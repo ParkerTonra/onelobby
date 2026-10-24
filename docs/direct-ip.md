@@ -164,4 +164,6 @@ joiner's `pair ... remote[...]` line showing the typed public address.
 
 Found while building: libjuice binds `P` with address reuse, so a second process can bind UDP `P` without an error;
 only the TCP listener reports `port_in_use`. Kicks are per address, so two joiners on one machine (same IP) share a ban.
-Not yet confirmed: `WebSocket.CreateFromStream` on Unity's Mono profile (s.5 step 3).
+`WebSocket.CreateFromStream` on Unity (s.5 step 3), checked statically against Unity 6000.2.7f2: the .NET Standard
+2.1 reference assembly declares it, and the runtime `System.dll` in both the `unityjit` (Mono) and `unityaot`
+(IL2CPP) profiles carries it with the `ManagedWebSocket` implementation behind it. Not yet exercised in a Unity player.
