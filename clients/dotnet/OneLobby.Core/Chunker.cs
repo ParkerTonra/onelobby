@@ -20,7 +20,7 @@ namespace OneLobby
 
     public sealed class ChunkAssembler
     {
-        private sealed class Partial { public byte[]?[] Parts = Array.Empty<byte[]>(); public int Got; }
+        private sealed class Partial { public byte[]?[] Parts = Array.Empty<byte[]>(); public int Got; public long Bytes; }
         private readonly Dictionary<uint, Partial> _partials = new();
 
         /// <summary>Feeds one chunk body (after the 3-byte header). True with the whole payload when the last piece arrives.</summary>
@@ -34,12 +34,11 @@ namespace OneLobby
             if (count == 0 || index >= count || count > 8192) throw new FormatException("bad chunk");
             if (!_partials.TryGetValue(id, out var p) || p.Parts.Length != count)
                 _partials[id] = p = new Partial { Parts = new byte[]?[count] };
-            if (p.Parts[index] == null) { p.Parts[index] = bytes; p.Got++; }
+            if (p.Parts[index] == null) { p.Parts[index] = bytes; p.Got++; p.Bytes += bytes.Length; }
+            if (p.Bytes > Wire.MaxReassembled) { _partials.Remove(id); throw new FormatException("chunk set over 64 MiB"); }
             if (p.Got < count) return false;
             _partials.Remove(id);
-            var total = 0;
-            foreach (var part in p.Parts) total += part!.Length;
-            var all = new byte[total];
+            var all = new byte[p.Bytes];
             var pos = 0;
             foreach (var part in p.Parts) { Buffer.BlockCopy(part!, 0, all, pos, part!.Length); pos += part.Length; }
             complete = all;

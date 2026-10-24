@@ -52,6 +52,8 @@ codes are shown in a large monospace font; nothing in the lobby flow is on a tim
 | [Crockford Base32](https://www.crockford.com/base32.html) | "10 digits and 22 letters", excluding "I L O U"; decoding maps i/l to 1 and o to 0 | s.6 codes |
 | [Stop Killing Games](https://www.stopkillinggames.com/), [Wikipedia](https://en.wikipedia.org/wiki/Stop_Killing_Games) | "If you purchase a good, it shouldn't self-destruct"; acceptable outcomes: "an offline mode or the ability to host private servers"; games left "in a reasonably functional state after discontinuation" | s.2 goals, s.13 |
 | [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) | Pure C# WebRTC exists, under a BSD-3 licence with an added use restriction. Reason the .NET client uses Godot's engine classes instead (s.4) | s.4 |
+| [Unity WebRTC 3.0 manual](https://docs.unity3d.com/Packages/com.unity.webrtc@3.0/manual/index.html), [requirements](https://docs.unity3d.com/Packages/com.unity.webrtc@3.0/manual/requirements.html), [repository README](https://github.com/Unity-Technologies/com.unity.webrtc) | `com.unity.webrtc` 3.0.0 (registry date 2025-09-26, `"unity": "6000.0"` in its package.json); platforms Windows 10 x64, Ubuntu 22.04/24.04, macOS Apple Silicon, iOS, Android ARM64; "WebGL platform is not supported"; README: "com.unity.webrtc is deprecated"; 3.0.0 changelog: "Change license to Unity Companion License" (verified 2026-10-24) | s.4 Unity client |
+| [libdatachannel](https://github.com/paullouisageneau/libdatachannel), [rtc.h](https://github.com/paullouisageneau/libdatachannel/blob/master/include/rtc/rtc.h) | C/C++ WebRTC data channels + WebSockets; "licensed under MPL 2.0 since version 0.18"; C API `include/rtc/rtc.h`; Linux, Android, macOS, iOS, Windows; WebAssembly via datachannel-wasm; v0.24.6 released 2026-09-26, active (verified 2026-10-24). Godot's official webrtc-native vendors it with Mbed TLS | s.4 `OneLobby.DataChannel` |
 | [RFC 6716 (Opus)](https://www.rfc-editor.org/rfc/rfc6716.html) | "designed to handle a wide range of interactive audio applications"; 6 to 510 kbit/s; frames of 2.5-60 ms, "20 ms frames are a good choice for most applications" | s.9a voice |
 | [Mumble: audio settings](https://www.mumble.info/documentation/user/audio-settings/) | Opus; "Using 20 ms gives a very low delay without the risk of audible audio device driver issues"; transmission modes "Push To Talk" and "Voice Activity" | s.9a |
 | [Steam: ISteamUser voice](https://partner.steamgames.com/doc/api/ISteamUser#GetVoice) | Compressed voice "can be transmitted by your application"; poll "once per frame, and at worst no more than four times a second"; decoder "supports any sample rate from 11025 to 48000" | s.9a |
@@ -75,7 +77,7 @@ mentioned as colour, never as a rule.
 | Voice chat (Opus over its own data channel: push-to-talk, voice activity, mute, per-player volume) and text chat (lobby and in-game) as first-class channels, never seen by the server | Voice mixing servers (SFU/MCU), recording, moderation services |
 | Agent-friendly docs: `AGENTS.md`, `llms.txt`, one recipe per engine, copy-paste examples, so an AI coding agent integrates a game in one session | A hosted docs site with search |
 | Stop Killing Games by construction: default server is a setting, server + relay are open source, one binary or `docker compose up`, games run offline | Matchmaking by skill, ranked, anti-cheat |
-| No vendor dependency: Steam / Epic / Discord are optional adapters that plug into the same lobby API | Cross-engine RPC or scene replication (Godot's `MultiplayerSynchronizer` and friends stay the game's business) |
+| No vendor dependency: Steam / Epic / Discord are optional adapters that plug into the same lobby API | Engine scene-graph replication (Godot's `MultiplayerSynchronizer` and friends stay the game's business). Engine-agnostic state replication over `raw` exists since 2026-10-24 (s.19) |
 | Small: a game integrates in one afternoon; the server runs on a Raspberry Pi | Persistence of lobbies across server restarts |
 
 ---
@@ -101,7 +103,7 @@ mentioned as colour, never as a rule.
 | `onelobby-server` (signaling + lobby server) | Lobby registry, join codes, public list, game/version gate, SDP/ICE forwarding, hands out STUN/TURN URLs with time-limited credentials, rate limits | Never (PeerJS model: "Data is not proxied") |
 | coturn (relay) | Standard TURN. Relays encrypted DTLS packets for peers that cannot connect directly | Encrypted bytes only |
 | Client library (`onelobby`, `OneLobby.Core`) | Protocol state machine, lockstep scheduler, chunking, host migration rule, text chat, voice packetization, events | Yes |
-| Transport adapter (`OneLobby.Godot`, browser `RTCPeerConnection`) | Opens peer connections and three data channels per peer; audio capture/playback and the Opus codec | Yes |
+| Transport adapter (`OneLobby.Godot`, `OneLobby.DataChannel` + `com.onelobby.unity`, browser `RTCPeerConnection`) | Opens peer connections and three data channels per peer; audio capture/playback and the Opus codec | Yes |
 | Game | Encodes commands to bytes, applies frames, reports state hashes, provides snapshot/restore | Owner |
 
 **Topology: star through the host.** Each joiner holds one WebRTC connection to the host; peer-to-peer messages route
@@ -115,6 +117,7 @@ same server/client shape (id 1 = server). Mesh is a later option for games that 
 |---|---|---|---|
 | `lockstep` | Host assigns every command to a tick and broadcasts a frame per tick | Frame scheduling, catch-up, state-hash comparison, snapshot-based late join, host migration with no state transfer (every peer has the state) | Deterministic sims (Lowkey: 20 TPS, every action a Command) |
 | `raw` | The game | Reliable/fast send, broadcast, routing, events, lobby | Games with their own netcode (host-authoritative arcade games, turn-based) |
+| `raw` + `OneLobby.Replication` | The host (authoritative sim) | Everything `raw` does, plus tick clock, delta snapshots, interpolation, input stream, events, prediction and lag-compensation helpers (s.19) | Real-time host-authoritative games with non-deterministic physics (Eons Later) |
 
 Rollback is out (GGPO: needs save/restore each frame and a fully deterministic engine; a management sim at 20 TPS gains
 nothing from it). Rune shows the server-decides model works for small web games; `raw` mode covers it.
@@ -129,11 +132,28 @@ nothing from it). Rune shows the server-decides model works for small web games;
 | .NET (engine-agnostic) | `OneLobby.Core` (netstandard2.1 + net8.0) | `ITransport` interface, in-memory implementation | Yes: xunit |
 | Godot 4.x C# | `OneLobby.Godot` (one `.cs` folder + the webrtc-native addon) | Godot's `WebRtcPeerConnection` / `WebRtcDataChannel` / `WebSocketPeer` engine classes, typed in C#; webrtc-native supplies the native implementation (Godot WebRTC doc) | Through Godot headless only |
 | Godot GDScript | later; same wire protocol | same engine classes | |
-| Unity / MonoGame C# | later: `OneLobby.Core` + a transport over any .NET WebRTC stack | | |
+| .NET (any engine, WebRTC) | `OneLobby.DataChannel` (netstandard2.1 + net8.0, + one native library per platform) | `DataChannelTransport`: libdatachannel v0.24.6 (Mbed TLS) over P/Invoke, three negotiated channels, static IL2CPP-safe callbacks that only queue; `WebSocketSignalingSocket` (`ClientWebSocket`) | Yes: live two-peer WebRTC test through an in-process server (`OneLobby.DataChannel.Tests`, Windows and Linux) and browser cross-play (`integration/crossplay-datachannel.mjs`) |
+| Unity 6 C# | `com.onelobby.unity` (UPM package: Core/DataChannel/Opus DLLs, the natives under `Runtime/Plugins/<platform>`, a thin `OneLobby.Unity` assembly) | `UnityTransport` wraps `DataChannelTransport`; `UnityVoiceAudio` (Microphone, `OnAudioFilterRead`); `OneLobbyRunner` pumps in `Update`. Desktop now, mobile once natives are built; no WebGL | Core/DataChannel: yes; package: compiled in Unity batchmode; WebRTC run on the editor's own Mono runtime (`clients/unity/mono-probe`); in-editor test needs a licensed editor |
+| MonoGame / other .NET | `OneLobby.Core` + `OneLobby.DataChannel` as is (no engine adapter needed for data; audio adapters per engine later) | | |
 
 Why engine classes for Godot and no pure-.NET WebRTC: the one pure C# stack found (SIPSorcery) carries a licence use
 restriction that an open framework cannot pass on; Godot's classes are typed in C#, free of that, and identical on a
 future web export (s.5). The core/transport split keeps the scheduler and protocol testable under `dotnet test`.
+
+**.NET/Unity WebRTC backend (decided 2026-10-24, revised the same day).** The transport is its own engine-agnostic
+project, `OneLobby.DataChannel`, so any .NET engine (Unity, MonoGame, a headless bot) gets real WebRTC without an engine
+adapter, and the backend can change without touching game code.
+
+| Option | Licence | Fit | Cost |
+|---|---|---|---|
+| libdatachannel native library (**chosen**) | MPL-2.0 (file-level copyleft: credit it, say where its source is, publish changes to its own files; our code stays MIT). Bundles libjuice (MPL-2.0), usrsctp (BSD-3), plog (MIT); we link Mbed TLS (Apache-2.0) | Data channels only, C API easy to P/Invoke, actively maintained, the same stack Godot's official webrtc-native ships (so Godot and .NET desktop share it); one small file per platform: win-x64 2.4 MB, linux-x64 5.0 MB (static libstdc++); datachannel-wasm is a possible WebGL route | We build the natives (scripts + CI workflow in `OneLobby.DataChannel/native/`) and own a ~30-function binding |
+| `com.unity.webrtc` 3.0.0 (first attempt, dropped) | Unity Companion License (Unity-dependent projects only) | Worked on Unity 6000.0+ | README: "com.unity.webrtc is deprecated"; Unity-only, so no portability; large natives (Windows 15 MB, macOS 39 MB, Android 62 MB) full of unused media code |
+| SIPSorcery (pure C#) | BSD-3 with an added use restriction | | Excluded (s.1) |
+| Unity Transport / Netcode relay | Unity's own services | No browser interop, ties games to Unity Gaming Services | Not P2P WebRTC; does not meet s.2 |
+
+Mbed TLS rather than OpenSSL: it is what Godot's webrtc-native uses with libdatachannel, builds from one tarball with
+CMake on every target (no Perl/NASM step as OpenSSL needs on Windows), links statically into one file, and is
+Apache-2.0. It needs `MBEDTLS_SSL_DTLS_SRTP` enabled; the build scripts set it.
 
 **Browser as host.** A hidden tab clamps timers to once per second (Chrome 88 blog); pages using WebRTC escape the
 once-per-minute tier. Consequences: the JS client drives its tick from `setInterval` in a dedicated Worker when
@@ -635,7 +655,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | MVP (this build) | Later |
 |---|---|
 | `onelobby-server`, coturn config, compose, docs | Prometheus dashboards, multi-region server tags |
-| JS + .NET/Godot clients, lockstep + raw | GDScript wrapper, Unity/MonoGame transport, mesh topology |
+| JS + .NET/Godot/Unity clients, lockstep + raw; `OneLobby.DataChannel` WebRTC for any .NET | GDScript wrapper, Unity WebGL transport (jslib or datachannel-wasm), iOS static build, mesh topology |
 | Codes, public list, unlisted/private, kick, approve | Invites via platform adapters (Steam / Discord / Epic lobbies as an optional `ILobbyDirectory`) |
 | Host migration in lockstep; `raw` with game snapshot | Dedicated headless host (a client with no renderer) |
 | Snapshot late join, desync resync | Deterministic replay recording/playback as a library feature |
@@ -644,6 +664,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | Voice: `voice` channel, Opus 20 ms, PTT + VAD, mute, per-peer volume, JS and Godot codecs | Mesh voice for lobbies > 8 speakers, noise suppression, spatial audio hooks |
 | `AGENTS.md`, `llms.txt`, six recipes, generated API reference, snippet CI | Hosted docs site |
 | Cross-play demo (browser ⇄ Godot desktop) with chat and a voice tone | Lowkey browser play (waits on Godot C# web export) |
+| Replicated state on raw mode (`OneLobby.Replication`, s.19): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers | Replication JS port, priority/interest management, host migration for replicated sessions |
 
 ---
 
@@ -663,7 +684,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | Relay? | coturn with REST credentials; TCP/TLS 443 fallback | coturn, draft-uberti |
 | Message size | ≤ 16 KiB, chunk above | MDN 64 KiB default |
 | Browser host timing | Worker timer; WebRTC exempts the page from intensive throttling | Chrome 88 blog |
-| Pure .NET WebRTC? | No: licence; use Godot engine classes | SIPSorcery licence |
+| Pure .NET WebRTC? | No: licence; Godot engine classes in Godot, libdatachannel (`OneLobby.DataChannel`) everywhere else in .NET | SIPSorcery licence; backend table (s.4) |
 | Voice as media tracks or data? | Opus in a data channel: Godot has no track API; one path everywhere | Godot class reference |
 | Voice frame size and rate | 20 ms Opus, 2 per packet, ~24 kbit/s | RFC 6716, Mumble, Steam poll rate |
 | Who relays voice? | The host, unmixed, like game data; server never sees it | PeerJS model, non-goal: SFU |
@@ -690,3 +711,93 @@ Today: the sim has one `PlayerState`. Yes: every player walks their own avatar a
 quests), any player can issue any command; the sim grows a `Players` list and `Moved{Peer}`. No: rival businesses on one map
 (separate cash and heat, shared town and Turf), a much larger sim change and a different game.
 `Default:` yes, shared-business co-op, 2-4 players.
+
+---
+
+## 19. Replicated state: `OneLobby.Replication` (host-authoritative, on raw mode)
+
+Status: built 2026-10-24 (`clients/dotnet/OneLobby.Replication`, wire format `spec/replication.md`). Driving game: Eons
+Later (Unity 6, 1-4 player co-op horde shooter, host = listen server, 24-50 AI aliens alive, hitscan guns, doors,
+power-ups, downs/revive). Unity physics and NavMesh are not deterministic, so `lockstep` (s.8) is out; `raw` (s.3) gives
+bytes and no netcode. This layer is that netcode, written once and engine-agnostic: one more DLL next to
+`OneLobby.Core`, no engine types, so Unity, Godot C# and plain .NET share it; a JS port follows the spec later.
+
+### 19.1 Prior art
+
+| Source | Establishes | Backs |
+|---|---|---|
+| [Gaffer: snapshot interpolation](https://gafferongames.com/post/snapshot_interpolation/) | "Snapshots are time critical but unlike inputs in deterministic lockstep snapshots don't need to be reliable"; "the amount of delay that works best at 2-5% packet loss is 3X the packet send rate"; "If we send 30 snapshots per-second we can get the same amount of packet loss protection with a delay of 150ms"; "extrapolation doesn't work very well for rigid bodies" | 19.2 send rate, interpolation delay, no extrapolation |
+| [Gaffer: snapshot compression](https://gafferongames.com/post/snapshot_compression/) | Delta "relative to a baseline that is roughly RTT (round trip time) in the past"; "Each cube that isn't sent costs 1 bit (not changed)"; smallest-three "2 + 9 + 9 + 9 = 29 bits per-orientation (down from 128 bits)"; "18 bits for x, 18 bits for y and 14 bits for z"; "Our target bandwidth is 256 kilobits per-second" | 19.2 delta, quantization, budget |
+| [Gaffer: state synchronization](https://gafferongames.com/post/state_synchronization/) | Priority accumulator: "one value per-object, that is remembered from frame to frame"; "Like deterministic lockstep we send multiple redundant inputs"; "you need to implement a jitter buffer"; "The solution is to quantize the state on both sides" | 19.2 inputs, jitter buffer; 19.4 priority |
+| [Fabien Sanglard: Quake 3 network model](https://fabiensanglard.net/quake3/network.php) | "There is no trace of TCP/IP anywhere since the "Reliable transmission" aspect introduced intolerable latency"; "For each Client the server keeps the 32 last gamestate sent over the network in a cycling array"; delta against "the last valid acknowledged snapshot"; "Resend OLD information that were not received and NEW information in a single message" | 19.2 per-client acked baseline, spawn/despawn through deltas |
+| Valve: Source Multiplayer Networking and Lag Compensation (**excerpt-only**: the wiki answers 403 to fetches; quotes come from search excerpts of `developer.valvesoftware.com/wiki/Source_Multiplayer_Networking` and `/wiki/Lag_Compensation`) | "Source defaults to an interpolation period ('lerp') of 100-milliseconds (cl_interp 0.1); this way, even if one snapshot is lost, there are always two valid snapshots to interpolate between"; interpolation is artificial latency to keep to a minimum; the server keeps about one second of player history and rewinds by the shooter's latency and interpolation | 19.2 100 ms, lag compensation |
+| [Gambetta: prediction and reconciliation](https://www.gabrielgambetta.com/client-side-prediction-server-reconciliation.html), [lag compensation](https://www.gabrielgambetta.com/lag-compensation.html) | "the client adds a sequence number to each request"; the server reply "includes the sequence number of the last input it processed"; the client "applies all the input still not seen by the server"; the server "can reconstruct the world exactly as it looked like to any client at any point in time"; cost: a target "may still be shot up to a few milliseconds after they took cover" | 19.2 local-player prediction, rewind cap |
+| [Mirror: lag compensation](https://mirror-networking.gitbook.io/docs/manual/general/lag-compensation) | "Lag Compensation (aka Rollback) is needed for fast pace / first person shooter games"; a component that "records a history of Collider snapshots"; it "rewinds 'target's history by that time" | 19.2 `HistoryRing` as a library helper |
+| [Photon Fusion 2: NetworkObject](https://doc.photonengine.com/fusion/v2/manual/network-object) | "The Server assigns a `NetworkId` value to the `NetworkObject` component"; "Runner.Spawn() can only be called on the Server in Host Mode"; "The Input Authority indicates which Player's inputs should be returned for this Object" | 19.2 NetId, host-only spawn, owner |
+| [Unity NGO: NetworkTime and ticks](https://mp-docs.dl.it.unity3d.com/netcode/1.9.1/advanced-topics/networktime-ticks) | "`LocalTime` on a client is ahead of the server"; "`ServerTime` on clients is behind the server"; "If a server RPC is sent at `LocalTime` from a client it will roughly arrive at `ServerTime` on the server" | 19.2 two client clocks |
+| Overwatch Gameplay Architecture and Netcode, GDC 2017 (**excerpt-only**: GDC Vault redirects to a maintenance page; the session listing via search) | The talk covers how the networked simulation "leverages determinism to achieve responsiveness and precision" in a server-authoritative game with prediction | 19.4 client time dilation (later) |
+
+### 19.2 Decisions
+
+| Question | Decision | Basis |
+|---|---|---|
+| Layer | `ReplicationSession` over a `raw` lobby; every message is a raw payload starting `0x52 'R', version, kind`. The lobby protocol `lk1` and the s.8 frame table do not change | s.3 raw mode; rule 1 (the game owns bytes) |
+| Tick and send rate | Host sim 30 Hz (`TickRate`), one snapshot per tick per client (`SnapshotEveryTicks = 1`); both configurable | Gaffer: 30/s halves the buffer 10/s needs |
+| Interpolation delay | 100 ms = 3 send intervals at 30 Hz: survives two lost snapshots in a row | Gaffer "3X the packet send rate"; Valve 100 ms |
+| Extrapolation | None. Past the newest snapshot an entity holds its last state | Gaffer |
+| Snapshot vs per-property delta | Entity-level delta against the client's last acked snapshot. Unchanged entities cost 0 bytes; a changed one sends a byte mask over its state plus the changed bytes; spawn and type/owner/length changes send the full state; despawn is one byte. Generic over the game's bytes: the game writes only full quantized state, and the spec stays small enough to port | Gaffer compression (baseline about RTT old, 1 bit when unchanged); Q3 acked baseline |
+| Reliability of spawn/despawn | Nothing extra: they ride the delta and repeat until a snapshot containing them is acked | Q3 "Resend OLD information ... and NEW" |
+| Baseline history | Host keeps 64 ticks (2.1 s) of sent worlds, client keeps 64 received. No ack inside that window means a full snapshot | Q3 keeps 32 |
+| Quantization | `NetWriter` bit packer + pure `Quantize` functions: range/bits, angles, smallest-three quaternions (29 bits). Example alien: x/z 16 bits over ±256 m (7.8 mm), y 12, yaw 9, anim 4, hp 7 = 8 bytes | Gaffer bit counts; "quantize the state on both sides" |
+| Clocks | Client estimates the host tick from the least-delayed snapshot (`ServerTick`) and renders at a smoothed, never-backwards `RenderTick = ServerTick - 100 ms` | NGO LocalTime/ServerTime |
+| Inputs | One input per local 30 Hz tick on `fast`, each packet carrying the last 4 inputs (4x redundancy), the newest acked snapshot tick, and the render tick being viewed (1/256 tick). The host's jitter buffer hands out one input per tick in sequence, repeats the last one when none arrived, and drops the oldest past 4 queued (latency cap) | Gaffer redundant inputs and jitter buffer; Gambetta sequence numbers |
+| Prediction | In MVP, local player only: `Reconciler<TInput,TState>` keeps unacked inputs and replays them on the host's state with the game's own step function; each snapshot carries the last input seq the host applied for that client. Remote entities are interpolated, never predicted | Gambetta; a shooter at 100 ms RTT feels broken without it |
+| Lag compensation | Host helper `HistoryRing<T>` (the game records hit volumes per tick) + `RewindTick(input)` = the input's view tick clamped to `MaxRewindMs` (250 ms). Hitscan tests against the rewound pose | Valve, Mirror, Gambetta (the "after they took cover" cost is why it is capped) |
+| Events / RPCs | `SendEvent` on `reliable` (ordered, never lost) or `fast`, stamped with the tick; host to one/all, client to host. Points, doors, power-ups, downed/revived go here; continuous state goes in snapshots | Fusion/NGO RPC split; s.8 |
+| Entities | `NetId` u32 from the host, never reused in a session; game `TypeId`; `Owner` peerId (0 = host-owned: AI, doors, pickups). Host-only spawn | Fusion NetworkId and host-mode spawn |
+| Visibility events | `EntitySpawned`/`EntityDespawned` fire when the render tick reaches the change, not on receipt, so an alien never vanishes 100 ms before its last rendered frame | follows from the interpolation delay |
+| Late join | No special path: a client with no ack gets full snapshots for about one RTT, then deltas. Non-entity state (score table, round) is the game's: send it on `PeerReady` or model it as an entity | Q3: full when no acked baseline |
+| Host migration | Not supported for replicated sessions: clients lack AI and hidden host state. `HostLost` fires and the game ends the match. Later, if needed: the host pushes a game snapshot to a successor | s.9 raw row; Fusion "A snapshot must be pushed" |
+| Snapshot size | One data-channel message: ≤ 1200 bytes typical (MTU-safe), counted above `SnapshotWarnBytes`; over 16 KiB the lobby chunks it on `reliable` (works, adds latency) | s.8 framing; Gaffer packet budget |
+
+**Bandwidth budget** (host + 3 clients, 50 aliens + 4 avatars all moving every tick, 30 Hz): per-client downstream
+≤ 128 kbit/s, host upstream ≤ 3 × 128 = 384 kbit/s (fits a 1 Mbit/s home uplink), client upstream ≤ 16 kbit/s, snapshots
+≤ 1200 bytes. Gaffer's heavier physics scene targets 256 kbit/s. Measured by
+`BandwidthFourPlayersFiftyAliensUnderBudget` (40 ms latency, 15 ms jitter, 5% loss, 10 s): average snapshot 378 bytes,
+largest 655 (the join-time full snapshot); **93.2 kbit/s per client, 279.5 kbit/s host upstream, 12.5 kbit/s client
+upstream** (inputs x4 plus lobby pings).
+
+### 19.3 API (C#, `OneLobby.Replication`)
+
+```csharp
+var rep = new ReplicationSession(lobby, new ReplicationConfig(TickRate: 30));  // lobby in SyncMode.Raw
+rep.Pump();                                              // every frame, instead of lobby.Pump()
+// host
+NetId id = rep.Spawn(typeId, ownerPeerId /* 0 = host */, entity /* IReplicatedEntity.Write(NetWriter) */);
+rep.Despawn(id);
+while (rep.Clock.TryAdvance()) {
+    foreach (var peer in rep.Clients) if (rep.TryGetInput(peer, out InputFrame f)) { /* f.Bytes, f.Seq, f.ViewTick */ }
+    /* sim step; hitscan: history.TrySample(target, rep.RewindTick(f), out pose) */
+    rep.SendSnapshot();
+}
+rep.SendEvent(bytes, toPeer: 0);
+// client
+while (rep.Clock.TryAdvance()) { uint seq = rep.SubmitInput(bytes); reconciler.Predict(seq, input); }
+rep.EntitySpawned += info => { }; rep.EntityDespawned += info => { };
+rep.TrySample<AlienState>(id, out var s);                // interpolated at rep.RenderTick
+rep.TryGetLatest<PlayerState>(myId, out var auth, out _); reconciler.Reconcile(auth, rep.LastProcessedInput);
+rep.EventReceived += (from, tick, payload) => { };
+```
+
+Engine adapters (a Unity `MonoBehaviour`, a Godot `Node3D`) only copy transforms in (`Write`) and out (`TrySample`); see
+`docs/recipes/replication.md`.
+
+### 19.4 MVP vs later
+
+| MVP (built) | Later |
+|---|---|
+| Tick clock, entity registry, delta snapshots against the acked baseline, interpolation, redundant inputs, reliable/fast events | Priority accumulator and per-client interest (relevancy) once a world outgrows one 1200-byte snapshot (Gaffer state sync) |
+| Quantize helpers (range, angle, smallest-three) | Per-field bit-level delta or entropy coding, if byte masks prove too coarse |
+| Local-player prediction (`Reconciler`), lag-compensation `HistoryRing` + `RewindTick` | Smoothing of prediction corrections; client clock time dilation that holds the host input buffer at 1-2 (Overwatch-style) instead of the drop-oldest latency cap |
+| Spec + vectors (`spec/replication.md`, `spec/vectors/replication.json`) | JS port in `onelobby` against the same spec and vectors |
+| `HostLost` ends the match | Host migration with a pushed snapshot; dedicated (renderer-less) host |

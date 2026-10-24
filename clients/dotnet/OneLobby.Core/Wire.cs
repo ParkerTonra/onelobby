@@ -12,6 +12,8 @@ namespace OneLobby
         public const int ProtoVersion = 1;
         public const int MaxFrame = 16 * 1024;
         public const int ChunkPayload = 15 * 1024;
+        /// <summary>Cap on one reassembled chunk set (spec/binary.md "Snapshot and chunks").</summary>
+        public const int MaxReassembled = 64 * 1024 * 1024;
 
         public const byte Hi = 0x01, WelcomeDc = 0x02, Cmd = 0x10, FrameMsg = 0x11, Hash = 0x12, Desync = 0x13,
             SnapshotReq = 0x14, Snapshot = 0x15, Chunk = 0x16, Raw = 0x20, Ping = 0x30, Pong = 0x31,
@@ -56,11 +58,12 @@ namespace OneLobby
 
         /// <summary>
         /// Strict structural check of one frame (spec/binary.md): null when valid or of an unknown type (those are ignored),
-        /// else "too_short", "trailing", "too_long" or "bad_utf8".
+        /// else "too_short", "trailing", "too_long" or "bad_utf8". A frame reassembled from chunks passes
+        /// <see cref="MaxReassembled"/> as <paramref name="maxLength"/>.
         /// </summary>
-        public static string? Validate(ReadOnlySpan<byte> frame)
+        public static string? Validate(ReadOnlySpan<byte> frame, int maxLength = MaxFrame)
         {
-            if (frame.Length > MaxFrame) return "too_long";
+            if (frame.Length > maxLength) return "too_long";
             if (frame.Length < 3) return "too_short";
             var r = new Reader(frame.Slice(3));
             try
