@@ -6,6 +6,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>Engine-agnostic Keepalive client: lobbies, lockstep, voice and text chat.</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Keepalive.Core.Tests" />
+  </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>

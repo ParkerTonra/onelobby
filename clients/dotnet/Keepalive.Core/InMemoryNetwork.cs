@@ -180,7 +180,9 @@ namespace Keepalive
         /// <summary>Kills the lobby server for everyone; data channels live on.</summary>
         public void ShutdownServer()
         {
-            foreach (var t in _transports) DropServerConnection(t);
+            foreach (var t in _transports)
+                foreach (var s in t.Sockets) { s.State = SocketState.Closed; s.Lobby = null; }
+            _lobbies.Clear();
         }
 
         /// <summary>Pumps every client once and advances the clock by <paramref name="ms"/>. Test helper.</summary>

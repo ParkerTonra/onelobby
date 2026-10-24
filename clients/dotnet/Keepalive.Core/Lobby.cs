@@ -309,6 +309,9 @@ namespace Keepalive
 
         private void OnLinkOpen(PeerRec rec)
         {
+            // telemetry (server counts relayed vs direct): one report per connection once ICE has completed
+            var relayed = rec.Link!.Relayed;
+            _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "path"); w.WriteString("path", relayed ? "relayed" : "direct"); }));
             if (IsHost)
             {
                 if (_epoch > 0) SendLink(rec, PeerChannel.Reliable, Wire.BuildHostClaim(_epoch, _you, Lockstep?.Head ?? 0));

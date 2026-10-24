@@ -8,17 +8,21 @@ namespace Keepalive
 {
     /// <summary>
     /// Entry point: talks to keepalive-server over the transport's signaling socket and hands out <see cref="Lobby"/>s.
-    /// Call <see cref="Pump"/> (or the lobby's) once per frame: that is when requests complete and events fire.
+    /// Requests complete (and their continuations are signalled) from inside <see cref="Pump"/>, never from another thread.
     /// </summary>
-    /// <remarks>The async calls throw <see cref="KeepaliveException"/> (with a server error <c>Code</c> such as lobby_full, unknown_code, version_mismatch, timeout, server_closed).</remarks>
+    /// <remarks>The async calls throw <see cref="KeepaliveException"/> (with the server error <c>Code</c>, such as
+    /// lobby_full, unknown_code, version_mismatch, rate_limited, or the local codes timeout and server_closed).</remarks>
     public sealed class LobbyClient : IAsyncDisposable
     {
         private const long RequestTimeoutMs = 10_000;
 
-        private sealed class Pending
+        private sealed class Op
         {
-            public readonly TaskCompletionSource<JsonElement> Tcs = new();
+            public string? Request;
             public string[] Expect = Array.Empty<string>();
+            public Action<JsonElement> Complete = _ => { };
+            public Action<Exception> Fail = _ => { };
+            public bool Sent;
             public long DeadlineMs;
             public CancellationTokenRegistration Reg;
         }
@@ -28,14 +32,14 @@ namespace Keepalive
         internal IReadOnlyList<IceServer> Ice { get; private set; } = Array.Empty<IceServer>();
         internal ISignalingSocket? Socket { get; private set; }
 
-        private Pending? _pending;
+        private Op? _op;
         private Lobby? _lobby;
-        private bool _helloSent;
         private bool _welcomed;
-        private string? _resumeToken;
+        private bool _helloWired;
+        private string? _helloResume;
+        private JsonElement? _stashedLobby;
         private long _lastPingMs;
         private int _pingN;
-        private TaskCompletionSource<bool>? _welcomeTcs;
 
         public event Action<LobbyError>? Error;
 
@@ -46,85 +50,85 @@ namespace Keepalive
         }
 
         public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
-            EnterAsync(null, Signaling.Create(Config, options), ct);
+            Run(null, Signaling.Create(Config, options), new[] { "lobby" }, EnterLobby, ct);
 
         public Task<Lobby> JoinAsync(string code, CancellationToken ct = default)
         {
             var norm = Crockford.Normalize(code);
             if (norm == null) return Task.FromException<Lobby>(new KeepaliveException("unknown_code", "not a valid join code"));
-            return EnterAsync(null, Signaling.Join(norm), ct);
+            return Run(null, Signaling.Join(norm), new[] { "lobby" }, EnterLobby, ct);
         }
 
         public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default) =>
-            EnterAsync(resumeToken, null, ct);
+            Run(resumeToken, null, new[] { "lobby" }, EnterLobby, ct);
 
-        public async Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null,
-            CancellationToken ct = default)
-        {
-            await EnsureHello(null, ct).ConfigureAwait(false);
-            var reply = await Request(Signaling.List(metaFilter), new[] { "lobbies" }, ct).ConfigureAwait(false);
-            var items = new List<LobbySummary>();
-            if (reply.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
-                foreach (var it in arr.EnumerateArray()) items.Add(Signaling.ParseSummary(it));
-            return items;
-        }
-
-        private async Task<Lobby> EnterAsync(string? resume, string? request, CancellationToken ct)
-        {
-            if (_lobby != null) throw new InvalidOperationException("already in a lobby; leave it first");
-            await EnsureHello(resume, ct).ConfigureAwait(false);
-            JsonElement reply;
-            if (request == null)
+        public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null,
+            CancellationToken ct = default) =>
+            Run<IReadOnlyList<LobbySummary>>(null, Signaling.List(metaFilter), new[] { "lobbies" }, e =>
             {
-                // rejoin: the server answers hello(resumeToken) with a lobby message right after welcome
-                if (_stashedLobby is { } s) { reply = s; _stashedLobby = null; }
-                else reply = await Request(null, new[] { "lobby" }, ct).ConfigureAwait(false);
-            }
-            else reply = await Request(request, new[] { "lobby" }, ct).ConfigureAwait(false);
-            var msg = Signaling.ParseLobby(reply);
-            _resumeToken = msg.ResumeToken;
-            var lobby = new Lobby(this, msg);
+                var items = new List<LobbySummary>();
+                if (e.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    foreach (var it in arr.EnumerateArray()) items.Add(Signaling.ParseSummary(it));
+                return items;
+            }, ct);
+
+        private Lobby EnterLobby(JsonElement reply)
+        {
+            var lobby = new Lobby(this, Signaling.ParseLobby(reply));
             _lobby = lobby;
             lobby.Start();
             return lobby;
         }
 
-        private JsonElement? _stashedLobby;
-
-        private async Task EnsureHello(string? resumeToken, CancellationToken ct)
+        private Task<T> Run<T>(string? resume, string? request, string[] expect, Func<JsonElement, T> finish, CancellationToken ct)
         {
+            if (_op != null) return Task.FromException<T>(new InvalidOperationException("another request is in flight"));
+            if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
+            var tcs = new TaskCompletionSource<T>();
+            var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
+            op.Complete = e =>
+            {
+                try { tcs.TrySetResult(finish(e)); }
+                catch (Exception ex) { tcs.TrySetException(ex); }
+            };
+            op.Fail = ex => tcs.TrySetException(ex);
+            if (ct.CanBeCanceled)
+                op.Reg = ct.Register(() => { if (_op == op) _op = null; tcs.TrySetCanceled(); });
+            _op = op;
             if (Socket == null || Socket.State == SocketState.Closed)
             {
                 Socket?.Dispose();
                 Socket = Transport.ConnectSignaling(Config.LobbyServer);
-                _helloSent = false;
                 _welcomed = false;
+                _helloWired = false;
             }
-            if (_welcomed) return;
-            if (!_helloSent)
-            {
-                _welcomeTcs = new TaskCompletionSource<bool>();
-                _helloSent = true;
-                _helloPendingSince = Transport.NowMs;
-                _helloResume = resumeToken;
-                _helloSentWire = false;
-            }
-            using (ct.Register(() => _welcomeTcs?.TrySetCanceled()))
-                await _welcomeTcs!.Task.ConfigureAwait(false);
+            _helloResume = resume;
+            if (_welcomed) Send(op);
+            return tcs.Task;
         }
 
-        private long _helloPendingSince;
-        private string? _helloResume;
-        private bool _helloSentWire;
-
-        private Task<JsonElement> Request(string? json, string[] expect, CancellationToken ct)
+        private void Send(Op op)
         {
-            if (_pending != null) throw new InvalidOperationException("another request is in flight");
-            var p = new Pending { Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
-            if (ct.CanBeCanceled) p.Reg = ct.Register(() => p.Tcs.TrySetCanceled());
-            _pending = p;
-            if (json != null) Socket!.Send(json);
-            return p.Tcs.Task;
+            op.Sent = true;
+            if (op.Request != null) Socket!.Send(op.Request);
+            else if (_stashedLobby is { } s) { _stashedLobby = null; FinishOp(s); }
+        }
+
+        private void FinishOp(JsonElement e)
+        {
+            var op = _op!;
+            _op = null;
+            op.Reg.Dispose();
+            op.Complete(e);
+        }
+
+        private void FailOp(Exception ex)
+        {
+            var op = _op;
+            if (op == null) return;
+            _op = null;
+            op.Reg.Dispose();
+            op.Fail(ex);
         }
 
         internal void SendRaw(string json) { if (Socket != null && Socket.State == SocketState.Open) Socket.Send(json); }
@@ -133,7 +137,11 @@ namespace Keepalive
 
         internal void RaiseError(LobbyError e) => Error?.Invoke(e);
 
-        /// <summary>Polls the transport and signaling socket. Needed only before a lobby exists (to complete HostAsync/JoinAsync/ListAsync); once you hold a <see cref="Lobby"/>, call <see cref="Lobby.Pump"/> instead, which does this too. Calling both is harmless.</summary>
+        /// <summary>
+        /// Polls the transport and the signaling socket. You need it only before a lobby exists (to complete HostAsync,
+        /// JoinAsync or ListAsync); once you hold a <see cref="Lobby"/>, call <see cref="Lobby.Pump"/>, which does this too.
+        /// Calling both is harmless.
+        /// </summary>
         public void Pump()
         {
             Transport.Poll();
@@ -141,16 +149,15 @@ namespace Keepalive
             var sock = Socket;
             if (sock != null)
             {
-                if (sock.State == SocketState.Open && _helloSent && !_helloSentWire)
+                if (sock.State == SocketState.Open && !_helloWired && (_op != null || _lobby != null))
                 {
-                    _helloSentWire = true;
+                    _helloWired = true;
                     sock.Send(Signaling.Hello(Config, _helloResume));
                 }
                 while (sock.TryReceive(out var text)) Dispatch(text);
                 if (sock.State == SocketState.Closed)
                 {
-                    if (_welcomeTcs != null && !_welcomed) { _welcomeTcs.TrySetException(new KeepaliveException("server_closed", sock.CloseReason ?? "closed")); _welcomeTcs = null; _helloSent = false; }
-                    if (_pending != null) { var p = _pending; _pending = null; p.Reg.Dispose(); p.Tcs.TrySetException(new KeepaliveException("server_closed", sock.CloseReason ?? "closed")); }
+                    FailOp(new KeepaliveException("server_closed", sock.CloseReason ?? "closed"));
                     _lobby?.OnSocketClosed();
                 }
                 else if (sock.State == SocketState.Open && _welcomed && now - _lastPingMs >= 10_000)
@@ -159,16 +166,7 @@ namespace Keepalive
                     sock.Send(Signaling.Ping(++_pingN));
                 }
             }
-            if (_pending != null && now > _pending.DeadlineMs)
-            {
-                var p = _pending; _pending = null; p.Reg.Dispose();
-                p.Tcs.TrySetException(new KeepaliveException("timeout", "no answer from the lobby server"));
-            }
-            if (_welcomeTcs != null && !_welcomed && _helloSent && now - _helloPendingSince > RequestTimeoutMs)
-            {
-                var t = _welcomeTcs; _welcomeTcs = null; _helloSent = false;
-                t.TrySetException(new KeepaliveException("timeout", "no welcome from the lobby server"));
-            }
+            if (_op != null && now > _op.DeadlineMs) FailOp(new KeepaliveException("timeout", "no answer from the lobby server"));
             _lobby?.PumpLobby();
         }
 
@@ -186,8 +184,7 @@ namespace Keepalive
                     case "welcome":
                         Ice = Signaling.ParseIce(e);
                         _welcomed = true;
-                        _welcomeTcs?.TrySetResult(true);
-                        _welcomeTcs = null;
+                        if (_op != null && !_op.Sent) Send(_op);
                         return;
                     case "ping":
                         SendRaw(Signaling.Pong(Signaling.Int(e, "n")));
@@ -197,30 +194,20 @@ namespace Keepalive
                     case "error":
                     {
                         var err = new LobbyError(Signaling.Str(e, "code"), Signaling.Str(e, "msg"));
-                        if (_welcomeTcs != null && !_welcomed)
-                        {
-                            _welcomeTcs.TrySetException(new KeepaliveException(err.Code, err.Message));
-                            _welcomeTcs = null; _helloSent = false;
-                        }
-                        else if (_pending != null)
-                        {
-                            var p = _pending; _pending = null; p.Reg.Dispose();
-                            p.Tcs.TrySetException(new KeepaliveException(err.Code, err.Message));
-                        }
+                        FailOp(new KeepaliveException(err.Code, err.Message));
                         Error?.Invoke(err);
                         _lobby?.OnServerError(err);
                         return;
                     }
                 }
-                if (_pending != null && Array.IndexOf(_pending.Expect, t) >= 0)
+                if (_op != null && _op.Sent && Array.IndexOf(_op.Expect, t) >= 0)
                 {
-                    var p = _pending; _pending = null; p.Reg.Dispose();
-                    p.Tcs.TrySetResult(e.Clone());
+                    FinishOp(e.Clone());
                     return;
                 }
                 if (t == "lobby" && _lobby == null)
                 {
-                    _stashedLobby = e.Clone();
+                    _stashedLobby = e.Clone(); // a resume reply that beat the request
                     return;
                 }
                 _lobby?.OnSignalingMessage(t, e);
