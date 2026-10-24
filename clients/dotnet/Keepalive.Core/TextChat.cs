@@ -91,11 +91,14 @@ namespace Keepalive
             Received?.Invoke(text == line.Text ? line : line with { Text = text });
         }
 
+        internal event Action<IReadOnlyList<ChatLine>>? HistoryLoaded;
+
         internal void SetHistory(IEnumerable<ChatLine> lines)
         {
             _history.Clear();
             _history.AddRange(lines);
             while (_history.Count > HistoryLimit) _history.RemoveAt(0);
+            HistoryLoaded?.Invoke(_history);
         }
 
         internal void AdoptHostCounter()

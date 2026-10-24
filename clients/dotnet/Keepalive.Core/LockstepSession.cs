@@ -135,6 +135,8 @@ namespace Keepalive
 
         internal bool Emitting => _emitting;
 
+        internal void ShortenGrace(long startMs) { if (_graceFix && startMs < _emitStartMs) _emitStartMs = startMs; }
+
         internal void StopEmitting() => _emitting = false;
 
         internal void QueueRemote(int peer, byte[] cmd)

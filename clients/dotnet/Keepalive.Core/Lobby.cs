@@ -17,14 +17,14 @@ namespace Keepalive
             public int Id;
             public string Name = "";
             public IPeerLink? Link;
-            public bool OpenHandled, Hello;
+            public bool OpenHandled, Hello, HiSent;
             public long LastRxMs, OpenedMs;
             public int PingMs;
             public int Resyncs;
             public long IgnoreHashUntil = -1;
         }
 
-        public const int HostTimeoutMs = 3000;
+        public const int HostTimeoutMs = 8000;
         public const int PeerTimeoutMs = 10000;
         public const int PingEveryMs = 1000;
         public const int ClaimWaitMs = 6000;
@@ -81,6 +81,8 @@ namespace Keepalive
         public SyncMode Mode { get; }
         public int TickRate { get; }
         public bool LateJoin { get; }
+        internal int Epoch => _epoch;
+        internal int SnapshotChunkSize = Wire.ChunkPayload;
         public LockstepSession? Lockstep { get; }
         public VoiceChannel Voice { get; }
         public TextChat Chat { get; }
@@ -187,6 +189,7 @@ namespace Keepalive
             rec.Link?.Dispose();
             rec.OpenHandled = false;
             rec.Hello = false;
+            rec.HiSent = false;
             rec.Link = _t.CreatePeerLink(new PeerLinkOptions(rec.Id, initiator, _c.Ice, _c.Config.RelayOnly));
             rec.LastRxMs = NowMs;
             if (initiator) rec.Link.StartOffer();
@@ -269,6 +272,17 @@ namespace Keepalive
                 foreach (var r in _peers.Values.ToList())
                     if (r.Id != _you && r.Link != null && r.Link.IsOpen && (IsHost || r.Id == _hostId)) r.Link.Send(PeerChannel.Fast, ping);
             }
+            if (IsHost && _migrationHold && Lockstep != null)
+            {
+                // a new host waits for every survivor to say hi (they replay frames it missed), then starts shortly after
+                if (_peers.Values.All(r => r.Id == _you || r.Hello))
+                {
+                    _migrationHold = false;
+                    _migrationEmitStartMs = now + 150;
+                    Lockstep.ShortenGrace(now + 150);
+                }
+                else if (now >= _migrationEmitStartMs) _migrationHold = false;
+            }
             if (IsHost) Lockstep?.EmitDue(now);
             else CheckSilentFrames(now);
             Voice.Update(now);
@@ -318,9 +332,15 @@ namespace Keepalive
             }
             else if (rec.Id == _hostId)
             {
-                var fresh = !_hasState && (Lockstep?.Head ?? 0) == 0;
-                SendLink(rec, PeerChannel.Reliable, Wire.BuildHi(_you, fresh ? -1 : Lockstep?.Head ?? 0));
+                SendHi(rec);
             }
+        }
+
+        private void SendHi(PeerRec rec)
+        {
+            rec.HiSent = true;
+            var fresh = !_hasState && (Lockstep?.Head ?? 0) == 0;
+            SendLink(rec, PeerChannel.Reliable, Wire.BuildHi(_you, fresh ? -1 : Lockstep?.Head ?? 0));
         }
 
         // ---- inbound frames ------------------------------------------------------------------------------------
@@ -337,7 +357,7 @@ namespace Keepalive
                 {
                     var r = new Wire.Reader(body);
                     var n = r.U32(); var t = r.U32();
-                    SendLink(rec, PeerChannel.Fast, Wire.BuildPing(Wire.Pong, n, t));
+                    SendLink(rec, ch, Wire.BuildPing(Wire.Pong, n, t));
                     return;
                 }
                 case Wire.Pong:
@@ -366,7 +386,7 @@ namespace Keepalive
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildWelcomeDc(Lockstep?.Head ?? 0, TickRate,
                         Mode == SyncMode.Raw ? Wire.ModeRaw : Wire.ModeLockstep, _you));
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildChatHistory(Chat.History));
-                    if (Lockstep != null && _phase == LobbyPhase.InGame)
+                    if (Lockstep != null && _phase == LobbyPhase.InGame && (Lockstep.Head > 0 || lastTick >= 0))
                     {
                         if (lastTick >= 0 && Lockstep.LogCovers(lastTick))
                         {
@@ -390,7 +410,6 @@ namespace Keepalive
                     if (Lockstep == null || !rec.Hello) return;
                     var r = new Wire.Reader(body);
                     var tick = r.I64(); var hash = r.U64();
-                    if (tick <= rec.IgnoreHashUntil) return;
                     if (Lockstep.TryHostHash(tick, out var mine)) CompareHash(rec, tick, mine, hash);
                     else Lockstep.StorePeerHash(rec.Id, tick, hash);
                     return;
@@ -456,10 +475,18 @@ namespace Keepalive
 
         private long MigrationEmitStart => _migrationEmitStartMs;
         private long _migrationEmitStartMs;
+        private bool _migrationHold;
 
         private void HandleAsJoiner(PeerRec rec, PeerChannel ch, byte type, int route, ReadOnlySpan<byte> body)
         {
-            if (rec.Id != _hostId) return; // joiners only listen to the host
+            if (type == Wire.HostClaim)
+            {
+                var cr = new Wire.Reader(body);
+                var epoch = cr.U16(); var claimant = cr.U16(); var tick = cr.I64();
+                if (claimant == rec.Id) AcceptClaim(rec, epoch, claimant, tick);
+                return;
+            }
+            if (rec.Id != _hostId) return; // otherwise joiners only listen to the host
             switch (type)
             {
                 case Wire.WelcomeDc:
@@ -551,13 +578,6 @@ namespace Keepalive
                 case Wire.Voice:
                     if (ch == PeerChannel.Voice) Voice.OnPacket(route, body, NowMs);
                     return;
-                case Wire.HostClaim:
-                {
-                    var r = new Wire.Reader(body);
-                    var epoch = r.U16(); var hostId = r.U16(); var tick = r.I64();
-                    AcceptClaim(epoch, hostId, tick);
-                    return;
-                }
             }
         }
 
@@ -586,7 +606,6 @@ namespace Keepalive
             }
             var tick = ls.Tick;
             var bytes = ls.Snapshot();
-            rec.IgnoreHashUntil = tick;
             byte flags = 0;
             if (bytes.Length >= 1024)
             {
@@ -595,13 +614,13 @@ namespace Keepalive
             }
             SendLink(rec, PeerChannel.Reliable, Wire.BuildSnapshot(tick, (uint)bytes.Length, flags));
             var id = ++_chunkId;
-            foreach (var chunk in Chunker.Split(id, bytes)) SendLink(rec, PeerChannel.Reliable, chunk);
+            foreach (var chunk in Chunker.Split(id, bytes, SnapshotChunkSize)) SendLink(rec, PeerChannel.Reliable, chunk);
             foreach (var f in ls.LogAfter(tick)) SendLink(rec, PeerChannel.Reliable, Wire.BuildFrame(f.Tick, f.Commands));
         }
 
         internal void CompareHash(PeerRec rec, long tick, ulong hostHash, ulong theirs)
         {
-            if (hostHash == theirs || tick <= rec.IgnoreHashUntil) return;
+            if (hostHash == theirs) return;
             rec.Resyncs++;
             if (rec.Resyncs >= 3)
             {
@@ -662,8 +681,7 @@ namespace Keepalive
                     if (rec.Link == null)
                     {
                         if (sig.SdpType != "offer" || IsHost) return;
-                        if (from != _hostId) SwitchHost(from); // an offer from a peer we have not elected yet: it claimed host
-                        if (rec.Link == null) ConnectPeer(rec, false);
+                        ConnectPeer(rec, false); // a peer is dialing us (a new host, or a rival claimant): its claim decides
                     }
                     rec.Link!.ApplySignal(sig);
                     return;
@@ -763,17 +781,19 @@ namespace Keepalive
             if (rec.Link == null || rec.Link.IsFailed) ConnectPeer(rec, false);
         }
 
-        private void AcceptClaim(int epoch, int hostId, long tick)
+        /// <summary>A claim wins on a higher epoch, or an equal epoch with a lower host id than the current one.</summary>
+        private void AcceptClaim(PeerRec rec, int epoch, int hostId, long tick)
         {
-            if (epoch <= _epoch && !(epoch == _epoch && _awaitingClaim)) return;
+            if (!(epoch > _epoch || (epoch == _epoch && hostId < _hostId))) return;
             _epoch = epoch;
             var changed = hostId != _hostId || _awaitingClaim;
             _hostId = hostId;
             _awaitingClaim = false;
             _ready = true;
+            if (rec.Link != null && rec.Link.IsOpen && !rec.HiSent) SendHi(rec);
             // replay what I hold beyond the new host's last frame
             if (Lockstep != null)
-                foreach (var f in Lockstep.LogAfter(tick)) SendToHost(PeerChannel.Reliable, Wire.BuildFrame(f.Tick, f.Commands));
+                foreach (var f in Lockstep.LogAfter(tick)) SendLink(rec, PeerChannel.Reliable, Wire.BuildFrame(f.Tick, f.Commands));
             if (changed) HostChanged?.Invoke(hostId);
         }
 
@@ -789,6 +809,7 @@ namespace Keepalive
             {
                 Lockstep.BeginEmitting(NowMs, MigrationGraceMs);
                 _migrationEmitStartMs = NowMs + MigrationGraceMs;
+                _migrationHold = true;
             }
             _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "host_changed"); w.WriteNumber("hostId", _you); w.WriteNumber("epoch", _epoch); }));
             HostChanged?.Invoke(_you);

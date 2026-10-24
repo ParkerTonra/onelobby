@@ -1,0 +1,26 @@
+; Engine configuration file for the Keepalive Godot demo (Godot 4.5.1 .NET).
+config_version=5
+
+[application]
+
+config/name="Keepalive Gridpaint"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.5", "C#", "Forward Plus")
+
+[audio]
+
+driver/enable_input=true
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=640
+
+[dotnet]
+
+project/assembly_name="KeepaliveDemo"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -102,6 +102,13 @@ namespace Keepalive
 
         public void SetVolume(int peerId, float gain) => _volume[peerId] = Math.Max(0f, Math.Min(2f, gain));
 
+        /// <summary>Test hook: sees every voice packet that reaches this peer (after host admission), before the codec.</summary>
+        internal Action<int, int, byte, List<byte[]>>? Observer;
+
+        /// <summary>Test hook: send one packet with ready-made frames, bypassing capture and codec.</summary>
+        internal void SendEncoded(List<byte[]> frames, bool end) =>
+            _lobby.SendVoiceFromLocal(Wire.BuildVoice(_lobby.LocalPeerId, _seq++ & 0xFFFF, (byte)(end ? 1 : 0), frames));
+
         internal bool IsMuted(int peerId) => _locallyMuted.ContainsKey(peerId);
 
         // ---- capture / send -------------------------------------------------------------------------------------
@@ -210,13 +217,14 @@ namespace Keepalive
 
         internal void OnPacket(int from, ReadOnlySpan<byte> body, long nowMs)
         {
-            if (!_enabled || Codec == null || Audio == null || IsMuted(from)) return;
             var r = new Wire.Reader(body);
             var seq = r.U16();
             var flags = r.U8();
             int n = r.U8();
             var frames = new List<byte[]>(n);
             for (var i = 0; i < n; i++) { var len = r.U16(); frames.Add(r.Bytes(len).ToArray()); }
+            Observer?.Invoke(from, seq, flags, frames);
+            if (!_enabled || Codec == null || Audio == null || IsMuted(from)) return;
             if (!_rx.TryGetValue(from, out var rx)) _rx[from] = rx = new Rx();
             if (rx.ExpectSeq >= 0)
             {

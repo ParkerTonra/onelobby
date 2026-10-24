@@ -1,0 +1,5 @@
+.godot/
+addons/godot_webrtc/
+bin/
+obj/
+*.tmp
