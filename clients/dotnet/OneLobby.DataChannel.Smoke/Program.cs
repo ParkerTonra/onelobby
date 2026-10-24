@@ -15,7 +15,8 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Length < 2) { Console.Error.WriteLine("usage: host <ws> | join <ws> <code>"); return 2; }
+        if (args.Length >= 1 && args[0] is "host-direct" or "join-direct") return DirectSmoke.Run(args);
+        if (args.Length < 2) { Console.Error.WriteLine("usage: host <ws> | join <ws> <code> | host-direct [port] [password] | join-direct <address> [password]"); return 2; }
         Console.Out.Flush();
         var cfg = new OneLobbyConfig("com.onelobby.crossplay", "1", new Uri(args[1]), SyncMode.Raw, DisplayName: ".NET " + args[0]);
         var client = new LobbyClient(cfg, new DataChannelTransport());
