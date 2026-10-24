@@ -26,6 +26,7 @@ async function feed(peer, g, from, to, { tamper = null, cmds = (t) => cmdsByTick
   for (let t = from; t <= to; t++) {
     const c = cmds(t);
     g.step(t, c);
+    (g.hist ??= new Map()).set(t, g.hash().toString());
     await peer.send({ type: 'frame', route: 0, tick: BigInt(t), cmds: tamper ? tamper(t, c) : c });
   }
 }
@@ -45,15 +46,6 @@ async function joinerUp(s, o = {}) {
   await host.send({ type: 'welcome_dc', route: 0, tick: BigInt(tick), tickRate: TICK_RATE, mode: o.mode === 'raw' ? 2 : 1, hostId: 1 });
   await host.send({ type: 'chat_history', route: 0, lines: o.history ?? [] });
   return host;
-}
-async function expectHashes(host, g, ticks, timeout = 3000) {
-  for (const t of ticks) {
-    const h = await host.wait('hash', { tick: t }, timeout);
-    assert.equal(h._ch, 'reliable'); assert.equal(h.route, 0);
-    const want = ref();
-    // recompute independently: g is the live reference; for earlier ticks use the golden when available
-    if (GOLD[t] !== undefined && g.tick === t) assert.equal(h.hash.toString(), GOLD[t], `hash at tick ${t} equals the published golden`);
-  }
 }
 async function hostUp(s, o = {}) {
   const { mode = 'lockstep', peers = [1, 2, 3], begin = true } = o;
@@ -96,7 +88,8 @@ export function buildScenarios() {
     await feed(host, g, 1, 100);
     for (const t of [20, 40, 60, 80, 100]) {
       const h = await host.wait('hash', { tick: t });
-      assert.equal(h.hash.toString(), t === 20 || t === 100 ? GOLD[t] : h.hash.toString());
+      assert.equal(h.hash.toString(), g.hist.get(t), `hash at tick ${t}`);
+      if (GOLD[t] !== undefined) assert.equal(h.hash.toString(), GOLD[t], `tick ${t} equals the published golden`);
     }
     assert.equal(g.hash().toString(), GOLD[100]);
     const st = await s.call('state');
@@ -121,7 +114,7 @@ export function buildScenarios() {
     assert.equal(c1.seq, 1); assert.equal(hex(c1.bytes), '010304'); assert.equal(c1.route, 0); assert.equal(c1._ch, 'reliable');
     await s.call('command', { x: 15, y: 0 });
     const c2 = await host.wait('cmd');
-    assert.equal(c2.seq, 2); assert.equal(hex(c2.bytes), '01000f'.replace('01000f', '010f00'));
+    assert.equal(c2.seq, 2); assert.equal(hex(c2.bytes), '010f00');
     assert.equal((await s.call('state')).hash, before, 'state waits for the frame');
     // the frame brings it in
     g.step(4, [{ peerId: 2, bytes: paintCmd(3, 4) }]);
@@ -168,7 +161,7 @@ export function buildScenarios() {
     const host = await joinerUp(s); const g = ref();
     await feed(host, g, 1, 40, { tamper: (t, c) => (t === firstCmdTick ? [] : c) });
     const bad = await host.wait('hash', { tick: 20 });
-    assert.notEqual(bad.hash.toString(), g.hash().toString() === bad.hash.toString() ? 'x' : GOLD[20], 'library state diverged (test premise)');
+    assert.notEqual(bad.hash.toString(), GOLD[20], 'library state diverged (test premise)');
     const msgs = snapshotMsgs(g, 4242, 40, 1);
     assert.ok(msgs.length > 3, 'snapshot spans several chunks');
     await host.send({ type: 'desync', route: 0, tick: 20n, hostHash: BigInt(GOLD[20]), yourHash: bad.hash });

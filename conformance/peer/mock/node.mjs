@@ -28,7 +28,11 @@ export class MockNode {
     if (this.role === 'host') this.hostMode = true;
   }
   stop() { for (const t of this.timers) clearInterval(t); clearInterval(this.hostTimer); this.timers = []; }
-  begin() { this.hostTimer = setInterval(() => this.emitFrame(), 1000 / this.tickRate); }
+  begin() {
+    clearInterval(this.hostTimer);
+    const t0 = Date.now(); let emitted = 0; const period = 1000 / this.tickRate;
+    this.hostTimer = setInterval(() => { const due = Math.floor((Date.now() - t0) / period); while (emitted < due) { emitted++; this.emitFrame(); } }, 4);
+  }
 
   tx(to, channel, msg) { const b = msg instanceof Uint8Array ? msg : encode(msg); this.io.send(to, channel, b); }
 
@@ -47,7 +51,7 @@ export class MockNode {
   recv(from, channel, bytes) {
     let m;
     try { m = decode(bytes); } catch (e) { if (e instanceof CodecError) return; throw e; }
-    this.dispatch(from, channel, m);
+    try { this.dispatch(from, channel, m); } catch (e) { if (!(e instanceof CodecError)) throw e; }
   }
   dispatch(from, channel, m) {
     switch (m.type) {

@@ -64,7 +64,7 @@ export class Gridpaint {
   }
 
   spread() {
-    const old = this.grid.slice();
+    const old = Uint8Array.from(this.grid); // copy (Buffer#slice would alias)
     for (let i = 0; i < W * H; i++) {
       if (old[i] === 0) continue;
       this.rng = xorshift32(this.rng);
@@ -90,7 +90,7 @@ export class Gridpaint {
     const g = new Gridpaint('000000');
     g.tick = Number(tick);
     g.rng = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
-    g.grid = bytes.slice(4);
+    g.grid = Uint8Array.from(bytes.subarray(4));
     return g;
   }
 }
