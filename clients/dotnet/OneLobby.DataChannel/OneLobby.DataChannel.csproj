@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <RootNamespace>OneLobby.DataChannel</RootNamespace>
+    <AssemblyName>OneLobby.DataChannel</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Engine-agnostic ITransport for OneLobby over libdatachannel (WebRTC data channels, MPL-2.0 native library) and ClientWebSocket signaling. Works in any .NET app, Unity (Mono and IL2CPP) and other engines.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneLobby.DataChannel.Tests" />
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+  </ItemGroup>
+  <!-- Natives built by native/build-*.{ps1,sh} (not committed). NuGet layout under runtimes/, plus a copy next to the
+       assembly for project references and tests (DllImport looks in the app directory). -->
+  <ItemGroup>
+    <None Include="runtimes\**\native\*" Pack="true" PackagePath="runtimes\" />
+    <None Include="runtimes\win-x64\native\datachannel.dll" Condition="Exists('runtimes\win-x64\native\datachannel.dll') And $([MSBuild]::IsOSPlatform('Windows'))" Link="datachannel.dll" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <None Include="runtimes\linux-x64\native\libdatachannel.so" Condition="Exists('runtimes\linux-x64\native\libdatachannel.so') And $([MSBuild]::IsOSPlatform('Linux'))" Link="libdatachannel.so" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <None Include="runtimes\osx\native\libdatachannel.dylib" Condition="Exists('runtimes\osx\native\libdatachannel.dylib') And $([MSBuild]::IsOSPlatform('OSX'))" Link="libdatachannel.dylib" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+</Project>
