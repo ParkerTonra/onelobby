@@ -78,9 +78,10 @@ try {
   await B.evaluate(() => { window.__ka.lobby.voice.enabled = true; });
   await A.evaluate(() => { window.__ka.lobby.voice.enabled = true; });
   await sleep(1500);
+  await B.evaluate(() => document.activeElement.blur());
   await B.keyboard.down("v");
-  await sleep(2000);
-  const heard = await A.evaluate(() => window.__ka.speaking?.has(2));
+  const heard0 = 0;
+  const heard = await A.waitForFunction(() => window.__ka.speaking?.has(2), null, { timeout: 4000 }).then(() => true, () => false);
   const level = await B.evaluate(() => window.__ka.lobby.voice.inputLevel);
   await B.keyboard.up("v");
   check("mic produces input level", level > 0, `level ${level}`);
