@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Keepalive.Gridpaint", "Keep
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Keepalive.Core.Tests", "Keepalive.Core.Tests\Keepalive.Core.Tests.csproj", "{FFC69A23-2767-47D8-937E-EBBF8EF80D4D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Keepalive.Opus", "Keepalive.Opus\Keepalive.Opus.csproj", "{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{FFC69A23-2767-47D8-937E-EBBF8EF80D4D}.Release|x64.Build.0 = Release|Any CPU
 		{FFC69A23-2767-47D8-937E-EBBF8EF80D4D}.Release|x86.ActiveCfg = Release|Any CPU
 		{FFC69A23-2767-47D8-937E-EBBF8EF80D4D}.Release|x86.Build.0 = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|x64.Build.0 = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Debug|x86.Build.0 = Debug|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|x64.ActiveCfg = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|x64.Build.0 = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|x86.ActiveCfg = Release|Any CPU
+		{EFCA672D-3BEC-4BC4-A765-02C2E7B27C14}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

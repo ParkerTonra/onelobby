@@ -11,5 +11,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Keepalive.Core\Keepalive.Core.csproj" />
     <ProjectReference Include="..\Keepalive.Gridpaint\Keepalive.Gridpaint.csproj" />
+    <ProjectReference Include="..\Keepalive.Opus\Keepalive.Opus.csproj" />
   </ItemGroup>
 </Project>
