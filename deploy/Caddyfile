@@ -1,0 +1,40 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Reusable: headers a Godot 4 web build needs (SharedArrayBuffer => cross-origin isolation).
+(godot_web) {
+	header {
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
+		Cross-Origin-Resource-Policy "cross-origin"
+	}
+	@wasm path *.wasm
+	header @wasm Content-Type "application/wasm"
+	encode zstd gzip
+}
+
+# Lobby server: HTTPS + WSS, certificate is automatic. /healthz and /metrics are proxied too.
+{$LOBBY_DOMAIN} {
+	encode gzip
+	# Do not leave /metrics open to the world; allow only local scrapers.
+	@metrics path /metrics
+	handle @metrics {
+		@local remote_ip 127.0.0.1 ::1 172.16.0.0/12
+		handle @local {
+			reverse_proxy server:8080
+		}
+		respond 403
+	}
+	handle {
+		reverse_proxy server:8080
+	}
+}
+
+# Optional: static Godot web build from ./game-web, with COOP/COEP.
+# Set GAME_DOMAIN in .env to a real name to turn it on; the default is localhost-only.
+{$GAME_DOMAIN:http://localhost:8081} {
+	import godot_web
+	root * /srv/game
+	file_server
+}

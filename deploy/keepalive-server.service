@@ -1,0 +1,43 @@
+# Run the single-file keepalive-server binary without Docker.
+# Install:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin keepalive
+#   sudo install -m 755 keepalive-server /usr/local/bin/keepalive-server
+#   sudo install -m 600 -o root /dev/null /etc/keepalive.env   # then fill it in (see below)
+#   sudo cp keepalive-server.service /etc/systemd/system/ && sudo systemctl enable --now keepalive-server
+#
+# /etc/keepalive.env (mode 600):
+#   TURN_SECRET=<same value as coturn's static-auth-secret>
+#   LOBBY_DOMAIN=lobby.example.com
+#   ALLOWED_GAMES=*
+#   MAX_LOBBIES=1000
+# Caddy (or another TLS proxy) still goes in front: point it at 127.0.0.1:8080.
+[Unit]
+Description=Keepalive lobby and signaling server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=keepalive
+Group=keepalive
+EnvironmentFile=/etc/keepalive.env
+ExecStart=/usr/local/bin/keepalive-server \
+  --listen 127.0.0.1:8080 \
+  --public-url wss://${LOBBY_DOMAIN} \
+  --turn-urls turn:${LOBBY_DOMAIN}:3478,turn:${LOBBY_DOMAIN}:3478?transport=tcp,turns:${LOBBY_DOMAIN}:5349?transport=tcp \
+  --turn-secret ${TURN_SECRET} \
+  --allowed-games ${ALLOWED_GAMES} \
+  --max-lobbies ${MAX_LOBBIES}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target
