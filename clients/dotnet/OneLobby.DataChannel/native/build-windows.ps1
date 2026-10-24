@@ -58,7 +58,20 @@ if ($sha -ne $mbedSha) { throw "mbedtls tarball sha256 $sha does not match $mbed
 Write-Host "mbedtls ${mbedVer}: extract"
 $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
 $mbedSrc = Join-Path $WorkDir "mbedtls-$mbedVer"
-if (-not (Test-Path $mbedSrc)) { & $tar -xjf $tarball -C $WorkDir; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } }
+if (-not (Test-Path $mbedSrc)) {
+    # windows-2022's tar.exe (libarchive 3.5.2) has no bz2lib, so -j pipes through an external bzip2 and hangs (CI
+    # stalled here for 25 minutes). Without bz2lib, unpack with Git for Windows' bzip2 first and untar the plain .tar.
+    $archive = $tarball
+    if (-not ((& $tar --version) -match 'bz2lib')) {
+        $bzip2 = Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) 'usr/bin/bzip2.exe'
+        if (-not (Test-Path $bzip2)) { throw "tar.exe has no bzip2 support and $bzip2 is missing" }
+        & $bzip2 -dkf $tarball
+        if ($LASTEXITCODE -ne 0) { throw 'bzip2 failed' }
+        $archive = $tarball -replace '\.bz2$', ''
+    }
+    & $tar -xf $archive -C $WorkDir
+    if ($LASTEXITCODE -ne 0) { throw 'extract failed' }
+}
 # libdatachannel's DTLS transport needs DTLS-SRTP key export, off in the default config (Godot enables it too).
 $cfg = Join-Path $mbedSrc 'include/mbedtls/mbedtls_config.h'
 $text = [IO.File]::ReadAllText($cfg)
