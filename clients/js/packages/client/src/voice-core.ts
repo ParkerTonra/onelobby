@@ -132,12 +132,7 @@ export class JitterBuffer {
 
   private bufferedFrames(): number {
     let n = this.ready.length;
-    let seq = this.expected;
-    // contiguous run starting at expected
-    while (seq !== null && this.packets.has(seq)) {
-      n += this.packets.get(seq)!.frames.length;
-      seq = (seq + 1) & 0xffff;
-    }
+    for (const p of this.packets.values()) n += p.frames.length;
     return n;
   }
 
