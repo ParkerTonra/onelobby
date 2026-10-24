@@ -149,6 +149,8 @@ Full reference (generated): `docs/api/`.
   / `JoinDirectAsync` from `OneLobby.Direct`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
   `kit.joinDirect(code)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP;
   host leaving ends the session)
+- Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
+  adapter): `docs/recipes/browser-game.md`
 - Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).

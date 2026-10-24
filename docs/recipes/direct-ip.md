@@ -169,8 +169,9 @@ console.log("Send this link:", lobby.joinUrl);
 ```
 
 The handler gets the path without the query and returns `{ status?, type, body }` or null (404). Serve only fixed
-paths from memory, never files by path. A game that already has its own web server (Ant Arena) can do the same on that
-server: what matters is that the page comes from the host's address over `http`. Smoke: `node e2e/direct-smoke.mjs
+paths from memory, never files by path. A game that already has its own web server can do the same on that server: what
+matters is that the page comes from the host's address over `http`. A whole game built this way:
+[browser-game.md](browser-game.md). Smoke: `node e2e/direct-smoke.mjs
 host 47810 --page --wait=600` prints `join page http://...`; opening it shows "It works!" and the host prints `PASS
 host`. .NET hosts do not serve pages yet.
 
