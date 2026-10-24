@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keepalive gridpaint</title>
+<meta name="keepalive-lobby-server" content="ws://localhost:8080/ws">
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; max-width: 760px; color: #111; }
+  button, input { font: inherit; padding: 4px 8px; }
+  #grid { border: 1px solid #333; image-rendering: pixelated; cursor: crosshair; display: block; margin: 8px 0; }
+  #log { height: 140px; overflow: auto; border: 1px solid #ccc; padding: 4px; font-family: ui-monospace, monospace; font-size: 12px; }
+  #status { font-family: ui-monospace, monospace; }
+  .ok { color: #176f2c; } .bad { color: #b00020; }
+  #meter { width: 160px; height: 10px; border: 1px solid #333; display: inline-block; vertical-align: middle; }
+  #meter > div { height: 100%; width: 0; background: #3cb44b; }
+  #browse li { cursor: pointer; }
+  .row { margin: 6px 0; }
+</style>
+</head>
+<body>
+<h1>Keepalive gridpaint</h1>
+<div class="row">
+  Name <input id="name" value="" size="10">
+  <button id="host">Host</button>
+  <input id="code" placeholder="join code" size="9">
+  <button id="join">Join</button>
+  <button id="browse-btn">Browse</button>
+  <button id="leave" disabled>Leave</button>
+</div>
+<ul id="browse"></ul>
+<div id="hostnote" class="bad" hidden>You are the host: keep this tab open and visible.</div>
+<div id="info" class="row">Not in a lobby.</div>
+<div class="row"><button id="start" disabled>Start game</button></div>
+<canvas id="grid" width="512" height="512"></canvas>
+<div id="status" class="row">-</div>
+<div class="row">
+  <button id="mic">Enable voice</button>
+  Hold <b>V</b> to talk <span id="meter"><div></div></span>
+  <span id="speaking"></span>
+</div>
+<div id="log"></div>
+<div class="row"><input id="chat" placeholder="chat line, Enter to send" size="50" disabled></div>
+<script type="module" src="./demo.js"></script>
+</body>
+</html>

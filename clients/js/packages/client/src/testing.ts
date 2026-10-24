@@ -87,7 +87,7 @@ export class ManualClock implements Clock {
 export async function settle(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
   // A macrotask boundary guarantees the whole microtask queue (delivery chains) has drained.
-  await new Promise<void>((r) => (typeof setImmediate === "function" ? setImmediate(r) : setTimeout(r, 0)));
+  await new Promise<void>((r) => ((globalThis as { setImmediate?: (f: () => void) => void }).setImmediate?.(r) ?? setTimeout(r, 0)));
 }
 
 // ---- in-memory peer network ---------------------------------------------------------------------------------------

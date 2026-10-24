@@ -18,6 +18,8 @@ import type { AudioSink, FrameSource, VoiceCodec, VoiceDecoderHandle, VoiceEncod
 export type VoiceEvents = {
   speaking: [peerId: number, talking: boolean];
   error: [VoiceError];
+  /** Every voice packet that reached this peer (after the host's validity checks), before mute/enable filtering. */
+  packet: [speaker: number, seq: number, flags: number, frames: Uint8Array[]];
 };
 
 interface Speaker {
@@ -157,6 +159,11 @@ export class Voice extends Emitter<VoiceEvents> {
     }, FRAME_MS * 2);
   }
 
+  /** Send already-encoded Opus frames as one packet (no codec involved); used by tools and conformance. */
+  sendEncoded(frames: Uint8Array[], endOfBurst = false): void {
+    this.sendPacket(this.packetizer.packet(frames, endOfBurst ? FLAG_END_OF_BURST : 0));
+  }
+
   /** Encoded frame from the encoder (also the test entry point for packetization). */
   onEncoded(opus: Uint8Array): void {
     const p = this.packetizer.push(opus);
@@ -176,7 +183,7 @@ export class Voice extends Emitter<VoiceEvents> {
 
   handle(from: number, route: number, msg: Message): void {
     if (msg.type !== "voice") return;
-    const size = msg.frames.reduce((a, f) => a + f.length, 0) + 4 + msg.frames.length * 2;
+    const size = msg.frames.reduce((a, f) => a + f.length + 2, 0) + 7; // whole wire frame: header 3 + seq/flags/n 4
     const now = this.hub.clock.now();
     let speaker = route;
     if (this.hub.isHost) {
@@ -186,6 +193,7 @@ export class Voice extends Emitter<VoiceEvents> {
         if (peer !== from) this.hub.sendTo(peer, msg, from, "voice");
       }
     }
+    this.emit("packet", speaker, msg.seq, msg.flags, msg.frames);
     if (!this._enabled || speaker === this.hub.localPeerId || this.peerMuted.has(speaker)) return;
     this.receivePacket(speaker, { seq: msg.seq, flags: msg.flags, frames: msg.frames }, now);
   }

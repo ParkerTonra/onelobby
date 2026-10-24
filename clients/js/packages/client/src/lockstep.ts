@@ -1,4 +1,4 @@
-import { splitChunks } from "./chunking.js";
+import { CHUNK_PAYLOAD, splitChunks } from "./chunking.js";
 import { PROTO, type FrameCommand, type Message } from "./codec.js";
 import { deflate, deflateAvailable, inflate } from "./deflate.js";
 import { Emitter } from "./emitter.js";
@@ -49,6 +49,8 @@ export class Lockstep extends Emitter<LockstepEvents> {
   restore: ((tick: number, bytes: Uint8Array) => void) | null = null;
 
   readonly hashEveryTicks: number;
+  /** Chunk body size used when serving snapshots. */
+  chunkSize = CHUNK_PAYLOAD;
   private historyMax: number;
 
   private queue: Frame[] = [];
@@ -76,7 +78,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
   private desyncs = new Map<number, number>();
   private lastHashRx = new Map<number, number>();
   /** Hashes a peer sent for ticks up to this were computed before it restored a snapshot: stale, not evidence. */
-  private staleUpTo = new Map<number, number>();
+  private staleUpTo = new Map<number, { from: number; to: number }>();
 
   // joiner side
   private pendingSnapshot: { tick: number; total: number; flags: number } | null = null;
@@ -378,7 +380,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   private onPeerHash(peerId: number, tick: number, hash: bigint): void {
     this.lastHashRx.set(peerId, this.hub.clock.now());
-    if (tick <= (this.staleUpTo.get(peerId) ?? 0)) return;
+    if (this.isStale(peerId, tick)) return;
     const own = this.ownHashes.get(tick);
     if (own === undefined) {
       let m = this.peerHashes.get(tick);
@@ -392,7 +394,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   private compare(peerId: number, tick: number, hostHash: bigint, yourHash: bigint): void {
     if (hostHash === yourHash) return;
-    if (tick <= (this.staleUpTo.get(peerId) ?? 0)) return;
+    if (this.isStale(peerId, tick)) return;
     if (!this.ready.has(peerId) || this.snapshotting.has(peerId)) return; // already being resynced
     const n = (this.desyncs.get(peerId) ?? 0) + 1;
     this.desyncs.set(peerId, n);
@@ -401,10 +403,16 @@ export class Lockstep extends Emitter<LockstepEvents> {
       return;
     }
     this.hub.sendTo(peerId, { type: "desync", tick, hostHash, yourHash }, 0);
-    void this.sendSnapshot(peerId);
+    void this.sendSnapshot(peerId, tick);
   }
 
-  private async sendSnapshot(peerId: number): Promise<void> {
+  /** Hashes computed before a peer restored its snapshot (ticks after the strike, up to what we had emitted) are not evidence. */
+  private isStale(peerId: number, tick: number): boolean {
+    const w = this.staleUpTo.get(peerId);
+    return !!w && tick > w.from && tick <= w.to;
+  }
+
+  private async sendSnapshot(peerId: number, strikeTick = Infinity): Promise<void> {
     if (this.snapshotting.has(peerId)) return;
     if (!this.snapshot) {
       this.hub.reportError(new Error("lockstep.snapshot is not set; cannot serve a snapshot"));
@@ -424,11 +432,12 @@ export class Lockstep extends Emitter<LockstepEvents> {
       if (!this.snapshotting.has(peerId)) return; // peer left while compressing
       // header + one contiguous chunk set + frames S+1... with nothing else in between
       this.hub.sendTo(peerId, { type: "snapshot", tick: S, total: payload.length, flags }, 0);
-      for (const c of splitChunks(this.hub.nextChunkId(), payload)) this.hub.sendTo(peerId, c, 0);
+      for (const c of splitChunks(this.hub.nextChunkId(), payload, this.chunkSize)) this.hub.sendTo(peerId, c, 0);
       for (const f of this.history) {
         if (f.tick > S) this.hub.sendTo(peerId, { type: "frame", tick: f.tick, commands: f.commands }, 0);
       }
-      this.staleUpTo.set(peerId, this.lastFrameTick);
+      if (strikeTick !== Infinity) this.staleUpTo.set(peerId, { from: strikeTick, to: this.lastFrameTick });
+      else this.staleUpTo.delete(peerId);
       for (const m of this.peerHashes.values()) m.delete(peerId);
       this.ready.add(peerId);
       this.lastHashRx.set(peerId, this.hub.clock.now());

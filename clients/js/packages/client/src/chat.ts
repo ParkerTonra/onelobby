@@ -53,6 +53,8 @@ export interface ChatMessage {
 export type ChatEvents = {
   message: [ChatMessage];
   rejected: [id: number, reason: ChatRejectReason];
+  /** The host's `chat_history` arrived (joiners, right after the handshake). */
+  history: [readonly ChatMessage[]];
 };
 
 /** Text chat (DESIGN s.9b): sender -> host (validates, stamps) -> everyone, over the reliable channel. */
@@ -123,6 +125,7 @@ export class Chat extends Emitter<ChatEvents> {
         if (!this.hub.isHost) {
           this.lines = [];
           for (const l of msg.lines.slice(-CHAT_HISTORY_LINES)) this.push({ ...l, text: this.safeFilter(l.text) });
+          this.emit("history", this.lines);
         }
         break;
       case "chat_reject":

@@ -32,6 +32,13 @@ export class VoicePacketizer {
     return this.take(0);
   }
 
+  /** Wrap already-encoded frames in the next packet (no batching). */
+  packet(frames: Uint8Array[], flags: number): VoicePacket {
+    const p: VoicePacket = { seq: this.seq, flags, frames };
+    this.seq = (this.seq + 1) & 0xffff;
+    return p;
+  }
+
   /** Always emits a packet (possibly with zero frames) carrying the end-of-burst flag. */
   endBurst(): VoicePacket {
     return this.take(FLAG_END_OF_BURST);

@@ -145,6 +145,26 @@ export class Lobby extends Emitter<LobbyEvents> {
     return this.roster.get(peerId);
   }
 
+  set snapshotChunkSize(n: number) {
+    this.lockstep.chunkSize = n;
+  }
+
+  /** Current migration epoch (0 until the first host change). */
+  get hostEpoch(): number {
+    return this.epoch;
+  }
+
+  /** @internal Host role: create the link to `peerId` and start negotiating (adapters and tests). */
+  _offer(peerId: number): PeerLink {
+    this.offerTo(peerId);
+    return this.links.get(peerId)!;
+  }
+
+  /** @internal Joiner role: create the answering link to `peerId` (adapters and tests). */
+  _answer(peerId: number): PeerLink {
+    return this.makeLink(peerId);
+  }
+
   /** @internal Called by Keepalive right after construction: the host waits for joiners, a joiner waits for the host's offer. */
   _begin(): void {
     /* joiners are passive until the host offers; hosts create links on peer_joined */
@@ -341,7 +361,7 @@ export class Lobby extends Emitter<LobbyEvents> {
         this.chat.handle(from, route, msg);
         break;
       case "voice":
-        this.voice.handle(from, route, msg);
+        if (channel === "voice") this.voice.handle(from, route, msg); // a voice frame on another channel is ignored
         break;
       case "raw":
         this.onRaw(from, route, msg.bytes, channel);
@@ -413,7 +433,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     const candidate = pickNewHost([...this.roster.keys(), this.localPeerId], failed) ?? this.localPeerId;
     if (candidate === this.localPeerId) this.becomeHost();
-    else this.setHost(candidate); // it will offer to us; we answer and say hi
+    // else: wait for the candidate's host_claim (or the server's host_changed); it offers to us and we answer with hi
   }
 
   private becomeHost(): void {
