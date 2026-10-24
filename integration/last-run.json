@@ -1,0 +1,95 @@
+{
+  "at": "2026-10-24T05:16:32.123Z",
+  "results": [
+    {
+      "name": "1 browser joiner receives frames from Godot host",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "name": "1 gridpaint hashes equal for 60 s (Godot host -> browser)",
+      "ok": true,
+      "evidence": "65 common hash ticks over 64 s, 0 mismatches "
+    },
+    {
+      "name": "2 chat Godot -> browser",
+      "ok": true,
+      "evidence": "godot: hello from godot | browser: hello from the browser"
+    },
+    {
+      "name": "2 chat browser -> Godot",
+      "ok": true,
+      "evidence": "hello from godot | hello from the browser"
+    },
+    {
+      "name": "1 Godot final line written",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "name": "3 voice tone Godot -> browser decodes",
+      "ok": null,
+      "evidence": "BLOCKED: demo-godot/Main.cs has no tone/voice CLI hook (voice only via the UI toggle and a real microphone; Dummy audio driver yields no capture). Browser receive side is covered by clients/js/e2e/tabs.mjs."
+    },
+    {
+      "name": "4 gridpaint hashes equal for 60 s (browser host -> Godot joiner)",
+      "ok": true,
+      "evidence": "65 common hash ticks over 64 s, 0 mismatches "
+    },
+    {
+      "name": "4 chat Godot -> browser host",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "name": "4 chat browser host -> Godot",
+      "ok": true,
+      "evidence": "hello from godot | hello from the browser host"
+    },
+    {
+      "name": "5a pre-migration: B1 == B2 hashes",
+      "ok": true,
+      "evidence": "259 common, 0 bad"
+    },
+    {
+      "name": "5a Godot host dies: browser peer 2 takes over, peer 3 follows",
+      "ok": true,
+      "evidence": "510 ms after kill (kill is a hard process kill)"
+    },
+    {
+      "name": "5a frames resume after migration",
+      "ok": true,
+      "evidence": "B1 262->491, B2 262->491"
+    },
+    {
+      "name": "5a hashes equal across the migration and after",
+      "ok": true,
+      "evidence": "240 common ticks from 262, 0 bad "
+    },
+    {
+      "name": "5a Godot's pre-death hashes match the browsers' (same history)",
+      "ok": true,
+      "evidence": "13 common, 0 bad "
+    },
+    {
+      "name": "5b pre-migration: Godot == browser B hashes",
+      "ok": true,
+      "evidence": "11 common, 0 bad; godot peer id 2"
+    },
+    {
+      "name": "5b browser host closes: Godot takes over, browser follows",
+      "ok": true,
+      "evidence": "5621 ms; godot peer 2; godot log: host is now #2,host is now #2"
+    },
+    {
+      "name": "5b frames resume after migration",
+      "ok": true,
+      "evidence": "B 225->463, Godot hash tick 220->460"
+    },
+    {
+      "name": "5b hashes equal across the migration and after",
+      "ok": true,
+      "evidence": "22 common, 0 bad "
+    }
+  ]
+}
