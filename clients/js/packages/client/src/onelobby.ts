@@ -18,6 +18,8 @@ import {
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 import { WebAudioSink, WorkletMic, webCodecsOpus, webCodecsOpusAvailable } from "./voice-browser.js";
 import { webRtcLinkFactory } from "./webrtc.js";
+import { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
+import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 
 export const LIB_NAME = "onelobby";
 export const LIB_VERSION = "0.1.0";
@@ -102,6 +104,22 @@ export interface ListOptions {
   meta?: Record<string, string>;
   limit?: number;
   cursor?: string;
+}
+
+export interface JoinDirectOptions {
+  /** The host's password, if it set one; a wrong one fails with `bad_password`. */
+  password?: string;
+  /** Port for an address typed without one (default 47810, docs/direct-ip.md s.2). */
+  defaultPort?: number;
+  /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
+  connectTimeoutMs?: number;
+}
+
+/** @internal How onelobby/direct makes a host lobby: its own socket and link factory, and direct mode. */
+export interface DirectLobbyHooks {
+  socketFactory: SocketFactory;
+  /** Wraps the kit's own link factory (port pin, no ICE servers). */
+  wrapLinks: (inner: LinkFactory) => LinkFactory;
 }
 
 export type OneLobbyEvents = { error: [Error] };
@@ -256,9 +274,23 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     };
   }
 
-  private async connect(): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
-    const sig = new SignalingClient(this.options.lobbyServer, this.socketFactory, this.clock);
-    await sig.connect();
+  private async connect(url = this.options.lobbyServer, factory = this.socketFactory, timeoutMs = 0): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
+    const sig = new SignalingClient(url, factory, this.clock);
+    if (timeoutMs > 0) {
+      let cancel = () => {};
+      const timeout = new Promise<never>((_, reject) => {
+        cancel = this.clock.setTimeout(() => reject(new OneLobbyError("direct_unreachable", `no answer from ${url} within ${timeoutMs} ms`)), timeoutMs);
+      });
+      try {
+        await Promise.race([sig.connect(), timeout]);
+      } catch (e) {
+        sig.close();
+        if (e instanceof OneLobbyError && e.code === "connect_failed") throw new OneLobbyError("direct_unreachable", `no answer from ${url}`);
+        throw e;
+      } finally {
+        cancel();
+      }
+    } else await sig.connect();
     try {
       const welcome = await sig.request<WelcomeMsg & { t: string }>(this.helloMsg(), "welcome");
       return { sig, welcome };
@@ -268,12 +300,13 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     }
   }
 
-  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState): Lobby {
+  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }): Lobby {
     const lobby = new Lobby({
       signaling: sig,
       state,
       ice: welcome.ice ?? [],
-      links: this.linkFactory,
+      links: direct?.links ?? this.linkFactory,
+      direct: !!direct,
       clock: this.clock,
       wall: this.wall,
       hashEveryTicks: this.options.hashEveryTicks,
@@ -283,7 +316,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       readyTimeoutMs: this.options.readyTimeoutMs,
     });
     lobby.errorSink = (e) => this.emit("error", e);
-    if (this.storage) {
+    if (this.storage && !direct) {
       liveSeats.add(lobby);
       this.saveSeat(lobby.code, lobby.resumeToken);
       lobby.seatSink = (token) => this.saveSeat(lobby.code, token);
@@ -336,6 +369,50 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     try {
       const state = await sig.request<LobbyState>({ t: "join", code: norm }, "lobby");
       return this.makeLobby(sig, welcome, state);
+    } catch (e) {
+      sig.close();
+      throw e;
+    }
+  }
+
+  /**
+   * Join a direct-IP host (docs/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
+   * or hyphens) or, advanced, an address (`ip`, `ip:port`, `[v6]:port`). No lobby server is involved: the code is
+   * the host's address. A mistyped code fails at once with `bad_code`; nobody listening is `direct_unreachable`.
+   * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
+   */
+  async joinDirect(codeOrAddress: string, opts: JoinDirectOptions = {}): Promise<Lobby> {
+    let input = codeOrAddress.trim();
+    if (looksLikeJoinCode(input)) {
+      const d = decodeJoinCode(input);
+      if ("error" in d)
+        throw new OneLobbyError(d.error, d.error === "unknown_version" ? `"${input}" is a join code from a newer version of the game` : `"${input}" is not a valid join code: check for a typo`);
+      input = `${d.ip}:${d.port}`;
+    }
+    const addr = parseDirectAddress(input, opts.defaultPort ?? DEFAULT_DIRECT_PORT);
+    if (!addr) throw new OneLobbyError("bad_address", `"${codeOrAddress}" is not a join code or an address (try 6B01-RGFE-P2B or 192.168.1.20:47810)`);
+    const inner = this.linkFactory;
+    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: [], extraRemoteCandidates: [addr.candidate] }) };
+    const { sig, welcome } = await this.connect(addr.url, this.socketFactory, opts.connectTimeoutMs ?? 5000);
+    try {
+      const state = await sig.request<LobbyState>({ t: "join", ...(opts.password ? { password: opts.password } : {}) }, "lobby");
+      return this.makeLobby(sig, welcome, state, { links });
+    } catch (e) {
+      sig.close();
+      throw e;
+    }
+  }
+
+  /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
+  async hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby> {
+    const { sig, welcome } = await this.connect("onelobby-direct://host/", hooks.socketFactory);
+    try {
+      const state = await sig.request<LobbyState>(
+        { t: "create", name: h.name, maxPlayers: h.maxPlayers, visibility: "unlisted", mode: this.options.mode, tickRate: this.options.tickRate,
+          lateJoin: h.lateJoin ?? true, meta: h.meta ?? {} },
+        "lobby",
+      );
+      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) });
     } catch (e) {
       sig.close();
       throw e;

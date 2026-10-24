@@ -75,7 +75,7 @@ describe("export surface", () => {
     expect(Object.keys(root).sort()).toEqual([
       "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "OneLobby", "OneLobbyError", "LIB_NAME", "LIB_VERSION",
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
-      "webCodecsOpusAvailable",
+      "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
       "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
     ].sort());
   });

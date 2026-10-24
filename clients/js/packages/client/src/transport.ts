@@ -53,6 +53,17 @@ export interface LinkOptions {
   remoteId: number;
   iceServers: IceServer[];
   relayOnly: boolean;
+  /**
+   * Direct-IP host (docs/direct-ip.md s.2): bind ICE to these local UDP ports. One port (begin = end) also turns on
+   * ICE UDP mux so every peer shares it. Honoured by libdatachannel-based RTCPeerConnection (node-datachannel);
+   * browsers ignore it.
+   */
+  portRange?: { begin: number; end: number };
+  /**
+   * Direct-IP joiner: remote ICE candidate lines (`candidate:1 1 UDP ... typ host`) added after the remote
+   * description, for the address the player typed or pasted as a code.
+   */
+  extraRemoteCandidates?: string[];
 }
 
 export interface LinkFactory {

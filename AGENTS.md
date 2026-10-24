@@ -145,8 +145,10 @@ Full reference (generated): `docs/api/`.
 - Replicated state (host-authoritative real-time: shooters, physics, AI), C#: `docs/recipes/replication.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
-- Host by IP, no server (.NET desktop, Unity): `docs/recipes/direct-ip.md` (`client.HostDirectAsync` / `JoinDirectAsync`
-  from `OneLobby.Direct`; host leaving ends the session, no codes, port 47810 TCP+UDP)
+- Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
+  / `JoinDirectAsync` from `OneLobby.Direct`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
+  `kit.joinDirect(code)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP;
+  host leaving ends the session)
 - Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).

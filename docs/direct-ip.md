@@ -198,7 +198,7 @@ STUN server for the host's public address, so more friends connect without forwa
 a server nobody here runs.
 `Default:` no outside servers; STUN becomes an opt-in setting in the parked list.
 
-## 9. Build status (2026-10-24, branch `direct-ip/poc`)
+## 9. Build status (2026-10-24, branch `direct-ip/poc`; s.2a and the Node host added the same afternoon)
 
 | Step | State | Where |
 |---|---|---|
@@ -208,8 +208,11 @@ a server nobody here runs.
 | 4 In-memory socket | done | `clients/dotnet/OneLobby.Direct/HubSignalingSocket.cs` |
 | 5 Port pin | done | `PeerLinkOptions.PortRangeBegin/End`; one pinned port turns on libjuice ICE UDP mux, so every peer shares UDP `P` |
 | 6 Typed-address candidate | done | `PeerLinkOptions.ExtraRemoteCandidates` (added after the remote description, with its `a=mid`), `NoIceServers` |
-| 7 Smoke | run 1 passed; run 3 emulated on one machine (passed); real two-network run optional | `OneLobby.DataChannel.Smoke host-direct` / `join-direct` print the selected ICE pair |
-| 8 Docs | done | `docs/recipes/direct-ip.md`, README, AGENTS.md, llms.txt, spec/signaling.md, self-host "later" |
+| 7 Join code codec | done; C# and TS against shared vectors (all 341 single-character typos caught) | `spec/reference/joincode.mjs`, `spec/vectors/joincode.json`, `OneLobby.Core/JoinCode.cs`, `onelobby` `decodeJoinCode` |
+| 8 Port mapper | done; fake-gateway tests (UPnP ok/725/718, NAT-PMP ok/other port, none); not yet seen work on a real router (below) | `OneLobby.Hub/PortMapper.cs`, `onelobby/direct` `PortMapper`; `HostDirectAsync`/`hostDirect` pick the code kind |
+| 9 Smoke | run 1 passed (now by code); run 3 emulated on one machine (passed); real two-network run optional | both smokes print `join code ...`; `join-direct <code>`, `--only-typed`, `--no-upnp` |
+| 10 Docs | done | `docs/recipes/direct-ip.md` ("host with a join code": C#, Node host, JS join), AGENTS.md, llms.txt |
+| Node host | done (asked for 2026-10-24): TS port of `Hub` + RFC 6455 listener + port mapper; `kit.joinDirect` for Node and browser joiners | `clients/js/packages/client/src/direct/` (`onelobby/direct`), `e2e/direct-smoke.mjs`; `conformance/server/run-ts-hub.mjs` |
 
 Smoke run 1 (one Windows machine, two processes): `join-direct 127.0.0.1` and `join-direct <LAN IPv4>` both PASS, link
 open in about 200 ms, host side of the selected pair on UDP 47810, joiner ends with `host_left`. In-process live test:
@@ -232,3 +235,19 @@ only the TCP listener reports `port_in_use`. Kicks are per address, so two joine
 `WebSocket.CreateFromStream` on Unity (s.5 step 3), checked statically against Unity 6000.2.7f2: the .NET Standard
 2.1 reference assembly declares it, and the runtime `System.dll` in both the `unityjit` (Mono) and `unityaot`
 (IL2CPP) profiles carries it with the `ManagedWebSocket` implementation behind it. Not yet exercised in a Unity player.
+
+Join codes and the Node host (2026-10-24, one Windows machine): .NET host to .NET joiner by same-network code, PASS;
+Node host (`e2e/direct-smoke.mjs host`) to .NET joiner (`join-direct <code>`), PASS, host side of the pair on the
+pinned UDP port; .NET host to Node joiner with `--only-typed` (4 host candidates dropped, so the code's address is the
+only way in), PASS in 486 ms. The TS hub passes `conformance/server` (54 functional, the slow idle test, and the 4-test
+rate-limit pass on a fresh scale-1 hub). Vitest: a Node host and two Node joiners over node-datachannel share UDP `P`
+(every host candidate is on `P`).
+
+Router on this machine: no UPnP or NAT-PMP answer, so every code was a same-network code. The PC's network is marked
+**Public**, where Windows turns off network discovery and drops SSDP replies, and Windows' own UPnP NAT API
+(`HNetCfg.NATUPnP`) sees no gateway either; the gateway (10.0.0.1) has no UPnP description on its common ports and does
+not answer NAT-PMP. So either UPnP is off on the router or the Public profile hides it; an internet code has not been
+seen yet. To check: mark the network Private and run the live test (`ONELOBBY_LIVE_UPNP=1`, then `dotnet test
+server/OneLobby.Server.Tests --filter LiveRouter`). PCP proper (RFC 6887) is not implemented; NAT-PMP is, which most
+PCP routers also answer.
+

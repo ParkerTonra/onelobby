@@ -48,6 +48,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./direct": {
+      "types": "./dist/direct/index.d.ts",
+      "import": "./dist/direct/index.js",
+      "default": "./dist/direct/index.js"
+    },
     "./ui": {
       "types": "./dist/ui/index.d.ts",
       "import": "./dist/ui/index.js",
@@ -84,6 +89,7 @@
     "prepublishOnly": "npm run typecheck && npm run build && npm test && node scripts/prepublish-check.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "node-datachannel": "^0.33.4"
   }
 }
