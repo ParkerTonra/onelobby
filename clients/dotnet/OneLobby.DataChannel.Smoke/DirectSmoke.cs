@@ -13,12 +13,16 @@ using OneLobby.Direct;
 //                                       0 after a joiner says "bye" (or 1 after 120 s with nobody).
 //   join-direct <address> [password]    joins, prints the selected ICE pair, sends "hello direct" (reliable) and
 //                                       "fast direct" (fast, repeated), waits for both echoes, prints PASS/FAIL, says bye.
+//     --only-typed                      (join) drop every candidate the host offers, so only the typed address can
+//                                       connect: the outside-joiner case on one machine (OnlyTypedTransport).
 // The joiner's "pair" line is the evidence for the s.2 candidate rule: through a forwarded port, its remote candidate
 // should be the typed public address.
 internal static class DirectSmoke
 {
     public static int Run(string[] args)
     {
+        var onlyTyped = args.Contains("--only-typed");
+        args = args.Where(a => a != "--only-typed").ToArray();
         var sw = Stopwatch.StartNew();
         void Say(string s) { Console.WriteLine(s); Console.Out.Flush(); }
         bool Wait(Func<bool> done, Action pump, int timeoutMs)
@@ -30,7 +34,8 @@ internal static class DirectSmoke
         var transport = new DataChannelTransport();
         var cfg = new OneLobbyConfig("com.onelobby.directsmoke", "1", new Uri("ws://unused.invalid/"), SyncMode.Raw,
             DisplayName: Environment.MachineName + " " + args[0]);
-        var client = new LobbyClient(cfg, transport);
+        var filter = onlyTyped ? new OnlyTypedTransport(transport) : null;
+        var client = new LobbyClient(cfg, (ITransport?)filter ?? transport);
         void Pairs(string who)
         {
             foreach (var l in transport.Links.Where(l => l.LocalCandidate != null))
@@ -85,6 +90,7 @@ internal static class DirectSmoke
                 Say($"ready after {sw.ElapsedMilliseconds} ms, host {lobby.HostPeerId}");
                 Wait(() => transport.Links.Any(l => l.LocalCandidate != null), lobby.Pump, 5000);
                 Pairs("joiner");
+                if (filter != null) Say($"only-typed: dropped {filter.Dropped} host candidates");
                 bool gotReliable = false, gotFast = false;
                 lobby.MessageReceived += (from, payload, ch) =>
                 {

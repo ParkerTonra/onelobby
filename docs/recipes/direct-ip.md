@@ -107,3 +107,5 @@ server:
    `OneLobby.DataChannel.Smoke join-direct 192.168.1.20` prints a `pair` line and `PASS`, and the host prints `PASS host`.
 4. Through a forwarded port, from outside the network: `join-direct <public-ip>` passes, and the joiner's `pair` line
    shows the public address as `remote[...]` (that is the typed-address candidate at work).
+   No second network? `join-direct <LAN address> --only-typed` drops every candidate the host offers, so the typed
+   address is the only way in (the outside-joiner case); it passes with that address as `remote[...]`.

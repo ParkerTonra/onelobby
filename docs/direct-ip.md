@@ -152,7 +152,7 @@ a server nobody here runs.
 | 4 In-memory socket | done | `clients/dotnet/OneLobby.Direct/HubSignalingSocket.cs` |
 | 5 Port pin | done | `PeerLinkOptions.PortRangeBegin/End`; one pinned port turns on libjuice ICE UDP mux, so every peer shares UDP `P` |
 | 6 Typed-address candidate | done | `PeerLinkOptions.ExtraRemoteCandidates` (added after the remote description, with its `a=mid`), `NoIceServers` |
-| 7 Smoke | run 1 passed; runs 2 and 3 to do by hand | `OneLobby.DataChannel.Smoke host-direct` / `join-direct` print the selected ICE pair |
+| 7 Smoke | run 1 passed; run 3 emulated on one machine (passed); real two-network run optional | `OneLobby.DataChannel.Smoke host-direct` / `join-direct` print the selected ICE pair |
 | 8 Docs | done | `docs/recipes/direct-ip.md`, README, AGENTS.md, llms.txt, spec/signaling.md, self-host "later" |
 
 Smoke run 1 (one Windows machine, two processes): `join-direct 127.0.0.1` and `join-direct <LAN IPv4>` both PASS, link
@@ -161,6 +161,15 @@ host + two joiners, both host-side pairs on the pinned port (the mux works). On 
 host candidate, so the typed-address candidate is not what connects there: **runs 2 (two LAN machines) and 3 (one
 joiner through a forwarded port) are still owed, and run 3 is what proves the s.2 candidate rule.** Its evidence is the
 joiner's `pair ... remote[...]` line showing the typed public address.
+
+Run 3 emulated (2026-10-24, one machine, no second network): `join-direct <LAN IPv4> --only-typed` drops every
+candidate the host offers (4 of them), so the typed address is the joiner's only way in, as for a joiner on the
+internet whose view of the host's own candidates is private and unreachable. Native Windows joiner: PASS, joiner
+`remote[a=candidate:1 1 UDP 2122317823 10.0.0.188 47810 typ host]` (the typed line), host learns the joiner as
+`prflx`. Linux joiner in a Docker container (behind Docker's NAT, `mcr.microsoft.com/dotnet/runtime:8.0` +
+`libdatachannel.so`): PASS in 588 ms, joiner `local[... typ prflx]` (its NAT-mapped address) and the same typed
+remote; Windows host to Linux joiner also works. That proves the s.2 rule. Not covered: a real router's port forward
+and an internet path; those are standard NAT behaviour for a static forward and remain an optional by-hand check.
 
 Found while building: libjuice binds `P` with address reuse, so a second process can bind UDP `P` without an error;
 only the TCP listener reports `port_in_use`. Kicks are per address, so two joiners on one machine (same IP) share a ban.
