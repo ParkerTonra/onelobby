@@ -411,7 +411,9 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.connected.add(from);
     this.sendTo(from, {
       type: "welcome_dc",
-      tick: this.lockstep.lastTick,
+      // the tick the snapshot will carry (the game's applied tick), so welcome_dc.tick == snapshot.tick even when
+      // the game loop has not yet consumed every emitted frame; 0 before the game starts
+      tick: this.mode === "lockstep" ? this.lockstep.currentTick : 0,
       tickRate: this.tickRate,
       mode: this.mode === "lockstep" ? MODE_LOCKSTEP : MODE_RAW,
       hostId: this.localPeerId,
