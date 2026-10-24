@@ -40,6 +40,8 @@ export interface PeerLink {
   /** Fired once when the link dies (after open or while connecting). */
   onClose: ((reason: string) => void) | null;
   onMessage: ((channel: ChannelName, bytes: Uint8Array) => void) | null;
+  /** Fired once after ICE completes: whether the selected candidate pair uses a TURN relay (reported to the server). */
+  onPath?: ((path: "direct" | "relayed") => void) | null;
   /** The offerer calls this to start negotiation. The answerer just feeds handleSignal. */
   startOffer(): void;
   handleSignal(s: SignalPayload): void | Promise<void>;

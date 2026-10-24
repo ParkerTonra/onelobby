@@ -21,6 +21,7 @@ export class WebRtcLink implements PeerLink {
   onOpen: PeerLink["onOpen"] = null;
   onClose: PeerLink["onClose"] = null;
   onMessage: PeerLink["onMessage"] = null;
+  onPath: PeerLink["onPath"] = null;
 
   private pc: RTCPeerConnection;
   private channels = {} as Record<ChannelName, RTCDataChannel>;
@@ -52,6 +53,7 @@ export class WebRtcLink implements PeerLink {
         if (++this.opened === 3 && !this.closed) {
           this.isOpen = true;
           this.onOpen?.();
+          void this.reportPath();
         }
       };
       ch.onclose = () => this.fail(`channel ${name} closed`);
@@ -92,6 +94,27 @@ export class WebRtcLink implements PeerLink {
       }
     } catch (e) {
       this.fail(`signal failed: ${String(e)}`);
+    }
+  }
+
+  /** Selected candidate pair has a relay candidate -> "relayed", else "direct". */
+  private async reportPath(): Promise<void> {
+    try {
+      const stats = await this.pc.getStats();
+      const byId = new Map<string, any>();
+      stats.forEach((v) => byId.set(v.id, v));
+      let pair: any;
+      stats.forEach((v) => {
+        if (v.type === "transport" && v.selectedCandidatePairId) pair = byId.get(v.selectedCandidatePairId);
+      });
+      if (!pair) stats.forEach((v) => { if (v.type === "candidate-pair" && (v.selected || (v.nominated && v.state === "succeeded"))) pair = v; });
+      if (!pair) return;
+      const l = byId.get(pair.localCandidateId);
+      const r = byId.get(pair.remoteCandidateId);
+      const relayed = l?.candidateType === "relay" || r?.candidateType === "relay";
+      this.onPath?.(relayed ? "relayed" : "direct");
+    } catch {
+      /* stats unavailable: no report */
     }
   }
 

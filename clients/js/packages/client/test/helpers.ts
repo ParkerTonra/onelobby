@@ -112,7 +112,7 @@ export class Player {
   pump(): void {
     let f;
     while ((f = this.lobby.lockstep.nextFrame())) {
-      if (this.corruptAt === f.tick) this.g.grid[0] ^= 7; // a deliberate determinism bug
+      if (this.corruptAt === f.tick) this.g.grid.fill(9); // a deliberate determinism bug
       const h = this.g.step(f.tick, f.commands);
       this.hashes.set(f.tick, h);
       this.lobby.lockstep.reportHash(f.tick, h);

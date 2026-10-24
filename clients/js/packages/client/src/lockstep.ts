@@ -75,6 +75,8 @@ export class Lockstep extends Emitter<LockstepEvents> {
   private peerHashes = new Map<number, Map<number, bigint>>();
   private desyncs = new Map<number, number>();
   private lastHashRx = new Map<number, number>();
+  /** Hashes a peer sent for ticks up to this were computed before it restored a snapshot: stale, not evidence. */
+  private staleUpTo = new Map<number, number>();
 
   // joiner side
   private pendingSnapshot: { tick: number; total: number; flags: number } | null = null;
@@ -200,6 +202,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
     this.snapshotting.delete(peerId);
     this.desyncs.delete(peerId);
     this.lastHashRx.delete(peerId);
+    this.staleUpTo.delete(peerId);
     for (const m of this.peerHashes.values()) m.delete(peerId);
     this.pending = this.pending.filter((c) => c.peerId !== peerId);
   }
@@ -375,6 +378,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   private onPeerHash(peerId: number, tick: number, hash: bigint): void {
     this.lastHashRx.set(peerId, this.hub.clock.now());
+    if (tick <= (this.staleUpTo.get(peerId) ?? 0)) return;
     const own = this.ownHashes.get(tick);
     if (own === undefined) {
       let m = this.peerHashes.get(tick);
@@ -388,6 +392,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   private compare(peerId: number, tick: number, hostHash: bigint, yourHash: bigint): void {
     if (hostHash === yourHash) return;
+    if (tick <= (this.staleUpTo.get(peerId) ?? 0)) return;
     if (!this.ready.has(peerId) || this.snapshotting.has(peerId)) return; // already being resynced
     const n = (this.desyncs.get(peerId) ?? 0) + 1;
     this.desyncs.set(peerId, n);
@@ -423,6 +428,8 @@ export class Lockstep extends Emitter<LockstepEvents> {
       for (const f of this.history) {
         if (f.tick > S) this.hub.sendTo(peerId, { type: "frame", tick: f.tick, commands: f.commands }, 0);
       }
+      this.staleUpTo.set(peerId, this.lastFrameTick);
+      for (const m of this.peerHashes.values()) m.delete(peerId);
       this.ready.add(peerId);
       this.lastHashRx.set(peerId, this.hub.clock.now());
     } catch (e) {

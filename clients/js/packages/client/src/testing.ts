@@ -140,6 +140,7 @@ export class MemoryLink implements PeerLink {
   onOpen: PeerLink["onOpen"] = null;
   onClose: PeerLink["onClose"] = null;
   onMessage: PeerLink["onMessage"] = null;
+  onPath: PeerLink["onPath"] = null;
   /** Bytes sent per channel, for assertions. */
   readonly sent: Record<ChannelName, number> = { reliable: 0, fast: 0, voice: 0 };
   /** While true, outgoing messages vanish (a frozen or partitioned peer). */
@@ -179,6 +180,7 @@ export class MemoryLink implements PeerLink {
     if (this.closed || this.isOpen) return;
     this.isOpen = true;
     this.onOpen?.();
+    this.onPath?.("direct");
   }
 
   send(channel: ChannelName, bytes: Uint8Array): void {

@@ -259,6 +259,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     link.onOpen = () => this.onLinkOpen(peerId, link);
     link.onClose = (reason) => this.onLinkClosed(peerId, link, reason);
     link.onMessage = (ch, bytes) => this.onData(peerId, ch, bytes);
+    link.onPath = (path) => this.signaling.send({ t: "path", path });
     return link;
   }
 
