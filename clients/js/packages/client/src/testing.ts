@@ -241,11 +241,14 @@ interface MLobby {
   peers: Map<number, MPeer>;
   next: number;
   kicked: Set<number>;
+  reserved: Map<string, MPeer>;
 }
 
 /** Minimal keepalive-server (lk1) for client tests. Not a conformance target: stream A owns the real server. */
 export class MemoryServer {
   readonly lobbies = new Map<string, MLobby>();
+  /** Every socket ever opened (to drop one from a test). */
+  readonly sockets: MemorySocket[] = [];
   readonly socketFactory: SocketFactory = () => this.connect();
   private n = 0;
   iceServers = [{ urls: ["stun:stun.example:3478"] }];
@@ -253,7 +256,9 @@ export class MemoryServer {
   readonly received: Json[] = [];
 
   connect(): MemorySocket {
-    return new MemorySocket(this);
+    const s = new MemorySocket(this);
+    this.sockets.push(s);
+    return s;
   }
 
   /** @internal */
@@ -344,6 +349,7 @@ export class MemorySocket implements SocketLike {
     this.peer = null;
     p.sock = null;
     l.peers.delete(p.peerId);
+    if (reason === "timeout") l.reserved.set(p.token, p); // slot kept for resume
     if (l.peers.size === 0) {
       this.srv.lobbies.delete(l.code);
       return;
@@ -364,6 +370,20 @@ export class MemorySocket implements SocketLike {
     if (t === "hello") {
       if (this.hello) return this.err("bad_request", "second hello");
       this.hello = m;
+      const tok = typeof m.resumeToken === "string" ? m.resumeToken : "";
+      for (const l of this.srv.lobbies.values()) {
+        const rp = l.reserved.get(tok);
+        if (!rp) continue;
+        l.reserved.delete(tok);
+        rp.sock = this;
+        rp.token = tok + "+";
+        l.peers.set(rp.peerId, rp);
+        this.lobby = l;
+        this.peer = rp;
+        this.push({ t: "welcome", peerId: rp.peerId, ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 } });
+        this.push(this.lobbyMsg(l, rp));
+        return this.broadcast(l, { t: "peer_joined", peer: { peerId: rp.peerId, name: rp.name, joinedAt: rp.joinedAt } }, rp.peerId);
+      }
       return this.push({ t: "welcome", ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 } });
     }
     if (!this.hello) return this.err("bad_request", "hello first");
@@ -376,7 +396,7 @@ export class MemorySocket implements SocketLike {
         const l: MLobby = {
           code, gameId, netVersion, name: String(m.name), hostId: 1, epoch: 0, mode: String(m.mode), tickRate: Number(m.tickRate),
           lateJoin: !!m.lateJoin, phase: "lobby", meta: (m.meta as Record<string, string>) ?? {}, visibility: String(m.visibility),
-          maxPlayers: Number(m.maxPlayers), peers: new Map([[1, p]]), next: 2, kicked: new Set(),
+          maxPlayers: Number(m.maxPlayers), peers: new Map([[1, p]]), next: 2, kicked: new Set(), reserved: new Map(),
         };
         this.srv.lobbies.set(code, l);
         this.lobby = l;

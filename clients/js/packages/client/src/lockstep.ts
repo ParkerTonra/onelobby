@@ -25,6 +25,7 @@ export type LockstepEvents = {
 };
 
 export const MAX_DESYNCS = 3;
+export const MAX_RESTORE_RETRIES = 3;
 export const HOST_SILENCE_MS = 3000;
 export const PEER_HASH_SILENCE_MS = 10_000;
 const SNAPSHOT_COMPRESS_MIN = 1024;
@@ -63,6 +64,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
   private awaitingSnapshot = false;
   private lastFrameRx = 0;
   private lastSnapshotReq = -Infinity;
+  private restoreFailures = 0;
 
   // host side
   private hosting = false;
@@ -340,17 +342,27 @@ export class Lockstep extends Emitter<LockstepEvents> {
       let bytes = payload;
       if (ps.flags & 1) bytes = await inflate(payload);
       if (!this.restore) throw new Error("lockstep.restore is not set; cannot apply a snapshot");
+      // Restore first: if the game's restore() throws, our bookkeeping must not have moved.
+      this.restore(ps.tick, bytes);
       this.queue = [];
       this.history = [];
       this.lastFrameTick = ps.tick;
       this.consumedTick = ps.tick;
       this.awaitingSnapshot = false;
+      this.restoreFailures = 0;
       this.markStarted();
-      this.restore(ps.tick, bytes);
       this.lastFrameRx = this.hub.clock.now();
       this.emit("restored", ps.tick);
     } catch (e) {
       this.hub.reportError(e instanceof Error ? e : new Error(String(e)));
+      // The game's state is unknown after a failed restore: keep our tick where it was, drop frames, ask again.
+      if (++this.restoreFailures <= MAX_RESTORE_RETRIES) {
+        this.awaitingSnapshot = false;
+        this.lastSnapshotReq = -Infinity;
+        this.requestSnapshot();
+      } else {
+        this.hub.reportError(new Error(`snapshot restore failed ${this.restoreFailures} times; giving up`));
+      }
     }
   }
 

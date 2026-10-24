@@ -34,7 +34,7 @@ frame handed out by `nextFrame()`; `restore(tick, bytes)` receives that tick and
 ```
 cd clients/js
 npm install
-npm test                 # vitest (158 tests); also: npm run typecheck, npm run build
+npm test                 # vitest (162 tests); also: npm run typecheck, npm run build
 KEEPALIVE_SERVER=ws://localhost:8080/ws npm test    # adds the real-server smoke test (real WebSocket, in-memory peer links)
 node ../../conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs   # after npm run build; 28/28
 ```
@@ -48,7 +48,7 @@ node ../../conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.
    and **Join**. Click the grid to paint; the status line shows tick, hash and "in sync". Chat line under the log.
    **Enable voice** in both tabs, hold **V** to talk (mic meter shows input level). A late third tab joins by snapshot and gets chat history.
    Close the host tab: the lowest peer id takes over within a few seconds. Hosting needs the tab visible and open.
-4. Automated version of step 3: `node e2e/tabs.mjs --demo http://localhost:5173/` (uses Edge via `playwright-core`; pass `--browser <path>` for Chrome).
+4. Automated version of step 3: `node e2e/tabs.mjs --demo http://localhost:5173/ --metrics http://localhost:8080/metrics` (uses Edge via `playwright-core`; pass `--browser <path>` for Chrome).
 
 `http://localhost` counts as a secure context, so `getUserMedia` works without TLS; anywhere else serve over https.
 

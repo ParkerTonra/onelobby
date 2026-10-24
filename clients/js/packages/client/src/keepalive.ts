@@ -194,7 +194,11 @@ export class Keepalive extends Emitter<KeepaliveEvents> {
         },
         "welcome",
       );
-      const [welcome, state] = await Promise.all([welcomeP, lobbyP]);
+      lobbyP.catch(() => {}); // settled below or by close()
+      const welcome = await welcomeP;
+      // spec: an unknown or expired token is ignored -> plain welcome (no peerId), and no lobby follows
+      if (welcome.peerId === undefined) throw new KeepaliveError("invalid_token", "resume token unknown or expired");
+      const state = await lobbyP;
       return this.makeLobby(sig, welcome, state);
     } catch (e) {
       sig.close();

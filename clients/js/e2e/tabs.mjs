@@ -5,6 +5,11 @@ import { chromium } from "playwright-core";
 
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i >= 0 ? process.argv[i + 1] : d; };
 const demo = arg("demo", "http://localhost:5173/");
+const metricsUrl = arg("metrics", "http://localhost:8080/metrics");
+const pathCount = async () => {
+  const t = await (await fetch(metricsUrl)).text();
+  return [...t.matchAll(/^keepalive_path_total\{path="(\w+)"\} (\d+)/gm)].reduce((a, m) => a + Number(m[2]), 0);
+};
 const exe = arg("browser", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
@@ -28,6 +33,7 @@ const state = (p) => p.evaluate(() => ({ tick: window.__ka.game?.tick, status: d
 const hashAt = (p, t) => p.evaluate((t) => window.__ka.hashes?.get(t)?.toString(), t);
 
 try {
+  const paths0 = await pathCount();
   const A = await open("alice");
   await A.click("#host");
   await A.waitForFunction(() => window.__ka.lobby);
@@ -73,6 +79,20 @@ try {
   const t2 = Math.min(s1.tick, s2.tick) - 10; const tt = t2 - (t2 % 20);
   const [h1, h2] = [await hashAt(A, tt), await hashAt(C, tt)];
   check("late joiner hash equals host", h1 && h1 === h2, `tick ${tt}`);
+
+  // ICE path telemetry: each WebRTC link reported direct/relayed to the server
+  const paths1 = await pathCount();
+  check("path reports reached keepalive_path_total", paths1 >= paths0 + 4, `${paths0} -> ${paths1}`);
+
+  // rejoin: bob's signaling socket drops, he resumes with the token, same peerId, back in sync
+  const pid = await B.evaluate(() => window.__ka.dropAndRejoin());
+  check("rejoin keeps the peerId", pid === 2, `peer ${pid}`);
+  await B.waitForFunction(() => window.__ka.game.tick > 20, null, { timeout: 15000 });
+  await sleep(3000);
+  const [r1, r2] = [await state(A), await state(B)];
+  const t5 = Math.min(r1.tick, r2.tick) - 10; const t6 = t5 - (t5 % 20);
+  const [rh1, rh2] = [await hashAt(A, t6), await hashAt(B, t6)];
+  check("rejoined peer converges (hash equals host)", !!rh1 && rh1 === rh2, `tick ${t6}`);
 
   // voice: fake mic device emits a beep; bob holds V
   await B.evaluate(() => { window.__ka.lobby.voice.enabled = true; });

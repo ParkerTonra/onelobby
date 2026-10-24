@@ -168,4 +168,17 @@ addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "v" && !e.repea
 addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "v") lobby?.voice.pushToTalk(false); });
 
 // Test hook for automation.
-window.__ka = { get lobby() { return lobby; }, get game() { return game; }, hashes, speaking };
+window.__ka = {
+  get lobby() { return lobby; },
+  get game() { return game; },
+  hashes,
+  speaking,
+  // drop the signaling socket and resume with the token (peerId is kept; the host snapshots us back in)
+  async dropAndRejoin() {
+    const token = lobby.resumeToken;
+    lobby.signaling.close();
+    await lobby.leave();
+    bind(await kit.rejoin(token));
+    return lobby.localPeerId;
+  },
+};

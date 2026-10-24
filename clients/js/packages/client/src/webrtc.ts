@@ -97,8 +97,9 @@ export class WebRtcLink implements PeerLink {
     }
   }
 
-  /** Selected candidate pair has a relay candidate -> "relayed", else "direct". */
-  private async reportPath(): Promise<void> {
+  /** Selected candidate pair has a relay candidate -> "relayed", else "direct". Retries while stats settle. */
+  private async reportPath(attempt = 0): Promise<void> {
+    if (this.closed || attempt > 10) return;
     try {
       const stats = await this.pc.getStats();
       const byId = new Map<string, any>();
@@ -108,14 +109,16 @@ export class WebRtcLink implements PeerLink {
         if (v.type === "transport" && v.selectedCandidatePairId) pair = byId.get(v.selectedCandidatePairId);
       });
       if (!pair) stats.forEach((v) => { if (v.type === "candidate-pair" && (v.selected || (v.nominated && v.state === "succeeded"))) pair = v; });
-      if (!pair) return;
-      const l = byId.get(pair.localCandidateId);
-      const r = byId.get(pair.remoteCandidateId);
-      const relayed = l?.candidateType === "relay" || r?.candidateType === "relay";
-      this.onPath?.(relayed ? "relayed" : "direct");
+      const l = pair && byId.get(pair.localCandidateId);
+      const r = pair && byId.get(pair.remoteCandidateId);
+      if (l && r) {
+        this.onPath?.(l.candidateType === "relay" || r.candidateType === "relay" ? "relayed" : "direct");
+        return;
+      }
     } catch {
-      /* stats unavailable: no report */
+      /* stats unavailable: retry */
     }
+    setTimeout(() => void this.reportPath(attempt + 1), 300);
   }
 
   send(channel: ChannelName, bytes: Uint8Array): void {
