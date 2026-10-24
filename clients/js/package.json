@@ -1,0 +1,17 @@
+{
+  "name": "keepalive-js",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build -w @keepalive/client",
+    "test": "npm test -w @keepalive/client",
+    "typecheck": "npm run typecheck -w @keepalive/client",
+    "demo": "node demo/serve.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

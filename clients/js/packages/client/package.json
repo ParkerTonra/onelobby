@@ -1,0 +1,20 @@
+{
+  "name": "@keepalive/client",
+  "version": "0.1.0",
+  "description": "Keepalive browser client: lobbies, WebRTC data channels, lockstep, text and voice chat. Zero runtime dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}
