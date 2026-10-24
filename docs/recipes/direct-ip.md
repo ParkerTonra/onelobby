@@ -144,6 +144,36 @@ In Node, give the kit `advanced.linkFactory: webRtcLinkFactoryFor(RTCPeerConnect
 own WebRTC, but it must be served over plain `http` (an `https` page may not open `ws://` to an address; s.7 of the
 design). `decodeJoinCode` / `looksLikeJoinCode` validate a "Paste a join code" box as the player types.
 
+## 4b. Node host: a join link for browsers
+
+A browser player shouldn't need a game page from anywhere else: the host serves its own on the same port. Give
+`hostDirect` an `http` handler; plain `GET`s that are not WebSocket upgrades go to it, and the lobby gets a `joinUrl`
+(`http://<the code's address>:47810/`) to share. The page joins `location.host`, which is the host's address, so it
+needs no code at all. Plain `http` is what makes this work (an `https` page may not open `ws://` to an address).
+
+```js
+import { readFileSync } from "node:fs";
+const bundle = readFileSync("node_modules/onelobby/dist/onelobby.bundle.mjs");
+const page = `<!doctype html><meta charset="utf-8"><p id="s">Connecting...</p><script type="module">
+  import { OneLobby } from "/onelobby.bundle.mjs";
+  const kit = new OneLobby({ gameId: "com.you.yourgame", netVersion: "1", lobbyServer: "", mode: "raw" });
+  const lobby = await kit.joinDirect(location.host);
+  await lobby.ready; document.getElementById("s").textContent = "Joined!";   // ...then start your game
+</script>`;
+const lobby = await hostDirect(kit, {
+  port: 47810,
+  http: (path) => path === "/" ? { type: "text/html; charset=utf-8", body: page }
+    : path === "/onelobby.bundle.mjs" ? { type: "text/javascript; charset=utf-8", body: bundle } : null,
+});
+console.log("Send this link:", lobby.joinUrl);
+```
+
+The handler gets the path without the query and returns `{ status?, type, body }` or null (404). Serve only fixed
+paths from memory, never files by path. A game that already has its own web server (Ant Arena) can do the same on that
+server: what matters is that the page comes from the host's address over `http`. Smoke: `node e2e/direct-smoke.mjs
+host 47810 --page --wait=600` prints `join page http://...`; opening it shows "It works!" and the host prints `PASS
+host`. .NET hosts do not serve pages yet.
+
 ## 5. What to tell the host (put this on the host screen)
 
 - "Join code: `6B01-RGFE-P2B`" in large monospace with a Copy button, labelled **Internet code** or **Same-network

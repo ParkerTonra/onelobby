@@ -8,6 +8,7 @@ import { PortMapper, type PortMapperOptions, type PortMapResult } from "./portma
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_HEADER_BYTES = 8192;
 const HANDSHAKE_TIMEOUT_MS = 5000;
+const STATUS_TEXT: Record<number, string> = { 200: "OK", 301: "Moved Permanently", 302: "Found", 404: "Not Found", 500: "Internal Server Error" };
 
 export class PortInUseError extends Error {
   readonly code = "port_in_use";
@@ -23,8 +24,25 @@ export class PortInUseError extends Error {
  * zero runtime dependencies. Any path upgrades; `GET /healthz` answers `ok`. The host's own client talks to the hub in
  * memory through {@link connectLocal}. `hub.tick()` runs once a second on an unref'd timer.
  */
+/** One plain-HTTP answer from the host's port, e.g. a browser join page. */
+export interface HttpReply {
+  /** Default 200. */
+  status?: number;
+  /** Content-Type, e.g. "text/html; charset=utf-8". */
+  type: string;
+  body: string | Uint8Array;
+}
+
+/** Serves plain `GET` requests on the direct port (path without the query); null answers 404. */
+export type HttpHandler = (path: string) => HttpReply | null;
+
 export class DirectHubHost {
   readonly hub: SignalingHub;
+  /**
+   * Plain `GET`s that are not WebSocket upgrades go here, so the host can serve its own join page: a browser opening
+   * `http://<host address>:<port>/` gets a page that joins with `kit.joinDirect(location.host)`. Null (default): 426.
+   */
+  http: HttpHandler | null = null;
   /** The bound TCP port (the requested one, or the one the OS picked for 0). */
   readonly port: number;
   portMapper: PortMapper | null = null;
@@ -155,7 +173,23 @@ export class DirectHubHost {
       return false;
     }
     const key = headers.get("sec-websocket-key");
-    if (method !== "GET" || !/websocket/i.test(headers.get("upgrade") ?? "") || !key) {
+    const upgrade = /websocket/i.test(headers.get("upgrade") ?? "");
+    if (method === "GET" && !upgrade && this.http && path) {
+      let page: HttpReply | null = null;
+      try {
+        page = this.http(path.split("?")[0]);
+      } catch {
+        page = { status: 500, type: "text/plain", body: "error" };
+      }
+      const p = page ?? { status: 404, type: "text/plain", body: "not found" };
+      const body = typeof p.body === "string" ? Buffer.from(p.body, "utf8") : Buffer.from(p.body);
+      const status = p.status ?? 200;
+      sock.write(`HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? "OK"}\r\nContent-Type: ${p.type}\r\n` +
+        `Content-Length: ${body.length}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n`);
+      sock.end(body);
+      return false;
+    }
+    if (method !== "GET" || !upgrade || !key) {
       reply("426 Upgrade Required", "this port speaks WebSocket (OneLobby direct host)");
       return false;
     }

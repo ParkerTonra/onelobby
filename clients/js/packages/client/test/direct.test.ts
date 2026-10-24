@@ -108,6 +108,25 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     expect(await (await fetch(`http://127.0.0.1:${host.port}/healthz`)).text()).toBe("ok");
     expect((await fetch(`http://127.0.0.1:${host.port}/`)).status).toBe(426);
   });
+
+  it("serves plain GETs from the http handler (join page), 404 for null, WebSocket still upgrades", async () => {
+    const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    const seen: string[] = [];
+    host.http = (path) => {
+      seen.push(path);
+      return path === "/" ? { type: "text/html; charset=utf-8", body: "<h1>join</h1>" } : null;
+    };
+    const page = await fetch(`http://127.0.0.1:${host.port}/?join=x`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(await page.text()).toBe("<h1>join</h1>");
+    expect((await fetch(`http://127.0.0.1:${host.port}/nope`)).status).toBe(404);
+    expect(seen).toEqual(["/", "/nope"]);
+    const ws = new WebSocket(`ws://127.0.0.1:${host.port}/`);
+    await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("ws failed")); });
+    ws.close();
+  });
 });
 
 describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {

@@ -14,12 +14,13 @@ import type { Lobby } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
 import { encodeJoinCode } from "../joincode.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
-import { DirectHubHost, PortInUseError } from "./hub-host.js";
+import { DirectHubHost, PortInUseError, type HttpHandler } from "./hub-host.js";
 import { directHubOptions } from "./hub.js";
 import { isPublicIPv4, lanIPv4, localAddresses, type PortMapResult, type PortMapperOptions } from "./portmap.js";
 import { OneLobbyError } from "../signaling.js";
 
 export { DirectHubHost, LocalHubSocket, PortInUseError } from "./hub-host.js";
+export type { HttpHandler, HttpReply } from "./hub-host.js";
 export { SignalingHub, Session, RateWindow, sanitize, defaultHubOptions, directHubOptions, PROTO } from "./hub.js";
 export type { HubOptions, HubDeps } from "./hub.js";
 export { PortMapper, isPublicIPv4, lanIPv4, localAddresses } from "./portmap.js";
@@ -40,10 +41,19 @@ export interface DirectHostOptions {
   openPort?: boolean;
   /** Test seam and knobs for the router request (description defaults to "OneLobby <gameId>"). */
   portMapping?: PortMapperOptions;
+  /**
+   * Serves plain-HTTP `GET`s on the same port, typically a join page for browsers (recipe s.4b). The page joins with
+   * `kit.joinDirect(location.host)`; the lobby's `joinUrl` is then the link to share.
+   */
+  http?: HttpHandler;
 }
 
 /** A direct host lobby: the normal Lobby, plus the hub behind it. Leaving or ending the lobby stops the hub. */
-export type DirectLobby = Lobby & { directHub: DirectHubHost };
+export type DirectLobby = Lobby & {
+  directHub: DirectHubHost;
+  /** With the `http` option: `http://<the code's address>:<port>/`, the link a browser opens to join. Else null. */
+  joinUrl: string | null;
+};
 
 /**
  * Hosts a direct-IP lobby (docs/direct-ip.md s.3): starts the hub and listener on `port`, opens the router port
@@ -58,6 +68,7 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
   let hub: DirectHubHost;
   try {
     hub = await DirectHubHost.listen(port, directHubOptions(maxPlayers, o.password));
+    hub.http = o.http ?? null;
   } catch (e) {
     if (e instanceof PortInUseError) throw new OneLobbyError("port_in_use", e.message.replace(/^port_in_use: /, ""));
     throw e;
@@ -86,15 +97,18 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
   const map = await mapping;
   lobby.directAddresses = localAddresses(hub.port);
   lobby.portMapping = map ? map.detail : "off";
+  let codeIp: string | null = null;
   if (map?.mapped && isPublicIPv4(map.externalIPv4)) {
-    lobby.joinCode = encodeJoinCode(map.externalIPv4!, hub.port);
+    codeIp = map.externalIPv4!;
+    lobby.joinCode = encodeJoinCode(codeIp, hub.port);
     lobby.joinCodeKind = "internet";
   } else {
-    const lan = map?.localIPv4 ?? (await lanIPv4());
-    if (lan) {
-      lobby.joinCode = encodeJoinCode(lan, hub.port);
+    codeIp = map?.localIPv4 ?? (await lanIPv4());
+    if (codeIp) {
+      lobby.joinCode = encodeJoinCode(codeIp, hub.port);
       lobby.joinCodeKind = "same_network";
     }
   }
-  return Object.assign(lobby, { directHub: hub });
+  const joinUrl = o.http && codeIp ? `http://${codeIp}:${hub.port}/` : null;
+  return Object.assign(lobby, { directHub: hub, joinUrl });
 }

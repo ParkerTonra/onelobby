@@ -3,6 +3,7 @@
 // Needs a build (npm run build) and node-datachannel (a devDependency of onelobby).
 //   node e2e/direct-smoke.mjs host [port] [password|-] [--no-upnp]   prints "join code ...", echoes, exits after "bye"
 //   node e2e/direct-smoke.mjs join <code|address> [password]          sends "hello direct" + "fast direct", waits for echoes
+import { readFileSync } from "node:fs";
 import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby, webRtcLinkFactoryFor } from "../packages/client/dist/index.js";
 import { hostDirect } from "../packages/client/dist/direct/index.js";
@@ -37,13 +38,17 @@ const dec = (b) => new TextDecoder().decode(b);
 if (args[0] === "host") {
   const port = Number(args[1] ?? 47810);
   const password = args[2] && args[2] !== "-" ? args[2] : undefined;
-  const lobby = await hostDirect(kit, { port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp") }).catch((e) => {
+  const waitS = Number(flags.find((f) => f.startsWith("--wait="))?.slice(7) ?? 120);
+  // --page: serve a browser join page on the same port; whoever opens joinUrl runs the same echo test as `join`.
+  const http = flags.includes("--page") ? joinPage() : undefined;
+  const lobby = await hostDirect(kit, { port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp"), http }).catch((e) => {
     say(`FAIL host: ${e.code ?? ""} ${e.message}`);
     process.exit(1);
   });
   say(`addresses ${lobby.directAddresses.join(" ")}`);
   say(`join code ${lobby.joinCode} (${lobby.joinCodeKind}); router: ${lobby.portMapping}`);
-  say(`hosting on TCP+UDP ${port}; waiting for joiners (120 s)`);
+  if (lobby.joinUrl) say(`join page ${lobby.joinUrl}`);
+  say(`hosting on TCP+UDP ${port}; waiting for joiners (${waitS} s)`);
   lobby.on("peerReady", (p) => say(`peer_ready ${p.peerId} ${p.name}`));
   lobby.on("peerLeft", (p, r) => say(`peer_left ${p.peerId} ${r}`));
   const done = new Promise((resolve) => {
@@ -53,7 +58,7 @@ if (args[0] === "host") {
       if (text === "bye") return resolve(true);
       lobby.send(from, enc(`echo:${text}`), { channel });
     });
-    setTimeout(() => resolve(false), 120_000).unref();
+    setTimeout(() => resolve(false), waitS * 1000).unref();
   });
   const ok = await done;
   await new Promise((r) => setTimeout(r, 300));
@@ -95,6 +100,45 @@ if (args[0] === "host") {
   say(ok ? `PASS after ${Date.now() - t0} ms` : `FAIL reliable=${gotReliable} fast=${gotFast}`);
   process.exit(ok ? 0 : 1);
 } else {
-  console.error("usage: node e2e/direct-smoke.mjs host [port] [password|-] [--no-upnp] | join <code|address> [password]");
+  console.error("usage: node e2e/direct-smoke.mjs host [port] [password|-] [--no-upnp] [--page] [--wait=s] | join <code|address> [password]");
   process.exit(2);
+}
+
+// The browser twin of `join`: one page plus the kit's single-file bundle, both served by the host itself.
+function joinPage() {
+  const bundle = readFileSync(new URL("../packages/client/dist/onelobby.bundle.mjs", import.meta.url));
+  const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OneLobby join test</title>
+<style>body{font:20px system-ui,sans-serif;max-width:32em;margin:3em auto;padding:0 16px}#s{font-size:1.6em;margin:.5em 0}
+pre{font-size:12px;color:#666;white-space:pre-wrap}</style>
+<h1>OneLobby join test</h1><p id="s">Connecting...</p><p id="h"></p><pre id="log"></pre>
+<script type="module">
+import { OneLobby } from "/onelobby.bundle.mjs";
+const s = document.getElementById("s"), h = document.getElementById("h"), log = document.getElementById("log");
+const t0 = Date.now(), say = (m) => (log.textContent += "[" + (Date.now() - t0) + " ms] " + m + "\\n");
+const enc = (x) => new TextEncoder().encode(x), dec = (b) => new TextDecoder().decode(b);
+const fail = (m) => { s.textContent = "It did not connect."; h.textContent = "Please send a screenshot of this page."; say("FAIL " + m); };
+try {
+  const kit = new OneLobby({ gameId: "com.onelobby.directsmoke", netVersion: "1", lobbyServer: "", mode: "raw",
+                             displayName: "browser join", rememberSeat: false });
+  const lobby = await kit.joinDirect(location.host);
+  await lobby.ready;
+  say("ready, host " + lobby.hostPeerId);
+  let rel = false, fast = false;
+  lobby.on("message", (from, b, ch) => { const t = dec(b); say("got " + ch + " " + t);
+    if (t === "echo:hello direct" && ch === "reliable") rel = true; if (t === "echo:fast direct" && ch === "fast") fast = true; });
+  lobby.send(lobby.hostPeerId, enc("hello direct"));
+  const until = Date.now() + 10000;
+  while (!(rel && fast) && Date.now() < until) {
+    if (!fast) lobby.send(lobby.hostPeerId, enc("fast direct"), { channel: "fast" });
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  lobby.send(lobby.hostPeerId, enc("bye"));
+  if (rel && fast) { s.textContent = "It works! You can close this page."; say("PASS"); } else fail("reliable=" + rel + " fast=" + fast);
+} catch (e) { fail((e.code ?? "") + " " + e.message); }
+</script>`;
+  return (path) =>
+    path === "/" ? { type: "text/html; charset=utf-8", body: html }
+    : path === "/onelobby.bundle.mjs" ? { type: "text/javascript; charset=utf-8", body: bundle }
+    : null;
 }
