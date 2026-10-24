@@ -41,3 +41,5 @@ export { systemClock } from "./clock.js";
 export type { Clock } from "./clock.js";
 export { Gridpaint, paintCmd, colourOf, PALETTE, GRID_W, GRID_H, seedFromCode, fnv1a64 } from "./gridpaint.js";
 export type { Hub } from "./hub.js";
+export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
+export type { FriendlyError } from "./friendly.js";
