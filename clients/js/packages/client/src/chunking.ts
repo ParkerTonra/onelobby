@@ -1,4 +1,4 @@
-import type { Message } from "./codec.js";
+import { CodecError, MAX_REASSEMBLED_BYTES, type Message } from "./codec.js";
 
 /** Chunk body capacity: 16 KiB frame - 3 header - 8 chunk header, rounded down for headroom. */
 export const CHUNK_PAYLOAD = 16000;
@@ -42,6 +42,10 @@ export class Reassembler {
     e.parts[chunk.index] = chunk.bytes;
     e.got++;
     e.bytes += chunk.bytes.length;
+    if (e.bytes > MAX_REASSEMBLED_BYTES) {
+      this.parts.delete(chunk.id);
+      throw new CodecError("too_long", `chunk set over ${MAX_REASSEMBLED_BYTES} bytes`);
+    }
     if (e.got < e.count) return null;
     this.parts.delete(chunk.id);
     const out = new Uint8Array(e.bytes);
