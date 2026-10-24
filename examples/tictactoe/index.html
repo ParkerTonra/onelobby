@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tic-tac-toe</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; display: grid; justify-items: center; gap: 12px; margin: 24px; }
+    #board { display: grid; grid-template-columns: repeat(3, 96px); gap: 4px; }
+    #board button { width: 96px; height: 96px; font-size: 48px; cursor: pointer; }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <h1>Tic-tac-toe</h1>
+  <div id="status"></div>
+  <div id="board"></div>
+  <button id="reset">New game</button>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
