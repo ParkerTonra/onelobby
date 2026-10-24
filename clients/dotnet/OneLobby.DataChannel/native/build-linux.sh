@@ -35,8 +35,14 @@ common=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 cmake -S "mbedtls-$MBEDTLS_VERSION" -B build-mbedtls "${common[@]}" -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF \
   -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DCMAKE_INSTALL_PREFIX="$work/prefix"
 cmake --build build-mbedtls --target install
+# GNU ld resolves static archives in order and a shared object may keep undefined symbols, so: list the three Mbed TLS
+# archives in a group at the end of the link line, and fail the build on anything left undefined.
+mlib="$(dirname "$(find "$work/prefix" -name libmbedcrypto.a | head -1)")"
+rm -rf build-ldc
 cmake -S libdatachannel -B build-ldc "${common[@]}" -DUSE_MBEDTLS=ON -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON \
-  -DNO_TESTS=ON -DCMAKE_PREFIX_PATH="$work/prefix" -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+  -DNO_TESTS=ON -DCMAKE_PREFIX_PATH="$work/prefix" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -static-libgcc -Wl,--no-undefined" \
+  -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group $mlib/libmbedtls.a $mlib/libmbedx509.a $mlib/libmbedcrypto.a -Wl,--end-group -lpthread"
 cmake --build build-ldc --target datachannel
 mkdir -p "$out"
 cp -L build-ldc/libdatachannel.so "$out/libdatachannel.so"
