@@ -1,6 +1,5 @@
 # Builds the libdatachannel natives for OneLobby.DataChannel (versions pinned in
 # clients/dotnet/OneLobby.DataChannel/native/versions.env) and runs the live two-peer WebRTC test where it can.
-# Not enabled yet: Parker decides whether to push it (the repo is public).
 name: datachannel-natives
 
 on:
@@ -16,6 +15,11 @@ permissions:
 jobs:
   windows-x64:
     runs-on: windows-2022
+    timeout-minutes: 25
+    env:
+      # a credential or terminal prompt fails fast instead of hanging the job
+      GIT_TERMINAL_PROMPT: "0"
+      GCM_INTERACTIVE: never
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
