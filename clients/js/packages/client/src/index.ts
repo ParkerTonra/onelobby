@@ -1,5 +1,7 @@
 export { Keepalive, LIB_NAME, LIB_VERSION } from "./keepalive.js";
 export type { KeepaliveOptions, HostOptions, ListOptions, KeepaliveEvents } from "./keepalive.js";
+export { DEFAULT_READY_TIMEOUT_MS } from "./keepalive.js";
+export type { AdvancedOptions, SeatStorage } from "./keepalive.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
 export { Lockstep, MAX_DESYNCS, HOST_SILENCE_MS } from "./lockstep.js";

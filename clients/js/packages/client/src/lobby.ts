@@ -15,7 +15,7 @@ import { Emitter } from "./emitter.js";
 import type { Hub } from "./hub.js";
 import { Lockstep } from "./lockstep.js";
 import { claimWinsWrapped, pickNewHost } from "./migration.js";
-import type { LobbyState, PeerInfo, SignalingClient, ServerMsg } from "./signaling.js";
+import { KeepaliveError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink, SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 
@@ -50,6 +50,24 @@ export interface LobbyConfig {
   relayOnly: boolean;
   voice: VoiceDeps;
   displayName: string;
+  /**
+   * Joiner: give up on reaching the host after this many ms (0 or absent: wait forever). When the ICE list has a
+   * TURN server and the lobby is not relay-only already, the second half of the budget is a relay-only retry.
+   * On failure `ready` rejects with KeepaliveError("ice_failed"), the error is reported and the lobby is left.
+   */
+  readyTimeoutMs?: number;
+}
+
+/** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
+export function seatName(p: PeerInfo): PeerInfo {
+  const n = typeof p.name === "string" ? p.name.trim() : "";
+  // "Player" is keepalive-server's stand-in for an empty name
+  if (n && n !== "Player") return p;
+  return { ...p, name: `Player ${p.peerId}` };
+}
+
+function hasRelay(ice: IceServer[]): boolean {
+  return ice.some((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^turns?:/i.test(String(u))));
 }
 
 const HOST_WATCHDOG_MS = 250;
@@ -89,8 +107,25 @@ export class Lobby extends Emitter<LobbyEvents> {
   private hub: Hub;
   private outbox = new Map<number, { msg: Message; route: number; channel?: ChannelName }[]>();
   private markReady: () => void = () => {};
-  /** Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a joiner. */
-  readonly ready: Promise<void> = new Promise<void>((res) => (this.markReady = res));
+  private failReady: (e: Error) => void = () => {};
+  private isReady = false;
+  private cancelReadyTimer: (() => void) | null = null;
+  private relayRetry = false;
+  /**
+   * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
+   * joiner. Rejects with KeepaliveError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
+   * (or with "closed"/"kicked" when the lobby ends first).
+   */
+  readonly ready: Promise<void> = new Promise<void>((res, rej) => {
+    this.markReady = () => {
+      if (this.isReady) return;
+      this.isReady = true;
+      this.cancelReadyTimer?.();
+      this.cancelReadyTimer = null;
+      res();
+    };
+    this.failReady = rej;
+  });
 
   constructor(cfg: LobbyConfig) {
     super();
@@ -105,7 +140,8 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.phase = st.phase;
     this.meta = { ...st.meta };
     this.resumeToken = st.resumeToken;
-    for (const p of st.peers) this.roster.set(p.peerId, p);
+    for (const p of st.peers) this.roster.set(p.peerId, seatName(p));
+    this.ready.catch(() => {}); // a rejection is also reported through errorSink; awaiting `ready` stays optional
 
     const self = this;
     this.hub = {
@@ -134,6 +170,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.signaling.onClose = () => this.onServerClosed();
 
     if (this.isHost) this.markReady();
+    else this.armReadyTimer();
     if (this.isHost && this.mode === "lockstep") {
       if (this.phase === "in_game") this.lockstep.hostStart();
       else this.lockstep.hostIdle();
@@ -288,17 +325,52 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
   /** @internal set by Keepalive so lobby errors reach `kit.on("error")`. */
   errorSink: ((e: Error) => void) | null = null;
+  /** @internal set by Keepalive: the server issued a new resume token (rememberSeat). */
+  seatSink: ((token: string) => void) | null = null;
+
+  // ---- joiner connect timeout -------------------------------------------------------------------------------------
+
+  private armReadyTimer(): void {
+    const total = this.cfg.readyTimeoutMs ?? 0;
+    if (!(total > 0)) return;
+    const canRelay = !this.cfg.relayOnly && hasRelay(this.cfg.ice);
+    const first = canRelay ? Math.ceil(total / 2) : total;
+    this.cancelReadyTimer = this.cfg.clock.setTimeout(() => {
+      if (this.isReady || this.ended) return;
+      if (canRelay) this.retryRelayed(total - first);
+      else this.giveUpConnecting();
+    }, first);
+  }
+
+  /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
+  private retryRelayed(budget: number): void {
+    this.relayRetry = true;
+    const link = this.makeLink(this.hostPeerId, true);
+    link.startOffer();
+    this.cancelReadyTimer = this.cfg.clock.setTimeout(() => {
+      if (!this.isReady && !this.ended) this.giveUpConnecting();
+    }, budget);
+  }
+
+  private giveUpConnecting(): void {
+    const err = new KeepaliveError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`);
+    this.failReady(err);
+    this.reportError(err);
+    if (this.ended) return;
+    this.signaling.send({ t: "leave" });
+    this.teardown("ice_failed");
+  }
 
   // ---- links -----------------------------------------------------------------------------------------------------
 
-  private makeLink(peerId: number): PeerLink {
+  private makeLink(peerId: number, relayOnly = this.cfg.relayOnly): PeerLink {
     const old = this.links.get(peerId);
     if (old) {
       old.onClose = null;
       old.onMessage = null;
       old.close();
     }
-    const link = this.cfg.links.create({ remoteId: peerId, iceServers: this.cfg.ice, relayOnly: this.cfg.relayOnly });
+    const link = this.cfg.links.create({ remoteId: peerId, iceServers: this.cfg.ice, relayOnly });
     this.links.set(peerId, link);
     link.onSignal = (s) => this.signaling.send({ t: "signal", to: peerId, ...s });
     link.onOpen = () => this.onLinkOpen(peerId, link);
@@ -347,6 +419,8 @@ export class Lobby extends Emitter<LobbyEvents> {
       // The server announces the departure; if it is gone, drop the peer ourselves.
       if (!this.serverUp && this.roster.has(peerId)) this.removePeer(peerId, "timeout");
     } else if (peerId === this.hostPeerId) {
+      // Never connected yet (ICE failed): not a host loss. The ready timer retries over the relay or gives up.
+      if (!this.isReady && this.cancelReadyTimer) return;
       this.handleHostLost("link closed");
     }
   }
@@ -479,6 +553,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   private becomeHost(): void {
     this.epoch = (this.epoch + 1) & 0xffff;
     this.hostPeerId = this.localPeerId;
+    this.markReady();
     this.connected.clear();
     this.hiSentTo.clear();
     this.lockstep.becomeHost();
@@ -522,8 +597,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   private onSignaling(m: ServerMsg): void {
     switch (m.t) {
       case "peer_joined": {
-        const peer = m.peer as Peer;
-        if (!peer || this.roster.has(peer.peerId)) return;
+        if (!m.peer || this.roster.has((m.peer as Peer).peerId)) return;
+        const peer = seatName(m.peer as Peer);
         this.roster.set(peer.peerId, peer);
         this.emit("peerJoined", peer);
         if (this.isHost) this.offerTo(peer.peerId);
@@ -546,13 +621,16 @@ export class Lobby extends Emitter<LobbyEvents> {
         break;
       }
       case "join_request":
-        this.emit("joinRequested", m.peer as Peer);
+        this.emit("joinRequested", seatName(m.peer as Peer));
         break;
       case "lobby": {
         const st = m as unknown as LobbyState;
         this.meta = { ...st.meta };
-        this.resumeToken = st.resumeToken ?? this.resumeToken;
-        this.roster = new Map(st.peers.map((p) => [p.peerId, p]));
+        if (st.resumeToken && st.resumeToken !== this.resumeToken) {
+          this.resumeToken = st.resumeToken;
+          this.seatSink?.(this.resumeToken);
+        }
+        this.roster = new Map(st.peers.map((p) => [p.peerId, seatName(p)]));
         if (st.hostId !== this.hostPeerId && !this.isHost) this.setHost(st.hostId);
         this.setPhase(st.phase);
         break;
@@ -569,7 +647,7 @@ export class Lobby extends Emitter<LobbyEvents> {
         break;
       case "error":
         if (m.code === "kicked") this.teardown("kicked");
-        else this.reportError(new Error(`${String(m.code)}: ${String(m.msg ?? "")}`));
+        else this.reportError(new KeepaliveError(String(m.code), String(m.msg ?? ""), m.data as Record<string, unknown> | undefined));
         break;
     }
   }
@@ -653,6 +731,11 @@ export class Lobby extends Emitter<LobbyEvents> {
   private teardown(reason: string): void {
     if (this.ended) return;
     this.ended = true;
+    this.cancelReadyTimer?.();
+    if (!this.isReady) {
+      const code = reason === "ice_failed" || reason === "kicked" ? reason : "closed";
+      this.failReady(new KeepaliveError(code, `the lobby ended before connecting (${reason})`));
+    }
     this.cancelWatchdog?.();
     this.cancelPing?.();
     this.lockstep.stop();
