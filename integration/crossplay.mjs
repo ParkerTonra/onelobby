@@ -120,7 +120,7 @@ const TICKS = Math.round(SECONDS * 20) + 100;
 async function scenarioGodotHosts() {
   console.log("\n== scenario 1+2: Godot hosts, browser joins ==");
   const codeFile = join(work, "code1.txt");
-  const g = godot("godot", ["--auto-host", "--expect-peers=1", `--code-file=${codeFile}`, "--paint", `--run-ticks=${TICKS}`]);
+  const g = godot("godot", ["--auto-host", "--expect-peers=1", `--code-file=${codeFile}`, "--paint", "--voice-tone", `--run-ticks=${TICKS}`]);
   const code = await waitFor(() => existsSync(codeFile) && readFileSync(codeFile, "utf8").trim(), 40000, "godot host code");
   console.log("godot hosting", code);
   const B = await openTab("browser");
@@ -129,7 +129,9 @@ async function scenarioGodotHosts() {
   await B.waitForFunction(() => window.__ka.game.tick > 20, null, { timeout: 30000 });
   check("1 browser joiner receives frames from Godot host", true);
   await paintLoop(B);
-  await sleep(8000);
+  await sleep(3000);
+  await voiceChecks(B, g);
+  await sleep(3000);
   await chat(B, "hello from the browser");
   await waitFor(() => g.exited, (SECONDS + 60) * 1000, "godot run-ticks to finish", 1000);
   const gh = g.hashes(), bh = await bHashes(B);
@@ -144,14 +146,20 @@ async function scenarioGodotHosts() {
   await B.close();
 }
 
-async function scenarioVoice() {
-  console.log("\n== scenario 3: voice tone Godot -> browser ==");
-  // The demo has no tone hook: voice starts only from the UI toggle, capture comes from AudioStreamMicrophone, and the
-  // --audio-driver Dummy used for headless runs yields no capture frames. Verified from source, not by running.
-  const main = readFileSync(join(demoGodot, "Main.cs"), "utf8");
-  const hasHook = /"voice-tone"|"tone"|--voice/.test(main);
-  if (hasHook) note("3 voice tone", "demo has a tone hook; wire it here");
-  else note("3 voice tone Godot -> browser decodes", "BLOCKED: demo-godot/Main.cs has no tone/voice CLI hook (voice only via the UI toggle and a real microphone; Dummy audio driver yields no capture). Browser receive side is covered by clients/js/e2e/tabs.mjs.");
+// Check 3, run inside scenario 1 (Godot host peer 1 with --voice-tone, browser joiner peer 2, fake mic device in Edge).
+async function voiceChecks(B, g) {
+  console.log("-- check 3: voice");
+  check("3 Godot --voice-tone started", await waitFor(() => g.lines().includes("voice_started"), 10000, "voice_started").then(() => true, () => false));
+  await B.evaluate(() => { window.__ka.lobby.voice.enabled = true; });
+  const heard = await B.waitForFunction(() => window.__ka.speaking.has(1), null, { timeout: 15000 }).then(() => true, () => false);
+  check("3 voice tone Godot -> browser (speaking gains Godot peer 1, Opus decoded)", heard);
+  // browser -> Godot: Edge's fake mic device beeps; hold V (as tabs.mjs does)
+  await B.evaluate(() => document.activeElement.blur());
+  await B.keyboard.down("v");
+  const rx = await waitFor(() => g.lines().find((l) => l.startsWith("voice_rx ")), 12000, "voice_rx").catch(() => null);
+  const level = await B.evaluate(() => window.__ka.lobby.voice.inputLevel);
+  await B.keyboard.up("v");
+  check("3 voice browser (fake mic) -> Godot decodes (voice_rx)", !!rx, `${rx ?? "no voice_rx"}; browser input level ${level}`);
 }
 
 async function scenarioBrowserHosts() {
@@ -272,7 +280,6 @@ try {
 
   const run = async (n, fn) => { if (!only.includes(n)) return; try { await fn(); } catch (e) { check(`scenario ${n} threw`, false, e.message); } };
   await run(1, scenarioGodotHosts);        // covers checks 1 and 2
-  if (only.includes(3)) await scenarioVoice();
   await run(4, scenarioBrowserHosts);
   if (only.includes(5)) {
     await run(5, scenarioMigrationGodotHost);
