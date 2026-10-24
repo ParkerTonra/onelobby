@@ -1,57 +1,81 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using OneLobby;
-using OneLobby.Unity;
+using OneLobby.DataChannel;
 
-// Runs OneLobby.Core + System.Text.Json (the DLLs shipped in com.onelobby.unity) and the package's ClientWebSocket
-// signaling adapter on Unity's own Mono, against a real onelobby-server. Peer links are not created (host + list only).
-sealed class SignalingOnlyTransport : ITransport
-{
-    static readonly Stopwatch Clock = Stopwatch.StartNew();
-    public long NowMs => Clock.ElapsedMilliseconds;
-    public ISignalingSocket ConnectSignaling(Uri url) => new UnitySignalingSocket(url);
-    public IPeerLink CreatePeerLink(PeerLinkOptions options) => throw new NotSupportedException("signaling-only probe");
-    public void Poll() { }
-}
-
+// Runs the managed + native half of com.onelobby.unity on Unity's own Mono (unityjit profile), with no Unity licence:
+// OneLobby.Core, OneLobby.DataChannel, the shipped System.Text.Json DLLs and the libdatachannel native plugin. Two peers
+// host/join through a real onelobby-server and exchange reliable + fast messages over real WebRTC data channels.
 static class Probe
 {
-    static T Wait<T>(Task<T> t, params Action[] pumps)
+    static void PumpUntil(Func<bool> done, Action pump, string what)
     {
         var sw = Stopwatch.StartNew();
-        while (!t.IsCompleted) { foreach (var p in pumps) p(); Thread.Sleep(5); if (sw.ElapsedMilliseconds > 10000) throw new TimeoutException(); }
-        return t.GetAwaiter().GetResult();
+        while (!done()) { pump(); Thread.Sleep(2); if (sw.ElapsedMilliseconds > 20000) throw new TimeoutException(what); }
     }
 
     static int Main(string[] args)
     {
         Console.WriteLine("runtime: " + typeof(object).Assembly.Location + " | " + Type.GetType("Mono.Runtime")?.GetMethod("GetDisplayName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.Invoke(null, null));
         Console.WriteLine("System.Text.Json: " + typeof(System.Text.Json.JsonDocument).Assembly.Location);
-        var url = new Uri(args.Length > 0 ? args[0] : "ws://127.0.0.1:18080/ws");
-        var cfg = new OneLobbyConfig("com.onelobby.monoprobe", "1", url, SyncMode.Raw, DisplayName: "MonoHost");
-        var a = new LobbyClient(cfg, new SignalingOnlyTransport());
-        var b = new LobbyClient(cfg with { DisplayName = "MonoLister" }, new SignalingOnlyTransport());
-        Lobby? lobby = null;
-        lobby = Wait(a.HostAsync(new LobbyOptions("mono probe", 4, Visibility.Public, Meta: new System.Collections.Generic.Dictionary<string, string> { ["map"] = "arena" })), () => a.Pump());
-        Console.WriteLine($"hosted {lobby.Code} peer {lobby.LocalPeerId}");
-        var list = Wait(b.ListAsync(), () => lobby.Pump(), () => b.Pump());
-        var found = list.FirstOrDefaultCode(lobby.Code);
-        Console.WriteLine($"list: {list.Count} lobby(s); ours found={found != null} name='{found?.Name}' host='{found?.HostName}' players={found?.Players}/{found?.MaxPlayers}");
-        Wait(lobby.LeaveAsync().ContinueWith(_ => 0), () => lobby.Pump());
-        Wait(b.DisposeAsync().AsTask().ContinueWith(_ => 0));
-        Wait(a.DisposeAsync().AsTask().ContinueWith(_ => 0));
-        Thread.Sleep(300);
-        var ok = found != null && found.Name == "mono probe" && found.HostName == "MonoHost";
+        if (Environment.GetEnvironmentVariable("ONELOBBY_PROBE_LOG") is { Length: > 0 } lv)
+        {
+            DataChannelTransport.NativeLogLevel = int.Parse(lv);
+            DataChannelTransport.NativeLog += line => Console.WriteLine(line);
+        }
+        {
+            var link = new DataChannelTransport().CreatePeerLink(new PeerLinkOptions(9, true, Array.Empty<IceServer>(), false));
+            var reason = link.GetType().GetProperty("FailReason")?.GetValue(link);
+            Console.WriteLine($"peer link self-check: failed={link.IsFailed} {reason}");
+            link.Dispose();
+        }
+        var url = new Uri(args.Length > 0 ? args[0] : "ws://127.0.0.1:8080/ws");
+        var cfg = new OneLobbyConfig("com.onelobby.monoprobe", "1", url, SyncMode.Raw);
+        var a = new LobbyClient(cfg with { DisplayName = "MonoHost" }, new DataChannelTransport());
+        var b = new LobbyClient(cfg with { DisplayName = "MonoJoiner" }, new DataChannelTransport());
+        Lobby? host = null, joiner = null;
+        void Pump() { if (host != null) host.Pump(); else a.Pump(); if (joiner != null) joiner.Pump(); else b.Pump(); }
+        var sw = Stopwatch.StartNew();
+
+        var ht = a.HostAsync(new LobbyOptions("mono probe", 2, Visibility.Public));
+        PumpUntil(() => ht.IsCompleted, Pump, "host");
+        host = ht.GetAwaiter().GetResult();
+        var got = new List<(Channel, string)>();
+        host.MessageReceived += (f, p, c) => got.Add((c, Encoding.UTF8.GetString(p.ToArray())));
+        Console.WriteLine($"hosted {host.Code}");
+
+        var lt = b.ListAsync();
+        PumpUntil(() => lt.IsCompleted, Pump, "list");
+        var listed = false;
+        foreach (var s in lt.GetAwaiter().GetResult()) if (s.Code == host.Code && s.HostName == "MonoHost") listed = true;
+        Console.WriteLine("listed: " + listed);
+
+        var jt = b.JoinAsync(host.Code);
+        PumpUntil(() => jt.IsCompleted, Pump, "join");
+        joiner = jt.GetAwaiter().GetResult();
+        PumpUntil(() => joiner.ReadyAsync.IsCompleted, Pump, "WebRTC link");
+        Console.WriteLine($"WebRTC data channels open after {sw.ElapsedMilliseconds} ms");
+
+        joiner.Send(host.LocalPeerId, Encoding.UTF8.GetBytes("hello from Unity's Mono"));
+        var n = 0;
+        PumpUntil(() =>
+        {
+            if (n++ % 20 == 0) joiner.Send(host.LocalPeerId, Encoding.UTF8.GetBytes("fast"), Channel.Fast);
+            return got.Exists(m => m.Item1 == Channel.Reliable) && got.Exists(m => m.Item1 == Channel.Fast);
+        }, Pump, "messages at host");
+        var ok = listed && got.Exists(m => m.Item1 == Channel.Reliable && m.Item2 == "hello from Unity's Mono");
+        Console.WriteLine($"host got reliable + fast after {sw.ElapsedMilliseconds} ms");
+
+        joiner.LeaveAsync();
+        host.LeaveAsync();
+        a.DisposeAsync().AsTask().Wait();
+        b.DisposeAsync().AsTask().Wait();
+        Thread.Sleep(200);
         Console.WriteLine(ok ? "PASS" : "FAIL");
         return ok ? 0 : 1;
-    }
-
-    static LobbySummary? FirstOrDefaultCode(this System.Collections.Generic.IReadOnlyList<LobbySummary> l, string code)
-    {
-        foreach (var s in l) if (s.Code == code) return s;
-        return null;
     }
 }

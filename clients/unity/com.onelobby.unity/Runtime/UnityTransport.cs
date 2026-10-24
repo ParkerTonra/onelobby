@@ -1,55 +1,46 @@
 #nullable enable
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+using OneLobby.DataChannel;
+using UnityEngine;
 
 namespace OneLobby.Unity
 {
     /// <summary>
-    /// <see cref="ITransport"/> for Unity: <c>com.unity.webrtc</c> (<c>RTCPeerConnection</c> with the three negotiated data
-    /// channels of DESIGN s.8) for peer links and <see cref="System.Net.WebSockets.ClientWebSocket"/> for signaling.
+    /// <see cref="ITransport"/> for Unity: the engine-agnostic <see cref="DataChannelTransport"/> (libdatachannel WebRTC
+    /// data channels + ClientWebSocket signaling, from OneLobby.DataChannel.dll and the native plugin in
+    /// Runtime/Plugins) with its native log forwarded to the Unity console. Nothing Unity-specific happens on the wire,
+    /// so a Unity peer and a Godot, browser or plain .NET peer meet in the same lobby.
     /// <para>
-    /// Threading: Unity WebRTC posts its callbacks (channel open, message, ICE candidate, async-op completion) to the main
-    /// thread's <c>SynchronizationContext</c>; the WebSocket runs on the thread pool. Both only fill queues. Everything the
-    /// core sees happens in <see cref="Poll"/> (called by <c>LobbyClient.Pump</c> / <c>Lobby.Pump</c>), so call Pump from
-    /// the main thread once per frame (<see cref="OneLobbyRunner"/> does). <c>WebRTC.Update()</c> is not needed: it only
-    /// copies video textures.
+    /// Threading: libdatachannel callbacks and the WebSocket only fill queues; everything the core sees happens in
+    /// <see cref="Poll"/> (called by <c>LobbyClient.Pump</c> / <c>Lobby.Pump</c>), so pump from the main thread once per
+    /// frame (<see cref="OneLobbyRunner"/> does).
     /// </para>
     /// </summary>
     public sealed class UnityTransport : ITransport
     {
-        private static readonly Stopwatch Clock = Stopwatch.StartNew();
-        private readonly List<UnitySignalingSocket> _sockets = new List<UnitySignalingSocket>();
-        private readonly List<UnityPeerLink> _links = new List<UnityPeerLink>();
+        private static bool _logHooked;
+        private readonly DataChannelTransport _inner = new DataChannelTransport();
 
-        /// <summary>Fallback STUN server used when the lobby server offers no ICE servers (same as GodotTransport).</summary>
-        public static string DefaultStun = "stun:stun.l.google.com:19302";
+        /// <summary>
+        /// Forward libdatachannel warnings and errors to <see cref="Debug.LogWarning(object)"/>. Set before the first
+        /// UnityTransport is created. Off by default.
+        /// </summary>
+        public static bool LogNativeWarnings;
 
-        public long NowMs => Clock.ElapsedMilliseconds;
-
-        public ISignalingSocket ConnectSignaling(Uri url)
+        public UnityTransport()
         {
-            var s = new UnitySignalingSocket(url);
-            _sockets.Add(s);
-            return s;
-        }
-
-        public IPeerLink CreatePeerLink(PeerLinkOptions options)
-        {
-            var l = new UnityPeerLink(options, this);
-            _links.Add(l);
-            return l;
-        }
-
-        public void Poll()
-        {
-            for (var i = _sockets.Count - 1; i >= 0; i--)
-                if (_sockets[i].Disposed) _sockets.RemoveAt(i);
-            for (var i = _links.Count - 1; i >= 0; i--)
+            if (LogNativeWarnings && !_logHooked)
             {
-                if (_links[i].Disposed) { _links.RemoveAt(i); continue; }
-                _links[i].Poll();
+                _logHooked = true;
+                DataChannelTransport.NativeLogLevel = 3;
+                // raised on a native thread; Debug.Log is thread-safe
+                DataChannelTransport.NativeLog += line => Debug.LogWarning(line);
             }
         }
+
+        public long NowMs => _inner.NowMs;
+        public ISignalingSocket ConnectSignaling(Uri url) => _inner.ConnectSignaling(url);
+        public IPeerLink CreatePeerLink(PeerLinkOptions options) => _inner.CreatePeerLink(options);
+        public void Poll() => _inner.Poll();
     }
 }

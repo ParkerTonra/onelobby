@@ -14,7 +14,7 @@ $plugins = Join-Path $pkg 'Runtime/Plugins'
 $deps = Join-Path $plugins 'Dependencies'
 
 # Engine-agnostic projects shipped as DLLs. OneLobby.Replication (and any -Extra project) is picked up when present.
-$projects = @('OneLobby.Core', 'OneLobby.Opus', 'OneLobby.Replication') + $Extra
+$projects = @('OneLobby.Core', 'OneLobby.DataChannel', 'OneLobby.Opus', 'OneLobby.Replication') + $Extra
 # NuGet dependencies Unity's .NET Standard 2.1 profile does NOT provide (checked against Unity 6000.2:
 # System.Memory, System.Buffers, System.Numerics.Vectors and System.Threading.Tasks.Extensions are built in, so they
 # are not copied; copying them would give duplicate-assembly errors).
@@ -36,13 +36,14 @@ foreach ($p in $projects) {
 if (Test-Path $plugins) { Remove-Item -Recurse -Force $plugins }
 New-Item -ItemType Directory -Force $deps | Out-Null
 
-function Write-Meta([string]$path, [string]$kind) {
+function Write-Meta([string]$path, [string]$kind, [string]$template = '') {
     $rel = $path.Substring($pkg.Length + 1).Replace('\', '/')
     $md5 = [Security.Cryptography.MD5]::Create()
     $guid = -join ($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes("com.onelobby.unity/$rel")) | ForEach-Object { $_.ToString('x2') })
     $body = switch ($kind) {
         'folder' { "fileFormatVersion: 2`nguid: $guid`nfolderAsset: yes`nDefaultImporter:`n  externalObjects: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
         'dll' { "fileFormatVersion: 2`nguid: $guid`nPluginImporter:`n  externalObjects: {}`n  serializedVersion: 2`n  iconMap: {}`n  executionOrder: {}`n  defineConstraints: []`n  isPreloaded: 0`n  isOverridable: 0`n  isExplicitlyReferenced: 0`n  validateReferences: 1`n  platformData:`n  - first:`n      Any: `n    second:`n      enabled: 1`n      settings: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
+        'native' { (Get-Content -Raw (Join-Path $here "plugin-meta/$template.meta.template")).Replace('{{GUID}}', $guid) }
         default { "fileFormatVersion: 2`nguid: $guid`nTextScriptImporter:`n  externalObjects: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
     }
     [IO.File]::WriteAllText("$path.meta", $body)
@@ -60,6 +61,29 @@ Write-Meta $plugins 'folder'
 Write-Meta $deps 'folder'
 Get-ChildItem $plugins -File -Recurse | Where-Object { $_.Extension -ne '.meta' } | ForEach-Object {
     Write-Meta $_.FullName $(if ($_.Extension -eq '.dll') { 'dll' } else { 'text' })
+}
+
+# libdatachannel natives (built by clients/dotnet/OneLobby.DataChannel/native/*, or CI) into Unity's platform folders,
+# with per-platform import settings from plugin-meta/*.meta.template.
+$natives = @(
+    @{ Rid = 'win-x64';       File = 'datachannel.dll';      Dir = 'x86_64' },
+    @{ Rid = 'linux-x64';     File = 'libdatachannel.so';    Dir = 'x86_64' },
+    @{ Rid = 'osx';           File = 'libdatachannel.dylib'; Dir = 'macOS' },
+    @{ Rid = 'android-arm64'; File = 'libdatachannel.so';    Dir = 'Android/arm64-v8a' }
+)
+$runtimes = Join-Path $dotnet 'OneLobby.DataChannel/runtimes'
+foreach ($n in $natives) {
+    $from = Join-Path $runtimes "$($n.Rid)/native/$($n.File)"
+    if (-not (Test-Path $from)) { Write-Host "native $($n.Rid): not built (skipped)"; continue }
+    $dir = $plugins
+    foreach ($part in $n.Dir.Split('/')) {
+        $dir = Join-Path $dir $part
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory $dir | Out-Null; Write-Meta $dir 'folder' }
+    }
+    $to = Join-Path $dir $n.File
+    Copy-Item $from $to
+    Write-Meta $to 'native' $n.Rid
+    Write-Host ("native $($n.Rid): {0:N0} bytes" -f (Get-Item $to).Length)
 }
 Remove-Item -Recurse -Force $out
 Write-Host "plugins:"; Get-ChildItem $plugins -Recurse -Filter *.dll | ForEach-Object { Write-Host "  $($_.FullName.Substring($pkg.Length + 1))" }
