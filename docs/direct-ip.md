@@ -211,7 +211,7 @@ a server nobody here runs.
 | 7 Join code codec | done; C# and TS against shared vectors (all 341 single-character typos caught) | `spec/reference/joincode.mjs`, `spec/vectors/joincode.json`, `OneLobby.Core/JoinCode.cs`, `onelobby` `decodeJoinCode` |
 | 8 Port mapper | done; fake-gateway tests (UPnP ok/725/718, NAT-PMP ok/other port, none); not yet seen work on a real router (below) | `OneLobby.Hub/PortMapper.cs`, `onelobby/direct` `PortMapper`; `HostDirectAsync`/`hostDirect` pick the code kind |
 | 9 Smoke | run 1 passed (now by code); run 3 emulated on one machine (passed); real two-network run optional | both smokes print `join code ...`; `join-direct <code>`, `--only-typed`, `--no-upnp` |
-| 10 Docs | done | `docs/recipes/direct-ip.md` ("host with a join code": C#, Node host, JS join), AGENTS.md, llms.txt |
+| 10 Docs | done | `docs/recipes/direct-ip.md` ("host with a join code": C#, Node host, JS join), `docs/recipes/browser-game.md` (a whole browser game hosted from Node: join link, page on the port), AGENTS.md, llms.txt |
 | Node host | done (asked for 2026-10-24): TS port of `Hub` + RFC 6455 listener + port mapper; `kit.joinDirect` for Node and browser joiners | `clients/js/packages/client/src/direct/` (`onelobby/direct`), `e2e/direct-smoke.mjs`; `conformance/server/run-ts-hub.mjs` |
 
 Smoke run 1 (one Windows machine, two processes): `join-direct 127.0.0.1` and `join-direct <LAN IPv4>` both PASS, link
