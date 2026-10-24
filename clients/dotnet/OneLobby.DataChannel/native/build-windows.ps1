@@ -5,6 +5,8 @@
 # Static CRT (/MT), so the DLL needs no Visual C++ redistributable. Versions live in versions.env (shared with Linux/CI).
 param([string]$WorkDir = (Join-Path ([IO.Path]::GetTempPath()) 'onelobby-datachannel-build'))
 $ErrorActionPreference = 'Stop'
+# Invoke-WebRequest's progress bar can slow a download to a crawl; CI stalled silently at the Mbed TLS download.
+$ProgressPreference = 'SilentlyContinue'
 
 $here = $PSScriptRoot
 $versions = @{}
@@ -46,15 +48,30 @@ if (-not (Test-Path $src)) {
         if ($LASTEXITCODE -ne 0) { throw "submodule $p failed" }
     }
 }
+Write-Host "mbedtls ${mbedVer}: download"
 $tarball = Join-Path $WorkDir "mbedtls-$mbedVer.tar.bz2"
 if (-not (Test-Path $tarball)) {
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$mbedVer/mbedtls-$mbedVer.tar.bz2" -OutFile $tarball
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$mbedVer/mbedtls-$mbedVer.tar.bz2" -OutFile $tarball -TimeoutSec 300
 }
 $sha = (Get-FileHash -Algorithm SHA256 $tarball).Hash.ToLowerInvariant()
 if ($sha -ne $mbedSha) { throw "mbedtls tarball sha256 $sha does not match $mbedSha" }
+Write-Host "mbedtls ${mbedVer}: extract"
 $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
 $mbedSrc = Join-Path $WorkDir "mbedtls-$mbedVer"
-if (-not (Test-Path $mbedSrc)) { & $tar -xjf $tarball -C $WorkDir; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } }
+if (-not (Test-Path $mbedSrc)) {
+    # windows-2022's tar.exe (libarchive 3.5.2) has no bz2lib, so -j pipes through an external bzip2 and hangs (CI
+    # stalled here for 25 minutes). Without bz2lib, unpack with Git for Windows' bzip2 first and untar the plain .tar.
+    $archive = $tarball
+    if (-not ((& $tar --version) -match 'bz2lib')) {
+        $bzip2 = Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) 'usr/bin/bzip2.exe'
+        if (-not (Test-Path $bzip2)) { throw "tar.exe has no bzip2 support and $bzip2 is missing" }
+        & $bzip2 -dkf $tarball
+        if ($LASTEXITCODE -ne 0) { throw 'bzip2 failed' }
+        $archive = $tarball -replace '\.bz2$', ''
+    }
+    & $tar -xf $archive -C $WorkDir
+    if ($LASTEXITCODE -ne 0) { throw 'extract failed' }
+}
 # libdatachannel's DTLS transport needs DTLS-SRTP key export, off in the default config (Godot enables it too).
 $cfg = Join-Path $mbedSrc 'include/mbedtls/mbedtls_config.h'
 $text = [IO.File]::ReadAllText($cfg)
@@ -68,10 +85,12 @@ function Invoke-Vs([string]$cmdline) {
     if ($LASTEXITCODE -ne 0) { throw "failed: $cmdline" }
 }
 $mbedBuild = Join-Path $WorkDir 'build-mbedtls-win-x64'
+Write-Host "mbedtls ${mbedVer}: build"
 Invoke-Vs "`"$cmake`" -S `"$mbedSrc`" -B `"$mbedBuild`" $common -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DCMAKE_INSTALL_PREFIX=`"$prefix`""
 Invoke-Vs "`"$cmake`" --build `"$mbedBuild`" --target install"
 
 $ldcBuild = Join-Path $WorkDir 'build-ldc-win-x64'
+Write-Host "libdatachannel ${ldcTag}: build"
 Invoke-Vs "`"$cmake`" -S `"$src`" -B `"$ldcBuild`" $common -DUSE_MBEDTLS=ON -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_PREFIX_PATH=`"$prefix`""
 Invoke-Vs "`"$cmake`" --build `"$ldcBuild`" --target datachannel"
 
