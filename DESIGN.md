@@ -52,6 +52,8 @@ codes are shown in a large monospace font; nothing in the lobby flow is on a tim
 | [Crockford Base32](https://www.crockford.com/base32.html) | "10 digits and 22 letters", excluding "I L O U"; decoding maps i/l to 1 and o to 0 | s.6 codes |
 | [Stop Killing Games](https://www.stopkillinggames.com/), [Wikipedia](https://en.wikipedia.org/wiki/Stop_Killing_Games) | "If you purchase a good, it shouldn't self-destruct"; acceptable outcomes: "an offline mode or the ability to host private servers"; games left "in a reasonably functional state after discontinuation" | s.2 goals, s.13 |
 | [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) | Pure C# WebRTC exists, under a BSD-3 licence with an added use restriction. Reason the .NET client uses Godot's engine classes instead (s.4) | s.4 |
+| [Unity WebRTC 3.0 manual](https://docs.unity3d.com/Packages/com.unity.webrtc@3.0/manual/index.html), [requirements](https://docs.unity3d.com/Packages/com.unity.webrtc@3.0/manual/requirements.html), [repository README](https://github.com/Unity-Technologies/com.unity.webrtc) | `com.unity.webrtc` 3.0.0 (registry date 2025-09-26, `"unity": "6000.0"` in its package.json); platforms Windows 10 x64, Ubuntu 22.04/24.04, macOS Apple Silicon, iOS, Android ARM64; "WebGL platform is not supported"; README: "com.unity.webrtc is deprecated"; 3.0.0 changelog: "Change license to Unity Companion License" (verified 2026-10-24) | s.4 Unity client |
+| [libdatachannel](https://github.com/paullouisageneau/libdatachannel), [rtc.h](https://github.com/paullouisageneau/libdatachannel/blob/master/include/rtc/rtc.h) | C/C++ WebRTC data channels + WebSockets; "licensed under MPL 2.0 since version 0.18"; C API `include/rtc/rtc.h`; Linux, Android, macOS, iOS, Windows; WebAssembly via datachannel-wasm; v0.24.6 released 2026-09-26, active (verified 2026-10-24). Godot's official webrtc-native vendors it with Mbed TLS | s.4 `OneLobby.DataChannel` |
 | [RFC 6716 (Opus)](https://www.rfc-editor.org/rfc/rfc6716.html) | "designed to handle a wide range of interactive audio applications"; 6 to 510 kbit/s; frames of 2.5-60 ms, "20 ms frames are a good choice for most applications" | s.9a voice |
 | [Mumble: audio settings](https://www.mumble.info/documentation/user/audio-settings/) | Opus; "Using 20 ms gives a very low delay without the risk of audible audio device driver issues"; transmission modes "Push To Talk" and "Voice Activity" | s.9a |
 | [Steam: ISteamUser voice](https://partner.steamgames.com/doc/api/ISteamUser#GetVoice) | Compressed voice "can be transmitted by your application"; poll "once per frame, and at worst no more than four times a second"; decoder "supports any sample rate from 11025 to 48000" | s.9a |
@@ -101,7 +103,7 @@ mentioned as colour, never as a rule.
 | `onelobby-server` (signaling + lobby server) | Lobby registry, join codes, public list, game/version gate, SDP/ICE forwarding, hands out STUN/TURN URLs with time-limited credentials, rate limits | Never (PeerJS model: "Data is not proxied") |
 | coturn (relay) | Standard TURN. Relays encrypted DTLS packets for peers that cannot connect directly | Encrypted bytes only |
 | Client library (`onelobby`, `OneLobby.Core`) | Protocol state machine, lockstep scheduler, chunking, host migration rule, text chat, voice packetization, events | Yes |
-| Transport adapter (`OneLobby.Godot`, browser `RTCPeerConnection`) | Opens peer connections and three data channels per peer; audio capture/playback and the Opus codec | Yes |
+| Transport adapter (`OneLobby.Godot`, `OneLobby.DataChannel` + `com.onelobby.unity`, browser `RTCPeerConnection`) | Opens peer connections and three data channels per peer; audio capture/playback and the Opus codec | Yes |
 | Game | Encodes commands to bytes, applies frames, reports state hashes, provides snapshot/restore | Owner |
 
 **Topology: star through the host.** Each joiner holds one WebRTC connection to the host; peer-to-peer messages route
@@ -129,11 +131,28 @@ nothing from it). Rune shows the server-decides model works for small web games;
 | .NET (engine-agnostic) | `OneLobby.Core` (netstandard2.1 + net8.0) | `ITransport` interface, in-memory implementation | Yes: xunit |
 | Godot 4.x C# | `OneLobby.Godot` (one `.cs` folder + the webrtc-native addon) | Godot's `WebRtcPeerConnection` / `WebRtcDataChannel` / `WebSocketPeer` engine classes, typed in C#; webrtc-native supplies the native implementation (Godot WebRTC doc) | Through Godot headless only |
 | Godot GDScript | later; same wire protocol | same engine classes | |
-| Unity / MonoGame C# | later: `OneLobby.Core` + a transport over any .NET WebRTC stack | | |
+| .NET (any engine, WebRTC) | `OneLobby.DataChannel` (netstandard2.1 + net8.0, + one native library per platform) | `DataChannelTransport`: libdatachannel v0.24.6 (Mbed TLS) over P/Invoke, three negotiated channels, static IL2CPP-safe callbacks that only queue; `WebSocketSignalingSocket` (`ClientWebSocket`) | Yes: live two-peer WebRTC test through an in-process server (`OneLobby.DataChannel.Tests`, Windows and Linux) and browser cross-play (`integration/crossplay-datachannel.mjs`) |
+| Unity 6 C# | `com.onelobby.unity` (UPM package: Core/DataChannel/Opus DLLs, the natives under `Runtime/Plugins/<platform>`, a thin `OneLobby.Unity` assembly) | `UnityTransport` wraps `DataChannelTransport`; `UnityVoiceAudio` (Microphone, `OnAudioFilterRead`); `OneLobbyRunner` pumps in `Update`. Desktop now, mobile once natives are built; no WebGL | Core/DataChannel: yes; package: compiled in Unity batchmode; WebRTC run on the editor's own Mono runtime (`clients/unity/mono-probe`); in-editor test needs a licensed editor |
+| MonoGame / other .NET | `OneLobby.Core` + `OneLobby.DataChannel` as is (no engine adapter needed for data; audio adapters per engine later) | | |
 
 Why engine classes for Godot and no pure-.NET WebRTC: the one pure C# stack found (SIPSorcery) carries a licence use
 restriction that an open framework cannot pass on; Godot's classes are typed in C#, free of that, and identical on a
 future web export (s.5). The core/transport split keeps the scheduler and protocol testable under `dotnet test`.
+
+**.NET/Unity WebRTC backend (decided 2026-10-24, revised the same day).** The transport is its own engine-agnostic
+project, `OneLobby.DataChannel`, so any .NET engine (Unity, MonoGame, a headless bot) gets real WebRTC without an engine
+adapter, and the backend can change without touching game code.
+
+| Option | Licence | Fit | Cost |
+|---|---|---|---|
+| libdatachannel native library (**chosen**) | MPL-2.0 (file-level copyleft: credit it, say where its source is, publish changes to its own files; our code stays MIT). Bundles libjuice (MPL-2.0), usrsctp (BSD-3), plog (MIT); we link Mbed TLS (Apache-2.0) | Data channels only, C API easy to P/Invoke, actively maintained, the same stack Godot's official webrtc-native ships (so Godot and .NET desktop share it); one small file per platform: win-x64 2.4 MB, linux-x64 5.0 MB (static libstdc++); datachannel-wasm is a possible WebGL route | We build the natives (scripts + CI workflow in `OneLobby.DataChannel/native/`) and own a ~30-function binding |
+| `com.unity.webrtc` 3.0.0 (first attempt, dropped) | Unity Companion License (Unity-dependent projects only) | Worked on Unity 6000.0+ | README: "com.unity.webrtc is deprecated"; Unity-only, so no portability; large natives (Windows 15 MB, macOS 39 MB, Android 62 MB) full of unused media code |
+| SIPSorcery (pure C#) | BSD-3 with an added use restriction | | Excluded (s.1) |
+| Unity Transport / Netcode relay | Unity's own services | No browser interop, ties games to Unity Gaming Services | Not P2P WebRTC; does not meet s.2 |
+
+Mbed TLS rather than OpenSSL: it is what Godot's webrtc-native uses with libdatachannel, builds from one tarball with
+CMake on every target (no Perl/NASM step as OpenSSL needs on Windows), links statically into one file, and is
+Apache-2.0. It needs `MBEDTLS_SSL_DTLS_SRTP` enabled; the build scripts set it.
 
 **Browser as host.** A hidden tab clamps timers to once per second (Chrome 88 blog); pages using WebRTC escape the
 once-per-minute tier. Consequences: the JS client drives its tick from `setInterval` in a dedicated Worker when
@@ -635,7 +654,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | MVP (this build) | Later |
 |---|---|
 | `onelobby-server`, coturn config, compose, docs | Prometheus dashboards, multi-region server tags |
-| JS + .NET/Godot clients, lockstep + raw | GDScript wrapper, Unity/MonoGame transport, mesh topology |
+| JS + .NET/Godot/Unity clients, lockstep + raw; `OneLobby.DataChannel` WebRTC for any .NET | GDScript wrapper, Unity WebGL transport (jslib or datachannel-wasm), iOS static build, mesh topology |
 | Codes, public list, unlisted/private, kick, approve | Invites via platform adapters (Steam / Discord / Epic lobbies as an optional `ILobbyDirectory`) |
 | Host migration in lockstep; `raw` with game snapshot | Dedicated headless host (a client with no renderer) |
 | Snapshot late join, desync resync | Deterministic replay recording/playback as a library feature |
@@ -663,7 +682,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | Relay? | coturn with REST credentials; TCP/TLS 443 fallback | coturn, draft-uberti |
 | Message size | ≤ 16 KiB, chunk above | MDN 64 KiB default |
 | Browser host timing | Worker timer; WebRTC exempts the page from intensive throttling | Chrome 88 blog |
-| Pure .NET WebRTC? | No: licence; use Godot engine classes | SIPSorcery licence |
+| Pure .NET WebRTC? | No: licence; Godot engine classes in Godot, libdatachannel (`OneLobby.DataChannel`) everywhere else in .NET | SIPSorcery licence; backend table (s.4) |
 | Voice as media tracks or data? | Opus in a data channel: Godot has no track API; one path everywhere | Godot class reference |
 | Voice frame size and rate | 20 ms Opus, 2 per packet, ~24 kbit/s | RFC 6716, Mumble, Steam poll rate |
 | Who relays voice? | The host, unmixed, like game data; server never sees it | PeerJS model, non-goal: SFU |

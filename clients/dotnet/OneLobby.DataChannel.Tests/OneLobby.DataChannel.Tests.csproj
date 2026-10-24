@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- net10.0 because it hosts the real OneLobby.Server (net10.0) in-process on a loopback port -->
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\OneLobby.DataChannel\OneLobby.DataChannel.csproj" />
+    <ProjectReference Include="..\..\..\server\OneLobby.Server\OneLobby.Server.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-24T17:29:27.846Z",
+  "results": [
+    {
+      "name": "A browser host <- .NET joiner: reliable + fast echoed back",
+      "ok": true,
+      "evidence": "code Y7FMQZ; .NET: ready after 765 ms, host 1 | PASS after 1309 ms; browser saw: reliable 2 hello from .NET | fast 2 fast from .NET | reliable 2 bye"
+    },
+    {
+      "name": "B .NET host <- browser joiner: reliable + fast echoed back",
+      "ok": true,
+      "evidence": "code FCJPT0; browser: {\"reliable\":true,\"fast\":true}; .NET host: got Reliable 2 hello from browser | got Fast 2 fast from browser | got Reliable 2 bye | PASS"
+    }
+  ]
+}
