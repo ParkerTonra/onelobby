@@ -2,13 +2,17 @@
 export const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const CODE_LENGTH = 6;
 
+/** ASCII-only uppercasing: `ß` must not fold to `SS`. */
+function asciiUpper(s: string): string {
+  return s.replace(/[a-z]/g, (c) => c.toUpperCase());
+}
+
 /**
  * Decode user input to the canonical code form (upper case, no separators, `i`/`l` -> `1`, `o` -> `0`).
  * Returns null when the input is not a valid 6-character code.
  */
 export function normalizeCode(input: string): string | null {
-  const s = input
-    .toUpperCase()
+  const s = asciiUpper(input)
     .replace(/[ \-]/g, "")
     .replace(/[IL]/g, "1")
     .replace(/O/g, "0");
@@ -25,7 +29,7 @@ export function formatCode(code: string): string {
 
 /** Numeric value of a Crockford string (same alias rules). Throws on invalid characters. */
 export function decodeCrockford(input: string): bigint {
-  const s = input.toUpperCase().replace(/[ \-]/g, "").replace(/[IL]/g, "1").replace(/O/g, "0");
+  const s = asciiUpper(input).replace(/[ \-]/g, "").replace(/[IL]/g, "1").replace(/O/g, "0");
   let v = 0n;
   for (const ch of s) {
     const i = CROCKFORD_ALPHABET.indexOf(ch);
