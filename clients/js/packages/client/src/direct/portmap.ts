@@ -225,11 +225,16 @@ export class PortMapper {
     return res;
   }
 
+  /**
+   * One connection per request: some routers close after each reply without saying so, and a reused
+   * keep-alive socket then fails every second request with "socket hang up".
+   */
   private http(method: string, url: URL, body: string | null, headers: Record<string, string>): Promise<{ status: number; body: string }> {
     return new Promise((resolve, reject) => {
+      const h = { ...headers, Connection: "close" };
       const req = httpRequest(
-        { method, hostname: url.hostname, port: url.port || 80, path: url.pathname + url.search, timeout: this.o.requestTimeoutMs,
-          headers: body === null ? headers : { ...headers, "Content-Length": Buffer.byteLength(body) } },
+        { method, hostname: url.hostname, port: url.port || 80, path: url.pathname + url.search, timeout: this.o.requestTimeoutMs, agent: false,
+          headers: body === null ? h : { ...h, "Content-Length": Buffer.byteLength(body) } },
         (res) => {
           let text = "";
           res.setEncoding("utf8");

@@ -80,6 +80,9 @@ public sealed class PortMapper : IDisposable
         _port = port;
         _o = options ?? new PortMapperOptions();
         _http = new HttpClient { Timeout = _o.RequestTimeout };
+        // One connection per request: some routers close after each reply without saying so, and a
+        // pooled connection then fails every second request.
+        _http.DefaultRequestHeaders.ConnectionClose = true;
     }
 
     /// <summary>Finds the router and maps TCP + UDP <c>P</c>. Never throws for network trouble: see <see cref="PortMapResult.Detail"/>.</summary>
