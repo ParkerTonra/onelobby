@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <RootNamespace>OneLobby.Replication</RootNamespace>
+    <AssemblyName>OneLobby.Replication</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Engine-agnostic host-authoritative state replication over a OneLobby raw-mode lobby: tick clock, entity registry, delta snapshots, interpolation, input stream, reliable events, lag-compensation history.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneLobby.Replication.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+  </ItemGroup>
+</Project>
