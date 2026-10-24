@@ -17,6 +17,7 @@ namespace KeepaliveDemo;
 ///   --auto-join=CODE | --auto-join-file=F            join (code given or read from a file)
 ///   --run-ticks=N  --result-file=F                   stop after N ticks, write tick/hash lines and chat lines
 ///   --paint                                          bot paints a random cell every 10 ticks
+///   --voice-tone                                     voice on with a 440 Hz sine mic (VoiceActivity); result file gets voice_started / voice_rx lines
 /// </summary>
 public partial class Main : Node
 {
@@ -225,6 +226,16 @@ public partial class Main : Node
         lobby.SessionEnded += r => { SetStatus("Session ended: " + r); _lobby = null; };
         lobby.PhaseChanged += p => Log("phase: " + p);
         lobby.Voice.VoiceError += e => Log("voice: " + e);
+        if (_args.ContainsKey("voice-tone"))
+        {
+            var tone = new ToneAudio();
+            tone.Started = () => Result("voice_started");
+            tone.FirstFrameFrom = p => Result("voice_rx " + p);
+            lobby.Voice.Codec = new Keepalive.Opus.OpusVoiceCodec();
+            lobby.Voice.Audio = tone;
+            lobby.Voice.Mode = VoiceMode.VoiceActivity;
+            lobby.Voice.Enabled = true;
+        }
         _start.Disabled = !lobby.IsHost;
         _voiceToggle.ButtonPressed = false;
         SetStatus($"In lobby {Crockford.Format(lobby.Code)} as #{lobby.LocalPeerId}{(lobby.IsHost ? " (host)" : "")}");
@@ -279,7 +290,7 @@ public partial class Main : Node
         _roster.Text = "Players: " + string.Join(", ", lobby.Peers.Select(p => p.Name + (p.PeerId == lobby.HostPeerId ? "*" : "")));
         _hashLabel.Text = $"tick {ls.Tick}  hash@{_lastHashTick}: {_lastHash:x16}  {(_desync ? "DESYNC" : "in sync")}";
         _meter.Value = lobby.Voice.InputLevel;
-        lobby.Voice.PushToTalk(Input.IsKeyPressed(Key.V) && !_chatInput.HasFocus());
+        if (!_args.ContainsKey("voice-tone")) lobby.Voice.PushToTalk(Input.IsKeyPressed(Key.V) && !_chatInput.HasFocus());
 
         if (_autoHost && !_autoStarted && lobby.IsReady && lobby.Peers.Count >= _expectPeers + 1 && lobby.Phase == LobbyPhase.Lobby)
         {
