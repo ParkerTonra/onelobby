@@ -4,6 +4,8 @@
  */
 
 export const MAX_FRAME_BYTES = 16 * 1024;
+/** Cap on one reassembled chunk set (spec/binary.md "Snapshot and chunks"). */
+export const MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
 export const HEADER_BYTES = 3;
 export const PROTO = 1;
 
@@ -167,9 +169,13 @@ const TYPE_BY_ID = new Map<number, keyof typeof MsgType>(
   (Object.keys(MsgType) as Array<keyof typeof MsgType>).map((k) => [MsgType[k], k]),
 );
 
-/** Decode one frame. Returns null for unknown types (ignored for forward compatibility); throws on a truncated body. */
-export function decodeMessage(buf: Uint8Array): Decoded | null {
-  if (buf.length > MAX_FRAME_BYTES) throw new CodecError("too_long", `${buf.length} > ${MAX_FRAME_BYTES}`);
+/**
+ * Decode one frame. Returns null for unknown types (ignored for forward compatibility); throws on a truncated body.
+ * A frame reassembled from chunks passes `reassembled` so the cap is MAX_REASSEMBLED_BYTES instead of one frame's.
+ */
+export function decodeMessage(buf: Uint8Array, reassembled = false): Decoded | null {
+  const max = reassembled ? MAX_REASSEMBLED_BYTES : MAX_FRAME_BYTES;
+  if (buf.length > max) throw new CodecError("too_long", `${buf.length} > ${max}`);
   if (buf.length < HEADER_BYTES) throw new CodecError("too_short", "header");
   const r = new Reader(buf);
   const type = TYPE_BY_ID.get(r.u8());

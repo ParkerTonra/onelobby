@@ -23,6 +23,7 @@ namespace OneLobby
             public int PingMs;
             public int Resyncs;
             public long IgnoreHashUntil = -1;
+            public readonly ChunkAssembler Chunks = new(); // per sender: every sender numbers its own chunk ids
         }
 
         public const int HostTimeoutMs = 8000;
@@ -47,7 +48,6 @@ namespace OneLobby
         private uint _chunkId;
         private int _localResyncs;
         private (long Tick, uint Total, byte Flags)? _snap;
-        private readonly ChunkAssembler _chunks = new();
         private LobbyPhase _phase;
         private Dictionary<string, string> _meta;
 
@@ -123,7 +123,8 @@ namespace OneLobby
         public event Action<int, ReadOnlyMemory<byte>, Channel>? MessageReceived;
         public event Action<string>? SessionEnded;
 
-        internal long NowMs => _t.NowMs;
+        /// <summary>The transport's monotonic clock in milliseconds (the same clock the lobby times out and pings with).</summary>
+        public long NowMs => _t.NowMs;
 
         // ---- public commands -----------------------------------------------------------------------------------
 
@@ -383,9 +384,9 @@ namespace OneLobby
 
         // ---- inbound frames ------------------------------------------------------------------------------------
 
-        private void HandleFrame(PeerRec rec, PeerChannel ch, byte[] data)
+        private void HandleFrame(PeerRec rec, PeerChannel ch, byte[] data, bool reassembled = false)
         {
-            if (Wire.Validate(data) != null) return;
+            if (Wire.Validate(data, reassembled ? Wire.MaxReassembled : Wire.MaxFrame) != null) return;
             var type = Wire.Type(data);
             var route = Wire.Route(data);
             var body = Wire.Body(data);
@@ -406,9 +407,26 @@ namespace OneLobby
                     rec.PingMs = (int)Math.Max(0, (uint)NowMs - t);
                     return;
                 }
+                case Wire.Chunk:
+                    HandleChunk(rec, ch, body);
+                    return;
             }
             if (IsHost) HandleAsHost(rec, ch, type, route, body, data);
             else HandleAsJoiner(rec, ch, type, route, body);
+        }
+
+        private void HandleChunk(PeerRec rec, PeerChannel ch, ReadOnlySpan<byte> body)
+        {
+            if (!rec.Chunks.TryAdd(body, out _, out var all)) return;
+            if (!IsHost && rec.Id == _hostId && _snap is { } s)
+            {
+                _snap = null;
+                if (s.Total != all.Length) { SendToHost(PeerChannel.Reliable, Wire.BuildSnapshotReq(Lockstep?.Tick ?? -1)); return; }
+                ApplySnapshot(s.Tick, s.Flags, all);
+                return;
+            }
+            // an oversized frame sent in chunks: the bytes are one complete inner frame (spec/binary.md "Large non-snapshot frames")
+            if (all.Length > 0 && all[0] != Wire.Chunk) HandleFrame(rec, ch, all, reassembled: true);
         }
 
         private void HandleAsHost(PeerRec rec, PeerChannel ch, byte type, int route, ReadOnlySpan<byte> body, byte[] data)
@@ -582,21 +600,7 @@ namespace OneLobby
                     var r = new Wire.Reader(body);
                     var tick = r.I64(); var total = r.U32(); var flags = r.U8();
                     _snap = (tick, total, flags);
-                    _chunks.Clear();
-                    return;
-                }
-                case Wire.Chunk:
-                {
-                    if (!_chunks.TryAdd(body, out _, out var all)) return;
-                    if (_snap is not { } s)
-                    {
-                        // an oversized frame sent in chunks: the bytes are one complete inner frame
-                        if (all.Length > 0 && all[0] != Wire.Chunk && Wire.Validate(all) == null) HandleFrame(rec, ch, all);
-                        return;
-                    }
-                    _snap = null;
-                    if (s.Total != all.Length) { SendToHost(PeerChannel.Reliable, Wire.BuildSnapshotReq(Lockstep?.Tick ?? -1)); return; }
-                    ApplySnapshot(s.Tick, s.Flags, all);
+                    rec.Chunks.Clear();
                     return;
                 }
                 case Wire.Raw:

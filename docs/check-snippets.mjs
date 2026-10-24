@@ -2,7 +2,7 @@
 // Extracts every fenced snippet tagged `ts compile` or `csharp compile` from AGENTS.md and docs/recipes/*.md and
 // type-checks it against the real client code.
 //   ```ts compile file=net.ts        -> tsc --noEmit with "onelobby" mapped to clients/js/packages/client/src/index.ts
-//   ```csharp compile file=Net.cs    -> temp csproj with ProjectReferences to clients/dotnet/OneLobby.Core (+ OneLobby.DataChannel, OneLobby.Direct)
+//   ```csharp compile file=Net.cs    -> temp csproj with ProjectReferences to clients/dotnet/OneLobby.Core (+ OneLobby.Replication, OneLobby.DataChannel, OneLobby.Direct)
 // Snippets of one markdown file share a folder, so ts snippets can import each other ("./settings"). Untagged fences and
 // ```csharp godot fences are documentation only. Flags: --strict (a missing client counts as a failure).
 import { execFileSync } from "node:child_process";
@@ -106,6 +106,8 @@ if (cs.length) {
       fs.mkdirSync(path.dirname(f), { recursive: true });
       fs.writeFileSync(f, s.code);
     }
+    const repl = path.join(root, "clients", "dotnet", "OneLobby.Replication", "OneLobby.Replication.csproj");
+    const refs = [proj, ...[repl, dcProj, directProj].filter((p) => fs.existsSync(p))].map((p) => `<ProjectReference Include="${fwd(p)}" />`).join("");
     let tfm = "net8.0";
     try { tfm = "net" + execFileSync("dotnet", ["--version"], { encoding: "utf8" }).trim().split(".")[0] + ".0"; } catch { /* keep default */ }
     fs.writeFileSync(path.join(dir, "Snippets.csproj"), `<Project Sdk="Microsoft.NET.Sdk">
@@ -117,7 +119,7 @@ if (cs.length) {
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="${fwd(proj)}" />${fs.existsSync(dcProj) ? `<ProjectReference Include="${fwd(dcProj)}" />` : ""}${fs.existsSync(directProj) ? `<ProjectReference Include="${fwd(directProj)}" />` : ""}</ItemGroup>
+  <ItemGroup>${refs}</ItemGroup>
 </Project>
 `);
     try {

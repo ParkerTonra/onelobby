@@ -427,10 +427,10 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   // ---- data channel dispatch -------------------------------------------------------------------------------------
 
-  private onData(from: number, channel: ChannelName, bytes: Uint8Array): void {
+  private onData(from: number, channel: ChannelName, bytes: Uint8Array, reassembled = false): void {
     let d;
     try {
-      d = decodeMessage(bytes);
+      d = decodeMessage(bytes, reassembled);
     } catch (e) {
       this.reportError(e instanceof Error ? e : new Error(String(e)));
       return;
@@ -452,12 +452,19 @@ export class Lobby extends Emitter<LobbyEvents> {
         if (from === this.hostPeerId || this.isHost) this.lockstep.handle(from, msg);
         break;
       case "chunk": {
+        if (reassembled) break; // a chunk set never nests another
         let r = this.reassemblers.get(from);
         if (!r) this.reassemblers.set(from, (r = new Reassembler()));
-        const whole = r.push(msg);
+        let whole;
+        try {
+          whole = r.push(msg);
+        } catch (e) {
+          this.reportError(e instanceof Error ? e : new Error(String(e)));
+          break;
+        }
         if (!whole) break;
         if (this.lockstep.snapshotPending && from === this.hostPeerId) this.lockstep.onSnapshotPayload(whole);
-        else this.onData(from, channel, whole); // an oversized inner frame
+        else this.onData(from, channel, whole, true); // an oversized inner frame
         break;
       }
       case "chat": case "chat_history": case "chat_reject":

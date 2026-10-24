@@ -5,6 +5,8 @@ client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneL
 (libdatachannel WebRTC for any .NET app) or the `com.onelobby.unity` package). Peers talk over WebRTC data channels;
 the server never sees game data.
 Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
+Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
+`OneLobby.Replication` (C#): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers.
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
 
 ## API surface (same shape in both languages)
@@ -27,6 +29,18 @@ lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
 lobby.Lockstep!.Submit(cmd); while (lobby.Lockstep.TryNextFrame(out var f)) { /* f.Tick, f.Commands */ }
 lobby.Lockstep.ReportHash(tick, hash); lobby.Lockstep.Snapshot = () => bytes; lobby.Lockstep.Restore = (tick, b) => { };
+```
+
+```csharp
+// C#: OneLobby.Replication, on a SyncMode.Raw lobby (docs/recipes/replication.md)
+var rep = new ReplicationSession(lobby);                   // 30 Hz tick + snapshots, 100 ms interpolation
+rep.Pump();                                                // every frame, instead of lobby.Pump()
+NetId id = rep.Spawn(typeId, ownerPeerId, entity);         // host; entity : IReplicatedEntity { Write(NetWriter) }
+while (rep.Clock.TryAdvance()) { rep.TryGetInput(peer, out InputFrame f); /* sim step */ rep.SendSnapshot(); }   // host
+while (rep.Clock.TryAdvance()) rep.SubmitInput(inputBytes);                                                   // client
+rep.EntitySpawned / EntityDespawned / EventReceived / HostLost; rep.SendEvent(bytes);
+rep.TrySample<TState>(id, out var s);                      // client: TState : IReplicatedState<TState>, at rep.RenderTick
+new Reconciler<TInput, TState>(start, step); new HistoryRing<T>(ticks, lerp); rep.RewindTick(f);   // prediction, hitscan
 ```
 
 ```ts
@@ -117,6 +131,8 @@ Full reference (generated): `docs/api/`.
    `<meta>` tag. Anyone can self-host (`docs/recipes/self-host.md`).
 6. `GameId` + `NetVersion` gate lobbies: bump `NetVersion` whenever your command bytes or rules change.
 7. Late join and host migration in lockstep need `Snapshot`/`Restore`. In raw mode, handle `HostChanged` yourself.
+   With `OneLobby.Replication` late join is automatic (full snapshot, then deltas); host migration is not supported:
+   end the match on `HostLost`. Clients send inputs, never positions; one-off facts (points, kills) go in `SendEvent`.
 8. Voice and chat are outside the sim: never put them in a lockstep frame or a hash.
 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
@@ -126,6 +142,7 @@ Full reference (generated): `docs/api/`.
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
+- Replicated state (host-authoritative real-time: shooters, physics, AI), C#: `docs/recipes/replication.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Host by IP, no server (.NET desktop, Unity): `docs/recipes/direct-ip.md` (`client.HostDirectAsync` / `JoinDirectAsync`

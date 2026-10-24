@@ -36,8 +36,15 @@ Write-Host "MSVC: $vs`ncmake: $cmake`nninja: $ninja"
 New-Item -ItemType Directory -Force $WorkDir | Out-Null
 $src = Join-Path $WorkDir "libdatachannel-$ldcTag"
 if (-not (Test-Path $src)) {
-    git clone --quiet --depth 1 --branch $ldcTag --recurse-submodules --shallow-submodules https://github.com/paullouisageneau/libdatachannel.git $src
+    git -c core.longpaths=true clone --quiet --depth 1 --branch $ldcTag https://github.com/paullouisageneau/libdatachannel.git $src
     if ($LASTEXITCODE -ne 0) { throw 'git clone failed' }
+    # one submodule at a time, so a stall shows which one (CI once hung here for 30 minutes with no output)
+    $paths = git -C $src config --file .gitmodules --get-regexp '\.path$' | ForEach-Object { $_.Split(' ', 2)[1] }
+    foreach ($p in $paths) {
+        Write-Host "submodule $p"
+        git -C $src -c core.longpaths=true submodule update --init --depth 1 --recursive -- $p
+        if ($LASTEXITCODE -ne 0) { throw "submodule $p failed" }
+    }
 }
 $tarball = Join-Path $WorkDir "mbedtls-$mbedVer.tar.bz2"
 if (-not (Test-Path $tarball)) {
