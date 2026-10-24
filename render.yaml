@@ -1,9 +1,9 @@
-# One-click Keepalive lobby server on Render (https://render.com/docs/blueprint-spec).
+# One-click OneLobby lobby server on Render (https://render.com/docs/blueprint-spec).
 # Used by the "Deploy to Render" button in deploy/EASY_SERVER.md. Lobby server only: players connect with
 # public STUN; add a TURN relay later if some players cannot connect (see deploy/EASY_SERVER.md).
 services:
   - type: web
-    name: keepalive-lobby
+    name: onelobby-server
     runtime: docker
     plan: free
     dockerfilePath: ./server/Dockerfile
@@ -12,7 +12,7 @@ services:
     # Render's advice for button deploys: do not redeploy every copy on each push to this repo.
     autoDeployTrigger: off
     envVars:
-      # Render sets PORT (default 10000); keepalive-server listens on it.
+      # Render sets PORT (default 10000); onelobby-server listens on it.
       # Render's proxy sits in front, so per-player limits must read the real address from X-Forwarded-For.
-      - key: KEEPALIVE_TRUST_PROXY
+      - key: ONELOBBY_TRUST_PROXY
         value: "true"

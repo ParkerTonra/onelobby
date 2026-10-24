@@ -15,7 +15,7 @@ import { Emitter } from "./emitter.js";
 import type { Hub } from "./hub.js";
 import { Lockstep } from "./lockstep.js";
 import { claimWinsWrapped, pickNewHost } from "./migration.js";
-import { KeepaliveError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
+import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink, SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 
@@ -53,7 +53,7 @@ export interface LobbyConfig {
   /**
    * Joiner: give up on reaching the host after this many ms (0 or absent: wait forever). When the ICE list has a
    * TURN server and the lobby is not relay-only already, the second half of the budget is a relay-only retry.
-   * On failure `ready` rejects with KeepaliveError("ice_failed"), the error is reported and the lobby is left.
+   * On failure `ready` rejects with OneLobbyError("ice_failed"), the error is reported and the lobby is left.
    */
   readyTimeoutMs?: number;
 }
@@ -61,7 +61,7 @@ export interface LobbyConfig {
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export function seatName(p: PeerInfo): PeerInfo {
   const n = typeof p.name === "string" ? p.name.trim() : "";
-  // "Player" is keepalive-server's stand-in for an empty name
+  // "Player" is onelobby-server's stand-in for an empty name
   if (n && n !== "Player") return p;
   return { ...p, name: `Player ${p.peerId}` };
 }
@@ -113,7 +113,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   private relayRetry = false;
   /**
    * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
-   * joiner. Rejects with KeepaliveError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
+   * joiner. Rejects with OneLobbyError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
    * (or with "closed"/"kicked" when the lobby ends first).
    */
   readonly ready: Promise<void> = new Promise<void>((res, rej) => {
@@ -211,7 +211,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     return this.makeLink(peerId);
   }
 
-  /** @internal Called by Keepalive right after construction: the host waits for joiners, a joiner waits for the host's offer. */
+  /** @internal Called by OneLobby right after construction: the host waits for joiners, a joiner waits for the host's offer. */
   _begin(): void {
     /* joiners are passive until the host offers; hosts create links on peer_joined */
   }
@@ -323,9 +323,9 @@ export class Lobby extends Emitter<LobbyEvents> {
   private reportError(e: Error): void {
     this.errorSink?.(e);
   }
-  /** @internal set by Keepalive so lobby errors reach `kit.on("error")`. */
+  /** @internal set by OneLobby so lobby errors reach `kit.on("error")`. */
   errorSink: ((e: Error) => void) | null = null;
-  /** @internal set by Keepalive: the server issued a new resume token (rememberSeat). */
+  /** @internal set by OneLobby: the server issued a new resume token (rememberSeat). */
   seatSink: ((token: string) => void) | null = null;
 
   // ---- joiner connect timeout -------------------------------------------------------------------------------------
@@ -353,7 +353,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private giveUpConnecting(): void {
-    const err = new KeepaliveError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`);
+    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`);
     this.failReady(err);
     this.reportError(err);
     if (this.ended) return;
@@ -647,7 +647,7 @@ export class Lobby extends Emitter<LobbyEvents> {
         break;
       case "error":
         if (m.code === "kicked") this.teardown("kicked");
-        else this.reportError(new KeepaliveError(String(m.code), String(m.msg ?? ""), m.data as Record<string, unknown> | undefined));
+        else this.reportError(new OneLobbyError(String(m.code), String(m.msg ?? ""), m.data as Record<string, unknown> | undefined));
         break;
     }
   }
@@ -734,7 +734,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.cancelReadyTimer?.();
     if (!this.isReady) {
       const code = reason === "ice_failed" || reason === "kicked" ? reason : "closed";
-      this.failReady(new KeepaliveError(code, `the lobby ended before connecting (${reason})`));
+      this.failReady(new OneLobbyError(code, `the lobby ended before connecting (${reason})`));
     }
     this.cancelWatchdog?.();
     this.cancelPing?.();

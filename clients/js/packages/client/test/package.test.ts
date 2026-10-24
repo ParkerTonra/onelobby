@@ -17,7 +17,7 @@ const dist = (f: string) => join(pkgDir, "dist", f);
 
 beforeAll(() => {
   // `npm test` alone (no build yet) still checks the real artifacts.
-  if (!existsSync(dist("keepalive.global.js")) || !existsSync(dist("internals.js"))) {
+  if (!existsSync(dist("onelobby.global.js")) || !existsSync(dist("internals.js"))) {
     execSync("npm run build", { cwd: pkgDir, stdio: "pipe" });
   }
 }, 120_000);
@@ -29,8 +29,8 @@ describe("npm pack", () => {
     for (const f of [
       "package.json", "README.md", "LICENSE",
       "dist/index.js", "dist/index.d.ts", "dist/internals.js", "dist/internals.d.ts", "dist/testing.js", "dist/testing.d.ts",
-      "dist/keepalive.global.js", "dist/keepalive.global.js.map", "dist/keepalive.global.min.js", "dist/keepalive.global.min.js.map",
-      "dist/keepalive.bundle.mjs", "dist/keepalive.bundle.mjs.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
+      "dist/onelobby.global.js", "dist/onelobby.global.js.map", "dist/onelobby.global.min.js", "dist/onelobby.global.min.js.map",
+      "dist/onelobby.bundle.mjs", "dist/onelobby.bundle.mjs.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
     ]) expect(files, f).toContain(f);
     const bad = files.filter((f) => /node_modules|(^|\/)test\/|\.test\.|^src\/|^scripts\/|tsconfig|\.tsbuildinfo$|\.tgz$/.test(f));
     expect(bad).toEqual([]);
@@ -48,15 +48,15 @@ describe("npm pack", () => {
 });
 
 describe("script-tag bundle", () => {
-  for (const file of ["keepalive.global.js", "keepalive.global.min.js"]) {
-    it(`${file} sets window.Keepalive in a bare sandbox`, () => {
+  for (const file of ["onelobby.global.js", "onelobby.global.min.js"]) {
+    it(`${file} sets window.OneLobby in a bare sandbox`, () => {
       // No DOM, no WebSocket, no RTCPeerConnection: loading must not touch browser APIs beyond TextEncoder/Decoder.
       const sandbox: Record<string, unknown> = { TextEncoder, TextDecoder };
       sandbox.window = sandbox;
       vm.createContext(sandbox);
       vm.runInContext(readFileSync(dist(file), "utf8"), sandbox, { filename: file });
-      const K = (sandbox.window as { Keepalive: Record<string, unknown> }).Keepalive;
-      expect(typeof K.Keepalive).toBe("function");
+      const K = (sandbox.window as { OneLobby: Record<string, unknown> }).OneLobby;
+      expect(typeof K.OneLobby).toBe("function");
       expect(typeof K.Lobby).toBe("function");
       expect((K.normalizeCode as (s: string) => string | null)("7hq-4k2")).toBe("7HQ4K2");
       expect(Object.keys(K).sort()).toEqual(bundleNames);
@@ -65,7 +65,7 @@ describe("script-tag bundle", () => {
   }
 
   it("bundle.mjs exports the same names", async () => {
-    const mod = await import(/* @vite-ignore */ "file://" + dist("keepalive.bundle.mjs").replace(/\\/g, "/"));
+    const mod = await import(/* @vite-ignore */ "file://" + dist("onelobby.bundle.mjs").replace(/\\/g, "/"));
     expect(Object.keys(mod).sort()).toEqual(bundleNames);
   });
 });
@@ -73,20 +73,26 @@ describe("script-tag bundle", () => {
 describe("export surface", () => {
   it("root is the small public API", () => {
     expect(Object.keys(root).sort()).toEqual([
-      "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "Keepalive", "KeepaliveError", "LIB_NAME", "LIB_VERSION",
+      "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "OneLobby", "OneLobbyError", "LIB_NAME", "LIB_VERSION",
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable",
-    ]);
+      "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
+    ].sort());
+  });
+
+  it("deprecated Keepalive names are the OneLobby classes", () => {
+    expect(root.Keepalive).toBe(root.OneLobby);
+    expect(root.KeepaliveError).toBe(root.OneLobbyError);
   });
 
   it("internals keeps everything the root used to export", () => {
     const before = [
-      "Keepalive", "LIB_NAME", "LIB_VERSION", "Lobby", "Lockstep", "MAX_DESYNCS", "HOST_SILENCE_MS", "Chat", "ChatLimiter",
+      "OneLobby", "LIB_NAME", "LIB_VERSION", "Lobby", "Lockstep", "MAX_DESYNCS", "HOST_SILENCE_MS", "Chat", "ChatLimiter",
       "sanitizeChat", "CHAT_MAX_BYTES", "CHAT_HISTORY_LINES", "Voice", "JitterBuffer", "VoiceGate", "VoicePacketizer",
       "VoiceRelayPolicy", "FRAME_SAMPLES", "SAMPLE_RATE", "MAX_SPEAKERS", "webCodecsOpus", "webCodecsOpusAvailable",
       "WorkletMic", "WebAudioSink", "pickNewHost", "claimWins", "claimWinsWrapped", "normalizeCode", "formatCode",
       "decodeCrockford", "encodeCrockford", "CROCKFORD_ALPHABET", "encodeMessage", "decodeMessage", "CodecError",
-      "MAX_FRAME_BYTES", "MsgType", "splitChunks", "Reassembler", "CHUNK_PAYLOAD", "KeepaliveError", "SignalingClient",
+      "MAX_FRAME_BYTES", "MsgType", "splitChunks", "Reassembler", "CHUNK_PAYLOAD", "OneLobbyError", "SignalingClient",
       "WebRtcLink", "webRtcLinkFactory", "systemClock", "Gridpaint", "paintCmd", "colourOf", "PALETTE", "GRID_W", "GRID_H",
       "seedFromCode", "fnv1a64",
     ];

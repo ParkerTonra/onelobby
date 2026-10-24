@@ -5,7 +5,7 @@
 import { formatCode, normalizeCode } from "./crockford.js";
 
 export interface FriendlyError {
-  /** Stable machine code (the KeepaliveError code, or "unknown"). */
+  /** Stable machine code (the OneLobbyError code, or "unknown"). */
   code: string;
   /** One short sentence a player can read. */
   message: string;

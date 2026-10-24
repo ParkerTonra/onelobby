@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <RootNamespace>OneLobby.Opus</RootNamespace>
+    <Description>IVoiceCodec for OneLobby using Concentus, a managed Opus port (BSD-3-Clause).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+  </ItemGroup>
+</Project>

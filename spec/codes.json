@@ -1,5 +1,5 @@
 {
-  "$comment": "Keepalive join codes (DESIGN s.6). Frozen. Reference: spec/reference/codes.mjs",
+  "$comment": "OneLobby join codes (DESIGN s.6). Frozen. Reference: spec/reference/codes.mjs",
   "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
   "excluded": ["I", "L", "O", "U"],
   "length": 6,

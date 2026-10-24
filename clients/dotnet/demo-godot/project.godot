@@ -1,9 +1,9 @@
-; Engine configuration file for the Keepalive Godot demo (Godot 4.5.1 .NET).
+; Engine configuration file for the OneLobby Godot demo (Godot 4.5.1 .NET).
 config_version=5
 
 [application]
 
-config/name="Keepalive Gridpaint"
+config/name="OneLobby Gridpaint"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.5", "C#", "Forward Plus")
 
@@ -18,7 +18,7 @@ window/size/viewport_height=640
 
 [dotnet]
 
-project/assembly_name="KeepaliveDemo"
+project/assembly_name="OneLobbyDemo"
 
 [rendering]
 

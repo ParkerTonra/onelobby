@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>OneLobby.Godot</RootNamespace>
+    <AssemblyName>OneLobby.Godot</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Description>Godot 4 transport (WebRTC data channels, WebSocket), microphone capture and playback for OneLobby.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="GodotSharp" Version="4.5.1" />
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\OneLobby.Opus\OneLobby.Opus.csproj" />
+  </ItemGroup>
+</Project>

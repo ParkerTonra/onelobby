@@ -1,40 +1,40 @@
 # Recipe: browser JS
 
-Add Host / Join / Browse buttons to a web game with `@keepalive/client`. Works in any bundler or a plain module script.
+Add Host / Join / Browse buttons to a web game with `onelobby`. Works in any bundler or a plain module script.
 Snippets tagged `ts compile file=NAME` are type-checked by `docs/check-snippets.mjs` (all snippets of one recipe share a
 folder, so they can import each other).
 
 ## 1. Install
 
 ```
-npm install @keepalive/client
+npm install onelobby
 ```
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.global.min.js">` sets
-`window.Keepalive` (so `new Keepalive.Keepalive({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.bundle.mjs`. Low-level pieces (codec, chunking,
-migration, WebRTC classes) are in `@keepalive/client/internals`; in-memory test doubles in `@keepalive/client/testing`.
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.global.min.js">` sets
+`window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
+`https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
 
 Build it once, then point your project at the build:
 
 ```
-git clone https://github.com/ParkerTonra/keepalive
-cd keepalive/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
+git clone https://github.com/ParkerTonra/onelobby
+cd onelobby/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
 ```
 
 Either depend on it with a `file:` path, or bundle with an esbuild alias (no package install in your project):
 
 ```
 # in your project
-npm install file:/path/to/keepalive/clients/js/packages/client
+npm install file:/path/to/onelobby/clients/js/packages/client
 # or, plain-JS project with no package.json
-/path/to/keepalive/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:@keepalive/client=/path/to/keepalive/clients/js/packages/client/dist/index.js
+/path/to/onelobby/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:onelobby=/path/to/onelobby/clients/js/packages/client/dist/index.js
 ```
 
 Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
-`<script type="module" src="./src/main.js">` cannot resolve the bare name `@keepalive/client`, so bundle first.
+`<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
 ## Codes and peers
@@ -48,18 +48,18 @@ either form. `lobby.peers` includes the local player and the host, so a two-play
 export function lobbyServerUrl(): string {
   const params = new URLSearchParams(location.search);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="lobby-server"]')?.content;
-  return localStorage.getItem("lobby_server") ?? params.get("lobby") ?? meta ?? "wss://lobby.keepalive.example/ws";
+  return localStorage.getItem("lobby_server") ?? params.get("lobby") ?? meta ?? "wss://lobby.onelobby.example/ws";
 }
 ```
 
 ## 3. Connect: Host, Join, Browse
 
 ```ts compile file=net.ts
-import { Keepalive, formatCode } from "@keepalive/client";
-import type { Lobby, LobbySummary } from "@keepalive/client";
+import { OneLobby, formatCode } from "onelobby";
+import type { Lobby, LobbySummary } from "onelobby";
 import { lobbyServerUrl } from "./settings";
 
-const kit = new Keepalive({
+const kit = new OneLobby({
   gameId: "com.you.yourgame",   // reverse-DNS, unique to your game
   netVersion: "1",              // bump when your command bytes or rules change
   lobbyServer: lobbyServerUrl(),
@@ -106,7 +106,7 @@ Never make the game's start wait on these. Wrap each call in try/catch, show the
 ```
 
 ```ts compile file=ui.ts
-import { codeFromUrl, describeError, shareUrl } from "@keepalive/client";
+import { codeFromUrl, describeError, shareUrl } from "onelobby";
 import { hostLobby, joinLobby, browseLobbies } from "./net";
 
 const status = document.getElementById("net-status")!;

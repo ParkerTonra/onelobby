@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Godot;
-using Keepalive;
-using Keepalive.Godot;
-using Keepalive.Gridpaint;
+using OneLobby;
+using OneLobby.Godot;
+using OneLobby.Gridpaint;
 
-namespace KeepaliveDemo;
+namespace OneLobbyDemo;
 
 /// <summary>
-/// Gridpaint over Keepalive: Host / Join / Browse, code field, chat line, push-to-talk (hold V).
+/// Gridpaint over OneLobby: Host / Join / Browse, code field, chat line, push-to-talk (hold V).
 /// The UI is built in code. Headless automation (after `--`):
 ///   --server=ws://host:8080/ws  --name=NAME
 ///   --auto-host --expect-peers=N [--code-file=F]     host, wait for N joiners, start, play
@@ -146,14 +146,14 @@ public partial class Main : Node
         voiceRow.AddChild(_meter);
 
         // the root container is parented through a CanvasLayer so it fills the window
-        GetWindow().Title = "Keepalive Gridpaint";
+        GetWindow().Title = "OneLobby Gridpaint";
     }
 
     // ---- lobby flow ------------------------------------------------------------------------------------------------
 
     private LobbyClient NewClient()
     {
-        var cfg = new KeepaliveConfig(GridpaintGame.GameId, GridpaintGame.NetVersion, new Uri(_server.Text.Trim()),
+        var cfg = new OneLobbyConfig(GridpaintGame.GameId, GridpaintGame.NetVersion, new Uri(_server.Text.Trim()),
             SyncMode.Lockstep, GridpaintGame.TickRate, GridpaintGame.HashEveryTicks, _name.Text.Trim());
         var c = new LobbyClient(cfg, _transport);
         c.Error += e => SetStatus("Server error: " + e.Code + " " + e.Message);
@@ -231,7 +231,7 @@ public partial class Main : Node
             var tone = new ToneAudio();
             tone.Started = () => Result("voice_started");
             tone.FirstFrameFrom = p => Result("voice_rx " + p);
-            lobby.Voice.Codec = new Keepalive.Opus.OpusVoiceCodec();
+            lobby.Voice.Codec = new OneLobby.Opus.OpusVoiceCodec();
             lobby.Voice.Audio = tone;
             lobby.Voice.Mode = VoiceMode.VoiceActivity;
             lobby.Voice.Enabled = true;
@@ -242,8 +242,8 @@ public partial class Main : Node
         Result("lobby " + lobby.Code + " peer " + lobby.LocalPeerId + (lobby.IsHost ? " host" : ""));
     }
 
-    private void SetStatus(string s) { _status.Text = s; GD.Print("[keepalive] " + s); }
-    private void Log(string s) { _chatLog.AppendText("* " + s + "\n"); GD.Print("[keepalive] " + s); }
+    private void SetStatus(string s) { _status.Text = s; GD.Print("[onelobby] " + s); }
+    private void Log(string s) { _chatLog.AppendText("* " + s + "\n"); GD.Print("[onelobby] " + s); }
 
     private void Result(string line)
     {

@@ -1,8 +1,8 @@
 using System;
 using Godot;
-using Keepalive.Gridpaint;
+using OneLobby.Gridpaint;
 
-namespace KeepaliveDemo;
+namespace OneLobbyDemo;
 
 /// <summary>Draws the 16x16 gridpaint board and reports clicked cells.</summary>
 public partial class GridView : Control

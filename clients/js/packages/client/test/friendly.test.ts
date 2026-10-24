@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeepaliveError, codeFromUrl, describeError, shareUrl } from "../src/index.js";
+import { OneLobbyError, codeFromUrl, describeError, shareUrl } from "../src/index.js";
 
 const SERVER_CODES = ["bad_request", "game_not_allowed", "in_game", "kicked", "lobby_full", "not_host", "rate_limited", "server_full", "unknown_code", "version_mismatch"];
 const CLIENT_CODES = ["bad_code", "closed", "connect_failed", "invalid_token", "ice_failed", "timeout", "server_lost"];
@@ -8,7 +8,7 @@ describe("describeError", () => {
   it("has specific text for every server and client error code", () => {
     const generic = describeError(new Error("x")).message;
     for (const code of [...SERVER_CODES, ...CLIENT_CODES]) {
-      const d = describeError(new KeepaliveError(code, "technical detail"));
+      const d = describeError(new OneLobbyError(code, "technical detail"));
       expect(d.code).toBe(code);
       expect(d.message).not.toBe(generic);
       expect(d.message).not.toContain("technical detail");
@@ -16,7 +16,7 @@ describe("describeError", () => {
   });
 
   it("lobby_full example", () => {
-    expect(describeError(new KeepaliveError("lobby_full", "lobby is full"))).toEqual({
+    expect(describeError(new OneLobbyError("lobby_full", "lobby is full"))).toEqual({
       code: "lobby_full",
       message: "That lobby is full.",
       hint: "Ask the host to make room, or start your own lobby.",
@@ -24,9 +24,9 @@ describe("describeError", () => {
   });
 
   it("uses error data: denied, max_lobbies, retryAfterMs", () => {
-    expect(describeError(new KeepaliveError("kicked", "", { reason: "denied" })).message).toMatch(/didn't let you in/);
-    expect(describeError(new KeepaliveError("rate_limited", "", { reason: "max_lobbies" })).message).toMatch(/most lobbies/);
-    expect(describeError(new KeepaliveError("rate_limited", "", { retryAfterMs: 2500 })).hint).toBe("Wait 3 seconds, then try again.");
+    expect(describeError(new OneLobbyError("kicked", "", { reason: "denied" })).message).toMatch(/didn't let you in/);
+    expect(describeError(new OneLobbyError("rate_limited", "", { reason: "max_lobbies" })).message).toMatch(/most lobbies/);
+    expect(describeError(new OneLobbyError("rate_limited", "", { retryAfterMs: 2500 })).hint).toBe("Wait 3 seconds, then try again.");
   });
 
   it("accepts plain objects, code strings and 'code: msg' errors", () => {

@@ -1,4 +1,4 @@
-# Run your own Keepalive server
+# Run your own OneLobby server
 
 You get a lobby server, a relay for players behind strict networks, and automatic HTTPS, on one small machine.
 A 1 vCPU / 1 GB VM or a Raspberry Pi 4 is enough.
@@ -34,7 +34,7 @@ on a free host in a few clicks.
 | 3478 | UDP and TCP | coturn | TURN relay |
 | 5349 | TCP | coturn | TURN over TLS (`turns:`), for networks that only allow TCP |
 | 49160-49400 | UDP | coturn | Relay range, one port per relayed player |
-| 8080 | TCP | keepalive-server | Internal only. Not published to the internet |
+| 8080 | TCP | onelobby-server | Internal only. Not published to the internet |
 
 TURN over TLS is on 5349 by default because Caddy owns 443. If you want `turns:` on 443 as well (some hotel and office
 networks allow nothing else), give the machine two public IPs. Bind Caddy to one with `ports: "IP1:443:443"` in
@@ -55,8 +55,8 @@ To check only the credential maths (no server needed): `node deploy/scripts/turn
 
 ## Running without Docker
 
-Download the `keepalive-server` binary for your platform from the releases page, then follow the comments at the top of
-`keepalive-server.service` (a systemd unit). Install coturn from your package manager, copy `turnserver.conf` to
+Download the `onelobby-server` binary for your platform from the releases page, then follow the comments at the top of
+`onelobby-server.service` (a systemd unit). Install coturn from your package manager, copy `turnserver.conf` to
 `/etc/turnserver.conf`, and pass the secret, realm, external IP and certificate on the coturn command line as
 `compose.yaml` does. You still want Caddy (or nginx) in front for TLS.
 
@@ -73,7 +73,7 @@ Download the `keepalive-server` binary for your platform from the releases page,
 ## Good to know
 
 - `--trust-proxy` is already set in compose and the unit, so per-IP limits see each player's real address behind Caddy.
-- `TURN_SECRET` must be the same for `keepalive-server` and coturn; compose passes one value to both.
+- `TURN_SECRET` must be the same for `onelobby-server` and coturn; compose passes one value to both.
 - Players' relay traffic is capped (`total-quota`, `user-quota`, `max-bps`) and cannot reach private addresses
   (`denied-peer-ip` in `turnserver.conf`), so the relay cannot be used to probe your home network.
 - coturn reads the certificate Caddy obtained. If `turns:` fails right after first start, wait for Caddy to finish

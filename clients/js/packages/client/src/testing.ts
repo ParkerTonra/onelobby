@@ -1,6 +1,6 @@
 /**
  * Test doubles: a manual clock, an in-memory lobby server speaking the lk1 protocol (spec/signaling.md, the parts the
- * client uses) and an in-memory peer network. Exported as `@keepalive/client/testing`.
+ * client uses) and an in-memory peer network. Exported as `onelobby/testing`.
  */
 import type { Clock } from "./clock.js";
 import { CROCKFORD_ALPHABET, normalizeCode } from "./crockford.js";
@@ -244,7 +244,7 @@ interface MLobby {
   reserved: Map<string, MPeer>;
 }
 
-/** Minimal keepalive-server (lk1) for client tests. Not a conformance target: stream A owns the real server. */
+/** Minimal onelobby-server (lk1) for client tests. Not a conformance target: stream A owns the real server. */
 export class MemoryServer {
   readonly lobbies = new Map<string, MLobby>();
   /** Every socket ever opened (to drop one from a test). */

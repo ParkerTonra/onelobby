@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using LowkeyIndustries.Sim.Commands;
 using Xunit.Abstractions;
 
-namespace Keepalive.Lowkey.Tests;
+namespace OneLobby.Lowkey.Tests;
 
 public class CodecRoundTripTests
 {

@@ -1,10 +1,10 @@
-import { Keepalive, Gridpaint, paintCmd, PALETTE, GRID_W, formatCode } from "/lib/internals.js";
+import { OneLobby, Gridpaint, paintCmd, PALETTE, GRID_W, formatCode } from "/lib/internals.js";
 
 const $ = (id) => document.getElementById(id);
-const server = document.querySelector('meta[name="keepalive-lobby-server"]').content;
+const server = document.querySelector('meta[name="onelobby-server"]').content;
 $("name").value = "player" + Math.floor(Math.random() * 90 + 10);
 
-const kit = new Keepalive({
+const kit = new OneLobby({
   gameId: "gridpaint",
   netVersion: "1",
   lobbyServer: server,

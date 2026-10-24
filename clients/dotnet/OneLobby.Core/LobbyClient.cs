@@ -1,0 +1,224 @@
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace OneLobby
+{
+    /// <summary>
+    /// Entry point: talks to onelobby-server over the transport's signaling socket and hands out <see cref="Lobby"/>s.
+    /// Requests complete (and their continuations are signalled) from inside <see cref="Pump"/>, never from another thread.
+    /// </summary>
+    /// <remarks>The async calls throw <see cref="OneLobbyException"/> (with the server error <c>Code</c>, such as
+    /// lobby_full, unknown_code, version_mismatch, rate_limited, or the local codes timeout and server_closed).</remarks>
+    public sealed class LobbyClient : IAsyncDisposable
+    {
+        private const long RequestTimeoutMs = 10_000;
+
+        private sealed class Op
+        {
+            public string? Request;
+            public string[] Expect = Array.Empty<string>();
+            public Action<JsonElement> Complete = _ => { };
+            public Action<Exception> Fail = _ => { };
+            public bool Sent;
+            public long DeadlineMs;
+            public CancellationTokenRegistration Reg;
+        }
+
+        internal OneLobbyConfig Config { get; }
+        internal ITransport Transport { get; }
+        internal IReadOnlyList<IceServer> Ice { get; private set; } = Array.Empty<IceServer>();
+        internal ISignalingSocket? Socket { get; private set; }
+
+        private Op? _op;
+        private Lobby? _lobby;
+        private bool _welcomed;
+        private bool _helloWired;
+        private string? _helloResume;
+        private JsonElement? _stashedLobby;
+        private long _lastPingMs;
+        private int _pingN;
+
+        public event Action<LobbyError>? Error;
+
+        public LobbyClient(OneLobbyConfig config, ITransport transport)
+        {
+            Config = config ?? throw new ArgumentNullException(nameof(config));
+            Transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        }
+
+        public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
+            Run(null, Signaling.Create(Config, options), new[] { "lobby" }, EnterLobby, ct);
+
+        public Task<Lobby> JoinAsync(string code, CancellationToken ct = default)
+        {
+            var norm = Crockford.Normalize(code);
+            if (norm == null) return Task.FromException<Lobby>(new OneLobbyException("unknown_code", "not a valid join code"));
+            return Run(null, Signaling.Join(norm), new[] { "lobby" }, EnterLobby, ct);
+        }
+
+        public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default) =>
+            Run(resumeToken, null, new[] { "lobby" }, EnterLobby, ct);
+
+        public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null,
+            CancellationToken ct = default) =>
+            Run<IReadOnlyList<LobbySummary>>(null, Signaling.List(metaFilter), new[] { "lobbies" }, e =>
+            {
+                var items = new List<LobbySummary>();
+                if (e.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    foreach (var it in arr.EnumerateArray()) items.Add(Signaling.ParseSummary(it));
+                return items;
+            }, ct);
+
+        private Lobby EnterLobby(JsonElement reply)
+        {
+            var lobby = new Lobby(this, Signaling.ParseLobby(reply));
+            _lobby = lobby;
+            lobby.Start();
+            return lobby;
+        }
+
+        private Task<T> Run<T>(string? resume, string? request, string[] expect, Func<JsonElement, T> finish, CancellationToken ct)
+        {
+            if (_op != null) return Task.FromException<T>(new InvalidOperationException("another request is in flight"));
+            if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
+            var tcs = new TaskCompletionSource<T>();
+            var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
+            op.Complete = e =>
+            {
+                try { tcs.TrySetResult(finish(e)); }
+                catch (Exception ex) { tcs.TrySetException(ex); }
+            };
+            op.Fail = ex => tcs.TrySetException(ex);
+            if (ct.CanBeCanceled)
+                op.Reg = ct.Register(() => { if (_op == op) _op = null; tcs.TrySetCanceled(); });
+            _op = op;
+            if (Socket == null || Socket.State == SocketState.Closed)
+            {
+                Socket?.Dispose();
+                Socket = Transport.ConnectSignaling(Config.LobbyServer);
+                _welcomed = false;
+                _helloWired = false;
+            }
+            _helloResume = resume;
+            if (_welcomed) Send(op);
+            return tcs.Task;
+        }
+
+        private void Send(Op op)
+        {
+            op.Sent = true;
+            if (op.Request != null) Socket!.Send(op.Request);
+            else if (_stashedLobby is { } s) { _stashedLobby = null; FinishOp(s); }
+        }
+
+        private void FinishOp(JsonElement e)
+        {
+            var op = _op!;
+            _op = null;
+            op.Reg.Dispose();
+            op.Complete(e);
+        }
+
+        private void FailOp(Exception ex)
+        {
+            var op = _op;
+            if (op == null) return;
+            _op = null;
+            op.Reg.Dispose();
+            op.Fail(ex);
+        }
+
+        internal void SendRaw(string json) { if (Socket != null && Socket.State == SocketState.Open) Socket.Send(json); }
+
+        internal void LobbyClosed(Lobby l) { if (_lobby == l) _lobby = null; }
+
+        internal void RaiseError(LobbyError e) => Error?.Invoke(e);
+
+        /// <summary>
+        /// Polls the transport and the signaling socket. You need it only before a lobby exists (to complete HostAsync,
+        /// JoinAsync or ListAsync); once you hold a <see cref="Lobby"/>, call <see cref="Lobby.Pump"/>, which does this too.
+        /// Calling both is harmless.
+        /// </summary>
+        public void Pump()
+        {
+            Transport.Poll();
+            var now = Transport.NowMs;
+            var sock = Socket;
+            if (sock != null)
+            {
+                if (sock.State == SocketState.Open && !_helloWired && (_op != null || _lobby != null))
+                {
+                    _helloWired = true;
+                    sock.Send(Signaling.Hello(Config, _helloResume));
+                }
+                while (sock.TryReceive(out var text)) Dispatch(text);
+                if (sock.State == SocketState.Closed)
+                {
+                    FailOp(new OneLobbyException("server_closed", sock.CloseReason ?? "closed"));
+                    _lobby?.OnSocketClosed();
+                }
+                else if (sock.State == SocketState.Open && _welcomed && now - _lastPingMs >= 10_000)
+                {
+                    _lastPingMs = now;
+                    sock.Send(Signaling.Ping(++_pingN));
+                }
+            }
+            if (_op != null && now > _op.DeadlineMs) FailOp(new OneLobbyException("timeout", "no answer from the lobby server"));
+            _lobby?.PumpLobby();
+        }
+
+        private void Dispatch(string text)
+        {
+            JsonDocument doc;
+            try { doc = JsonDocument.Parse(text); }
+            catch (JsonException) { return; }
+            using (doc)
+            {
+                var e = doc.RootElement;
+                var t = Signaling.Str(e, "t");
+                switch (t)
+                {
+                    case "welcome":
+                        Ice = Signaling.ParseIce(e);
+                        _welcomed = true;
+                        if (_op != null && !_op.Sent) Send(_op);
+                        return;
+                    case "ping":
+                        SendRaw(Signaling.Pong(Signaling.Int(e, "n")));
+                        return;
+                    case "pong":
+                        return;
+                    case "error":
+                    {
+                        var err = new LobbyError(Signaling.Str(e, "code"), Signaling.Str(e, "msg"));
+                        FailOp(new OneLobbyException(err.Code, err.Message));
+                        Error?.Invoke(err);
+                        _lobby?.OnServerError(err);
+                        return;
+                    }
+                }
+                if (_op != null && _op.Sent && Array.IndexOf(_op.Expect, t) >= 0)
+                {
+                    FinishOp(e.Clone());
+                    return;
+                }
+                if (t == "lobby" && _lobby == null)
+                {
+                    _stashedLobby = e.Clone(); // a resume reply that beat the request
+                    return;
+                }
+                _lobby?.OnSignalingMessage(t, e);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_lobby != null) await _lobby.LeaveAsync().ConfigureAwait(false);
+            Socket?.Dispose();
+            Socket = null;
+        }
+    }
+}

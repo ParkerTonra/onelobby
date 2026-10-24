@@ -1,6 +1,6 @@
 # TURN REST credentials
 
-DESIGN s.10, draft-uberti-behave-turn-rest. `keepalive-server` and coturn (`use-auth-secret`, `static-auth-secret=<secret>`)
+DESIGN s.10, draft-uberti-behave-turn-rest. `onelobby-server` and coturn (`use-auth-secret`, `static-auth-secret=<secret>`)
 share one secret.
 
 ```

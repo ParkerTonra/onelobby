@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Keepalive smoke test for a clean Ubuntu 22.04/24.04 VM after `docker compose up -d`.
+# OneLobby smoke test for a clean Ubuntu 22.04/24.04 VM after `docker compose up -d`.
 #   1. /healthz over TLS answers 200 with a valid certificate
-#   2. a TURN allocation works over UDP with credentials minted like keepalive-server does
+#   2. a TURN allocation works over UDP with credentials minted like onelobby-server does
 #   3. the same works over TCP and TLS with UDP to the relay blocked (needs root for iptables)
 # Run from anywhere:  sudo deploy/scripts/smoke.sh   (reads deploy/.env)
 set -u

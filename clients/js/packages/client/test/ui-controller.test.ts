@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Keepalive } from "../src/keepalive.js";
+import { OneLobby } from "../src/onelobby.js";
 import { LobbyController } from "../src/ui/controller.js";
-import type { KeepaliveOptions, SeatStorage } from "../src/keepalive.js";
+import type { OneLobbyOptions, SeatStorage } from "../src/onelobby.js";
 import { rig, type Rig } from "./helpers.js";
 
 /** A kit like the element builds (raw mode, no voice) on the in-memory server. */
-const kit = (r: Rig, name: string, extra: Partial<KeepaliveOptions> = {}, adv: KeepaliveOptions["advanced"] = {}) =>
-  new Keepalive({
+const kit = (r: Rig, name: string, extra: Partial<OneLobbyOptions> = {}, adv: OneLobbyOptions["advanced"] = {}) =>
+  new OneLobby({
     gameId: "gridpaint", netVersion: "1", lobbyServer: "mem://server", mode: "raw", displayName: name, ...extra,
     advanced: { socketFactory: r.server.socketFactory, linkFactory: r.net.factoryFor(name), clock: r.clock, voiceCodec: null, createMic: null, createSink: null, storage: null, ...adv },
   });
@@ -18,7 +18,7 @@ class MapStorage implements SeatStorage {
   removeItem(k: string) { this.m.delete(k); }
 }
 
-function player(r: Rig, opts: { maxPlayers?: number; makeKit?: (name: string) => Keepalive } = {}) {
+function player(r: Rig, opts: { maxPlayers?: number; makeKit?: (name: string) => OneLobby } = {}) {
   const c = new LobbyController({
     makeKit: opts.makeKit ?? ((name) => kit(r, name)),
     maxPlayers: opts.maxPlayers ?? 4,
@@ -32,7 +32,7 @@ function player(r: Rig, opts: { maxPlayers?: number; makeKit?: (name: string) =>
   return { c, events, states, of: (t: string) => events.filter((e) => e[0] === t).map((e) => e[1]) };
 }
 
-describe("<keepalive-lobby> controller", () => {
+describe("<one-lobby> controller", () => {
   it("host -> join -> start -> messages, with plain-language status along the way", async () => {
     const r = rig();
     const A = player(r);

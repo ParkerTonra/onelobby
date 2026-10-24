@@ -1,19 +1,19 @@
 # Recipe: raw mode (bring your own netcode)
 
 Use `mode: "raw"` when your game is turn-based or host-authoritative (arcade, card, board games) and you do not want a
-deterministic lockstep sim. Keepalive gives you lobbies plus reliable/fast byte messages; you define the protocol.
+deterministic lockstep sim. OneLobby gives you lobbies plus reliable/fast byte messages; you define the protocol.
 Connect first with `js-web.md` (or the C# recipes), then add this.
 
 ## Pattern: joiners send intents, the host decides, everyone gets the result
 
-One tag byte, then payload. The game owns this layout; Keepalive never looks inside.
+One tag byte, then payload. The game owns this layout; OneLobby never looks inside.
 
 | Tag | Direction | Payload | Meaning |
 |---|---|---|---|
 | 1 `MOVE` | joiner to host | `cell` (1 byte) | "I want to play this cell" |
 | 2 `STATE` | host to one or all | 9 cells, `turn`, `winner` (1 byte each) | authoritative state |
 
-**Mapping your state to bytes.** Keepalive moves bytes; your state is strings and objects. Keep a small table from each
+**Mapping your state to bytes.** OneLobby moves bytes; your state is strings and objects. Keep a small table from each
 value to a number and back, and never send names or JSON text for something that has an id. Here the example game's
 `"X" | "O" | ""` cells and `"" | "X" | "O" | "draw"` winner become `0..3` in the code below.
 
@@ -24,7 +24,7 @@ here, because the state you send should be the state at the moment they can rece
 A joiner's own `ready` event (or `await lobby.ready`) means its link to the host is open.
 
 ```ts compile file=sync.ts
-import type { Lobby } from "@keepalive/client";
+import type { Lobby } from "onelobby";
 
 export const MOVE = 1, STATE = 2;
 

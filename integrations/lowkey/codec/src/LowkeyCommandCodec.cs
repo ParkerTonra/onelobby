@@ -2,7 +2,7 @@ using System.Text.Json;
 using LowkeyIndustries.Sim.Commands;
 using LowkeyIndustries.Sim.Core;
 
-namespace Keepalive.Lowkey;
+namespace OneLobby.Lowkey;
 
 /// <summary>
 /// Lowkey Command &lt;-&gt; UTF-8 JSON bytes, the payload of <c>LockstepSession.Submit</c> / <c>Frame.Commands</c>.

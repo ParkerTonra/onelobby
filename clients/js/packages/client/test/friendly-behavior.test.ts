@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Keepalive, KeepaliveError, describeError, type KeepaliveOptions, type SeatStorage } from "../src/index.js";
+import { OneLobby, OneLobbyError, describeError, type OneLobbyOptions, type SeatStorage } from "../src/index.js";
 import type { LinkFactory, PeerLink } from "../src/transport.js";
 import { ManualClock, MemoryNetwork, MemoryServer, settle } from "../src/testing.js";
 
@@ -29,8 +29,8 @@ function world() {
   const clock = new ManualClock();
   const server = new MemoryServer();
   const net = new MemoryNetwork();
-  const make = (name: string, extra: Partial<KeepaliveOptions> = {}, adv: KeepaliveOptions["advanced"] = {}) =>
-    new Keepalive({
+  const make = (name: string, extra: Partial<OneLobbyOptions> = {}, adv: OneLobbyOptions["advanced"] = {}) =>
+    new OneLobby({
       gameId: "gridpaint",
       netVersion: "1",
       lobbyServer: "mem://server",
@@ -83,9 +83,9 @@ describe("joiner ready timeout (ice_failed)", () => {
     await w.clock.run(9_900, 100);
     expect(rejected).toBeNull();
     await w.clock.run(200, 100);
-    expect(rejected).toBeInstanceOf(KeepaliveError);
-    expect((rejected as KeepaliveError).code).toBe("ice_failed");
-    expect(errors.map((e) => (e as KeepaliveError).code)).toEqual(["ice_failed"]);
+    expect(rejected).toBeInstanceOf(OneLobbyError);
+    expect((rejected as OneLobbyError).code).toBe("ice_failed");
+    expect(errors.map((e) => (e as OneLobbyError).code)).toEqual(["ice_failed"]);
     expect(describeError(errors[0]).message).toBe("Couldn't connect to the other players.");
     expect(blocked.relayTries).toBe(0); // no TURN offered: no relay retry
     expect(ended).toEqual(["ice_failed"]);
@@ -125,7 +125,7 @@ describe("joiner ready timeout (ice_failed)", () => {
     const blocked = blockedDirect(w.net, "bob", false);
     const lb = await w.make("bob", { readyTimeoutMs: 8_000 }, { linkFactory: blocked.factory }).join(la.code);
     let code = "";
-    lb.ready.catch((e: KeepaliveError) => (code = e.code));
+    lb.ready.catch((e: OneLobbyError) => (code = e.code));
     await w.clock.run(8_100, 100);
     expect(blocked.relayTries).toBe(1);
     expect(code).toBe("ice_failed");
@@ -154,25 +154,25 @@ describe("rememberSeat", () => {
     const store = new MapStorage();
     const lb = await w.make("bob", {}, { storage: store }).join(la.code);
     await w.clock.run(200);
-    expect(JSON.parse(store.getItem("keepalive.seat.gridpaint")!)).toMatchObject({ code: la.code, token: lb.resumeToken });
+    expect(JSON.parse(store.getItem("onelobby.seat.gridpaint")!)).toMatchObject({ code: la.code, token: lb.resumeToken });
 
     // "reload": the page's storage survives, everything else is gone
     const afterReload = store.copy();
     w.server.sockets[1].close();
     await lb.leave();
     await w.clock.run(500);
-    expect(store.getItem("keepalive.seat.gridpaint")).toBeNull(); // ended sessions forget their seat
+    expect(store.getItem("onelobby.seat.gridpaint")).toBeNull(); // ended sessions forget their seat
 
     const kitB2 = w.make("bob", {}, { storage: afterReload });
     expect(kitB2.rememberedCode).toBe(la.code);
     const lb2 = await kitB2.join(la.code.toLowerCase());
     expect(lb2.localPeerId).toBe(2); // same seat, not a new player 3
-    expect(JSON.parse(afterReload.getItem("keepalive.seat.gridpaint")!).token).toBe(lb2.resumeToken);
+    expect(JSON.parse(afterReload.getItem("onelobby.seat.gridpaint")!).token).toBe(lb2.resumeToken);
     await w.clock.run(500);
     expect(la.peers.map((p) => p.peerId)).toEqual([1, 2]);
 
     await lb2.leave();
-    expect(afterReload.getItem("keepalive.seat.gridpaint")).toBeNull();
+    expect(afterReload.getItem("onelobby.seat.gridpaint")).toBeNull();
   });
 
   it("resume() takes the seat back without a code; a stale seat resolves null and is forgotten", async () => {
@@ -187,11 +187,11 @@ describe("rememberSeat", () => {
     expect(lb2?.localPeerId).toBe(2);
 
     const stale = new MapStorage();
-    stale.setItem("keepalive.seat.gridpaint", JSON.stringify({ code: la.code, token: "gone", server: "mem://server" }));
+    stale.setItem("onelobby.seat.gridpaint", JSON.stringify({ code: la.code, token: "gone", server: "mem://server" }));
     expect(await w.make("x", {}, { storage: stale }).resume()).toBeNull();
-    expect(stale.getItem("keepalive.seat.gridpaint")).toBeNull();
+    expect(stale.getItem("onelobby.seat.gridpaint")).toBeNull();
     // and join() with a stale seat falls back to a normal join
-    stale.setItem("keepalive.seat.gridpaint", JSON.stringify({ code: la.code, token: "gone", server: "mem://server" }));
+    stale.setItem("onelobby.seat.gridpaint", JSON.stringify({ code: la.code, token: "gone", server: "mem://server" }));
     const lx = await w.make("x", {}, { storage: stale }).join(la.code);
     expect(lx.localPeerId).toBe(3);
   });
@@ -253,14 +253,14 @@ describe("defaults", () => {
   it("advanced seams win over the deprecated top-level ones, which still work", async () => {
     const w = world();
     let used = "";
-    const viaTop = new Keepalive({
+    const viaTop = new OneLobby({
       gameId: "gridpaint", netVersion: "1", lobbyServer: "mem://server",
       socketFactory: (u) => ((used = "top"), w.server.socketFactory(u)),
       linkFactory: w.net.factory, clock: w.clock, voiceCodec: null, createMic: null, createSink: null,
     });
     await viaTop.host({ name: "t", maxPlayers: 2 });
     expect(used).toBe("top");
-    const both = new Keepalive({
+    const both = new OneLobby({
       gameId: "gridpaint", netVersion: "1", lobbyServer: "mem://server",
       socketFactory: () => { throw new Error("deprecated seam should lose"); },
       advanced: { socketFactory: (u) => ((used = "advanced"), w.server.socketFactory(u)), linkFactory: w.net.factory, clock: w.clock, voiceCodec: null, createMic: null, createSink: null, storage: null },

@@ -4,7 +4,7 @@ Your game needs a lobby server so players can find each other with a join code. 
 [Render](https://render.com), a hosting site with a free plan. You click a button, sign in, and copy an address.
 No Linux, no DNS, no ports to open.
 
-What you get: the Keepalive lobby server on a free `https://...onrender.com` address with a certificate. Players connect
+What you get: the OneLobby lobby server on a free `https://...onrender.com` address with a certificate. Players connect
 to each other directly; the server only introduces them.
 What you do not get: a TURN relay (explained below). Most players do not need one. When you do, use
 [RUN_YOUR_OWN.md](RUN_YOUR_OWN.md), the advanced path.
@@ -13,24 +13,24 @@ What you do not get: a TURN relay (explained below). Most players do not need on
 
 1. **Click the button.**
 
-   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ParkerTonra/keepalive)
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ParkerTonra/onelobby)
 
 2. **Sign in or sign up.** Render asks you to log in. GitHub, GitLab, Google or email all work. The free plan does not
    ask for a credit card.
 3. **Check the form and click "Deploy Blueprint"** (the button may say "Apply"). Render shows one service named
-   `keepalive-lobby` on the **Free** plan. You can rename it; the name becomes part of your address. Leave everything
+   `onelobby-server` on the **Free** plan. You can rename it; the name becomes part of your address. Leave everything
    else as it is.
 4. **Wait for "Live".** The first build takes a few minutes. Open the service from your Render dashboard and wait until
    the status says **Live**.
-5. **Copy your address.** Near the top of the service page is a link like `https://keepalive-lobby-ab12.onrender.com`.
-   Click it: the page should say `keepalive-server lk1, connect over WebSocket`. That means it works.
+5. **Copy your address.** Near the top of the service page is a link like `https://onelobby-server-ab12.onrender.com`.
+   Click it: the page should say `onelobby-server lk1, connect over WebSocket`. That means it works.
 6. **Give your game the lobby server address.** Take your address, change `https://` to `wss://` and add `/ws`:
 
    ```
-   wss://keepalive-lobby-ab12.onrender.com/ws
+   wss://onelobby-server-ab12.onrender.com/ws
    ```
 
-   Paste that wherever your game or the `<keepalive-lobby>` element asks for the lobby server
+   Paste that wherever your game or the `<one-lobby>` element asks for the lobby server
    (see [docs/no-code.md](../docs/no-code.md)). Without `/ws` works too; with it is the usual form.
 
 ## What it costs
@@ -56,7 +56,7 @@ A TURN relay is a server that passes game traffic between two players whose netw
 directly. You need one if some players can never join (the join hangs or times out every time) while others can,
 which typically happens on strict office, school or hotel networks and some mobile carriers. A relay has to be
 reachable on many ports, which free web hosts like Render do not allow, so it needs a real machine: follow
-[RUN_YOUR_OWN.md](RUN_YOUR_OWN.md), then add `KEEPALIVE_TURN_URLS` and `KEEPALIVE_TURN_SECRET` to this server's
+[RUN_YOUR_OWN.md](RUN_YOUR_OWN.md), then add `ONELOBBY_TURN_URLS` and `ONELOBBY_TURN_SECRET` to this server's
 **Environment** tab (or move the lobby server onto that machine too).
 
 ## Optional settings
@@ -65,21 +65,21 @@ On the service page, open **Environment**, add a variable, and save; Render rest
 
 | Variable | Example | What it does |
 |---|---|---|
-| `KEEPALIVE_ALLOWED_GAMES` | `com.you.yourgame` | Accept only your game(s), comma-separated. Empty: any game. |
-| `KEEPALIVE_MAX_LOBBIES` | `200` | Most lobbies open at once (default 1000). |
-| `KEEPALIVE_REGION` | `us-west` | Short tag shown next to each lobby in the lobby list. |
-| `KEEPALIVE_TURN_URLS`, `KEEPALIVE_TURN_SECRET` | see above | Hand out your TURN relay to players. |
+| `ONELOBBY_ALLOWED_GAMES` | `com.you.yourgame` | Accept only your game(s), comma-separated. Empty: any game. |
+| `ONELOBBY_MAX_LOBBIES` | `200` | Most lobbies open at once (default 1000). |
+| `ONELOBBY_REGION` | `us-west` | Short tag shown next to each lobby in the lobby list. |
+| `ONELOBBY_TURN_URLS`, `ONELOBBY_TURN_SECRET` | see above | Hand out your TURN relay to players. |
 
-Leave `KEEPALIVE_TRUST_PROXY` set to `true`: it lets the server tell players apart behind Render's front door.
+Leave `ONELOBBY_TRUST_PROXY` set to `true`: it lets the server tell players apart behind Render's front door.
 
 Good to know: `/metrics` (server counters, no player data) is public on this setup; the advanced path restricts it.
-To update to a newer Keepalive version, open the service and choose **Manual Deploy**, then **Deploy latest commit**.
+To update to a newer OneLobby version, open the service and choose **Manual Deploy**, then **Deploy latest commit**.
 
 ## Other hosts
 
 Any host that runs a Docker image and allows WebSockets works. Build from the `server/` folder with
 `server/Dockerfile`; the server listens on the `PORT` the host gives it (8080 if none) and answers health checks on
-`/healthz`. Set `KEEPALIVE_TRUST_PROXY=true` when the host puts a proxy in front. As of October 2026:
+`/healthz`. Set `ONELOBBY_TRUST_PROXY=true` when the host puts a proxy in front. As of October 2026:
 
 - [Railway](https://docs.railway.com/reference/pricing/plans): a one-time $5 trial, then a free plan with $1 of credit a
   month or Hobby at $5 a month. Point a new service at the repo with root directory `server`.

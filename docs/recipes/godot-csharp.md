@@ -1,14 +1,14 @@
 # Recipe: Godot 4 C# (desktop and web)
 
-Godot uses `Keepalive.Core` unchanged and adds `Keepalive.Godot` for the WebRTC transport, microphone capture and Opus.
+Godot uses `OneLobby.Core` unchanged and adds `OneLobby.Godot` for the WebRTC transport, microphone capture and Opus.
 Godot snippets are not compiled by `check-snippets.mjs` (they need GodotSharp); the engine-free parts are in
 `dotnet-generic.md` and are. Use Godot 4.3+ with the .NET build.
 
 ## 1. Add the packages
 
 ```
-dotnet add package Keepalive.Core
-dotnet add package Keepalive.Godot
+dotnet add package OneLobby.Core
+dotnet add package OneLobby.Godot
 ```
 
 Desktop: copy the `webrtc-native` GDExtension into `addons/` (the demo in `clients/dotnet/demo-godot/` shows where).
@@ -22,12 +22,12 @@ Add it under Project Settings, Autoload, as `Net`. The lobby server is a setting
 using System;
 using System.Threading.Tasks;
 using Godot;
-using Keepalive;
-using Keepalive.Godot;
+using OneLobby;
+using OneLobby.Godot;
 
 public partial class Net : Node
 {
-    public const string DefaultServer = "wss://lobby.keepalive.example/ws";
+    public const string DefaultServer = "wss://lobby.onelobby.example/ws";
     LobbyClient _client = null!;
     public Lobby? Lobby { get; private set; }
     [Signal] public delegate void StatusEventHandler(string text);
@@ -41,7 +41,7 @@ public partial class Net : Node
         if (cfg.Load("user://settings.cfg") == Error.Ok)
             server = (string)cfg.GetValue("multiplayer", "lobby_server", server);
 
-        var config = new KeepaliveConfig("com.you.yourgame", "1", new Uri(server), SyncMode.Raw, DisplayName: "Player");
+        var config = new OneLobbyConfig("com.you.yourgame", "1", new Uri(server), SyncMode.Raw, DisplayName: "Player");
         _client = new LobbyClient(config, new GodotTransport());
         _client.Error += e => EmitSignal(SignalName.Status, e.Message);
     }
@@ -110,13 +110,13 @@ sim, `ReportHash` every `HashEveryTicks`. The sim must be deterministic and not 
 
 ## Web builds
 
-Browser peers use the browser's own WebRTC through `Keepalive.Godot`'s web path. Serve the export with
+Browser peers use the browser's own WebRTC through `OneLobby.Godot`'s web path. Serve the export with
 `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (the `deploy/Caddyfile` snippet
 does this) if you use threads. Voice needs `audio/driver/enable_input` on.
 
 ## Done when
 
 - The project builds with `dotnet build` and the menu shows Host / Join / Browse.
-- With a local `keepalive-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080/ws`; use 127.0.0.1, not localhost): one presses Host and shows a
+- With a local `onelobby-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080/ws`; use 127.0.0.1, not localhost): one presses Host and shows a
   code, the other joins it, and a message sent by one arrives in the other's `MessageReceived`.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".

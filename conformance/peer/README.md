@@ -8,7 +8,7 @@ from `spec/vectors/gridpaint.json` and the reference implementation.
 cd conformance && npm install
 node peer/run.mjs --mock                              # harness self-test against the built-in reference mock
 node peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs     # in-process JS adapter
-node peer/run.mjs --stdio="dotnet run --project ../clients/dotnet/Keepalive.Conformance"   # any language
+node peer/run.mjs --stdio="dotnet run --project ../clients/dotnet/OneLobby.Conformance"   # any language
   --only=<text>  --group=joiner,host,migration  --timeout=<ms>
 ```
 Exit 0 green, 1 failures, 2 adapter would not start. Scenarios whose `needs` the adapter does not list in `capabilities` are skipped.

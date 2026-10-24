@@ -12,13 +12,13 @@ if (raw.includes("REPLACE-ME")) {
 if (readFileSync(join(dir, "README.md"), "utf8").includes("REPLACE-ME")) {
   problems.push('README.md still has "REPLACE-ME" links: point them at the docs.');
 }
-for (const f of ["dist/index.js", "dist/index.d.ts", "dist/keepalive.global.js", "dist/keepalive.global.min.js", "dist/keepalive.bundle.mjs", "README.md", "LICENSE"]) {
+for (const f of ["dist/index.js", "dist/index.d.ts", "dist/onelobby.global.js", "dist/onelobby.global.min.js", "dist/onelobby.bundle.mjs", "README.md", "LICENSE"]) {
   if (!existsSync(join(dir, f))) problems.push(`missing ${f}`);
 }
 const pkg = JSON.parse(raw);
-const src = readFileSync(join(dir, "src", "keepalive.ts"), "utf8");
+const src = readFileSync(join(dir, "src", "onelobby.ts"), "utf8");
 const m = /LIB_VERSION = "([^"]+)"/.exec(src);
-if (m && m[1] !== pkg.version) problems.push(`src/keepalive.ts LIB_VERSION is ${m[1]} but package.json version is ${pkg.version}`);
+if (m && m[1] !== pkg.version) problems.push(`src/onelobby.ts LIB_VERSION is ${m[1]} but package.json version is ${pkg.version}`);
 const n = /LIB_NAME = "([^"]+)"/.exec(src);
 if (n && n[1] !== pkg.name) console.warn(`note: LIB_NAME is "${n[1]}" but the package is "${pkg.name}" (fine if you renamed the package on purpose)`);
 if (problems.length) {

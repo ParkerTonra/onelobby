@@ -1,4 +1,4 @@
-// Real-browser end to end for <keepalive-lobby> and examples/drop-in: two browser profiles host and join through the
+// Real-browser end to end for <one-lobby> and examples/drop-in: two browser profiles host and join through the
 // element (invite link from the Copy button), start, sync a shared counter, send a message; plus a friendly error.
 // Self-contained: builds nothing, but starts the C# lobby server (dotnet, Release build) unless --lobby is given.
 //   npm run build && node e2e/dropin.mjs [--lobby ws://localhost:8080/ws] [--browser "C:/.../msedge.exe"] [--shots dir]
@@ -28,8 +28,8 @@ if (!lobby) {
   const port = 18000 + Math.floor(Math.random() * 1000);
   lobby = `ws://localhost:${port}/ws`;
   // run the built dll directly (killing `dotnet run` can orphan the server on Windows); build it if missing
-  const dll = join(repo, "server/Keepalive.Server/bin/Release/net10.0/keepalive-server.dll");
-  if (!existsSync(dll)) execFileSync("dotnet", ["build", join(repo, "server/Keepalive.Server"), "-c", "Release"], { stdio: "inherit" });
+  const dll = join(repo, "server/OneLobby.Server/bin/Release/net10.0/onelobby-server.dll");
+  if (!existsSync(dll)) execFileSync("dotnet", ["build", join(repo, "server/OneLobby.Server"), "-c", "Release"], { stdio: "inherit" });
   server = spawn("dotnet", [dll, "--listen", `:${port}`], { stdio: "ignore" });
   const t0 = Date.now();
   for (;;) {
@@ -61,8 +61,8 @@ const browser = await chromium.launch({ executablePath: exe, headless: true });
 // The page loads the element from unpkg; serve that URL from this checkout's build instead.
 const profile = async (viewport) => {
   const ctx = await browser.newContext({ viewport, permissions: ["clipboard-read", "clipboard-write"] });
-  await ctx.route("https://unpkg.com/@keepalive/client/dist/**", async (route) => {
-    const rel = new URL(route.request().url()).pathname.replace(/^\/@keepalive\/client\/dist\//, "");
+  await ctx.route("https://unpkg.com/onelobby/dist/**", async (route) => {
+    const rel = new URL(route.request().url()).pathname.replace(/^\/onelobby\/dist\//, "");
     try { route.fulfill({ status: 200, contentType: types[extname(rel)] ?? "text/plain", body: await readFile(join(dist, rel)) }); }
     catch { route.fulfill({ status: 404, body: "" }); }
   });
@@ -75,9 +75,9 @@ const open = async (ctx, url, name) => {
   await p.goto(url);
   return p;
 };
-const status = (p) => p.locator("keepalive-lobby #status").textContent();
+const status = (p) => p.locator("one-lobby #status").textContent();
 const waitStatus = (p, re, ms = 20000) =>
-  p.waitForFunction((src) => new RegExp(src).test(document.querySelector("keepalive-lobby").shadowRoot.getElementById("status").textContent), re.source, { timeout: ms });
+  p.waitForFunction((src) => new RegExp(src).test(document.querySelector("one-lobby").shadowRoot.getElementById("status").textContent), re.source, { timeout: ms });
 
 try {
   await mkdir(shots, { recursive: true });
@@ -85,32 +85,32 @@ try {
   const ctxB = await profile({ width: 390, height: 844 }); // a phone
   const A = await open(ctxA, page0, "Sam");
   await A.screenshot({ path: join(shots, "1-start.png") });
-  await A.fill("keepalive-lobby #name", "Sam");
-  await A.click("keepalive-lobby #host");
+  await A.fill("one-lobby #name", "Sam");
+  await A.click("one-lobby #host");
   await waitStatus(A, /Waiting for players/);
   check("host shows the waiting status", true, await status(A));
-  const code = (await A.locator("keepalive-lobby #codeText").textContent()).replace(/\s/g, "");
+  const code = (await A.locator("one-lobby #codeText").textContent()).replace(/\s/g, "");
   check("code shown big", /^[0-9A-Z]{6}$/.test(code), code);
-  await A.click("keepalive-lobby #copyLink");
+  await A.click("one-lobby #copyLink");
   const invite = await A.evaluate(() => navigator.clipboard.readText());
   check("copy invite link puts a join link on the clipboard", invite.replace(/-/g, "").includes(`join=${code}`), invite);
-  check("copy button confirms", (await A.locator("keepalive-lobby #copyLink").textContent()) === "Link copied!");
+  check("copy button confirms", (await A.locator("one-lobby #copyLink").textContent()) === "Link copied!");
   await A.screenshot({ path: join(shots, "2-host-waiting.png") });
 
   const B = await open(ctxB, invite, "Alex");
   await waitStatus(B, /invited/);
-  check("invite link pre-fills the code and asks for a name", (await B.inputValue("keepalive-lobby #code")).replace(/\s/g, "") === code);
-  await B.fill("keepalive-lobby #name", "Alex");
-  await B.click("keepalive-lobby #join");
+  check("invite link pre-fills the code and asks for a name", (await B.inputValue("one-lobby #code")).replace(/\s/g, "") === code);
+  await B.fill("one-lobby #name", "Alex");
+  await B.click("one-lobby #join");
   await waitStatus(B, /Connected! Waiting for Sam to start/);
   check("joiner connects to the host", true, await status(B));
   await waitStatus(A, /2 players here/);
-  const names = await A.locator("keepalive-lobby #players li").allTextContents();
+  const names = await A.locator("one-lobby #players li").allTextContents();
   check("player list has both names", names.some((n) => n.startsWith("Sam")) && names.some((n) => n.startsWith("Alex")), JSON.stringify(names));
-  check("start button only for the host", (await A.isVisible("keepalive-lobby #start")) && !(await B.isVisible("keepalive-lobby #start")));
+  check("start button only for the host", (await A.isVisible("one-lobby #start")) && !(await B.isVisible("one-lobby #start")));
   await B.screenshot({ path: join(shots, "3-joiner-phone.png") });
 
-  await A.click("keepalive-lobby #start");
+  await A.click("one-lobby #start");
   await A.waitForSelector("#game:not([hidden])");
   await B.waitForSelector("#game:not([hidden])", { timeout: 10000 });
   check("start reaches both pages", true);
@@ -131,7 +131,7 @@ try {
   await B.waitForSelector("#game:not([hidden])", { timeout: 20000 });
   await B.waitForFunction(() => document.querySelector("#count").textContent === "5", null, { timeout: 10000 });
   await sleep(500);
-  const afterReload = await A.locator("keepalive-lobby #players li").count();
+  const afterReload = await A.locator("one-lobby #players li").count();
   check("reload takes the same seat back", afterReload === 2, `${afterReload} players at the host`);
   await B.click("#click");
   await A.waitForFunction(() => document.querySelector("#count").textContent === "6", null, { timeout: 10000 });
@@ -140,26 +140,26 @@ try {
   // late joiner gets the current count
   const ctxC = await profile({ width: 800, height: 700 });
   const C = await open(ctxC, invite, "Kim");
-  await C.fill("keepalive-lobby #name", "Kim");
-  await C.click("keepalive-lobby #join");
+  await C.fill("one-lobby #name", "Kim");
+  await C.click("one-lobby #join");
   await C.waitForSelector("#game:not([hidden])", { timeout: 15000 });
   await C.waitForFunction(() => document.querySelector("#count").textContent === "6", null, { timeout: 10000 });
   check("late joiner sees the game and the current count", true);
 
   // friendly error + retry
   const D = await open(ctxC, page0, "Lee");
-  await D.fill("keepalive-lobby #name", "Lee");
-  await D.fill("keepalive-lobby #code", "ZZZ ZZZ");
-  await D.click("keepalive-lobby #join");
+  await D.fill("one-lobby #name", "Lee");
+  await D.fill("one-lobby #code", "ZZZ ZZZ");
+  await D.click("one-lobby #join");
   await waitStatus(D, /couldn't find a lobby with that code/);
-  check("unknown code: plain-language error with a retry button", await D.isVisible("keepalive-lobby #retry"), await status(D));
+  check("unknown code: plain-language error with a retry button", await D.isVisible("one-lobby #retry"), await status(D));
   await D.screenshot({ path: join(shots, "5-error.png") });
-  await D.click("keepalive-lobby #back");
-  check("back returns to the start", await D.isVisible("keepalive-lobby #host"));
+  await D.click("one-lobby #back");
+  check("back returns to the start", await D.isVisible("one-lobby #host"));
 
   // keyboard: Tab to the host button and press Enter
   const E = await open(await profile({ width: 800, height: 700 }), page0, "Keys");
-  await E.focus("keepalive-lobby #name");
+  await E.focus("one-lobby #name");
   await E.keyboard.type("Keys");
   await E.keyboard.press("Tab");
   await E.keyboard.press("Enter");

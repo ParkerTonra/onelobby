@@ -1,13 +1,13 @@
-# keepalive-server image. Build context is the server/ directory:
-#   docker build -t ghcr.io/parkertonra/keepalive-server:latest server
+# onelobby-server image. Build context is the server/ directory:
+#   docker build -t ghcr.io/parkertonra/onelobby-server:latest server
 # Not built in CI-less dev boxes without a Docker daemon; the Dockerfile is plain multi-stage .NET.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY Directory.Build.props ./
-COPY Keepalive.Server/Keepalive.Server.csproj Keepalive.Server/
-RUN dotnet restore Keepalive.Server/Keepalive.Server.csproj
-COPY Keepalive.Server/ Keepalive.Server/
-RUN dotnet publish Keepalive.Server/Keepalive.Server.csproj -c Release -o /out --no-restore -p:UseAppHost=false
+COPY OneLobby.Server/OneLobby.Server.csproj OneLobby.Server/
+RUN dotnet restore OneLobby.Server/OneLobby.Server.csproj
+COPY OneLobby.Server/ OneLobby.Server/
+RUN dotnet publish OneLobby.Server/OneLobby.Server.csproj -c Release -o /out --no-restore -p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
@@ -18,5 +18,5 @@ ENV DOTNET_EnableDiagnostics=0 \
     DOTNET_gcServer=0
 EXPOSE 8080
 # Listens on :8080, or on $PORT when the host sets it (Render, Railway, Heroku-style platforms).
-# Flags (or KEEPALIVE_* env vars) are appended: --listen, --turn-urls, --turn-secret, --public-url, --allowed-games, --max-lobbies ...
-ENTRYPOINT ["dotnet", "keepalive-server.dll"]
+# Flags (or ONELOBBY_* env vars) are appended: --listen, --turn-urls, --turn-secret, --public-url, --allowed-games, --max-lobbies ...
+ENTRYPOINT ["dotnet", "onelobby-server.dll"]

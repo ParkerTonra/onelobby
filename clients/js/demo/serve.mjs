@@ -16,10 +16,10 @@ const arg = (name, dflt) => {
   return i >= 0 ? process.argv[i + 1] : dflt;
 };
 const port = Number(arg("port", process.env.PORT ?? 5173));
-const lobby = arg("lobby", process.env.KEEPALIVE_LOBBY ?? "ws://localhost:8080/ws");
+const lobby = arg("lobby", process.env.ONELOBBY_LOBBY ?? process.env.KEEPALIVE_LOBBY ?? "ws://localhost:8080/ws");
 
 if (!existsSync(join(dist, "internals.js")) || process.argv.includes("--build")) {
-  console.log("building @keepalive/client ...");
+  console.log("building onelobby ...");
   execSync("npx tsc -p tsconfig.build.json", { cwd: pkg, stdio: "inherit" });
 }
 
@@ -35,7 +35,7 @@ createServer(async (req, res) => {
     if (rel.startsWith("..")) throw new Error("bad path");
     let body = await readFile(join(base, rel));
     if (rel === "index.html") {
-      body = Buffer.from(body.toString().replace(/(name="keepalive-lobby-server" content=")[^"]*/, `$1${lobby}`));
+      body = Buffer.from(body.toString().replace(/(name="onelobby-server" content=")[^"]*/, `$1${lobby}`));
     }
     res.writeHead(200, { "content-type": types[extname(rel)] ?? "application/octet-stream", "cache-control": "no-store" });
     res.end(body);

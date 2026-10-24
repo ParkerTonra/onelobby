@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mints a TURN REST credential the way keepalive-server does (DESIGN s.10) and checks it.
+// Mints a TURN REST credential the way onelobby-server does (DESIGN s.10) and checks it.
 //   username   = "<expiry unix seconds>:<userId>" (userId = the server connection id)
 //   credential = base64(HMAC-SHA1(secret, username))
 // Usage:

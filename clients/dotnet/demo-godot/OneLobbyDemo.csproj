@@ -1,0 +1,17 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>OneLobbyDemo</RootNamespace>
+    <AssemblyName>OneLobbyDemo</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\OneLobby.Gridpaint\OneLobby.Gridpaint.csproj" />
+    <ProjectReference Include="..\OneLobby.Godot\OneLobby.Godot.csproj" />
+    <ProjectReference Include="..\OneLobby.Opus\OneLobby.Opus.csproj" />
+  </ItemGroup>
+</Project>

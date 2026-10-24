@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>OneLobby.Lowkey</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Lowkey's Sim, built by ../../build-sim.sh into .lowkey-sim/bin (never a ProjectReference: that would write obj/ into the Lowkey repo). -->
+    <Reference Include="LowkeyIndustries.Sim">
+      <HintPath>$(MSBuildThisFileDirectory)../../.lowkey-sim/bin/LowkeyIndustries.Sim.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <Target Name="NeedSim" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(MSBuildThisFileDirectory)../../.lowkey-sim/bin/LowkeyIndustries.Sim.dll')">
+    <Error Text="Run integrations/lowkey/build-sim.sh first (it builds Lowkey's Sim into integrations/lowkey/.lowkey-sim without touching the Lowkey repo)." />
+  </Target>
+</Project>

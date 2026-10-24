@@ -1,7 +1,7 @@
 // Single-file bundles from src/global.ts (run after tsc; `npm run build` does both):
-//   dist/keepalive.global.js      IIFE, sets window.Keepalive (plain <script src>, works from file:// too)
-//   dist/keepalive.global.min.js  same, minified
-//   dist/keepalive.bundle.mjs     one ES module (import from a CDN URL without a bundler)
+//   dist/onelobby.global.js      IIFE, sets window.OneLobby (plain <script src>, works from file:// too)
+//   dist/onelobby.global.min.js  same, minified
+//   dist/onelobby.bundle.mjs     one ES module (import from a CDN URL without a bundler)
 // Each gets a .map. Prints raw / min+gzip sizes.
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
@@ -17,9 +17,9 @@ const banner = { js: `/*! ${pkg.name} ${pkg.version} | ${pkg.license} license */
 const common = { entryPoints: [entry], bundle: true, sourcemap: true, target: "es2022", platform: "browser", banner, logLevel: "warning", legalComments: "none" };
 
 const outputs = [
-  { outfile: join(dist, "keepalive.global.js"), format: "iife", globalName: "Keepalive", minify: false },
-  { outfile: join(dist, "keepalive.global.min.js"), format: "iife", globalName: "Keepalive", minify: true },
-  { outfile: join(dist, "keepalive.bundle.mjs"), format: "esm", minify: true },
+  { outfile: join(dist, "onelobby.global.js"), format: "iife", globalName: "OneLobby", minify: false },
+  { outfile: join(dist, "onelobby.global.min.js"), format: "iife", globalName: "OneLobby", minify: true },
+  { outfile: join(dist, "onelobby.bundle.mjs"), format: "esm", minify: true },
 ];
 for (const o of outputs) await build({ ...common, ...o });
 

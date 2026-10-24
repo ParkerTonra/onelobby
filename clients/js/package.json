@@ -1,14 +1,14 @@
 {
-  "name": "keepalive-js",
+  "name": "onelobby-js",
   "private": true,
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @keepalive/client",
-    "test": "npm test -w @keepalive/client",
-    "typecheck": "npm run typecheck -w @keepalive/client",
+    "build": "npm run build -w onelobby",
+    "test": "npm test -w onelobby",
+    "typecheck": "npm run typecheck -w onelobby",
     "demo": "node demo/serve.mjs",
     "e2e:dropin": "npm run build && node e2e/dropin.mjs"
   },

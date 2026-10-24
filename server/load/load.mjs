@@ -1,7 +1,7 @@
-// Keepalive server load script: N lobbies x P sockets each, then a signal storm.
+// OneLobby server load script: N lobbies x P sockets each, then a signal storm.
 //   node server/load/load.mjs ws://localhost:8080/ws [--lobbies 1000] [--per-lobby 5] [--seconds 20] [--metrics http://localhost:8080/metrics]
 // Start the server with the per-IP limits off (one machine = one IP):
-//   keepalive-server --disable-ip-limits --max-lobbies 2000
+//   onelobby-server --disable-ip-limits --max-lobbies 2000
 // Needs Node 22+ (global WebSocket, no dependencies).
 
 const args = process.argv.slice(2);
@@ -123,7 +123,7 @@ console.log(`signals: sent ${signalsSent}, echoed ${signalsGot}, errors ${errors
 console.log(`echo latency ms: p50 ${pct(lat, 50)}  p95 ${pct(lat, 95)}  p99 ${pct(lat, 99)}  max ${Math.max(0, ...lat)}`);
 try {
   const text = await (await fetch(METRICS)).text();
-  console.log(text.split('\n').filter((l) => /^keepalive_(lobbies|sockets) /.test(l)).join('\n'));
+  console.log(text.split('\n').filter((l) => /^onelobby_(lobbies|sockets) /.test(l)).join('\n'));
 } catch (e) {
   console.log('metrics unavailable:', e.message);
 }

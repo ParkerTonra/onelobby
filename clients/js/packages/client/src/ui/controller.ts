@@ -1,10 +1,10 @@
 /**
- * The DOM-free brain of `<keepalive-lobby>`: a small state machine over Keepalive + Lobby (raw mode) that the element
+ * The DOM-free brain of `<one-lobby>`: a small state machine over OneLobby + Lobby (raw mode) that the element
  * renders, plus the JSON message envelope and the host-authoritative shared state. Unit-tested without a browser.
  */
-import { KeepaliveError } from "../signaling.js";
+import { OneLobbyError } from "../signaling.js";
 import type { Lobby, Peer } from "../lobby.js";
-import type { HostOptions } from "../keepalive.js";
+import type { HostOptions } from "../onelobby.js";
 import { describeError, type FriendlyError } from "../friendly.js";
 import { normalizeCode } from "../crockford.js";
 
@@ -17,11 +17,11 @@ export interface Player {
   isMe: boolean;
 }
 
-/** What the controller needs from `Keepalive` (so tests can pass the in-memory rig). */
+/** What the controller needs from `OneLobby` (so tests can pass the in-memory rig). */
 export interface KitLike {
   host(h: HostOptions): Promise<Lobby>;
   join(code: string): Promise<Lobby>;
-  /** Take back the seat this tab held before a reload (Keepalive `rememberSeat`); null when there is none. */
+  /** Take back the seat this tab held before a reload (OneLobby `rememberSeat`); null when there is none. */
   resume?(): Promise<Lobby | null>;
   readonly rememberedCode?: string | null;
 }
@@ -157,7 +157,7 @@ export class LobbyController {
     const norm = normalizeCode(code);
     this.lastAction = { kind: "join", code };
     if (!norm) {
-      this.fail(new KeepaliveError("bad_code"));
+      this.fail(new OneLobbyError("bad_code"));
       return Promise.resolve();
     }
     return this.run(name, (kit) => kit.join(norm));
@@ -269,7 +269,7 @@ export class LobbyController {
     on.push(l.on("sessionEnded", (reason) => {
       if (this.lobby !== l) return;
       if (reason === "left") return;
-      this.fail(new KeepaliveError(reason));
+      this.fail(new OneLobbyError(reason));
     }));
     // A joiner that cannot reach the host: the kit gives up after its readyTimeoutMs, leaves, and ends the session
     // with "ice_failed", which lands in the sessionEnded handler above.

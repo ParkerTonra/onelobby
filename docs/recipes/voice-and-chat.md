@@ -9,7 +9,7 @@ Limits: 256 UTF-8 bytes per message, 5 messages per 5 s per peer. The host stamp
 and sends `chat_history` (last 100 lines) to late joiners. Join/leave notices are yours to generate from roster events.
 
 ```ts compile file=chat.ts
-import type { Lobby } from "@keepalive/client";
+import type { Lobby } from "onelobby";
 
 export function wireChat(lobby: Lobby, log: HTMLElement, input: HTMLInputElement): void {
   const add = (text: string) => { const p = document.createElement("p"); p.textContent = text; log.append(p); };
@@ -33,7 +33,7 @@ function nameOf(lobby: Lobby, peerId: number): string {
 ```csharp compile file=Chat.cs
 using System;
 using System.Linq;
-using Keepalive;
+using OneLobby;
 
 public static class ChatWiring
 {
@@ -54,7 +54,7 @@ public static class ChatWiring
 Opus over a data channel, star-routed through the host. It is off until the player opts in, so show a button.
 
 ```ts compile file=voice.ts
-import type { Lobby } from "@keepalive/client";
+import type { Lobby } from "onelobby";
 
 export function wireVoice(lobby: Lobby, talkButton: HTMLElement, meter: HTMLElement): void {
   lobby.voice.mode = "pushToTalk";                         // or "voiceActivity"
@@ -75,7 +75,7 @@ export function muteForMe(lobby: Lobby, peerId: number): void {
 
 ```csharp compile file=Voice.cs
 using System;
-using Keepalive;
+using OneLobby;
 
 public static class VoiceWiring
 {
@@ -90,7 +90,7 @@ public static class VoiceWiring
 }
 ```
 
-In Godot, `Keepalive.Godot` supplies `Voice.Codec` and `Voice.Audio` (mic bus and playback); set project setting
+In Godot, `OneLobby.Godot` supplies `Voice.Codec` and `Voice.Audio` (mic bus and playback); set project setting
 `audio/driver/enable_input` to on and keep an `AudioEffectCapture` bus named as in the demo. The host can silence a chatty
 peer for everyone with `Chat.HostMute(peerId, true)` (C#) / `lobby.chat.hostMute(peerId, true)` (JS).
 

@@ -1,12 +1,12 @@
 # Recipe: generic .NET
 
-`Keepalive.Core` is engine-agnostic (`netstandard2.1` and `net8.0`). It needs an `ITransport` that opens WebRTC data
-channels: `Keepalive.Godot` provides one for Godot; for tests use `InMemoryNetwork` (in `Keepalive.Core`). Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `Keepalive.Core`.
+`OneLobby.Core` is engine-agnostic (`netstandard2.1` and `net8.0`). It needs an `ITransport` that opens WebRTC data
+channels: `OneLobby.Godot` provides one for Godot; for tests use `InMemoryNetwork` (in `OneLobby.Core`). Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `OneLobby.Core`.
 
 ## 1. Reference
 
 ```
-dotnet add package Keepalive.Core
+dotnet add package OneLobby.Core
 ```
 
 ## 2. Lobby wrapper: Host, Join, Browse
@@ -16,7 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Keepalive;
+using OneLobby;
 
 public sealed class Net
 {
@@ -28,7 +28,7 @@ public sealed class Net
     // lobbyServer comes from the game's settings (a --lobby-server flag, a config file): never a constant.
     public Net(string lobbyServer, ITransport transport, string displayName)
     {
-        var config = new KeepaliveConfig("com.you.yourgame", "1", new Uri(lobbyServer),
+        var config = new OneLobbyConfig("com.you.yourgame", "1", new Uri(lobbyServer),
                                          SyncMode.Raw, DisplayName: displayName);
         _client = new LobbyClient(config, transport);
         _client.Error += e => Status = $"Multiplayer error: {e.Message}";
@@ -64,7 +64,7 @@ Never block the game loop on these: `await` them from a UI handler and keep tick
 
 ```csharp compile file=Loop.cs
 using System;
-using Keepalive;
+using OneLobby;
 
 public static class Loop
 {

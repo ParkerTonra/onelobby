@@ -1,9 +1,9 @@
 {
-  "name": "@keepalive/spec",
+  "name": "onelobby-spec",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Keepalive protocol spec: schemas, vectors, reference codec and gridpaint. `npm test` round-trips the vectors.",
+  "description": "OneLobby protocol spec: schemas, vectors, reference codec and gridpaint. `npm test` round-trips the vectors.",
   "exports": {
     "./codec": "./reference/codec.mjs",
     "./codes": "./reference/codes.mjs",

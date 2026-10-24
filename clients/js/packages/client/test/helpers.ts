@@ -1,4 +1,4 @@
-import { Gridpaint, Keepalive, type Lobby } from "../src/internals.js";
+import { Gridpaint, OneLobby, type Lobby } from "../src/internals.js";
 import type { AudioSink, FrameSource, VoiceCodec } from "../src/internals.js";
 import { ManualClock, MemoryNetwork, MemoryServer } from "../src/testing.js";
 
@@ -48,7 +48,7 @@ export interface Rig {
   clock: ManualClock;
   server: MemoryServer;
   net: MemoryNetwork;
-  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number }): Keepalive;
+  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number }): OneLobby;
   sinks: Map<string, RecordingSink>;
   mics: Map<string, ToneMic>;
 }
@@ -70,7 +70,7 @@ export function rig(): Rig {
       const mic = new ToneMic();
       sinks.set(name, sink);
       mics.set(name, mic);
-      return new Keepalive({
+      return new OneLobby({
         gameId: "gridpaint",
         netVersion: "1",
         lobbyServer: "mem://server",

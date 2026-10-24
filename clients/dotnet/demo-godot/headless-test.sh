@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Two headless Godot instances host/join through a running keepalive-server and play gridpaint; compares hashes.
+# Two headless Godot instances host/join through a running onelobby-server and play gridpaint; compares hashes.
 #   usage: GODOT=/path/to/godot_console ./headless-test.sh [ws://127.0.0.1:8080/ws] [ticks]
 # Run `dotnet build` and fetch-webrtc.sh + `godot --headless --import --path .` first.
 set -euo pipefail

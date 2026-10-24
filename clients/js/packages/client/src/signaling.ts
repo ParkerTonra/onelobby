@@ -59,10 +59,10 @@ export interface ServerError {
 
 export type ServerMsg = { t: string; [k: string]: unknown };
 
-export class KeepaliveError extends Error {
+export class OneLobbyError extends Error {
   constructor(public code: string, message?: string, public data?: Record<string, unknown>) {
     super(message ? `${code}: ${message}` : code);
-    this.name = "KeepaliveError";
+    this.name = "OneLobbyError";
   }
 }
 
@@ -96,7 +96,7 @@ export class SignalingClient {
       try {
         s = this.factory(this.url);
       } catch (e) {
-        reject(new KeepaliveError("connect_failed", String(e)));
+        reject(new OneLobbyError("connect_failed", String(e)));
         return;
       }
       this.socket = s;
@@ -106,7 +106,7 @@ export class SignalingClient {
         resolve();
       };
       s.onerror = () => {
-        if (!this.lastRx) reject(new KeepaliveError("connect_failed", `cannot reach ${this.url}`));
+        if (!this.lastRx) reject(new OneLobbyError("connect_failed", `cannot reach ${this.url}`));
       };
       s.onmessage = (ev) => {
         this.lastRx = this.clock.now();
@@ -132,7 +132,7 @@ export class SignalingClient {
         this.onMessage?.(m);
       };
       s.onclose = () => {
-        if (!this.lastRx) reject(new KeepaliveError("connect_failed", `cannot reach ${this.url}`));
+        if (!this.lastRx) reject(new OneLobbyError("connect_failed", `cannot reach ${this.url}`));
         this.shutdown();
       };
     });
@@ -151,7 +151,7 @@ export class SignalingClient {
     if (this.closed) return;
     this.closed = true;
     this.cancelPing?.();
-    const err = new KeepaliveError("closed", "signaling connection closed");
+    const err = new OneLobbyError("closed", "signaling connection closed");
     for (const w of this.waiters.splice(0)) w.reject(err);
     this.onClose?.();
   }
@@ -167,7 +167,7 @@ export class SignalingClient {
 
   /** Wait for the next message of one of `types`, or reject on `error`/close. */
   expect<T extends { t: string } = ServerMsg>(...types: string[]): Promise<T> {
-    if (this.closed) return Promise.reject(new KeepaliveError("closed", "signaling connection closed"));
+    if (this.closed) return Promise.reject(new OneLobbyError("closed", "signaling connection closed"));
     return new Promise<T>((resolve, reject) => {
       this.waiters.push({ types, resolve: resolve as (m: ServerMsg) => void, reject });
     });
@@ -185,6 +185,6 @@ export class SignalingClient {
   }
 }
 
-function errorFrom(m: ServerMsg): KeepaliveError {
-  return new KeepaliveError(String(m.code ?? "error"), m.msg === undefined ? undefined : String(m.msg), m.data as Record<string, unknown> | undefined);
+function errorFrom(m: ServerMsg): OneLobbyError {
+  return new OneLobbyError(String(m.code ?? "error"), m.msg === undefined ? undefined : String(m.msg), m.data as Record<string, unknown> | undefined);
 }

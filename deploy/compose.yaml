@@ -1,10 +1,10 @@
-# Keepalive self-host stack: keepalive-server + coturn + Caddy (automatic TLS).
+# OneLobby self-host stack: onelobby-server + coturn + Caddy (automatic TLS).
 # Run from this directory:  cp .env.example .env && docker compose up -d
-name: keepalive
+name: onelobby
 
 services:
   server:
-    image: ${KEEPALIVE_IMAGE:-ghcr.io/parkertonra/keepalive-server:latest}
+    image: ${ONELOBBY_IMAGE:-ghcr.io/parkertonra/onelobby-server:latest}
     # To build from source instead of pulling the image, uncomment:
     # build: ../server
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
       - ${MAX_LOBBIES:-1000}
     environment:
       # Read from the environment so the secret does not show in `ps` (flag --turn-secret is equivalent).
-      KEEPALIVE_TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
+      ONELOBBY_TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
     expose:
       - "8080"
     networks: [web]

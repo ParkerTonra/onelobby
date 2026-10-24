@@ -1,4 +1,4 @@
-// Keepalive reference codec for the data-channel binary protocol (DESIGN s.8, s.9a, s.9b).
+// OneLobby reference codec for the data-channel binary protocol (DESIGN s.8, s.9a, s.9b).
 // Little-endian. 3-byte header: type:u8, route:u16. One message per frame, <= 16 KiB.
 // Representation: i64/u64 fields are BigInt, bytes fields are Uint8Array, chat text is a JS string.
 // JSON form (spec/vectors): i64/u64 as decimal strings, bytes as lowercase hex, text as string.

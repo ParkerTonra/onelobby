@@ -1,21 +1,21 @@
 /**
- * `<keepalive-lobby>`: a drop-in lobby (host, join by code or invite link, player list, start) for people who paste
+ * `<one-lobby>`: a drop-in lobby (host, join by code or invite link, player list, start) for people who paste
  * HTML rather than write code. Zero dependencies; shadow DOM; themed with CSS custom properties.
  *
- *   <keepalive-lobby server="wss://lobby.example.com" game="my-game" max-players="4"></keepalive-lobby>
+ *   <one-lobby server="wss://lobby.example.com" game="my-game" max-players="4"></one-lobby>
  *
  * Game API: el.send(data), el.shared.set/add/get, el.isHost, el.players, events message / player-joined /
  * player-left / start / error / shared-change (all bubble, `event.detail` carries the data).
  */
 import { formatCode } from "../crockford.js";
-import { Keepalive } from "../keepalive.js";
-import { KeepaliveError } from "../signaling.js";
+import { OneLobby } from "../onelobby.js";
+import { OneLobbyError } from "../signaling.js";
 import { LobbyController, type Player, type SharedState, type UiState } from "./controller.js";
 import { codeFromUrl, shareUrl } from "../friendly.js";
 import { LOBBY_CSS } from "./styles.js";
 
-export const LOBBY_TAG = "keepalive-lobby";
-const NAME_KEY = "keepalive-name";
+export const LOBBY_TAG = "one-lobby";
+const NAME_KEY = "onelobby-name";
 
 const TEMPLATE = `
 <div class="card" part="card">
@@ -73,7 +73,7 @@ const TEMPLATE = `
 `;
 
 /** The element's public surface (for TypeScript users). */
-export interface KeepaliveLobbyElement extends HTMLElement {
+export interface OneLobbyElement extends HTMLElement {
   readonly isHost: boolean;
   readonly players: Player[];
   readonly code: string | null;
@@ -131,7 +131,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 function makeClass(): CustomElementConstructor {
-  class KeepaliveLobby extends HTMLElement implements KeepaliveLobbyElement {
+  class OneLobbyBox extends HTMLElement implements OneLobbyElement {
     static observedAttributes = ["name", "theme"];
     /** @internal exposed for debugging and tests */
     readonly _controller: LobbyController;
@@ -182,7 +182,7 @@ function makeClass(): CustomElementConstructor {
             input.focus();
           }
         } else if (!code && this._controller.state === "idle" && this.getAttribute("server")) {
-          // A reload in the middle of a game: quietly take this tab's seat back (Keepalive rememberSeat).
+          // A reload in the middle of a game: quietly take this tab's seat back (OneLobby rememberSeat).
           void this._controller.resume(input.value.trim());
         }
       }
@@ -215,11 +215,11 @@ function makeClass(): CustomElementConstructor {
       return v;
     }
 
-    private makeKit(name: string): Keepalive {
+    private makeKit(name: string): OneLobby {
       const server = this.getAttribute("server");
-      if (!server) throw new KeepaliveError("no_server", "the <keepalive-lobby> tag has no server attribute");
-      return new Keepalive({
-        gameId: this.getAttribute("game") || "keepalive-drop-in",
+      if (!server) throw new OneLobbyError("no_server", "the <one-lobby> tag has no server attribute");
+      return new OneLobby({
+        gameId: this.getAttribute("game") || "onelobby-drop-in",
         netVersion: this.getAttribute("version") || "1",
         lobbyServer: wsUrl(server),
         mode: "raw",
@@ -270,7 +270,7 @@ function makeClass(): CustomElementConstructor {
       status.classList.toggle("error", s === "error");
       const hint = this.$("hint");
       const hintText = s === "error"
-        ? (c.error?.code === "no_server" ? 'Add server="…" to the <keepalive-lobby> tag. See the guide for where to get one.' : c.error?.hint ?? "")
+        ? (c.error?.code === "no_server" ? 'Add server="…" to the <one-lobby> tag. See the guide for where to get one.' : c.error?.hint ?? "")
         : "";
       hint.textContent = hintText;
       hint.hidden = !hintText;
@@ -302,10 +302,10 @@ function makeClass(): CustomElementConstructor {
       }
     }
   }
-  return KeepaliveLobby;
+  return OneLobbyBox;
 }
 
-/** Register `<keepalive-lobby>` (safe to call more than once; a no-op outside a browser). */
+/** Register `<one-lobby>` (safe to call more than once; a no-op outside a browser). */
 export function defineLobbyElement(tag = LOBBY_TAG): void {
   if (typeof customElements === "undefined" || customElements.get(tag)) return;
   customElements.define(tag, makeClass());
@@ -313,6 +313,6 @@ export function defineLobbyElement(tag = LOBBY_TAG): void {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "keepalive-lobby": KeepaliveLobbyElement;
+    "one-lobby": OneLobbyElement;
   }
 }

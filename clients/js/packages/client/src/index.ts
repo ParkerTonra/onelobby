@@ -1,12 +1,12 @@
 /**
- * Public API of `@keepalive/client`: create a `Keepalive`, `host()` / `join(code)` / `list()` lobbies, then use the
+ * Public API of `onelobby`: create a `OneLobby`, `host()` / `join(code)` / `list()` lobbies, then use the
  * `Lobby`'s lockstep, raw messages, chat and voice. Lower-level pieces (codec, chunking, migration, jitter buffer,
- * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `@keepalive/client/internals`.
+ * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
-export { Keepalive, LIB_NAME, LIB_VERSION } from "./keepalive.js";
-export type { KeepaliveOptions, HostOptions, ListOptions, KeepaliveEvents } from "./keepalive.js";
-export { DEFAULT_READY_TIMEOUT_MS } from "./keepalive.js";
-export type { AdvancedOptions, SeatStorage } from "./keepalive.js";
+export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
+export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents } from "./onelobby.js";
+export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
+export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
 export { Lockstep } from "./lockstep.js";
@@ -19,10 +19,13 @@ export type { VoiceMode } from "./voice-core.js";
 export type { VoiceCodec, VoiceEncoderHandle, VoiceDecoderHandle, FrameSource, AudioSink, VoiceError } from "./voice-types.js";
 export { webCodecsOpusAvailable } from "./voice-browser.js";
 export { normalizeCode, formatCode } from "./crockford.js";
-export { KeepaliveError } from "./signaling.js";
+export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
-// Types for the seams in KeepaliveOptions (ChannelName also tags raw messages).
+// Types for the seams in OneLobbyOptions (ChannelName also tags raw messages).
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
 export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
 export type { FriendlyError } from "./friendly.js";
+// Pre-rename names, kept for one version so existing games (Ant Arena) keep working.
+export { Keepalive, KeepaliveError } from "./deprecated.js";
+export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";

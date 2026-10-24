@@ -109,7 +109,7 @@ else `bad_request`. A signal with neither `sdp` nor `ice`: `bad_request`. Not in
 server has an `allowedGameIds` list and the id is not on it; the server then closes the socket.
 
 **Test mode (decision).** The per-IP limits make a full functional run impossible from one IP, so a server must offer a
-way to scale them (stream A: env `KEEPALIVE_RATE_SCALE`, default 1; conformance functional suite is run with 20, the
+way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; conformance functional suite is run with 20, the
 `--ratelimit` suite with 1 on a fresh server). `conformance/server/README.md` has the exact invocations.
 
 ## Error `data` summary

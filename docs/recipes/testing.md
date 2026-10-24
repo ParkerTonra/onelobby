@@ -7,7 +7,7 @@ Use it to check the "Done when" lines of the other recipes without clicking.
 
 ```
 npm install --save-dev playwright-core
-dotnet run --project /path/to/keepalive/server/Keepalive.Server -- --listen :8080     # lobby server, in another terminal
+dotnet run --project /path/to/onelobby/server/OneLobby.Server -- --listen :8080     # lobby server, in another terminal
 npx serve -l 5173 .                                                                   # your bundled game, in another terminal
 ```
 

@@ -15,8 +15,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Click Together</title>
 
-  <!-- STEP 1: load Keepalive. This one line adds the <keepalive-lobby> box to the page. -->
-  <script src="https://unpkg.com/@keepalive/client/dist/keepalive.global.min.js"></script>
+  <!-- STEP 1: load OneLobby. This one line adds the <one-lobby> box to the page. -->
+  <script src="https://unpkg.com/onelobby/dist/onelobby.global.min.js"></script>
 
   <style>
     /* Plain page styling. Change colours and sizes freely. */
@@ -40,12 +40,12 @@
        game        = any short name for your game, no spaces (players only meet others with the same name)
        max-players = how many people can be in one game
        theme       = light, dark, or auto (follows the visitor's device) -->
-  <keepalive-lobby
+  <one-lobby
     server="wss://YOUR-LOBBY-SERVER.example.com"
     game="click-together"
     max-players="6"
     theme="light">
-  </keepalive-lobby>
+  </one-lobby>
 
   <!-- STEP 3: your game. It stays hidden until the host presses Start. -->
   <section id="game" hidden>
@@ -59,7 +59,7 @@
 
 <script type="module">
   // Find the lobby box and the parts of our game on the page.
-  const lobby = document.querySelector("keepalive-lobby");
+  const lobby = document.querySelector("one-lobby");
   const game = document.querySelector("#game");
   const count = document.querySelector("#count");
   const news = document.querySelector("#news");
@@ -67,7 +67,7 @@
   // When the host presses Start, show the game (this happens on everyone's screen).
   lobby.addEventListener("start", () => { game.hidden = false; });
 
-  // The Click button adds 1 to a number that everyone shares. Keepalive keeps it the same on every screen.
+  // The Click button adds 1 to a number that everyone shares. OneLobby keeps it the same on every screen.
   document.querySelector("#click").addEventListener("click", () => lobby.shared.add("clicks"));
 
   // Whenever a shared number changes (anyone clicked), show the new value.

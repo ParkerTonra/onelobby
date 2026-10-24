@@ -1,9 +1,9 @@
 {
-  "name": "@keepalive/conformance",
+  "name": "onelobby-conformance",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Keepalive conformance harness: conformance/server (drives a keepalive-server) and conformance/peer (drives a client lib).",
+  "description": "OneLobby conformance harness: conformance/server (drives a onelobby-server) and conformance/peer (drives a client lib).",
   "scripts": {
     "test": "node --test peer/selftest.test.mjs server/selftest.test.mjs",
     "server": "node server/run.mjs",

@@ -1,4 +1,4 @@
-// conformance/peer adapter for @keepalive/client (in-process). Run (after `npm run build` in clients/js):
+// conformance/peer adapter for onelobby (in-process). Run (after `npm run build` in clients/js):
 //   node conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs
 // The library runs for real (real timers); only the three data channels per peer and the signaling socket are replaced:
 // channels go through the harness as `send`/`recv`, signaling is a stub. The game is gridpaint, written against the public API.
@@ -105,7 +105,7 @@ export default function createAdapter() {
     set onevent(h) { handler = h; },
     async call(op, a = {}) {
       switch (op) {
-        case "init": return { name: "@keepalive/client (js)", capabilities: ["host", "joiner", "lockstep", "raw", "chat", "voice", "migration", "deflate"] };
+        case "init": return { name: "onelobby (js)", capabilities: ["host", "joiner", "lockstep", "raw", "chat", "voice", "migration", "deflate"] };
         case "start": await start(a); return {};
         case "begin": await lobby.start(); return {};
         case "link_open": {

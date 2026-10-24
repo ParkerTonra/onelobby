@@ -1,26 +1,19 @@
-# Publishing @keepalive/client to npm
+# Publishing onelobby to npm
 
 Not shipped in the tarball (only `dist/`, `README.md`, `LICENSE`, `package.json` are). Version stays `0.1.0` until the
 first publish.
 
-## Names (checked 2026-10-24)
+## Name
 
-| Name | Status |
-|---|---|
-| `keepalive` | taken (unrelated package) |
-| `@keepalive/client` | unpublished; needs the npm **organization** `keepalive`, which may already belong to someone |
-| `keepalive-lobby` | free: the fallback |
-| `keepalive-client` | free: second fallback |
+`onelobby`, unscoped (checked free on npm 2026-10-24). No npm organization is needed. If someone takes it before the
+first publish, fallbacks: `one-lobby`, `onelobby-client`.
 
 ## Once: before the first publish
 
-1. Replace the placeholders. `package.json` (`homepage`, `repository.url`, `bugs.url`) and `README.md` (two docs links)
-   contain `REPLACE-ME.example`. Put in the real repo URL (the docs mention `https://github.com/ParkerTonra/keepalive`),
-   or delete those three package.json fields if there is no public repo. `prepublishOnly` refuses to publish while any
-   `REPLACE-ME` is left.
+1. Create the GitHub repo `https://github.com/ParkerTonra/onelobby` (package.json `homepage`, `repository.url` and
+   `bugs.url` and the README docs links point there), and push this code to it. Without a public repo, delete those
+   three package.json fields and the README links instead.
 2. Log in: `npm login` (your account; turn on 2FA, npm asks for the code on publish).
-3. Claim the scope: go to https://www.npmjs.com/org/create and create the organization `keepalive` (the free plan is
-   enough for public packages). If npm says the name is taken, use the fallback below.
 
 ## Publish
 
@@ -32,19 +25,23 @@ npm publish --dry-run      # runs prepublishOnly: typecheck, build, tests, metad
 npm publish                # access is public via publishConfig
 ```
 
-Then check: https://www.npmjs.com/package/@keepalive/client and
-https://cdn.jsdelivr.net/npm/@keepalive/client@0.1.0/dist/keepalive.global.min.js (CDNs pick it up within minutes).
+Then check: https://www.npmjs.com/package/onelobby and
+https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js (CDNs pick it up within minutes).
 
-## Fallback: scope taken -> `keepalive-lobby`
+## Fallback: name taken -> `one-lobby`
 
-1. In `package.json`, set `"name": "keepalive-lobby"`.
-2. In `README.md`, replace `@keepalive/client` with `keepalive-lobby` (install line, imports, both CDN URLs).
-3. Optional: `LIB_NAME` in `src/keepalive.ts` is only sent to the lobby server as an informational client name;
+1. In `package.json`, set `"name": "one-lobby"`.
+2. In `README.md`, replace `onelobby` with `one-lobby` in the install line, imports and CDN URLs (not the file names
+   `dist/onelobby.*`, which stay).
+3. Optional: `LIB_NAME` in `src/onelobby.ts` is only sent to the lobby server as an informational client name;
    `prepublish-check` prints a note if it differs, which is fine.
 4. `cd clients/js && npm install` (refreshes the workspace name in `package-lock.json`), then the Publish steps above.
-5. Tell the docs that `npm install @keepalive/client` became `npm install keepalive-lobby` (root README, `docs/recipes/js-web.md`).
+5. Update the docs that say `npm install onelobby` and the unpkg/jsdelivr URLs (root README, AGENTS.md, llms.txt,
+   `docs/recipes/js-web.md`, `docs/no-code.md`, `examples/drop-in/index.html`).
 
 ## Later releases
 
-Bump `version` in `package.json` **and** `LIB_VERSION` in `src/keepalive.ts` (prepublish-check fails if they differ),
-commit, then `npm publish`. The script-tag URL `.../@keepalive/client@0.1/...` follows patch releases automatically.
+Bump `version` in `package.json` **and** `LIB_VERSION` in `src/onelobby.ts` (prepublish-check fails if they differ),
+commit, then `npm publish`. The script-tag URL `.../onelobby@0.1/...` follows patch releases automatically. The
+deprecated `Keepalive` / `KeepaliveError` aliases can be dropped in the next minor release once Ant Arena imports
+`OneLobby`.

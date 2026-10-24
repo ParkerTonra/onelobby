@@ -1,5 +1,5 @@
 // End-to-end in a real browser: host tab, joiner tab, late-joiner tab, voice, host-close migration.
-// Needs: a running keepalive-server, the demo server, and Edge/Chrome. Usage:
+// Needs: a running onelobby-server, the demo server, and Edge/Chrome. Usage:
 //   node e2e/tabs.mjs [--demo http://localhost:5173/] [--browser "C:/.../msedge.exe"]
 import { chromium } from "playwright-core";
 
@@ -8,7 +8,7 @@ const demo = arg("demo", "http://localhost:5173/");
 const metricsUrl = arg("metrics", "http://localhost:8080/metrics");
 const pathCount = async () => {
   const t = await (await fetch(metricsUrl)).text();
-  return [...t.matchAll(/^keepalive_path_total\{path="(\w+)"\} (\d+)/gm)].reduce((a, m) => a + Number(m[2]), 0);
+  return [...t.matchAll(/^onelobby_path_total\{path="(\w+)"\} (\d+)/gm)].reduce((a, m) => a + Number(m[2]), 0);
 };
 const exe = arg("browser", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -82,7 +82,7 @@ try {
 
   // ICE path telemetry: each WebRTC link reported direct/relayed to the server
   const paths1 = await pathCount();
-  check("path reports reached keepalive_path_total", paths1 >= paths0 + 4, `${paths0} -> ${paths1}`);
+  check("path reports reached onelobby_path_total", paths1 >= paths0 + 4, `${paths0} -> ${paths1}`);
 
   // rejoin: bob's signaling socket drops, he resumes with the token, same peerId, back in sync
   const pid = await B.evaluate(() => window.__ka.dropAndRejoin());

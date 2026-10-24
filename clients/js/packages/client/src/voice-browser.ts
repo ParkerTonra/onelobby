@@ -16,7 +16,7 @@ export const webCodecsOpus: VoiceCodec = {
         chunk.copyTo(out);
         onFrame(out);
       },
-      error: (e) => console.error("keepalive: AudioEncoder", e),
+      error: (e) => console.error("onelobby: AudioEncoder", e),
     });
     enc.configure({
       codec: "opus",
@@ -53,7 +53,7 @@ export const webCodecsOpus: VoiceCodec = {
         audio.close();
         onPcm(pcm);
       },
-      error: (e) => console.error("keepalive: AudioDecoder", e),
+      error: (e) => console.error("onelobby: AudioDecoder", e),
     });
     dec.configure({ codec: "opus", sampleRate: SAMPLE_RATE, numberOfChannels: 1 });
     return {
@@ -73,7 +73,7 @@ export const webCodecsOpus: VoiceCodec = {
 };
 
 const WORKLET_SRC = `
-class KeepaliveCapture extends AudioWorkletProcessor {
+class OneLobbyCapture extends AudioWorkletProcessor {
   constructor() { super(); this.buf = new Float32Array(${FRAME_SAMPLES}); this.n = 0; }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
@@ -89,7 +89,7 @@ class KeepaliveCapture extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('keepalive-capture', KeepaliveCapture);
+registerProcessor('onelobby-capture', OneLobbyCapture);
 `;
 
 /** getUserMedia + AudioWorklet producing 960-sample frames at 48 kHz. Must be started from a user gesture. */
@@ -109,7 +109,7 @@ export class WorkletMic implements FrameSource {
       URL.revokeObjectURL(url);
     }
     const src = this.ctx.createMediaStreamSource(this.stream);
-    const node = new AudioWorkletNode(this.ctx, "keepalive-capture", { numberOfInputs: 1, numberOfOutputs: 0 });
+    const node = new AudioWorkletNode(this.ctx, "onelobby-capture", { numberOfInputs: 1, numberOfOutputs: 0 });
     node.port.onmessage = (e) => onFrame(e.data as Float32Array);
     src.connect(node);
     if (this.ctx.state === "suspended") await this.ctx.resume();

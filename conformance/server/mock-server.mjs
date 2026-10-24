@@ -1,4 +1,4 @@
-// A compact in-memory reference keepalive-server, written from spec/signaling.md. It exists to prove the harness is
+// A compact in-memory reference onelobby-server, written from spec/signaling.md. It exists to prove the harness is
 // self-consistent (conformance/server self-test) and as a readable executable version of the rules. Not production code.
 //   node conformance/server/mock-server.mjs [port] [--scale=N]
 import { WebSocketServer } from 'ws';
@@ -234,5 +234,5 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('server/mock-server.mjs')) {
   const port = Number(process.argv[2]?.match(/^\d+$/) ? process.argv[2] : 8080);
   const scale = Number(process.argv.find((a) => a.startsWith('--scale='))?.slice(8) ?? 1);
   const s = await startMock({ port, scale });
-  console.log(`mock keepalive-server on ${s.url} (rate scale ${scale})`);
+  console.log(`mock onelobby-server on ${s.url} (rate scale ${scale})`);
 }

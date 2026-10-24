@@ -1,6 +1,6 @@
-# Keepalive
+# OneLobby
 
-Keepalive adds Host lobby / Join lobby to any game: players share a join code and play together over a direct
+OneLobby adds Host lobby / Join lobby to any game: players share a join code and play together over a direct
 (WebRTC) connection, with voice and text chat built in. The lobby server is open source and anyone can run one, so a
 game outlives whoever made it (Stop Killing Games).
 
@@ -11,11 +11,11 @@ You also need a lobby server; [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md) get
 
 ## Quickstart for developers
 
-Install `@keepalive/client` (see [its README](clients/js/packages/client/README.md)), then in a browser module:
+Install `onelobby` (see [its README](clients/js/packages/client/README.md)), then in a browser module:
 
 ```js
-import { Keepalive } from "@keepalive/client";
-const kit = new Keepalive({ gameId: "com.you.game", netVersion: "1", lobbyServer: "wss://YOUR-SERVER/ws", mode: "raw" });
+import { OneLobby } from "onelobby";
+const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer: "wss://YOUR-SERVER/ws", mode: "raw" });
 const code = new URLSearchParams(location.search).get("join");   // open the page with ?join=CODE to join
 const lobby = code ? await kit.join(code) : await kit.host({ name: "My game", maxPlayers: 4 });
 console.log("Join code:", lobby.code);
@@ -32,5 +32,8 @@ Next: [docs/recipes/js-web.md](docs/recipes/js-web.md), [raw-mode.md](docs/recip
 
 - Easy: lobby server only, free host, a few clicks: [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)
 - Advanced: lobby server plus TURN relay on your own machine: [deploy/RUN_YOUR_OWN.md](deploy/RUN_YOUR_OWN.md)
+
+Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError` and the server's `KEEPALIVE_*` env vars still work
+for one version (deprecated).
 
 Design and wire protocol: [DESIGN.md](DESIGN.md). Status: MVP in progress on branch `dev`.

@@ -1,11 +1,11 @@
-// Runs only when KEEPALIVE_SERVER=ws://localhost:8080/ws is set (stream A's server). Real WebSocket + real timers;
+// Runs only when ONELOBBY_SERVER=ws://localhost:8080/ws is set (stream A's server). Real WebSocket + real timers;
 // peer links are in-memory (Node has no RTCPeerConnection), so this checks the signaling contract end to end.
 import { describe, expect, it } from "vitest";
-import { Keepalive, KeepaliveError } from "../src/internals.js";
+import { OneLobby, OneLobbyError } from "../src/internals.js";
 import { MemoryNetwork } from "../src/testing.js";
 import { FakeCodec, Player } from "./helpers.js";
 
-const url = process.env.KEEPALIVE_SERVER;
+const url = process.env.ONELOBBY_SERVER ?? process.env.KEEPALIVE_SERVER; // old name: deprecated
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (f: () => boolean, ms = 8000) => {
   const t = Date.now();
@@ -13,10 +13,10 @@ const until = async (f: () => boolean, ms = 8000) => {
   if (!f()) throw new Error("timeout");
 };
 
-describe.skipIf(!url)("against a real keepalive-server", () => {
+describe.skipIf(!url)("against a real onelobby-server", () => {
   const net = new MemoryNetwork();
   const mk = (name: string, netVersion = "1") =>
-    new Keepalive({
+    new OneLobby({
       gameId: "gridpaint", netVersion, lobbyServer: url!, mode: "lockstep", tickRate: 20, displayName: name,
       linkFactory: net.factoryFor(name), voiceCodec: new FakeCodec(), createMic: null, createSink: null,
     });
@@ -31,7 +31,7 @@ describe.skipIf(!url)("against a real keepalive-server", () => {
     expect(listed.map((l) => l.code)).toContain(la.code);
 
     await expect(mk("old", "0").join(la.code)).rejects.toMatchObject({ code: "version_mismatch" });
-    await expect(mk("nobody").join("ZZZZZZ")).rejects.toBeInstanceOf(KeepaliveError);
+    await expect(mk("nobody").join("ZZZZZZ")).rejects.toBeInstanceOf(OneLobbyError);
 
     const lb = await mk("bob").join(la.code.slice(0, 3).toLowerCase() + " " + la.code.slice(3));
     const lc = await mk("cara").join(la.code);

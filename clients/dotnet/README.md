@@ -1,13 +1,13 @@
-# Keepalive .NET and Godot clients
+# OneLobby .NET and Godot clients
 
 | Project | What |
 |---|---|
-| `Keepalive.Core` | Engine-agnostic client (netstandard2.1 + net8.0): `LobbyClient`, `Lobby`, `LockstepSession`, `VoiceChannel`, `TextChat`, `ITransport`/`IPeerLink`/`ISignalingSocket`, `IVoiceCodec`, `IVoiceAudio`, and `InMemoryNetwork` (a fake lobby server + loopback links + manual clock, for offline tests) |
-| `Keepalive.Opus` | `OpusVoiceCodec` (Concentus, BSD-3-Clause; see `THIRD_PARTY.md`) |
-| `Keepalive.Godot` | `GodotTransport` (WebSocketPeer + WebRtcPeerConnection), `GodotVoiceAudio` (mic capture, per-speaker playback) |
-| `Keepalive.Gridpaint` | The shared demo game (`spec/demo-game.md`) |
-| `Keepalive.Core.Tests` | xunit: spec vectors, goldens, lobby, lockstep, migration, desync, chat, voice, Opus |
-| `Keepalive.Conformance` | stdio adapter for `conformance/peer` |
+| `OneLobby.Core` | Engine-agnostic client (netstandard2.1 + net8.0): `LobbyClient`, `Lobby`, `LockstepSession`, `VoiceChannel`, `TextChat`, `ITransport`/`IPeerLink`/`ISignalingSocket`, `IVoiceCodec`, `IVoiceAudio`, and `InMemoryNetwork` (a fake lobby server + loopback links + manual clock, for offline tests) |
+| `OneLobby.Opus` | `OpusVoiceCodec` (Concentus, BSD-3-Clause; see `THIRD_PARTY.md`) |
+| `OneLobby.Godot` | `GodotTransport` (WebSocketPeer + WebRtcPeerConnection), `GodotVoiceAudio` (mic capture, per-speaker playback) |
+| `OneLobby.Gridpaint` | The shared demo game (`spec/demo-game.md`) |
+| `OneLobby.Core.Tests` | xunit: spec vectors, goldens, lobby, lockstep, migration, desync, chat, voice, Opus |
+| `OneLobby.Conformance` | stdio adapter for `conformance/peer` |
 | `demo-godot` | Godot 4.5.1 .NET gridpaint demo (Host / Join / Browse, code field, chat line, hold V to talk) |
 
 ## Game loop
@@ -20,14 +20,14 @@ lobby.Pump();
 while (lobby.Lockstep!.TryNextFrame(out var f)) { /* apply f, report hashes */ }
 ```
 
-Async calls throw `KeepaliveException` (`Code` = server error code, or `timeout` / `server_closed`).
+Async calls throw `OneLobbyException` (`Code` = server error code, or `timeout` / `server_closed`).
 
 ## Build and test
 
 ```
 dotnet build clients/dotnet            # 0 warnings
 dotnet test clients/dotnet
-node conformance/peer/run.mjs --stdio="dotnet run --project ../clients/dotnet/Keepalive.Conformance"   # from conformance/
+node conformance/peer/run.mjs --stdio="dotnet run --project ../clients/dotnet/OneLobby.Conformance"   # from conformance/
 ```
 
 ## Godot demo
@@ -36,7 +36,7 @@ node conformance/peer/run.mjs --stdio="dotnet run --project ../clients/dotnet/Ke
 dotnet build clients/dotnet/demo-godot
 clients/dotnet/demo-godot/fetch-webrtc.ps1        # or .sh: webrtc-native 1.2.2-stable into addons/godot_webrtc/ (not committed)
 godot --headless --import --path clients/dotnet/demo-godot      # once, registers the extension
-dotnet run --project server/Keepalive.Server -- --listen :8080
+dotnet run --project server/OneLobby.Server -- --listen :8080
 GODOT=... clients/dotnet/demo-godot/headless-test.sh            # two headless instances host/join, compares hashes
 ```
 
@@ -44,7 +44,7 @@ Use `ws://127.0.0.1:8080/ws`, not `localhost` (Godot's WebSocketPeer can stall o
 
 ## Cross-play with the browser demo
 
-1. Start the server: `dotnet run --project server/Keepalive.Server -- --listen :8080`.
+1. Start the server: `dotnet run --project server/OneLobby.Server -- --listen :8080`.
 2. Browser: `node clients/js/demo/serve.mjs --lobby ws://127.0.0.1:8080/ws`, open http://localhost:5173.
 3. Godot (windowed): `godot --path clients/dotnet/demo-godot --position 2000,420 --audio-driver Dummy --log-file k.log -- --server=ws://127.0.0.1:8080/ws`; click Host, then type the code in the browser tab and Join (or Host in the browser and type its code into the Godot code field).
 4. Both show the same hash line every second; chat lines cross; hold V in either to talk.

@@ -6,7 +6,7 @@ anyone else's server: the lobby server URL is a setting. The full walkthrough is
 ## Local, for development
 
 ```
-dotnet run --project server/Keepalive.Server -- --listen :8080
+dotnet run --project server/OneLobby.Server -- --listen :8080
 ```
 
 Then run your game with the lobby server set to `ws://127.0.0.1:8080/ws` (Godot: `--lobby-server=ws://127.0.0.1:8080/ws`, not `localhost`; browser:
@@ -18,7 +18,7 @@ Check it is alive: `curl http://127.0.0.1:8080/healthz`. The WebSocket endpoint 
 On a Linux box with Docker and a DNS name pointing at it:
 
 ```
-git clone https://github.com/ParkerTonra/keepalive && cd keepalive/deploy
+git clone https://github.com/ParkerTonra/onelobby && cd onelobby/deploy
 cp .env.example .env        # set LOBBY_DOMAIN, ACME_EMAIL, TURN_EXTERNAL_IP, TURN_SECRET (openssl rand -hex 32)
 docker compose up -d
 ```
@@ -29,7 +29,7 @@ Caddy fetches the TLS certificate on first start. Players behind strict networks
 ## Point the game at it
 
 Expose `lobby_server` as a setting (Multiplayer, Advanced) with your default filled in, and pass the same value to
-`KeepaliveConfig.LobbyServer` (C#) or `lobbyServer` (JS). Accept a command-line flag or `<meta>` tag override too, so players can
+`OneLobbyConfig.LobbyServer` (C#) or `lobbyServer` (JS). Accept a command-line flag or `<meta>` tag override too, so players can
 use their own server without rebuilding. Add `--allowed-games com.you.yourgame` on the server to accept only your game.
 
 ## Done when

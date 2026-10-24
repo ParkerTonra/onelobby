@@ -3,9 +3,9 @@
 This guide is for people who can copy and paste into an HTML file but don't program. By the end you will have a web
 page where you press **Host a game**, send a link to friends, and play together.
 
-## What Keepalive does
+## What OneLobby does
 
-Keepalive connects the people who open your page so their browsers can talk to each other directly, fast enough for a
+OneLobby connects the people who open your page so their browsers can talk to each other directly, fast enough for a
 game. It gives you a ready-made **lobby box** for your page:
 
 - a **Host a game** button that makes a short code like `K7M 2QX`
@@ -47,13 +47,13 @@ If you'd rather add a lobby to a page you already have, paste these two pieces i
 In the `<head>` part of the page:
 
 ```html
-<script src="https://unpkg.com/@keepalive/client/dist/keepalive.global.min.js"></script>
+<script src="https://unpkg.com/onelobby/dist/onelobby.global.min.js"></script>
 ```
 
 Where you want the lobby box to appear:
 
 ```html
-<keepalive-lobby server="wss://YOUR-LOBBY-SERVER.example.com" game="my-game" max-players="4"></keepalive-lobby>
+<one-lobby server="wss://YOUR-LOBBY-SERVER.example.com" game="my-game" max-players="4"></one-lobby>
 ```
 
 ### Settings on the lobby box
@@ -84,7 +84,7 @@ Your page talks to the lobby box with a few short lines. Copy them from the exam
 | Check if you are the host | `lobby.isHost` |
 | List the players | `lobby.players` (each has a `name`) |
 
-Where `lobby` is `document.querySelector("keepalive-lobby")`.
+Where `lobby` is `document.querySelector("one-lobby")`.
 
 **Shared values** are the easy way to keep everyone in step: the host's page keeps the official copy, everyone's page
 asks it to make changes, and every page gets the same result in the same order. Use `add` for scores and counters, so
@@ -97,18 +97,18 @@ The lobby box follows your colours if you set these on it in your page's style s
 
 ```html
 <style>
-  keepalive-lobby {
-    --ka-accent: #8a2be2;   /* button colour */
-    --ka-accent-fg: #ffffff; /* text on buttons */
-    --ka-bg: #fffaf0;       /* box background */
-    --ka-fg: #222222;       /* text */
-    --ka-radius: 4px;       /* corner roundness */
-    --ka-font: Georgia, serif;
+  one-lobby {
+    --onelobby-accent: #8a2be2;   /* button colour */
+    --onelobby-accent-fg: #ffffff; /* text on buttons */
+    --onelobby-bg: #fffaf0;       /* box background */
+    --onelobby-fg: #222222;       /* text */
+    --onelobby-radius: 4px;       /* corner roundness */
+    --onelobby-font: Georgia, serif;
   }
 </style>
 ```
 
-Others: `--ka-muted` (quiet text), `--ka-border`, `--ka-field` (input background), `--ka-danger` (error text).
+Others: `--onelobby-muted` (quiet text), `--onelobby-border`, `--onelobby-field` (input background), `--onelobby-danger` (error text).
 
 ## Playing with friends
 
@@ -148,6 +148,6 @@ It also helps to:
 
 - **Lobby server**: the helper website that hands out codes and introduces players. It doesn't carry the game.
 - **Host**: the player who pressed Host a game. Their page keeps the official copy of shared values.
-- **WebRTC**: the browser feature that lets two browsers talk to each other directly. Keepalive uses it for you.
+- **WebRTC**: the browser feature that lets two browsers talk to each other directly. OneLobby uses it for you.
 - **Signaling**: the "here is how to reach me" notes the lobby server passes between players before they connect.
 - **TURN / relay**: a go-between that carries game traffic when two networks refuse a direct connection.

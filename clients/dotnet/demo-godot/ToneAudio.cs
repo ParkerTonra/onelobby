@@ -1,8 +1,8 @@
 using System;
 using System.Diagnostics;
-using Keepalive;
+using OneLobby;
 
-namespace KeepaliveDemo;
+namespace OneLobbyDemo;
 
 /// <summary>Test audio: capture is a 440 Hz sine at real-time pace; playback only counts frames (works under the Dummy driver).</summary>
 public sealed class ToneAudio : IVoiceAudio

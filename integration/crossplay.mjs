@@ -1,6 +1,6 @@
-// Keepalive MVP exit test: browser demo (stream C) <-> Godot demo (stream D) through a real keepalive-server.
+// OneLobby MVP exit test: browser demo (stream C) <-> Godot demo (stream D) through a real onelobby-server.
 //   node integration/crossplay.mjs [--only=1,4,5] [--godot <console exe>] [--browser <msedge.exe>] [--seconds 60]
-// Starts: server/Keepalive.Server, clients/js/demo/serve.mjs, headless Godot (demo-godot), one headless Edge.
+// Starts: server/OneLobby.Server, clients/js/demo/serve.mjs, headless Godot (demo-godot), one headless Edge.
 // Checks: (1) Godot hosts, browser joins, hashes equal for N s  (2) chat both ways  (3) voice tone Godot -> browser
 //         (4) browser hosts, Godot joins, hashes equal  (5) host migration in a mixed 3-peer lobby, both orders.
 // Everything it starts is killed on exit. Godot is driven only through the demo's existing CLI hooks (Main.cs header).
@@ -261,7 +261,7 @@ async function scenarioMigrationBrowserHost() {
   check("5b frames resume after migration", tB1 > tB0 + 100 && gT1 > gT0 + 100, `B ${tB0}->${tB1}, Godot hash tick ${gT0}->${gT1}`);
   const post = compare(g.hashes(), await bHashes(B), tB0 - 200);
   check("5b hashes equal across the migration and after", post.bad === 0 && post.common > 10, `${post.common} common, ${post.bad} bad ${post.first ?? ""}`);
-  console.log("[godot log tail]", godotLog(g).split(/\r?\n/).filter((l) => /\[keepalive\]/.test(l)).slice(-8).join(" | "));
+  console.log("[godot log tail]", godotLog(g).split(/\r?\n/).filter((l) => /\[onelobby\]/.test(l)).slice(-8).join(" | "));
   await B.close();
   kill(g);
 }
@@ -270,7 +270,7 @@ async function scenarioMigrationBrowserHost() {
 let exitCode = 1;
 try {
   console.log("work dir", work);
-  start("dotnet", ["run", "--project", join(root, "server/Keepalive.Server"), "--", "--listen", `127.0.0.1:${SPORT}`, "--rate-scale", "20"], "server");
+  start("dotnet", ["run", "--project", join(root, "server/OneLobby.Server"), "--", "--listen", `127.0.0.1:${SPORT}`, "--rate-scale", "20"], "server");
   await waitFor(async () => { try { return (await fetch(`http://127.0.0.1:${SPORT}/healthz`)).ok; } catch { return false; } }, 120000, "server /healthz");
   start("node", [join(root, "clients/js/demo/serve.mjs"), "--port", String(DPORT), "--lobby", WS], "demo");
   await waitFor(async () => { try { return (await fetch(DEMO)).ok; } catch { return false; } }, 20000, "demo server");

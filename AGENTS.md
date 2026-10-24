@@ -1,7 +1,7 @@
-# Keepalive for AI coding agents
+# OneLobby for AI coding agents
 
-Keepalive is an open-source, game-agnostic multiplayer kit: a lobby server (join codes, public list), a TURN relay, and
-client libraries (`@keepalive/client` for JS, `Keepalive.Core` + `Keepalive.Godot` for C#). Peers talk over WebRTC data channels;
+OneLobby is an open-source, game-agnostic multiplayer kit: a lobby server (join codes, public list), a TURN relay, and
+client libraries (`onelobby` for JS, `OneLobby.Core` + `OneLobby.Godot` for C#). Peers talk over WebRTC data channels;
 the server never sees game data.
 Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
@@ -9,8 +9,8 @@ You do not need to open `clients/`, `server/` or `spec/` to integrate a game. Th
 ## API surface (same shape in both languages)
 
 ```csharp
-// C#: Keepalive.Core (Godot: add new GodotTransport())
-var client = new LobbyClient(new KeepaliveConfig("com.you.game", "1", new Uri(lobbyServerUrl),
+// C#: OneLobby.Core (Godot: add new GodotTransport())
+var client = new LobbyClient(new OneLobbyConfig("com.you.game", "1", new Uri(lobbyServerUrl),
                              SyncMode.Raw, DisplayName: "Ann"), transport);
 Lobby lobby = await client.HostAsync(new LobbyOptions("Ann's game", MaxPlayers: 4, Visibility: Visibility.Public));
 Lobby lobby = await client.JoinAsync("7HQ 4K2");          // also RejoinAsync(resumeToken)
@@ -29,8 +29,8 @@ lobby.Lockstep.ReportHash(tick, hash); lobby.Lockstep.Snapshot = () => bytes; lo
 ```
 
 ```ts
-// JS: @keepalive/client (no pump(): events come from the event loop)
-const kit = new Keepalive({ gameId: "com.you.game", netVersion: "1", lobbyServer, mode: "raw", displayName: "Ann" });
+// JS: onelobby (no pump(): events come from the event loop)
+const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer, mode: "raw", displayName: "Ann" });
 const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public" });
 const lobby = await kit.join("7HQ 4K2");                   // also kit.rejoin(resumeToken), kit.resume()
 const list = await kit.list();                             // LobbySummary[]
@@ -48,34 +48,34 @@ lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lo
 ## Install
 
 ```
-npm install @keepalive/client
+npm install onelobby
 ```
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.global.min.js">` sets
-`window.Keepalive` (so `new Keepalive.Keepalive({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.bundle.mjs`. Low-level pieces (codec, chunking,
-migration, WebRTC classes) are in `@keepalive/client/internals`; in-memory test doubles in `@keepalive/client/testing`.
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.global.min.js">` sets
+`window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
+`https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
 
 Build it once, then point your project at the build:
 
 ```
-git clone https://github.com/ParkerTonra/keepalive
-cd keepalive/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
+git clone https://github.com/ParkerTonra/onelobby
+cd onelobby/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
 ```
 
 Either depend on it with a `file:` path, or bundle with an esbuild alias (no package install in your project):
 
 ```
 # in your project
-npm install file:/path/to/keepalive/clients/js/packages/client
+npm install file:/path/to/onelobby/clients/js/packages/client
 # or, plain-JS project with no package.json
-/path/to/keepalive/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:@keepalive/client=/path/to/keepalive/clients/js/packages/client/dist/index.js
+/path/to/onelobby/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:onelobby=/path/to/onelobby/clients/js/packages/client/dist/index.js
 ```
 
 Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
-`<script type="module" src="./src/main.js">` cannot resolve the bare name `@keepalive/client`, so bundle first.
+`<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
 ## Codes and peers
@@ -89,7 +89,7 @@ Full reference (generated): `docs/api/`.
 ## Friendly defaults (JS)
 
 - `readyTimeoutMs` (default 15000, 0 = wait forever): a joiner that cannot reach the host gives up. `lobby.ready`
-  rejects with `KeepaliveError` code `ice_failed`, `kit.on("error")` fires, the lobby is left and `sessionEnded` fires
+  rejects with `OneLobbyError` code `ice_failed`, `kit.on("error")` fires, the lobby is left and `sessionEnded` fires
   with reason `"ice_failed"`. When the server offers TURN, the second half of the budget is one relay-only retry.
 - `rememberSeat` (default on where `sessionStorage` exists): after a page reload `kit.join(sameCode)` takes the old
   seat back instead of joining as a new player; `await kit.resume()` does it without a code (null when there is no seat
@@ -103,7 +103,7 @@ Full reference (generated): `docs/api/`.
 
 ## Rules
 
-1. **The game owns the command bytes.** Keepalive moves opaque `Uint8Array` / `byte[]`. Encode and decode yourself; pass
+1. **The game owns the command bytes.** OneLobby moves opaque `Uint8Array` / `byte[]`. Encode and decode yourself; pass
    ids and numbers, never display names or object graphs.
 2. **The host is truth.** In `raw` mode the host's state wins: joiners send intents, the host validates and broadcasts the
    result. In `lockstep` the host only orders commands; every peer runs the same sim.

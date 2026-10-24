@@ -1,5 +1,5 @@
 {
-  "name": "@keepalive/client",
+  "name": "onelobby",
   "version": "0.1.0",
   "description": "Multiplayer for browser games: host/join lobbies by short code, peer-to-peer WebRTC, lockstep sync, text and voice chat. Zero runtime dependencies; works from a plain <script> tag.",
   "keywords": [
@@ -14,24 +14,24 @@
     "gamedev",
     "browser-game",
     "voice-chat",
-    "keepalive"
+    "onelobby"
   ],
   "license": "MIT",
   "author": "Parker Tonra",
-  "homepage": "https://REPLACE-ME.example/keepalive#readme",
+  "homepage": "https://github.com/ParkerTonra/onelobby#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://REPLACE-ME.example/keepalive.git",
+    "url": "git+https://github.com/ParkerTonra/onelobby.git",
     "directory": "clients/js/packages/client"
   },
   "bugs": {
-    "url": "https://REPLACE-ME.example/keepalive/issues"
+    "url": "https://github.com/ParkerTonra/onelobby/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "unpkg": "./dist/keepalive.global.min.js",
-  "jsdelivr": "./dist/keepalive.global.min.js",
+  "unpkg": "./dist/onelobby.global.min.js",
+  "jsdelivr": "./dist/onelobby.global.min.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -53,10 +53,10 @@
       "import": "./dist/ui/index.js",
       "default": "./dist/ui/index.js"
     },
-    "./global": "./dist/keepalive.global.js",
+    "./global": "./dist/onelobby.global.js",
     "./bundle": {
       "types": "./dist/global.d.ts",
-      "default": "./dist/keepalive.bundle.mjs"
+      "default": "./dist/onelobby.bundle.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -66,8 +66,8 @@
     "LICENSE"
   ],
   "sideEffects": [
-    "./dist/keepalive.global.js",
-    "./dist/keepalive.global.min.js",
+    "./dist/onelobby.global.js",
+    "./dist/onelobby.global.min.js",
     "./dist/ui/index.js",
     "./dist/ui/element.js"
   ],

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Extracts every fenced snippet tagged `ts compile` or `csharp compile` from AGENTS.md and docs/recipes/*.md and
 // type-checks it against the real client code.
-//   ```ts compile file=net.ts        -> tsc --noEmit with "@keepalive/client" mapped to clients/js/packages/client/src/index.ts
-//   ```csharp compile file=Net.cs    -> temp csproj with a ProjectReference to clients/dotnet/Keepalive.Core
+//   ```ts compile file=net.ts        -> tsc --noEmit with "onelobby" mapped to clients/js/packages/client/src/index.ts
+//   ```csharp compile file=Net.cs    -> temp csproj with a ProjectReference to clients/dotnet/OneLobby.Core
 // Snippets of one markdown file share a folder, so ts snippets can import each other ("./settings"). Untagged fences and
 // ```csharp godot fences are documentation only. Flags: --strict (a missing client counts as a failure).
 import { execFileSync } from "node:child_process";
@@ -68,7 +68,7 @@ if (ts.length) {
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM", "DOM.Iterable"],
         strict: true, noEmit: true, skipLibCheck: true, types: [],
-        baseUrl: fwd(dir), paths: { "@keepalive/client": [fwd(entry)] },
+        baseUrl: fwd(dir), paths: { "onelobby": [fwd(entry)] },
       },
       files,
     }, null, 1));
@@ -93,10 +93,10 @@ if (ts.length) {
 // ---- C# ----
 const cs = snippets.filter((s) => s.lang === "csharp" || s.lang === "cs");
 if (cs.length) {
-  const proj = path.join(root, "clients", "dotnet", "Keepalive.Core", "Keepalive.Core.csproj");
+  const proj = path.join(root, "clients", "dotnet", "OneLobby.Core", "OneLobby.Core.csproj");
   if (!fs.existsSync(proj)) {
     waiting += cs.length;
-    console.warn(`WAITING ${cs.length} csharp snippets: Keepalive.Core.csproj has not landed`);
+    console.warn(`WAITING ${cs.length} csharp snippets: OneLobby.Core.csproj has not landed`);
   } else {
     const dir = path.join(tmp, "cs");
     for (const s of cs) {
@@ -129,7 +129,7 @@ if (cs.length) {
       const mine = errs.filter((l) => fwd(l).includes(fwd(dir)) && !fwd(l).includes("/clients/dotnet/"));
       if (mine.length === 0) {
         waiting += cs.length;
-        console.warn("WAITING csharp snippets: Keepalive.Core does not build yet:\n" + errs.slice(0, 5).join("\n"));
+        console.warn("WAITING csharp snippets: OneLobby.Core does not build yet:\n" + errs.slice(0, 5).join("\n"));
       } else {
         failed += cs.length;
         console.error("FAIL csharp snippets:\n" + mapBack(mine.join("\n"), [[dir + path.sep, ""], [dir + "/", ""]]));

@@ -1,8 +1,8 @@
 /**
  * Everything the package has, including the building blocks apps normally never call: wire codec, chunking, deflate,
  * host-migration rule, jitter buffer and voice packetizer, signaling and WebRTC classes, clocks, and the gridpaint demo
- * game. Exported as `@keepalive/client/internals`. No stability promise: these can change in any release.
- * The public API is the root export (`@keepalive/client`); it is re-exported here too.
+ * game. Exported as `onelobby/internals`. No stability promise: these can change in any release.
+ * The public API is the root export (`onelobby`); it is re-exported here too.
  */
 export * from "./index.js";
 export { MAX_DESYNCS, HOST_SILENCE_MS } from "./lockstep.js";

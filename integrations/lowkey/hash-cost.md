@@ -44,7 +44,7 @@ day 1 / 30 medians 0.52 / 0.72 ms.
 ## Recommendation
 
 **Hash every 20 ticks (once a second), full `Save()`-based `StateHash()`, no incremental hash for now.** This is
-Keepalive's default (`HashEveryTicks = 20`), costs a single 0.5 to 2 ms (p95 4 ms) blip once a second on a 50 ms tick
+OneLobby's default (`HashEveryTicks = 20`), costs a single 0.5 to 2 ms (p95 4 ms) blip once a second on a 50 ms tick
 budget, and detects a desync within one second, after which the host's snapshot resync (`Save()`, 150 KB) repairs it. Hashing
 every tick buys nothing a 1 s cadence does not (a desync is only fixable by resync, whose cost does not depend on when it was
 noticed) and would add 1.4 to 3.8% CPU and ~9 MB/s of LOH garbage that can cause visible GC hitches on a Godot frame.

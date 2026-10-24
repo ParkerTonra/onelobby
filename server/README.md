@@ -1,6 +1,6 @@
-# keepalive-server
+# onelobby-server
 
-Lobby and signaling server for Keepalive (protocol `lk1`, DESIGN.md s.6-s.7, s.9-s.10, s.12-s.13; behavioural rules in
+Lobby and signaling server for OneLobby (protocol `lk1`, DESIGN.md s.6-s.7, s.9-s.10, s.12-s.13; behavioural rules in
 `spec/signaling.md`). .NET 10, ASP.NET Core minimal app, one WebSocket endpoint. It never sees game traffic: peers talk over
 WebRTC data channels once the handshake is done.
 
@@ -8,42 +8,42 @@ WebRTC data channels once the handshake is done.
 |---|---|
 | `/ws` and `/` | WebSocket upgrade, text frames, one JSON object per frame (so `ws://host:8080` works without a path). A plain `GET /` returns a one-line text hint |
 | `/healthz` | `200 ok` |
-| `/metrics` | Prometheus text: `keepalive_lobbies`, `keepalive_sockets`, `keepalive_path_total{path="relayed\|direct"}`, `keepalive_messages_total{type}`, `keepalive_errors_total{code}`, `keepalive_rate_limit_hits_total{kind}`, ... |
+| `/metrics` | Prometheus text: `onelobby_lobbies`, `onelobby_sockets`, `onelobby_path_total{path="relayed\|direct"}`, `onelobby_messages_total{type}`, `onelobby_errors_total{code}`, `onelobby_rate_limit_hits_total{kind}`, ... |
 
 ## Run
 
 ```
-dotnet run --project Keepalive.Server -- --listen :8080
+dotnet run --project OneLobby.Server -- --listen :8080
 # or the single-file build
-dotnet publish Keepalive.Server -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
-./publish/keepalive-server --listen :8080 --turn-urls turn:relay.example:3478,turns:relay.example:443 --turn-secret ...
+dotnet publish OneLobby.Server -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+./publish/onelobby-server --listen :8080 --turn-urls turn:relay.example:3478,turns:relay.example:443 --turn-secret ...
 ```
 
-Other runtimes: `linux-x64`, `linux-arm64`, `osx-arm64`. Docker: `docker build -t keepalive-server .` in this directory
+Other runtimes: `linux-x64`, `linux-arm64`, `osx-arm64`. Docker: `docker build -t onelobby-server .` in this directory
 (the deploy stack in `../deploy` runs the image with the flags below).
 
 ## Flags and environment
 
-A flag wins over its `KEEPALIVE_*` environment variable.
+A flag wins over its `ONELOBBY_*` environment variable.
 
 | Flag | Env | Default | Meaning |
 |---|---|---|---|
-| `--listen` | `KEEPALIVE_LISTEN` | `:8080` | `:port`, `host:port` or a full `http(s)://` URL |
-| `--turn-urls` | `KEEPALIVE_TURN_URLS` | none | comma list, e.g. `turn:r.example:3478,turns:r.example:443?transport=tcp` |
-| `--turn-secret` | `KEEPALIVE_TURN_SECRET` | none | coturn `static-auth-secret`; without both flags `welcome.ice` has STUN only |
-| `--stun-urls` | `KEEPALIVE_STUN_URLS` | `stun:stun.l.google.com:19302` | comma list |
-| `--public-url` | `KEEPALIVE_PUBLIC_URL` | none | the `wss://` address clients use (informational) |
-| `--allowed-games` | `KEEPALIVE_ALLOWED_GAMES` | any | comma list of `gameId`; `*` or empty = any. Others get `game_not_allowed` |
-| `--max-lobbies` | `KEEPALIVE_MAX_LOBBIES` | 1000 | more `create` -> `server_full` |
-| `--max-peers` | `KEEPALIVE_MAX_PEERS` | 10000 | more sockets -> `server_full` and close |
-| `--game-quota id=n` | `KEEPALIVE_GAME_QUOTAS=id=n,id=n` | none | max live lobbies for one `gameId` (repeat the flag); over -> `server_full` |
-| `--max-players` | `KEEPALIVE_MAX_PLAYERS` | 64 | largest `maxPlayers` a lobby may ask for, up to 250; advertised as `limits.maxPlayers` |
-| `--region` | `KEEPALIVE_REGION` | empty | coarse tag in each lobby list row |
-| `--turn-ttl` | `KEEPALIVE_TURN_TTL` | 3600 | TURN credential lifetime, seconds |
-| `--max-msg` | `KEEPALIVE_MAX_MSG` | 16384 | frame size limit; advertised as `limits.maxMsg` |
-| `--trust-proxy` | `KEEPALIVE_TRUST_PROXY` | off | take the client IP from `X-Forwarded-For` (set it behind Caddy, else every client shares the proxy IP and the per-IP limits) |
-| `--rate-scale n` | `KEEPALIVE_RATE_SCALE` | 1 | testing only: multiply the per-IP limits (conformance runs with 20) |
-| `--disable-ip-limits` | `KEEPALIVE_DISABLE_IP_LIMITS` | off | testing only: no per-IP limits (load script) |
+| `--listen` | `ONELOBBY_LISTEN` | `:8080` | `:port`, `host:port` or a full `http(s)://` URL |
+| `--turn-urls` | `ONELOBBY_TURN_URLS` | none | comma list, e.g. `turn:r.example:3478,turns:r.example:443?transport=tcp` |
+| `--turn-secret` | `ONELOBBY_TURN_SECRET` | none | coturn `static-auth-secret`; without both flags `welcome.ice` has STUN only |
+| `--stun-urls` | `ONELOBBY_STUN_URLS` | `stun:stun.l.google.com:19302` | comma list |
+| `--public-url` | `ONELOBBY_PUBLIC_URL` | none | the `wss://` address clients use (informational) |
+| `--allowed-games` | `ONELOBBY_ALLOWED_GAMES` | any | comma list of `gameId`; `*` or empty = any. Others get `game_not_allowed` |
+| `--max-lobbies` | `ONELOBBY_MAX_LOBBIES` | 1000 | more `create` -> `server_full` |
+| `--max-peers` | `ONELOBBY_MAX_PEERS` | 10000 | more sockets -> `server_full` and close |
+| `--game-quota id=n` | `ONELOBBY_GAME_QUOTAS=id=n,id=n` | none | max live lobbies for one `gameId` (repeat the flag); over -> `server_full` |
+| `--max-players` | `ONELOBBY_MAX_PLAYERS` | 64 | largest `maxPlayers` a lobby may ask for, up to 250; advertised as `limits.maxPlayers` |
+| `--region` | `ONELOBBY_REGION` | empty | coarse tag in each lobby list row |
+| `--turn-ttl` | `ONELOBBY_TURN_TTL` | 3600 | TURN credential lifetime, seconds |
+| `--max-msg` | `ONELOBBY_MAX_MSG` | 16384 | frame size limit; advertised as `limits.maxMsg` |
+| `--trust-proxy` | `ONELOBBY_TRUST_PROXY` | off | take the client IP from `X-Forwarded-For` (set it behind Caddy, else every client shares the proxy IP and the per-IP limits) |
+| `--rate-scale n` | `ONELOBBY_RATE_SCALE` | 1 | testing only: multiply the per-IP limits (conformance runs with 20) |
+| `--disable-ip-limits` | `ONELOBBY_DISABLE_IP_LIMITS` | off | testing only: no per-IP limits (load script) |
 
 ## Rules implemented (summary)
 
@@ -61,7 +61,7 @@ A flag wins over its `KEEPALIVE_*` environment variable.
   TTL 1 h (`spec/turn-rest.md`).
 - Names: control characters and bidi overrides stripped, truncated (24 for players, 48 for lobbies).
 - Path telemetry: a peer may send `{"t":"path","path":"relayed"|"direct"}` after ICE completes; counted in
-  `keepalive_path_total`. (Not in the schema yet; an additive message, unknown to older servers and ignored.)
+  `onelobby_path_total`. (Not in the schema yet; an additive message, unknown to older servers and ignored.)
 - Logs: lobby events and rate-limit hits with a salted hash of the client IP; SDP bodies are never logged.
 
 ## Develop
@@ -77,14 +77,14 @@ window, 24 h code retirement, rate windows) is tested without sleeping.
 Conformance (needs the Node harness in `../conformance/server`):
 
 ```
-KEEPALIVE_RATE_SCALE=20 ./keepalive-server --listen 127.0.0.1:8080 &
+ONELOBBY_RATE_SCALE=20 ./onelobby-server --listen 127.0.0.1:8080 &
 node ../conformance/server/run.mjs ws://localhost:8080/ws
 ```
 
 ## Load
 
 ```
-./keepalive-server --listen 127.0.0.1:8080 --disable-ip-limits --max-lobbies 2000
+./onelobby-server --listen 127.0.0.1:8080 --disable-ip-limits --max-lobbies 2000
 node load/load.mjs ws://localhost:8080/ws --lobbies 1000 --per-lobby 5 --seconds 20
 ```
 
