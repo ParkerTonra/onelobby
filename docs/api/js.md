@@ -6,34 +6,33 @@ sections are the modules it re-exports.
 ## index
 
 ```ts
+/**
+ * Public API of `@keepalive/client`: create a `Keepalive`, `host()` / `join(code)` / `list()` lobbies, then use the
+ * `Lobby`'s lockstep, raw messages, chat and voice. Lower-level pieces (codec, chunking, migration, jitter buffer,
+ * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `@keepalive/client/internals`.
+ */
 export { Keepalive, LIB_NAME, LIB_VERSION } from "./keepalive.js";
 export type { KeepaliveOptions, HostOptions, ListOptions, KeepaliveEvents } from "./keepalive.js";
+export { DEFAULT_READY_TIMEOUT_MS } from "./keepalive.js";
+export type { AdvancedOptions, SeatStorage } from "./keepalive.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
-export { Lockstep, MAX_DESYNCS, HOST_SILENCE_MS } from "./lockstep.js";
+export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
-export { Chat, ChatLimiter, sanitizeChat, CHAT_MAX_BYTES, CHAT_HISTORY_LINES } from "./chat.js";
+export { Chat, CHAT_MAX_BYTES } from "./chat.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";
 export type { VoiceEvents, VoiceDeps } from "./voice.js";
-export { JitterBuffer, VoiceGate, VoicePacketizer, VoiceRelayPolicy, FRAME_SAMPLES, SAMPLE_RATE, MAX_SPEAKERS, } from "./voice-core.js";
-export type { VoiceMode, VoicePacket } from "./voice-core.js";
+export type { VoiceMode } from "./voice-core.js";
 export type { VoiceCodec, VoiceEncoderHandle, VoiceDecoderHandle, FrameSource, AudioSink, VoiceError } from "./voice-types.js";
-export { webCodecsOpus, webCodecsOpusAvailable, WorkletMic, WebAudioSink } from "./voice-browser.js";
-export { pickNewHost, claimWins, claimWinsWrapped } from "./migration.js";
-export type { Claim } from "./migration.js";
-export { normalizeCode, formatCode, decodeCrockford, encodeCrockford, CROCKFORD_ALPHABET } from "./crockford.js";
-export { encodeMessage, decodeMessage, CodecError, MAX_FRAME_BYTES, MsgType } from "./codec.js";
-export type { Message, Decoded } from "./codec.js";
-export { splitChunks, Reassembler, CHUNK_PAYLOAD } from "./chunking.js";
-export { KeepaliveError, SignalingClient } from "./signaling.js";
+export { webCodecsOpusAvailable } from "./voice-browser.js";
+export { normalizeCode, formatCode } from "./crockford.js";
+export { KeepaliveError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
-export { WebRtcLink, webRtcLinkFactory } from "./webrtc.js";
-export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName, } from "./transport.js";
-export { systemClock } from "./clock.js";
+export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
-export { Gridpaint, paintCmd, colourOf, PALETTE, GRID_W, GRID_H, seedFromCode, fnv1a64 } from "./gridpaint.js";
-export type { Hub } from "./hub.js";
+export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
+export type { FriendlyError } from "./friendly.js";
 ```
 
 ## keepalive
@@ -47,17 +46,14 @@ import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 export declare const LIB_NAME = "@keepalive/client";
 export declare const LIB_VERSION = "0.1.0";
-export interface KeepaliveOptions {
-    gameId: string;
-    netVersion: string;
-    /** `ws://` / `wss://` URL of a keepalive-server. */
-    lobbyServer: string;
-    mode?: "lockstep" | "raw";
-    tickRate?: number;
-    /** Default: tickRate (once a second). */
-    hashEveryTicks?: number;
-    displayName?: string;
-    relayOnly?: boolean;
+/** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
+export interface SeatStorage {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
+/** Seams for tests, adapters and non-browser runtimes. Every default is the browser implementation. */
+export interface AdvancedOptions {
     socketFactory?: SocketFactory;
     linkFactory?: LinkFactory;
     clock?: Clock;
@@ -67,10 +63,56 @@ export interface KeepaliveOptions {
     voiceCodec?: VoiceCodec | null;
     createMic?: (() => FrameSource) | null;
     createSink?: (() => AudioSink) | null;
+    /** Storage for `rememberSeat`; defaults to `sessionStorage` when the page has one. null disables it. */
+    storage?: SeatStorage | null;
+}
+export interface KeepaliveOptions {
+    gameId: string;
+    netVersion: string;
+    /** `ws://` / `wss://` URL of a keepalive-server. */
+    lobbyServer: string;
+    mode?: "lockstep" | "raw";
+    tickRate?: number;
+    /** Default: tickRate (once a second). */
+    hashEveryTicks?: number;
+    /** The player's name. Empty (the default): other players see "Player N", N being the seat number. */
+    displayName?: string;
+    relayOnly?: boolean;
+    /**
+     * Joiners give up on reaching the host after this many ms: `lobby.ready` rejects with code `ice_failed`, the kit
+     * emits `error`, and the lobby is left. Half the time goes to a relay-only retry when the server offers TURN.
+     * Default 15000; 0 waits forever.
+     */
+    readyTimeoutMs?: number;
+    /**
+     * Keep this tab's seat across a page reload (sessionStorage): `join(code)` and `resume()` take the seat back
+     * instead of joining as a new player. Cleared when the session ends. Default true where sessionStorage exists.
+     */
+    rememberSeat?: boolean;
+    /** Test and runtime seams (see AdvancedOptions). */
+    advanced?: AdvancedOptions;
+    /** @deprecated use `advanced.socketFactory` */
+    socketFactory?: SocketFactory;
+    /** @deprecated use `advanced.linkFactory` */
+    linkFactory?: LinkFactory;
+    /** @deprecated use `advanced.clock` */
+    clock?: Clock;
+    /** @deprecated use `advanced.wallClock` */
+    wallClock?: () => number;
+    /** @deprecated use `advanced.voiceCodec` */
+    voiceCodec?: VoiceCodec | null;
+    /** @deprecated use `advanced.createMic` */
+    createMic?: (() => FrameSource) | null;
+    /** @deprecated use `advanced.createSink` */
+    createSink?: (() => AudioSink) | null;
 }
 export interface HostOptions {
     name: string;
     maxPlayers: number;
+    /**
+     * "unlisted" (default): anyone with the code or link can join, but the lobby is not in `list()`.
+     * "public": also listed. "private": the host approves each join.
+     */
     visibility?: "public" | "unlisted" | "private";
     lateJoin?: boolean;
     meta?: Record<string, string>;
@@ -83,10 +125,18 @@ export interface ListOptions {
 export type KeepaliveEvents = {
     error: [Error];
 };
+export declare const DEFAULT_READY_TIMEOUT_MS = 15000;
 /** Entry point (DESIGN s.11.2). */
 export declare class Keepalive extends Emitter<KeepaliveEvents> {
-    readonly options: Required<Pick<KeepaliveOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly">>;
+    readonly options: Required<Pick<KeepaliveOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs">>;
     constructor(o: KeepaliveOptions);
+    /** The lobby code of the seat this tab can take back (rememberSeat), or null. */
+    get rememberedCode(): string | null;
+    /**
+     * Take back the seat remembered from before a page reload (host or joiner). Resolves null when there is none
+     * or the server no longer holds it (the seat is forgotten then).
+     */
+    resume(): Promise<Lobby | null>;
     host(h: HostOptions): Promise<Lobby>;
     join(code: string): Promise<Lobby>;
     rejoin(resumeToken: string): Promise<Lobby>;
@@ -102,7 +152,7 @@ import type { Clock } from "./clock.js";
 import { PROTO } from "./codec.js";
 import { Emitter } from "./emitter.js";
 import { Lockstep } from "./lockstep.js";
-import type { LobbyState, PeerInfo, SignalingClient } from "./signaling.js";
+import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 export type Phase = "lobby" | "in_game";
@@ -134,7 +184,15 @@ export interface LobbyConfig {
     relayOnly: boolean;
     voice: VoiceDeps;
     displayName: string;
+    /**
+     * Joiner: give up on reaching the host after this many ms (0 or absent: wait forever). When the ICE list has a
+     * TURN server and the lobby is not relay-only already, the second half of the budget is a relay-only retry.
+     * On failure `ready` rejects with KeepaliveError("ice_failed"), the error is reported and the lobby is left.
+     */
+    readyTimeoutMs?: number;
 }
+/** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
+export declare function seatName(p: PeerInfo): PeerInfo;
 /** One joined lobby: roster, star of peer links, and the lockstep/chat/voice engines riding on them. */
 export declare class Lobby extends Emitter<LobbyEvents> {
     readonly code: string;
@@ -150,7 +208,11 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     resumeToken: string;
     /** Last measured round trip to the host in ms (joiners), or 0. */
     rtt: number;
-    /** Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a joiner. */
+    /**
+     * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
+     * joiner. Rejects with KeepaliveError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
+     * (or with "closed"/"kicked" when the lobby ends first).
+     */
     readonly ready: Promise<void>;
     constructor(cfg: LobbyConfig);
     get isHost(): boolean;
@@ -180,6 +242,9 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     }): void;
     /** @internal set by Keepalive so lobby errors reach `kit.on("error")`. */
     errorSink: ((e: Error) => void) | null;
+    /** @internal set by Keepalive: the server issued a new resume token (rememberSeat). */
+    seatSink: ((token: string) => void) | null;
+    /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
     /** Host side: offer to a joiner. */
     /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
     /** Total in-flight links (diagnostics and tests). */
@@ -537,28 +602,6 @@ export declare class WebAudioSink implements AudioSink {
 }
 ```
 
-## migration
-
-```ts
-/**
- * Host migration rule (DESIGN s.9). Pure functions so the rule is testable without any network.
- *
- *  - New host = lowest peerId still connected.
- *  - Two claims: higher epoch wins; equal epoch -> lower peerId wins; the loser demotes itself.
- */
-export interface Claim {
-    epoch: number;
-    hostId: number;
-}
-/** Lowest peerId among `connected`, skipping the failed host. Null when nobody is left. */
-export declare function pickNewHost(connected: Iterable<number>, failedHost: number): number | null;
-/** True when claim `a` beats claim `b`. */
-export declare function claimWins(a: Claim, b: Claim): boolean;
-/** Epochs are u16 on the wire; compare with wraparound so a long-lived lobby never sticks. */
-export declare function epochAfter(a: number, b: number): boolean;
-export declare function claimWinsWrapped(a: Claim, b: Claim): boolean;
-```
-
 ## crockford
 
 ```ts
@@ -576,168 +619,6 @@ export declare function formatCode(code: string): string;
 export declare function decodeCrockford(input: string): bigint;
 /** Inverse of decodeCrockford, left-padded to `length` if given. */
 export declare function encodeCrockford(value: bigint, length?: number): string;
-```
-
-## codec
-
-```ts
-/**
- * Binary codec for the peer data channels (DESIGN s.8). Little-endian, one message per frame,
- * 3-byte header `type:u8, route:u16`. Pure functions; no I/O.
- */
-export declare const MAX_FRAME_BYTES: number;
-export declare const HEADER_BYTES = 3;
-export declare const PROTO = 1;
-export declare const MsgType: {
-    readonly hi: 1;
-    readonly welcome_dc: 2;
-    readonly cmd: 16;
-    readonly frame: 17;
-    readonly hash: 18;
-    readonly desync: 19;
-    readonly snapshot_req: 20;
-    readonly snapshot: 21;
-    readonly chunk: 22;
-    readonly raw: 32;
-    readonly ping: 48;
-    readonly pong: 49;
-    readonly host_claim: 64;
-    readonly voice: 80;
-    readonly chat: 96;
-    readonly chat_history: 97;
-    readonly chat_reject: 98;
-};
-/** welcome_dc.mode: 1 = lockstep, 2 = raw (0 reserved) per spec/binary.md. */
-export declare const MODE_LOCKSTEP = 1;
-export declare const MODE_RAW = 2;
-export type CodecErrorCode = "too_short" | "trailing" | "too_long" | "bad_utf8" | "bad_value";
-export declare class CodecError extends Error {
-    code: CodecErrorCode;
-    constructor(code: CodecErrorCode, detail?: string);
-}
-export interface FrameCommand {
-    peerId: number;
-    bytes: Uint8Array;
-}
-export interface ChatLine {
-    peerId: number;
-    id: number;
-    ts: number;
-    text: string;
-}
-export type Message = {
-    type: "hi";
-    proto: number;
-    peerId: number;
-    lastTick: number;
-} | {
-    type: "welcome_dc";
-    tick: number;
-    tickRate: number;
-    mode: number;
-    hostId: number;
-} | {
-    type: "cmd";
-    seq: number;
-    bytes: Uint8Array;
-} | {
-    type: "frame";
-    tick: number;
-    commands: FrameCommand[];
-} | {
-    type: "hash";
-    tick: number;
-    hash: bigint;
-} | {
-    type: "desync";
-    tick: number;
-    hostHash: bigint;
-    yourHash: bigint;
-} | {
-    type: "snapshot_req";
-    sinceTick: number;
-} | {
-    type: "snapshot";
-    tick: number;
-    total: number;
-    flags: number;
-} | {
-    type: "chunk";
-    id: number;
-    index: number;
-    count: number;
-    bytes: Uint8Array;
-} | {
-    type: "raw";
-    bytes: Uint8Array;
-} | {
-    type: "ping";
-    n: number;
-    t: number;
-} | {
-    type: "pong";
-    n: number;
-    t: number;
-} | {
-    type: "host_claim";
-    epoch: number;
-    hostId: number;
-    tick: number;
-} | {
-    type: "voice";
-    seq: number;
-    flags: number;
-    frames: Uint8Array[];
-} | {
-    type: "chat";
-    id: number;
-    ts: number;
-    text: string;
-} | {
-    type: "chat_history";
-    lines: ChatLine[];
-} | {
-    type: "chat_reject";
-    id: number;
-    reason: number;
-};
-export interface Decoded {
-    route: number;
-    msg: Message;
-}
-export declare function encodeMessage(msg: Message, route?: number, allowOversize?: boolean): Uint8Array;
-/** Decode one frame. Returns null for unknown types (ignored for forward compatibility); throws on a truncated body. */
-export declare function decodeMessage(buf: Uint8Array): Decoded | null;
-/** Rewrite the route field on a copy (the host does this when relaying). */
-export declare function withRoute(buf: Uint8Array, route: number): Uint8Array;
-export declare const CHAT_REJECT: {
-    readonly rate: 1;
-    readonly length: 2;
-    readonly mutedByHost: 3;
-};
-export type ChatRejectReason = "rate" | "length" | "muted_by_host" | "unknown";
-export declare function chatRejectName(code: number): ChatRejectReason;
-```
-
-## chunking
-
-```ts
-import type { Message } from "./codec.js";
-/** Chunk body capacity: 16 KiB frame - 3 header - 8 chunk header, rounded down for headroom. */
-export declare const CHUNK_PAYLOAD = 16000;
-export declare function splitChunks(id: number, bytes: Uint8Array, size?: number): Message[];
-/** Reassembles chunked payloads by id. Duplicates are ignored; out-of-order chunks are fine. */
-export declare class Reassembler {
-    /** Returns the full payload when the last chunk arrives, otherwise null. */
-    push(chunk: {
-        id: number;
-        index: number;
-        count: number;
-        bytes: Uint8Array;
-    }): Uint8Array | null;
-    get pending(): number;
-    clear(): void;
-}
 ```
 
 ## signaling
@@ -829,29 +710,6 @@ export declare class SignalingClient {
 }
 ```
 
-## webrtc
-
-```ts
-import { type ChannelName, type LinkFactory, type LinkOptions, type PeerLink, type SignalPayload } from "./transport.js";
-/** Browser (or any WebRTC-capable runtime) PeerLink over RTCPeerConnection with three negotiated channels. */
-export declare class WebRtcLink implements PeerLink {
-    readonly remoteId: number;
-    isOpen: boolean;
-    onSignal: PeerLink["onSignal"];
-    onOpen: PeerLink["onOpen"];
-    onClose: PeerLink["onClose"];
-    onMessage: PeerLink["onMessage"];
-    onPath: PeerLink["onPath"];
-    constructor(opts: LinkOptions);
-    startOffer(): void;
-    handleSignal(s: SignalPayload): Promise<void>;
-    /** Selected candidate pair has a relay candidate -> "relayed", else "direct". Retries while stats settle. */
-    send(channel: ChannelName, bytes: Uint8Array): void;
-    close(): void;
-}
-export declare const webRtcLinkFactory: LinkFactory;
-```
-
 ## transport
 
 ```ts
@@ -936,63 +794,27 @@ export interface Clock {
 export declare const systemClock: Clock;
 ```
 
-## gridpaint
+## friendly
 
 ```ts
-export declare const GRID_W = 16;
-export declare const GRID_H = 16;
-export declare const OP_PAINT = 1;
-export declare const PALETTE: string[];
-export declare const colourOf: (peerId: number) => number;
-export declare function fnv1a32(bytes: Uint8Array): number;
-export declare function fnv1a64(bytes: Uint8Array): bigint;
-export declare function seedFromCode(code: string): number;
-export declare function xorshift32(x: number): number;
-export declare const paintCmd: (x: number, y: number) => Uint8Array;
-export declare class Gridpaint {
-    tick: number;
-    rng: number;
-    grid: Uint8Array<ArrayBuffer>;
-    constructor(code: string);
-    /** Apply frame `tick` (must be current + 1). Returns the hash after the tick. */
-    step(tick: number, cmds?: ReadonlyArray<{
-        peerId: number;
-        bytes: Uint8Array;
-    }>): bigint;
-    apply(peerId: number, bytes: Uint8Array): void;
-    hash(): bigint;
-    /** rng:u32 LE + 256 grid bytes. */
-    snapshot(): Uint8Array;
-    restore(tick: number, bytes: Uint8Array): void;
+export interface FriendlyError {
+    /** Stable machine code (the KeepaliveError code, or "unknown"). */
+    code: string;
+    /** One short sentence a player can read. */
+    message: string;
+    /** What the player can do about it, when there is something. */
+    hint?: string;
 }
-```
-
-## hub
-
-```ts
-import type { Clock } from "./clock.js";
-import type { Message } from "./codec.js";
-import type { ChannelName } from "./transport.js";
 /**
- * What lockstep/chat/voice need from the Lobby. Keeping this narrow lets them be unit-tested with a fake hub.
- * Star topology: a joiner's only link is to the host; the host has one link per joiner.
+ * Plain-language, player-facing text for any error the kit (or its server) can produce.
+ * Never returns a stack trace or raw technical message; unknown errors get a generic friendly line.
  */
-export interface Hub {
-    readonly clock: Clock;
-    readonly localPeerId: number;
-    readonly hostPeerId: number;
-    readonly isHost: boolean;
-    readonly tickRate: number;
-    /** Remote peers with an open link (host: every joiner; joiner: just the host, if linked). */
-    connectedPeers(): number[];
-    /** Send to one directly linked peer. */
-    sendTo(peerId: number, msg: Message, route?: number, channel?: ChannelName): void;
-    /** Joiner -> host. No-op when this peer is the host. */
-    sendToHost(msg: Message, route?: number, channel?: ChannelName): void;
-    /** Host drops a misbehaving peer (kick with a reason shown to the game). */
-    dropPeer(peerId: number, reason: string): void;
-    reportError(err: Error): void;
-    /** Next chunk-set id for this sender (shared by snapshots and oversized frames). */
-    nextChunkId(): number;
-}
+export declare function describeError(err: unknown): FriendlyError;
+/**
+ * A link that opens the game straight into lobby `code`, e.g. `https://game.example/?join=7HQ-4K2`.
+ * `base` defaults to the current page; any existing `param` is replaced. Throws on an invalid code.
+ */
+export declare function shareUrl(code: string, base?: string, param?: string): string;
+/** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
+export declare function codeFromUrl(url?: string, param?: string): string | null;
 ```

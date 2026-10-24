@@ -32,7 +32,7 @@ lobby.Lockstep.ReportHash(tick, hash); lobby.Lockstep.Snapshot = () => bytes; lo
 // JS: @keepalive/client (no pump(): events come from the event loop)
 const kit = new Keepalive({ gameId: "com.you.game", netVersion: "1", lobbyServer, mode: "raw", displayName: "Ann" });
 const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public" });
-const lobby = await kit.join("7HQ 4K2");                   // also kit.rejoin(resumeToken)
+const lobby = await kit.join("7HQ 4K2");                   // also kit.rejoin(resumeToken), kit.resume()
 const list = await kit.list();                             // LobbySummary[]
 lobby.send(peerId, bytes); lobby.broadcast(bytes);         // { channel: "fast" } optional
 lobby.on("message", (from, bytes, channel) => {});
@@ -45,9 +45,20 @@ lobby.lockstep.submit(cmd); for (let f; (f = lobby.lockstep.nextFrame()); ) { /*
 lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lobby.lockstep.restore = (tick, b) => {};
 ```
 
-## Using it from this repo (not on npm yet)
+## Install
 
-`@keepalive/client` is not published. Build it once in a clone of this repo, then point your project at the build:
+```
+npm install @keepalive/client
+```
+
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.global.min.js">` sets
+`window.Keepalive` (so `new Keepalive.Keepalive({...})`), or import the single-file ES module
+`https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.bundle.mjs`. Low-level pieces (codec, chunking,
+migration, WebRTC classes) are in `@keepalive/client/internals`; in-memory test doubles in `@keepalive/client/testing`.
+
+### From a clone of this repo (before a release is on npm, or to try unreleased changes)
+
+Build it once, then point your project at the build:
 
 ```
 git clone https://github.com/ParkerTonra/keepalive
@@ -74,6 +85,21 @@ either form. `lobby.peers` includes the local player and the host, so a two-play
 
 Useful fields: `lobby.code`, `localPeerId`, `hostPeerId`, `isHost`, `phase`, `peers`, `meta`, `resumeToken`.
 Full reference (generated): `docs/api/`.
+
+## Friendly defaults (JS)
+
+- `readyTimeoutMs` (default 15000, 0 = wait forever): a joiner that cannot reach the host gives up. `lobby.ready`
+  rejects with `KeepaliveError` code `ice_failed`, `kit.on("error")` fires, the lobby is left and `sessionEnded` fires
+  with reason `"ice_failed"`. When the server offers TURN, the second half of the budget is one relay-only retry.
+- `rememberSeat` (default on where `sessionStorage` exists): after a page reload `kit.join(sameCode)` takes the old
+  seat back instead of joining as a new player; `await kit.resume()` does it without a code (null when there is no seat
+  or the server dropped it) and `kit.rememberedCode` tells you whether there is one. Forgotten when the session ends.
+- `host()` defaults to `visibility: "unlisted"`: joinable by code or link, not shown by `list()`. Pass `"public"` to list it.
+- An empty `displayName` (the default) shows to everyone as `"Player N"`, N being the seat (peer id).
+- Test and runtime seams (`socketFactory`, `linkFactory`, `clock`, `wallClock`, `voiceCodec`, `createMic`,
+  `createSink`, `storage`) go under `options.advanced`; the old top-level keys still work but are deprecated.
+- Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
+  error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 
 ## Rules
 

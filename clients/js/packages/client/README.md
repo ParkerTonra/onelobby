@@ -40,11 +40,23 @@ console.log("Tell your friend this code:", formatCode(lobby.code));
 
 Without a bundler: `import { Keepalive } from "https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.bundle.mjs"`.
 
+## Made for players
+
+- Lobbies are **unlisted** by default: friends join with the code or a link (`Keepalive.shareUrl(lobby.code)` makes
+  `https://your.game/?join=C5A-FX8`; `Keepalive.codeFromUrl()` reads it back). Pass `visibility: "public"` to list it.
+- Players without a name show as **"Player 2"**, "Player 3", ...
+- A joiner that can't connect gets an error after 15 s (`readyTimeoutMs`) instead of waiting forever: code
+  `ice_failed`, and `sessionEnded` with that reason. One relay retry happens first when the server offers TURN.
+- A page **reload keeps the seat** (`rememberSeat`, on by default): `kit.join(sameCode)` or `kit.resume()` takes it back;
+  `kit.rememberedCode` says which lobby.
+- `Keepalive.describeError(err)` turns any error into `{ message, hint }` you can show as-is.
+- Test seams go under `advanced: { socketFactory, linkFactory, clock, storage, ... }`.
+
 ## Files
 
 | Import | What |
 |---|---|
-| `@keepalive/client` | the public API: `Keepalive`, `Lobby`, `Lockstep`, `Chat`, `Voice`, `KeepaliveError`, `normalizeCode`, `formatCode` |
+| `@keepalive/client` | the public API: `Keepalive`, `Lobby`, `Lockstep`, `Chat`, `Voice`, `KeepaliveError`, `normalizeCode`, `formatCode`, `describeError`, `shareUrl`, `codeFromUrl` |
 | `@keepalive/client/testing` | in-memory server, peer network and clock for your own tests |
 | `@keepalive/client/internals` | low-level pieces (codec, chunking, migration, jitter buffer, ...); no stability promise |
 | `dist/keepalive.global.min.js` | the `<script>` build; sets `window.Keepalive` |

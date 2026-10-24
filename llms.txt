@@ -13,6 +13,12 @@ sends made before it are queued and flushed, not dropped), ready and the `lobby.
 a joiner's link to the host is open; the host is ready at once), peerLeft, joinRequested, hostChanged, phase,
 message, metaChanged, serverLost, sessionEnded.
 
+JS defaults: host() is unlisted unless visibility "public"; empty displayName shows as "Player N"; a joiner that cannot
+reach the host in readyTimeoutMs (15000) fails with code ice_failed (sessionEnded reason "ice_failed"); rememberSeat keeps
+the seat across a reload (kit.resume(), kit.rememberedCode); seams go under options.advanced; describeError(e),
+shareUrl(code) and codeFromUrl() are player-facing helpers. Install: npm install @keepalive/client, or the script-tag
+build dist/keepalive.global.min.js (window.Keepalive).
+
 ## Recipes
 
 - [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project

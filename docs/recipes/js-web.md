@@ -4,9 +4,20 @@ Add Host / Join / Browse buttons to a web game with `@keepalive/client`. Works i
 Snippets tagged `ts compile file=NAME` are type-checked by `docs/check-snippets.mjs` (all snippets of one recipe share a
 folder, so they can import each other).
 
-## 1. Install: using it from this repo (not on npm yet)
+## 1. Install
 
-`@keepalive/client` is not published. Build it once in a clone of this repo, then point your project at the build:
+```
+npm install @keepalive/client
+```
+
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.global.min.js">` sets
+`window.Keepalive` (so `new Keepalive.Keepalive({...})`), or import the single-file ES module
+`https://cdn.jsdelivr.net/npm/@keepalive/client@0.1/dist/keepalive.bundle.mjs`. Low-level pieces (codec, chunking,
+migration, WebRTC classes) are in `@keepalive/client/internals`; in-memory test doubles in `@keepalive/client/testing`.
+
+### From a clone of this repo (before a release is on npm, or to try unreleased changes)
+
+Build it once, then point your project at the build:
 
 ```
 git clone https://github.com/ParkerTonra/keepalive
@@ -53,18 +64,26 @@ const kit = new Keepalive({
   netVersion: "1",              // bump when your command bytes or rules change
   lobbyServer: lobbyServerUrl(),
   mode: "raw",                  // or "lockstep" (see raw-mode.md)
-  displayName: "Player",
+  // displayName: "Ann",        // optional; empty shows as "Player N"
+  // readyTimeoutMs: 15000,     // default: a joiner that can't reach the host fails with code "ice_failed"
 });
 
 let lobby: Lobby | null = null;
 
 export async function hostLobby(): Promise<string> {
+  // visibility defaults to "unlisted" (join by code or link only); "public" also shows it in Browse
   lobby = await kit.host({ name: "My game", maxPlayers: 2, visibility: "public" });
   return formatCode(lobby.code); // the server returns "C5AFX8"; show it grouped: "C5A FX8"
 }
 
 export async function joinLobby(code: string): Promise<void> {
-  lobby = await kit.join(code); // accepts "7hq4k2" or "7HQ 4K2"
+  lobby = await kit.join(code); // accepts "7hq4k2" or "7HQ 4K2"; after a reload it takes the old seat back
+}
+
+/** After a page reload: back into the lobby this tab was in (rememberSeat), or false. */
+export async function resumeLobby(): Promise<boolean> {
+  lobby = await kit.resume();
+  return lobby !== null;
 }
 
 export async function browseLobbies(): Promise<LobbySummary[]> {
@@ -87,16 +106,24 @@ Never make the game's start wait on these. Wrap each call in try/catch, show the
 ```
 
 ```ts compile file=ui.ts
+import { codeFromUrl, describeError, shareUrl } from "@keepalive/client";
 import { hostLobby, joinLobby, browseLobbies } from "./net";
 
 const status = document.getElementById("net-status")!;
 const guard = (fn: () => Promise<void>) => async () => {
-  try { await fn(); } catch (e) { status.textContent = `Multiplayer unavailable: ${(e as Error).message}`; }
+  try { await fn(); } catch (e) {
+    const f = describeError(e); // plain words for players, e.g. "That lobby is full." plus a hint
+    status.textContent = f.hint ? `${f.message} ${f.hint}` : f.message;
+  }
 };
 
 document.getElementById("host")!.onclick = guard(async () => {
-  status.textContent = `Share this code: ${await hostLobby()}`;
+  const code = await hostLobby();
+  status.textContent = `Share this code: ${code} or this link: ${shareUrl(code)}`;
 });
+// Opened from a share link (?join=7HQ-4K2): join straight away.
+const linked = codeFromUrl();
+if (linked) void guard(async () => { await joinLobby(linked); status.textContent = "Joined."; })();
 document.getElementById("join")!.onclick = guard(async () => {
   await joinLobby((document.getElementById("code") as HTMLInputElement).value);
   status.textContent = "Joined.";
@@ -112,6 +139,15 @@ document.getElementById("browse")!.onclick = guard(async () => {
 });
 ```
 
+## Friendly defaults
+
+- A joiner that cannot reach the host within `readyTimeoutMs` (15 s) stops waiting: `lobby.ready` rejects with code
+  `ice_failed`, `kit.on("error")` fires, and the lobby ends with `sessionEnded` reason `"ice_failed"`. Show
+  `describeError(e)`; it suggests another network. Half the budget is a relay-only retry when the server has TURN.
+- `rememberSeat` (on by default): a reload keeps the player's seat. `kit.rememberedCode` is the lobby to offer
+  ("Rejoin 7HQ 4K2?"), `kit.resume()` takes it back. Pass `rememberSeat: false` to always join fresh.
+- Test seams (`socketFactory`, `linkFactory`, `clock`, ...) live under `advanced: { ... }`.
+
 ## 5. Move bytes
 
 Encode your moves as bytes yourself (`Uint8Array.of(cell)`), then follow `raw-mode.md` (host-authoritative messages) or
@@ -123,4 +159,5 @@ Encode your moves as bytes yourself (`Uint8Array.of(cell)`), then follow `raw-mo
 - With a local server (`docs/recipes/self-host.md`) two browser tabs: tab A clicks Host and shows a code; tab B pastes it
   into Join; both see two peers (`lobby.peers.length === 2`).
 - Tab B's Browse lists tab A's lobby while it is `public`.
+- Opening tab A's share link in tab B joins without typing the code; reloading tab B puts it back in the same seat.
 - With the server URL set to a dead address the game still plays offline and Host shows a visible error.

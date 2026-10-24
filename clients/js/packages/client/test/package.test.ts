@@ -68,8 +68,9 @@ describe("script-tag bundle", () => {
 describe("export surface", () => {
   it("root is the small public API", () => {
     expect(Object.keys(root).sort()).toEqual([
-      "CHAT_MAX_BYTES", "Chat", "Keepalive", "KeepaliveError", "LIB_NAME", "LIB_VERSION", "Lobby", "Lockstep", "Voice",
-      "formatCode", "normalizeCode", "webCodecsOpusAvailable",
+      "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "Keepalive", "KeepaliveError", "LIB_NAME", "LIB_VERSION",
+      "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
+      "webCodecsOpusAvailable",
     ]);
   });
 
