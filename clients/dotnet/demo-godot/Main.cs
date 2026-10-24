@@ -84,7 +84,7 @@ public partial class Main : Node
         var row1 = new HBoxContainer();
         col.AddChild(row1);
         row1.AddChild(new Label { Text = "Server" });
-        _server = new LineEdit { Text = "ws://localhost:8080/ws", CustomMinimumSize = new Vector2(260, 0) };
+        _server = new LineEdit { Text = "ws://127.0.0.1:8080/ws", CustomMinimumSize = new Vector2(260, 0) };
         row1.AddChild(_server);
         row1.AddChild(new Label { Text = "Name" });
         _name = new LineEdit { Text = "Player" + (new Random().Next(100, 999)), CustomMinimumSize = new Vector2(110, 0) };
