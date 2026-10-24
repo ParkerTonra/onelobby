@@ -22,9 +22,10 @@ game itself.
 
 1. **A lobby server address.** It looks like `wss://lobby.example.com`. You can get one of two ways:
    - Ask someone who already runs one (a friend, a club, a teacher) for its address.
-   - Run your own. It is one small program on a rented computer or a free/cheap hosting service. Step by step
-     instructions are in [deploy/RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md). You only do this once, and every game you
-     make can share it.
+   - Make your own for free in a few clicks: [deploy/EASY_SERVER.md](../deploy/EASY_SERVER.md) walks you through it
+     (a free hosting account, one button, then copy the address). You only do this once, and every game you make can
+     share it. For a server that also relays connections on strict networks, see
+     [deploy/RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md).
 2. **A place to put your page** so friends can open it. Any free static web host works: GitHub Pages, Netlify Drop
    (drag a folder onto the page), Cloudflare Pages, or your school or club website. For trying it alone on your own
    computer you can just double-click the file, but friends on other computers need a web address.
@@ -46,7 +47,7 @@ If you'd rather add a lobby to a page you already have, paste these two pieces i
 In the `<head>` part of the page:
 
 ```html
-<script type="module" src="https://unpkg.com/@keepalive/client/dist/ui/index.js"></script>
+<script src="https://unpkg.com/@keepalive/client/dist/keepalive.global.min.js"></script>
 ```
 
 Where you want the lobby box to appear:

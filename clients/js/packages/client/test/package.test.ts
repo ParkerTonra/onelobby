@@ -7,6 +7,10 @@ import vm from "node:vm";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as root from "../src/index.js";
 import * as internals from "../src/internals.js";
+import * as ui from "../src/ui/index.js";
+
+/** What the single-file bundles expose: the root API plus the drop-in UI. */
+const bundleNames = [...new Set([...Object.keys(root), ...Object.keys(ui)])].sort();
 
 const pkgDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = (f: string) => join(pkgDir, "dist", f);
@@ -26,7 +30,7 @@ describe("npm pack", () => {
       "package.json", "README.md", "LICENSE",
       "dist/index.js", "dist/index.d.ts", "dist/internals.js", "dist/internals.d.ts", "dist/testing.js", "dist/testing.d.ts",
       "dist/keepalive.global.js", "dist/keepalive.global.js.map", "dist/keepalive.global.min.js", "dist/keepalive.global.min.js.map",
-      "dist/keepalive.bundle.mjs", "dist/keepalive.bundle.mjs.map", "dist/global.d.ts",
+      "dist/keepalive.bundle.mjs", "dist/keepalive.bundle.mjs.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
     ]) expect(files, f).toContain(f);
     const bad = files.filter((f) => /node_modules|(^|\/)test\/|\.test\.|^src\/|^scripts\/|tsconfig|\.tsbuildinfo$|\.tgz$/.test(f));
     expect(bad).toEqual([]);
@@ -55,13 +59,14 @@ describe("script-tag bundle", () => {
       expect(typeof K.Keepalive).toBe("function");
       expect(typeof K.Lobby).toBe("function");
       expect((K.normalizeCode as (s: string) => string | null)("7hq-4k2")).toBe("7HQ4K2");
-      expect(Object.keys(K).sort()).toEqual(Object.keys(root).sort());
+      expect(Object.keys(K).sort()).toEqual(bundleNames);
+      expect(typeof K.defineLobbyElement).toBe("function");
     });
   }
 
   it("bundle.mjs exports the same names", async () => {
     const mod = await import(/* @vite-ignore */ "file://" + dist("keepalive.bundle.mjs").replace(/\\/g, "/"));
-    expect(Object.keys(mod).sort()).toEqual(Object.keys(root).sort());
+    expect(Object.keys(mod).sort()).toEqual(bundleNames);
   });
 });
 

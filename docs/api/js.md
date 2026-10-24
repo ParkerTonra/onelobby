@@ -818,3 +818,164 @@ export declare function shareUrl(code: string, base?: string, param?: string): s
 /** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
 export declare function codeFromUrl(url?: string, param?: string): string | null;
 ```
+
+## ui/index
+
+```ts
+export { defineLobbyElement, LOBBY_TAG } from "./element.js";
+export type { KeepaliveLobbyElement } from "./element.js";
+export { LobbyController, SharedState } from "./controller.js";
+export type { Player, UiState, ControllerEvents, ControllerOptions, KitLike } from "./controller.js";
+```
+
+## ui/element
+
+```ts
+import { type Player, type SharedState, type UiState } from "./controller.js";
+export declare const LOBBY_TAG = "keepalive-lobby";
+/** The element's public surface (for TypeScript users). */
+export interface KeepaliveLobbyElement extends HTMLElement {
+    readonly isHost: boolean;
+    readonly players: Player[];
+    readonly code: string | null;
+    readonly state: UiState;
+    readonly shared: SharedState;
+    send(data: unknown): void;
+    host(): Promise<void>;
+    join(code: string): Promise<void>;
+    start(): Promise<void>;
+    leave(): Promise<void>;
+}
+/** Register `<keepalive-lobby>` (safe to call more than once; a no-op outside a browser). */
+export declare function defineLobbyElement(tag?: string): void;
+declare global {
+    interface HTMLElementTagNameMap {
+        "keepalive-lobby": KeepaliveLobbyElement;
+    }
+}
+```
+
+## ui/controller
+
+```ts
+import type { Lobby } from "../lobby.js";
+import type { HostOptions } from "../keepalive.js";
+import { type FriendlyError } from "../friendly.js";
+export type UiState = "idle" | "connecting" | "lobby" | "playing" | "error";
+export interface Player {
+    id: number;
+    name: string;
+    isHost: boolean;
+    isMe: boolean;
+}
+/** What the controller needs from `Keepalive` (so tests can pass the in-memory rig). */
+export interface KitLike {
+    host(h: HostOptions): Promise<Lobby>;
+    join(code: string): Promise<Lobby>;
+    /** Take back the seat this tab held before a reload (Keepalive `rememberSeat`); null when there is none. */
+    resume?(): Promise<Lobby | null>;
+    readonly rememberedCode?: string | null;
+}
+export interface ControllerEvents {
+    message: {
+        from: Player | null;
+        data: unknown;
+    };
+    "player-joined": {
+        player: Player;
+    };
+    "player-left": {
+        player: Player;
+        reason: string;
+    };
+    start: Record<string, never>;
+    error: FriendlyError;
+    "shared-change": {
+        key: string;
+        value: unknown;
+        from: Player | null;
+    };
+}
+export interface ControllerOptions {
+    makeKit: (name: string) => KitLike;
+    /** A number, or a function read each time a game is hosted. */
+    maxPlayers: number | (() => number);
+    /** Lobby name shown to the server (not to players). */
+    lobbyName?: string;
+}
+/** Wire envelope inside raw frames. Kept tiny and versioned by key names only. */
+type Wire = {
+    k: "m";
+    d: unknown;
+} | {
+    k: "set";
+    key: string;
+    v: unknown;
+} | {
+    k: "add";
+    key: string;
+    n: number;
+} | {
+    k: "S";
+    key: string;
+    v: unknown;
+    by: number;
+    q: number;
+} | {
+    k: "SS";
+    all: Record<string, unknown>;
+    q: number;
+};
+export declare class SharedState {
+    /** @internal */ values: Map<string, unknown>;
+    constructor(c: LobbyController);
+    get(key: string): unknown;
+    /** Set a value for everyone. The host decides the order; everyone gets `shared-change`. */
+    set(key: string, value: unknown): void;
+    /** Add `n` (default 1) to a number, safely even when several players click at once. */
+    add(key: string, n?: number): void;
+    /** A plain copy of every value. */
+    all(): Record<string, unknown>;
+    keys(): string[];
+}
+export declare class LobbyController {
+    state: UiState;
+    lobby: Lobby | null;
+    error: FriendlyError | null;
+    /** True while a joiner waits for its direct link to the host. */
+    linking: boolean;
+    name: string;
+    readonly shared: SharedState;
+    onChange: () => void;
+    onEvent: <K extends keyof ControllerEvents>(type: K, detail: ControllerEvents[K]) => void;
+    /** Host: changes made so far. Joiner: the newest change applied (older queued ones are skipped). */
+    constructor(opts: ControllerOptions);
+    get isHost(): boolean;
+    get code(): string | null;
+    get players(): Player[];
+    /** One line of plain language for the status area. */
+    get statusText(): string;
+    host(name: string): Promise<void>;
+    join(code: string, name: string): Promise<void>;
+    /**
+     * Take back this tab's seat after a page reload, if the kit remembers one (host or joiner). Quietly stays on the
+     * start screen when there is nothing to resume or the seat is gone. Resolves true when back in a game.
+     */
+    resume(name: string): Promise<boolean>;
+    /** Repeat whatever failed last (host or join). */
+    retry(): Promise<void>;
+    start(): Promise<void>;
+    leave(): Promise<void>;
+    /** Back to the start screen (after an error, or to cancel). */
+    reset(): void;
+    /** Send any JSON-able value to everyone else. */
+    send(data: unknown): void;
+    /** @internal from SharedState */
+    _sharedOp(op: Extract<Wire, {
+        k: "set";
+    } | {
+        k: "add";
+    }>): void;
+}
+export {};
+```

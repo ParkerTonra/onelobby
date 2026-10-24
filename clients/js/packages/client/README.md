@@ -24,6 +24,11 @@ You need a Keepalive lobby server (the WebSocket URL, like `wss://lobby.example.
 
 The file also works saved next to your page (`<script src="keepalive.global.min.js">`), including pages opened from disk.
 
+## No code at all
+
+`<keepalive-lobby server="wss://lobby.example.com/ws" game="my-game" max-players="4"></keepalive-lobby>` after the
+`<script>` tag above gives a complete lobby box. See the [no-code guide](https://REPLACE-ME.example/keepalive/blob/main/docs/no-code.md).
+
 ## Install with npm
 
 ```
@@ -57,6 +62,7 @@ Without a bundler: `import { Keepalive } from "https://cdn.jsdelivr.net/npm/@kee
 | Import | What |
 |---|---|
 | `@keepalive/client` | the public API: `Keepalive`, `Lobby`, `Lockstep`, `Chat`, `Voice`, `KeepaliveError`, `normalizeCode`, `formatCode`, `describeError`, `shareUrl`, `codeFromUrl` |
+| `@keepalive/client/ui` | the `<keepalive-lobby>` drop-in element (host, join, invite link, players, start); also in the `<script>` build |
 | `@keepalive/client/testing` | in-memory server, peer network and clock for your own tests |
 | `@keepalive/client/internals` | low-level pieces (codec, chunking, migration, jitter buffer, ...); no stability promise |
 | `dist/keepalive.global.min.js` | the `<script>` build; sets `window.Keepalive` |
