@@ -1,0 +1,17 @@
+{
+  "name": "@keepalive/spec",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keepalive protocol spec: schemas, vectors, reference codec and gridpaint. `npm test` round-trips the vectors.",
+  "exports": {
+    "./codec": "./reference/codec.mjs",
+    "./codes": "./reference/codes.mjs",
+    "./turn": "./reference/turn.mjs",
+    "./gridpaint": "./reference/gridpaint.mjs"
+  },
+  "scripts": {
+    "test": "node --test reference/spec.test.mjs",
+    "gen": "node reference/gen-vectors.mjs"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$comment": "Keepalive join codes (DESIGN s.6). Frozen. Reference: spec/reference/codes.mjs",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "excluded": ["I", "L", "O", "U"],
+  "length": 6,
+  "display": "3+3 with one space: 7HQ 4K2",
+  "decode": {
+    "steps": [
+      "remove every space (U+0020) and hyphen-minus (U+002D)",
+      "uppercase ASCII letters",
+      "I and L become 1; O becomes 0",
+      "the result must be exactly 6 characters, each in the alphabet; U and every other character is invalid"
+    ],
+    "canonical": "6 uppercase alphabet characters, no separators. The server stores and echoes the canonical form; clients display it as 3+3.",
+    "invalidMeansServerError": "bad_request (malformed). A well-formed code that names no live lobby of the same gameId is unknown_code."
+  },
+  "issue": {
+    "uniqueAmongLiveLobbies": true,
+    "neverReusedForHours": 24,
+    "space": 1073741824,
+    "randomness": "cryptographically secure random, 30 bits"
+  },
+  "valid": [
+    { "input": "7HQ4K2", "canonical": "7HQ4K2" },
+    { "input": "7HQ 4K2", "canonical": "7HQ4K2" },
+    { "input": "7hq-4k2", "canonical": "7HQ4K2" },
+    { "input": " 7hq 4k2 ", "canonical": "7HQ4K2" },
+    { "input": "OOOOOO", "canonical": "000000" },
+    { "input": "oOo0O0", "canonical": "000000" },
+    { "input": "IL1il1", "canonical": "111111" },
+    { "input": "012345", "canonical": "012345" },
+    { "input": "zzzzzz", "canonical": "ZZZZZZ" },
+    { "input": "ABCDEF", "canonical": "ABCDEF" },
+    { "input": "GHJKMN", "canonical": "GHJKMN" },
+    { "input": "PQRSTV", "canonical": "PQRSTV" },
+    { "input": "WXYZ89", "canonical": "WXYZ89" }
+  ],
+  "invalid": [
+    { "input": "", "why": "empty" },
+    { "input": "7HQ4K", "why": "5 chars" },
+    { "input": "7HQ4K22", "why": "7 chars" },
+    { "input": "7HQ4KU", "why": "U is not in the alphabet" },
+    { "input": "7HQ4K!", "why": "punctuation" },
+    { "input": "7HQ_4K2", "why": "underscore is not a separator" },
+    { "input": "7HQ\t4K2", "why": "tab is not a separator" },
+    { "input": "7HQ4KÉ", "why": "non-ASCII" },
+    { "input": "７HQ4K2", "why": "full-width digit is not ASCII" },
+    { "input": "ßHQ4K", "why": "sharp s must not case-fold to SS: uppercasing is ASCII-only" }
+  ]
+}

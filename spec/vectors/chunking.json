@@ -1,0 +1,67 @@
+{
+  "desc": "Chunking: split bytes into chunk frames sharing one id; reassemble by index (any order, duplicates ignored). Each chunk frame is a complete wire frame.",
+  "maxFrame": 16384,
+  "defaultChunkSize": 16000,
+  "maxChunkBody": 16373,
+  "vectors": [
+    {
+      "name": "small_3byte_chunks",
+      "payload": "01020304050607",
+      "chunkSize": 3,
+      "id": 5,
+      "chunks": [
+        "1600000500000000000300010203",
+        "1600000500000001000300040506",
+        "160000050000000200030007"
+      ]
+    },
+    {
+      "name": "forty_kb_default",
+      "payload_len": 40000,
+      "payload_pattern": "byte[i] = (i*7+3) & 0xff",
+      "chunkSize": 16000,
+      "id": 3735928559,
+      "chunk_count": 3,
+      "chunk_lengths": [
+        16011,
+        16011,
+        8011
+      ],
+      "chunk_hex_prefix_16": [
+        "160000efbeadde00000300030a11181f",
+        "160000efbeadde01000300838a91989f",
+        "160000efbeadde02000300030a11181f"
+      ],
+      "payload_fnv1a64": "15206158565288813733"
+    },
+    {
+      "name": "empty_payload",
+      "payload": "",
+      "chunkSize": 16000,
+      "id": 1,
+      "chunks": [
+        "1600000100000000000100"
+      ]
+    },
+    {
+      "name": "oversized_inner_frame",
+      "desc": "a 20017-byte frame (type 0x11) sent as chunks; reassembled bytes decode as a frame",
+      "payload_len": 20017,
+      "chunkSize": 16000,
+      "id": 12,
+      "payload_fnv1a64": "5935521270955411518",
+      "chunk_count": 2
+    },
+    {
+      "name": "snapshot_deflate",
+      "desc": "snapshot flags=1: payload is a zlib stream (RFC 1950, what CompressionStream(\"deflate\") and ZLibStream produce) of the 260-byte gridpaint snapshot; header total = payload length",
+      "snapshot_header_hex": "15000064000000000000000f00000001",
+      "payload": "789c636440058c23900f0009c80012",
+      "inflated_len": 260,
+      "id": 21,
+      "chunks": [
+        "1600001500000000000100789c636440058c23900f0009c80012"
+      ]
+    }
+  ]
+}

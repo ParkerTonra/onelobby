@@ -1,0 +1,28 @@
+{
+  "desc": "credential = base64(HMAC-SHA1(secret as UTF-8, username as UTF-8)). username = <expiry unix seconds>:<userId>, userId has no colon.",
+  "vectors": [
+    {
+      "username": "1761267600:c7",
+      "secret": "keepalive-test-secret",
+      "credential": "Eo7GydsW4v5d+yFkevvJK2v3xE8="
+    },
+    {
+      "username": "2000000000:p42",
+      "secret": "keepalive-test-secret",
+      "credential": "hBXnf4wxE+ysfNU2if4B9HjecaQ="
+    },
+    {
+      "username": "1761267600:c7",
+      "secret": "another secret",
+      "credential": "EThGDYNbRvBKYhQ00IEl7YZeQaI="
+    }
+  ],
+  "mint": {
+    "secret": "keepalive-test-secret",
+    "userId": "c7",
+    "nowSeconds": 1761264000,
+    "ttl": 3600,
+    "expectUsername": "1761267600:c7",
+    "expectCredential": "Eo7GydsW4v5d+yFkevvJK2v3xE8="
+  }
+}

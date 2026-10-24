@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keepalive.dev/spec/signaling.schema.json",
+  "title": "Keepalive signaling protocol lk1 (DESIGN s.7)",
+  "description": "One WebSocket, text frames, one JSON object per frame, at most 16 KiB. Every message has t. Unknown types and unknown fields are ignored (additive evolution), so objects do not set additionalProperties:false. Validate client messages against #/$defs/clientMessage and server messages against #/$defs/serverMessage. Behavioural rules that JSON Schema cannot express are in spec/signaling.md (decisions) and are exercised by conformance/server.",
+  "anyOf": [{ "$ref": "#/$defs/clientMessage" }, { "$ref": "#/$defs/serverMessage" }],
+  "$defs": {
+    "proto": { "const": "lk1" },
+    "code": {
+      "description": "Join code as typed by a user: 6 Crockford characters, optionally with spaces or hyphens, any case, with i/l/o folded (spec/codes.json). Servers send the canonical form.",
+      "type": "string",
+      "maxLength": 32
+    },
+    "canonicalCode": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{6}$" },
+    "peerId": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "playerName": { "type": "string", "maxLength": 24 },
+    "lobbyName": { "type": "string", "maxLength": 48 },
+    "meta": {
+      "description": "Host-set key/value strings, at most 16 keys, keys and values at most 64 characters each.",
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": { "maxLength": 64 },
+      "additionalProperties": { "type": "string", "maxLength": 64 }
+    },
+    "visibility": { "enum": ["public", "unlisted", "private"] },
+    "mode": { "enum": ["lockstep", "raw"] },
+    "phase": { "enum": ["lobby", "in_game"] },
+    "errorCode": {
+      "enum": ["bad_request", "unknown_code", "lobby_full", "in_game", "version_mismatch", "game_not_allowed", "rate_limited", "not_host", "kicked", "server_full"]
+    },
+    "sdp": {
+      "type": "object",
+      "required": ["type", "sdp"],
+      "properties": { "type": { "enum": ["offer", "answer", "pranswer", "rollback"] }, "sdp": { "type": "string" } }
+    },
+    "ice": {
+      "type": "object",
+      "required": ["candidate"],
+      "properties": {
+        "candidate": { "type": "string" },
+        "sdpMid": { "type": ["string", "null"] },
+        "sdpMLineIndex": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "iceServer": {
+      "type": "object",
+      "required": ["urls"],
+      "properties": {
+        "urls": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "username": { "type": "string" },
+        "credential": { "type": "string" },
+        "ttl": { "type": "integer", "minimum": 1, "description": "seconds" }
+      }
+    },
+    "peerRef": {
+      "type": "object",
+      "required": ["peerId", "name"],
+      "properties": { "peerId": { "$ref": "#/$defs/peerId" }, "name": { "type": "string" } }
+    },
+    "peerEntry": {
+      "type": "object",
+      "required": ["peerId", "name", "joinedAt"],
+      "properties": { "peerId": { "$ref": "#/$defs/peerId" }, "name": { "type": "string" }, "joinedAt": { "type": "integer", "description": "server unix ms" } }
+    },
+    "lobbyEntry": {
+      "description": "Row of the public list (DESIGN s.6).",
+      "type": "object",
+      "required": ["code", "gameId", "netVersion", "name", "hostName", "players", "maxPlayers", "phase", "meta", "region", "createdAt"],
+      "properties": {
+        "code": { "$ref": "#/$defs/canonicalCode" },
+        "gameId": { "type": "string" },
+        "netVersion": { "type": "string" },
+        "name": { "type": "string" },
+        "hostName": { "type": "string" },
+        "players": { "type": "integer", "minimum": 1 },
+        "maxPlayers": { "type": "integer", "minimum": 2 },
+        "phase": { "$ref": "#/$defs/phase" },
+        "meta": { "$ref": "#/$defs/meta" },
+        "region": { "type": "string" },
+        "createdAt": { "type": "integer", "description": "server unix ms" }
+      }
+    },
+
+    "clientMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/c_hello" }, { "$ref": "#/$defs/c_create" }, { "$ref": "#/$defs/c_join" }, { "$ref": "#/$defs/c_list" },
+        { "$ref": "#/$defs/c_leave" }, { "$ref": "#/$defs/c_signal" }, { "$ref": "#/$defs/c_meta" }, { "$ref": "#/$defs/c_phase" },
+        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }
+      ]
+    },
+    "c_hello": {
+      "type": "object",
+      "required": ["t", "proto", "gameId", "netVersion", "client", "name"],
+      "properties": {
+        "t": { "const": "hello" },
+        "proto": { "$ref": "#/$defs/proto" },
+        "gameId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+        "netVersion": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "client": {
+          "type": "object",
+          "required": ["lib", "ver", "platform"],
+          "properties": { "lib": { "type": "string" }, "ver": { "type": "string" }, "platform": { "type": "string" } }
+        },
+        "name": { "$ref": "#/$defs/playerName" },
+        "resumeToken": { "type": "string" }
+      }
+    },
+    "c_create": {
+      "type": "object",
+      "required": ["t", "name", "maxPlayers", "visibility", "mode", "tickRate", "lateJoin", "meta"],
+      "properties": {
+        "t": { "const": "create" },
+        "name": { "$ref": "#/$defs/lobbyName" },
+        "maxPlayers": { "type": "integer", "minimum": 2, "maximum": 250 },
+        "visibility": { "$ref": "#/$defs/visibility" },
+        "mode": { "$ref": "#/$defs/mode" },
+        "tickRate": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "lateJoin": { "type": "boolean" },
+        "meta": { "$ref": "#/$defs/meta" },
+        "relayOnly": { "type": "boolean", "description": "Additive (s.10): hide IPs by forcing TURN. Default false." }
+      }
+    },
+    "c_join": { "type": "object", "required": ["t", "code"], "properties": { "t": { "const": "join" }, "code": { "$ref": "#/$defs/code" } } },
+    "c_list": {
+      "type": "object",
+      "required": ["t", "visibility"],
+      "properties": {
+        "t": { "const": "list" },
+        "visibility": { "const": "public" },
+        "meta": { "$ref": "#/$defs/meta" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "cursor": { "type": "string" }
+      }
+    },
+    "c_leave": { "type": "object", "required": ["t"], "properties": { "t": { "const": "leave" } } },
+    "c_signal": {
+      "type": "object",
+      "required": ["t", "to"],
+      "properties": { "t": { "const": "signal" }, "to": { "$ref": "#/$defs/peerId" }, "sdp": { "$ref": "#/$defs/sdp" }, "ice": { "$ref": "#/$defs/ice" } },
+      "anyOf": [{ "required": ["sdp"] }, { "required": ["ice"] }]
+    },
+    "c_meta": { "type": "object", "required": ["t", "meta"], "properties": { "t": { "const": "meta" }, "meta": { "$ref": "#/$defs/meta" } } },
+    "c_phase": { "type": "object", "required": ["t", "phase"], "properties": { "t": { "const": "phase" }, "phase": { "$ref": "#/$defs/phase" } } },
+    "c_kick": { "type": "object", "required": ["t", "peerId"], "properties": { "t": { "const": "kick" }, "peerId": { "$ref": "#/$defs/peerId" } } },
+    "c_approve": {
+      "type": "object",
+      "required": ["t", "peerId", "ok"],
+      "properties": { "t": { "const": "approve" }, "peerId": { "$ref": "#/$defs/peerId" }, "ok": { "type": "boolean" } }
+    },
+    "c_ping": { "type": "object", "required": ["t", "n"], "properties": { "t": { "const": "ping" }, "n": { "type": "integer", "minimum": 0 } } },
+    "c_host_changed": {
+      "description": "Additive (s.9 'host_changed to keepalive-server'): the new host announces a migration so the server mirror follows. Accepted when hostId is the sender's own peerId, the sender is a current member, and epoch is greater than the lobby's current epoch (0 at creation).",
+      "type": "object",
+      "required": ["t", "hostId", "epoch"],
+      "properties": { "t": { "const": "host_changed" }, "hostId": { "$ref": "#/$defs/peerId" }, "epoch": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+    },
+
+    "serverMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/s_welcome" }, { "$ref": "#/$defs/s_lobby" }, { "$ref": "#/$defs/s_peer_joined" }, { "$ref": "#/$defs/s_peer_left" },
+        { "$ref": "#/$defs/s_host_changed" }, { "$ref": "#/$defs/s_join_request" }, { "$ref": "#/$defs/s_lobbies" },
+        { "$ref": "#/$defs/s_signal" }, { "$ref": "#/$defs/s_error" }, { "$ref": "#/$defs/s_pong" }
+      ]
+    },
+    "s_welcome": {
+      "type": "object",
+      "required": ["t", "ice", "serverTime", "limits"],
+      "properties": {
+        "t": { "const": "welcome" },
+        "peerId": { "$ref": "#/$defs/peerId", "description": "Present only when a resumeToken was accepted." },
+        "ice": { "type": "array", "items": { "$ref": "#/$defs/iceServer" } },
+        "serverTime": { "type": "integer", "description": "unix ms" },
+        "limits": {
+          "type": "object",
+          "required": ["maxMsg", "maxPlayers"],
+          "properties": { "maxMsg": { "type": "integer", "minimum": 1024 }, "maxPlayers": { "type": "integer", "minimum": 2, "maximum": 250 } }
+        }
+      }
+    },
+    "s_lobby": {
+      "type": "object",
+      "required": ["t", "code", "gameId", "netVersion", "hostId", "you", "mode", "tickRate", "lateJoin", "phase", "meta", "peers", "resumeToken"],
+      "properties": {
+        "t": { "const": "lobby" },
+        "code": { "$ref": "#/$defs/canonicalCode" },
+        "gameId": { "type": "string" },
+        "netVersion": { "type": "string" },
+        "hostId": { "$ref": "#/$defs/peerId" },
+        "you": { "$ref": "#/$defs/peerId" },
+        "mode": { "$ref": "#/$defs/mode" },
+        "tickRate": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "lateJoin": { "type": "boolean" },
+        "phase": { "$ref": "#/$defs/phase" },
+        "meta": { "$ref": "#/$defs/meta" },
+        "peers": { "type": "array", "items": { "$ref": "#/$defs/peerEntry" }, "minItems": 1 },
+        "resumeToken": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "description": "Additive: lobby name as given to create." },
+        "maxPlayers": { "type": "integer", "description": "Additive." },
+        "visibility": { "$ref": "#/$defs/visibility", "description": "Additive." },
+        "relayOnly": { "type": "boolean", "description": "Additive." }
+      }
+    },
+    "s_peer_joined": { "type": "object", "required": ["t", "peer"], "properties": { "t": { "const": "peer_joined" }, "peer": { "$ref": "#/$defs/peerRef" } } },
+    "s_peer_left": {
+      "type": "object",
+      "required": ["t", "peerId", "reason"],
+      "properties": { "t": { "const": "peer_left" }, "peerId": { "$ref": "#/$defs/peerId" }, "reason": { "enum": ["left", "kicked", "timeout"] } }
+    },
+    "s_host_changed": {
+      "type": "object",
+      "required": ["t", "hostId"],
+      "properties": { "t": { "const": "host_changed" }, "hostId": { "$ref": "#/$defs/peerId" }, "epoch": { "type": "integer", "minimum": 0, "description": "Additive." } }
+    },
+    "s_join_request": { "type": "object", "required": ["t", "peer"], "properties": { "t": { "const": "join_request" }, "peer": { "$ref": "#/$defs/peerRef" } } },
+    "s_lobbies": {
+      "type": "object",
+      "required": ["t", "items"],
+      "properties": { "t": { "const": "lobbies" }, "items": { "type": "array", "items": { "$ref": "#/$defs/lobbyEntry" } }, "cursor": { "type": "string" } }
+    },
+    "s_signal": {
+      "type": "object",
+      "required": ["t", "from"],
+      "properties": { "t": { "const": "signal" }, "from": { "$ref": "#/$defs/peerId" }, "sdp": { "$ref": "#/$defs/sdp" }, "ice": { "$ref": "#/$defs/ice" } }
+    },
+    "s_pong": { "type": "object", "required": ["t", "n"], "properties": { "t": { "const": "pong" }, "n": { "type": "integer", "minimum": 0 } } },
+    "s_error": {
+      "type": "object",
+      "required": ["t", "code", "msg"],
+      "properties": {
+        "t": { "const": "error" },
+        "code": { "$ref": "#/$defs/errorCode" },
+        "msg": { "type": "string" },
+        "data": {
+          "type": "object",
+          "description": "version_mismatch: {hostNetVersion, yourNetVersion}. rate_limited: {retryAfterMs}. kicked: {reason?:'denied'}. bad_request: {field?}."
+        }
+      }
+    }
+  }
+}
