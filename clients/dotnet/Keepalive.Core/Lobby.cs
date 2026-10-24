@@ -413,7 +413,7 @@ namespace Keepalive
                     if (proto != Wire.ProtoVersion) return;
                     rec.Hello = true;
                     RaiseReady(rec);
-                    SendLink(rec, PeerChannel.Reliable, Wire.BuildWelcomeDc(Lockstep?.Head ?? 0, TickRate,
+                    SendLink(rec, PeerChannel.Reliable, Wire.BuildWelcomeDc(Lockstep?.Tick ?? 0, TickRate,
                         Mode == SyncMode.Raw ? Wire.ModeRaw : Wire.ModeLockstep, _you));
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildChatHistory(Chat.History));
                     if (Lockstep != null && _phase == LobbyPhase.InGame && (Lockstep.Head > 0 || lastTick >= 0))
@@ -422,7 +422,8 @@ namespace Keepalive
                         {
                             foreach (var f in Lockstep.LogAfter(lastTick)) SendLink(rec, PeerChannel.Reliable, Wire.BuildFrame(f.Tick, f.Commands));
                         }
-                        else SendSnapshot(rec);
+                        else if (Lockstep.Tick > 0) SendSnapshot(rec); // snapshot tick == welcome_dc.tick (the applied tick)
+                        else foreach (var f in Lockstep.LogAfter(0)) SendLink(rec, PeerChannel.Reliable, Wire.BuildFrame(f.Tick, f.Commands));
                     }
                     return;
                 }
