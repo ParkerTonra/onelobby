@@ -114,7 +114,8 @@ namespace OneLobby
         public event Action<int, ReadOnlyMemory<byte>, Channel>? MessageReceived;
         public event Action<string>? SessionEnded;
 
-        internal long NowMs => _t.NowMs;
+        /// <summary>The transport's monotonic clock in milliseconds (the same clock the lobby times out and pings with).</summary>
+        public long NowMs => _t.NowMs;
 
         // ---- public commands -----------------------------------------------------------------------------------
 

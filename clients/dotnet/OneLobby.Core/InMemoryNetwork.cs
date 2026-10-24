@@ -5,6 +5,17 @@ using System.Text.Json;
 
 namespace OneLobby
 {
+    /// <summary>Per-channel byte and frame counters (see <see cref="InMemoryNetwork.Traffic"/>).</summary>
+    public sealed class TrafficCounter
+    {
+        private readonly long[] _bytes = new long[3];
+        private readonly long[] _frames = new long[3];
+        public long Bytes(PeerChannel channel) => _bytes[(int)channel];
+        public long Frames(PeerChannel channel) => _frames[(int)channel];
+        public void Reset() { Array.Clear(_bytes, 0, 3); Array.Clear(_frames, 0, 3); }
+        internal void Count(PeerChannel channel, int bytes) { _bytes[(int)channel] += bytes; _frames[(int)channel]++; }
+    }
+
     /// <summary>
     /// A whole OneLobby world in memory: a fake lobby server speaking the lk1 signaling protocol plus loopback "WebRTC"
     /// links, with a manual clock. Lets games and tests run lobbies, lockstep, chat and voice offline and deterministically.
@@ -55,6 +66,7 @@ namespace OneLobby
             public bool Open, Failed;
             public readonly Queue<PeerSignal> Out = new();
             public readonly List<(long At, PeerChannel Ch, byte[] Data)> Inbox = new();
+            private long _lastReliableAt;
             public Link(InMemoryTransport owner, bool initiator, string token) { Owner = owner; Net = owner.Net; Initiator = initiator; Token = token; }
             public bool IsOpen => Open && !Failed;
             public bool IsFailed => Failed;
@@ -90,8 +102,16 @@ namespace OneLobby
             public void Send(PeerChannel channel, ReadOnlySpan<byte> frame)
             {
                 if (!IsOpen || Other == null || Other.Failed) return;
+                Owner.Traffic.Count(channel, frame.Length);
                 if (channel != PeerChannel.Reliable && Net.DropUnreliable != null && Net.DropUnreliable()) return;
-                Other.Inbox.Add((Net.NowMs + (long)Net.LatencyMs, channel, frame.ToArray()));
+                var at = Net.NowMs + (long)Net.LatencyMs + (long)Math.Max(0, Net.ExtraDelayMs?.Invoke(channel) ?? 0);
+                if (channel == PeerChannel.Reliable)
+                {
+                    // ordered channel: jitter delays, never reorders
+                    if (at < _lastReliableAt) at = _lastReliableAt;
+                    _lastReliableAt = at;
+                }
+                Other.Inbox.Add((at, channel, frame.ToArray()));
             }
             public bool TryReceive(out PeerChannel channel, out byte[] frame)
             {
@@ -119,6 +139,7 @@ namespace OneLobby
             public readonly InMemoryNetwork Net;
             public readonly List<Sock> Sockets = new();
             public readonly List<Link> Links = new();
+            public readonly TrafficCounter Traffic = new();
             public InMemoryTransport(InMemoryNetwork n) { Net = n; }
             public long NowMs => Net.NowMs;
             public ISignalingSocket ConnectSignaling(Uri url)
@@ -156,6 +177,12 @@ namespace OneLobby
         public double LatencyMs { get; set; }
         /// <summary>When set, called for every fast/voice frame; return true to lose it.</summary>
         public Func<bool>? DropUnreliable { get; set; }
+        /// <summary>When set, extra one-way delay in ms per frame (jitter). Reliable frames stay in order.</summary>
+        public Func<PeerChannel, double>? ExtraDelayMs { get; set; }
+
+        /// <summary>Bytes and frames this transport has sent on its peer links (whole frames, lobby header included), counted before loss.</summary>
+        public TrafficCounter Traffic(ITransport transport) => ((InMemoryTransport)transport).Traffic;
+
         /// <summary>Allowed (gameId) values; empty means any.</summary>
         public ISet<string> AllowedGames { get; } = new HashSet<string>();
 

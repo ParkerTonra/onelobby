@@ -44,7 +44,7 @@ with the id of the connection the frame arrived on. **(decision)** `cmd`, `hash`
 | 0x14 | `snapshot_req` | `sinceTick:i64` | peer -> host. `sinceTick` = last tick the peer has (-1 = none) |
 | 0x15 | `snapshot` | `tick:i64, total:u32, flags:u8` | header; the chunks follow (below) |
 | 0x16 | `chunk` | `id:u32, index:u16, count:u16, rest` | either direction |
-| 0x20 | `raw` | `rest` | `raw` mode payload |
+| 0x20 | `raw` | `rest` | `raw` mode payload. Payloads starting `0x52` are the optional replication layer (`spec/replication.md`); the lobby treats them like any other raw bytes |
 | 0x30 | `ping` | `n:u32, t:u32` | on `fast`. `t` = sender's monotonic ms (mod 2^32) |
 | 0x31 | `pong` | `n:u32, t:u32` | echo of the ping's `n` and `t`, `route 0` **(decision)** |
 | 0x40 | `host_claim` | `epoch:u16, hostId:u16, tick:i64` | on `reliable`, to every reachable peer. `tick` = claimant's last applied tick |
