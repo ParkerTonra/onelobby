@@ -1,0 +1,54 @@
+{
+  "description": "Replication payloads (spec/replication.md), version 1. Hex is the raw-mode payload, i.e. after the 3-byte lobby header. World entries: [id, type, owner, stateHex].",
+  "snapshots": [
+    {
+      "name": "full snapshot, two entities",
+      "tick": 5, "baseline": null, "lastInputSeq": 0,
+      "world": [[1, 7, 0, "0102"], [3, 1, 2, "aa"]],
+      "hex": "5201010500000205070002010209010201aa"
+    },
+    {
+      "name": "delta: one changed byte, one despawn, one spawn",
+      "tick": 7, "lastInputSeq": 4,
+      "baseline": { "tick": 5, "world": [[1, 7, 0, "0102"], [3, 1, 2, "aa"]] },
+      "world": [[1, 7, 0, "0109"], [4, 7, 0, "ff"]],
+      "hex": "520101070204030402090a05070001ff"
+    },
+    {
+      "name": "delta: nothing changed",
+      "tick": 8, "lastInputSeq": 4,
+      "baseline": { "tick": 7, "world": [[1, 7, 0, "0109"], [4, 7, 0, "ff"]] },
+      "world": [[1, 7, 0, "0109"], [4, 7, 0, "ff"]],
+      "hex": "52010108010400"
+    }
+  ],
+  "inputs": [
+    {
+      "name": "two inputs, newest first, view ticks 5.5 and 5.0",
+      "ack": 7, "newestSeq": 12,
+      "inputs": [[1408, "01"], [1280, "02"]],
+      "hex": "520102070c02800b0101800a0102"
+    },
+    { "name": "ack only", "ack": 300, "newestSeq": 0, "inputs": [], "hex": "520102ac020000" }
+  ],
+  "events": [
+    { "name": "event at tick 300", "tick": 300, "payloadHex": "6869", "hex": "520103ac026869" }
+  ],
+  "stateBits": [
+    { "name": "WriteBits(5,3) WriteBits(1,1) WriteBits(0xAB,8)", "hex": "bd0a" }
+  ],
+  "quantize": [
+    { "fn": "float", "value": 1.5, "min": -256, "max": 256, "bits": 16, "q": 32959 },
+    { "fn": "float", "value": -300, "min": -256, "max": 256, "bits": 16, "q": 0 },
+    { "fn": "float", "value": 256, "min": -256, "max": 256, "bits": 16, "q": 65535 },
+    { "fn": "angle", "value": 90, "bits": 9, "q": 128 },
+    { "fn": "angle", "value": -90, "bits": 9, "q": 384 },
+    { "fn": "angle", "value": 360, "bits": 9, "q": 0 }
+  ],
+  "invalid": [
+    { "name": "truncated record", "baseline": null, "hex": "520101050000010507000201", "error": "too_short" },
+    { "name": "delta for an id not in the baseline", "baseline": { "tick": 5, "world": [[1, 7, 0, "0102"]] }, "hex": "52010107020001080100", "error": "delta" },
+    { "name": "trailing bytes", "baseline": null, "hex": "52010105000000ff", "error": "trailing" },
+    { "name": "despawn of an unknown id", "baseline": { "tick": 5, "world": [[1, 7, 0, "0102"]] }, "hex": "520101060100010a", "error": "despawn" }
+  ]
+}

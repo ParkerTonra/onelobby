@@ -42,13 +42,13 @@ namespace OneLobby.Replication
         public bool TryAdvance()
         {
             var now = _now();
-            if (!_started) { _started = true; _startMs = now - (long)TickMs; }
+            if (!_started) { _started = true; _startMs = now - (long)Math.Ceiling(TickMs); }
             var due = (long)Math.Floor((now - _startMs) / TickMs);
             if (due <= Tick) return false;
             if (due - Tick > MaxCatchUp)
             {
                 // a long stall: drop the backlog instead of racing through it
-                _startMs = now - (long)((Tick + MaxCatchUp) * TickMs);
+                _startMs = now - (long)Math.Ceiling((Tick + MaxCatchUp) * TickMs);
             }
             Tick++;
             return true;
