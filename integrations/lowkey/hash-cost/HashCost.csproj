@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <LowkeyRepo Condition="'$(LowkeyRepo)' == ''">C:/Users/parke/ClaudeCode/Lowkey</LowkeyRepo>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LowkeyIndustries.Sim">
+      <HintPath>$(MSBuildThisFileDirectory)../.lowkey-sim/bin/LowkeyIndustries.Sim.dll</HintPath>
+    </Reference>
+    <!-- The Sim's own bot, linked read-only from the Lowkey repo (the game's csproj does the same). -->
+    <Compile Include="$(LowkeyRepo)/tests/LowkeyIndustries.Sim.Tests/Bot/UnplugBot*.cs" LinkBase="Bot" />
+    <Compile Include="$(LowkeyRepo)/tests/LowkeyIndustries.Sim.Tests/Bot/IBot.cs" LinkBase="Bot" />
+  </ItemGroup>
+</Project>
