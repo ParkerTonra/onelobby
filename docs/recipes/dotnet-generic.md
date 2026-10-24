@@ -1,8 +1,7 @@
 # Recipe: generic .NET
 
 `Keepalive.Core` is engine-agnostic (`netstandard2.1` and `net8.0`). It needs an `ITransport` that opens WebRTC data
-channels: `Keepalive.Godot` provides one for Godot; for tests use the in-memory transport shipped with
-`Keepalive.Core.Tests`. Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `Keepalive.Core`.
+channels: `Keepalive.Godot` provides one for Godot; for tests use `InMemoryNetwork` (in `Keepalive.Core`). Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `Keepalive.Core`.
 
 ## 1. Reference
 
@@ -22,6 +21,7 @@ using Keepalive;
 public sealed class Net
 {
     readonly LobbyClient _client;
+    public LobbyClient Client => _client;
     public Lobby? Lobby { get; private set; }
     public string Status { get; private set; } = "";
 
@@ -72,8 +72,8 @@ public static class Loop
     public static void Frame(Net net, Action<int, byte[]> onMessage)
     {
         var lobby = net.Lobby;
-        if (lobby is null) return;
-        lobby.Pump();
+        if (lobby is null) net.Client.Pump();   // before a lobby exists, pending Host/Join/Browse calls complete here
+        else lobby.Pump();                       // once joined, Lobby.Pump() is the one per-frame call
     }
 
     public static void Wire(Lobby lobby, Action<int, byte[]> onMessage)

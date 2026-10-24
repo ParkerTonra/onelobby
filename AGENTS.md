@@ -15,7 +15,8 @@ var client = new LobbyClient(new KeepaliveConfig("com.you.game", "1", new Uri(lo
 Lobby lobby = await client.HostAsync(new LobbyOptions("Ann's game", MaxPlayers: 4, Visibility: Visibility.Public));
 Lobby lobby = await client.JoinAsync("7HQ 4K2");          // also RejoinAsync(resumeToken)
 IReadOnlyList<LobbySummary> list = await client.ListAsync();
-lobby.Pump();                                              // every frame; events fire on the calling thread
+client.Pump();                                             // only until you hold a Lobby (Host/Join/List complete here)
+lobby.Pump();                                              // then this, every frame; events fire on the calling thread
 lobby.Send(peerId, bytes); lobby.Broadcast(bytes);         // Channel.Reliable (default) or Channel.Fast
 lobby.MessageReceived += (from, payload, channel) => { };
 lobby.PeerJoined / PeerLeft / HostChanged / PhaseChanged / SessionEnded

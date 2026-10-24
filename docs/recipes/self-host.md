@@ -9,7 +9,7 @@ anyone else's server: the lobby server URL is a setting. The full walkthrough is
 dotnet run --project server/Keepalive.Server -- --listen :8080
 ```
 
-Then run your game with the lobby server set to `ws://localhost:8080` (Godot: `--lobby-server=ws://localhost:8080`; browser:
+Then run your game with the lobby server set to `ws://localhost:8080` (Godot: `--lobby-server=ws://127.0.0.1:8080`, not `localhost`; browser:
 `?lobby=ws://localhost:8080` or localStorage `lobby_server`). Two peers on one machine connect directly; no relay needed.
 Check it is alive: `curl http://localhost:8080/healthz`.
 

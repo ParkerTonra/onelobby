@@ -37,7 +37,8 @@ function buildJs() {
     }
   }
   const files = fs.readdirSync(tmp).filter((f) => f.endsWith(".d.ts")).sort();
-  const read = (f) => lf(fs.readFileSync(path.join(tmp, f), "utf8")).replace(/\n+$/, "");
+  const read = (f) => lf(fs.readFileSync(path.join(tmp, f), "utf8")).split("\n")
+    .filter((l) => !/^\s+private /.test(l)).join("\n").replace(/\n+$/, "");
   const idx = read("index.d.ts");
   const mods = [...idx.matchAll(/from\s+["']\.\/([\w-]+)\.js["']/g)].map((m) => m[1] + ".d.ts").filter((f) => files.includes(f));
   const order = ["index.d.ts", ...[...new Set(mods)].filter((f) => f !== "index.d.ts")];

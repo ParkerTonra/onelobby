@@ -46,7 +46,10 @@ public partial class Net : Node
         _client.Error += e => EmitSignal(SignalName.Status, e.Message);
     }
 
-    public override void _Process(double delta) => Lobby?.Pump();             // events fire on the main thread
+    public override void _Process(double delta)                               // events fire on the main thread
+    {
+        if (Lobby != null) Lobby.Pump(); else _client.Pump();                 // _client.Pump() only matters before a lobby exists
+    }
 
     public async Task<string?> HostAsync()
     {
@@ -114,6 +117,6 @@ does this) if you use threads. Voice needs `audio/driver/enable_input` on.
 ## Done when
 
 - The project builds with `dotnet build` and the menu shows Host / Join / Browse.
-- With a local `keepalive-server`, two Godot instances (`--lobby-server=ws://localhost:8080`): one presses Host and shows a
+- With a local `keepalive-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080`; use 127.0.0.1, not localhost): one presses Host and shows a
   code, the other joins it, and a message sent by one arrives in the other's `MessageReceived`.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".

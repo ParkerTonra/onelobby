@@ -96,18 +96,89 @@ public interface ITransport
     void Poll();
 ```
 
+## Keepalive.Core/InMemoryNetwork.cs
+
+```csharp
+/// A whole Keepalive world in memory: a fake lobby server speaking the lk1 signaling protocol plus loopback "WebRTC" links, with a manual clock. Lets games and tests run lobbies, lockstep, chat and voice offline and deterministically. Make one network, call CreateTransport per client, and drive time with Advance/Step.
+public sealed class InMemoryNetwork
+    /// The manual clock shared by every transport of this network.
+    public long NowMs { get; private set; }
+    /// One-way delivery delay for data channel frames.
+    public double LatencyMs { get; set; }
+    /// When set, called for every fast/voice frame; return true to lose it.
+    public Func<bool>? DropUnreliable { get; set; }
+    /// Allowed (gameId) values; empty means any.
+    public ISet<string> AllowedGames { get; }
+    public void Advance(long ms);
+    public ITransport CreateTransport();
+    /// Simulates a crash: closes the transport's signaling socket and every peer link, without a goodbye.
+    public void Crash(ITransport transport);
+    /// Drops only the signaling socket (the lobby server goes away for that client); data channels live on.
+    public void DropServerConnection(ITransport transport);
+    /// Kills the lobby server for everyone; data channels live on.
+    public void ShutdownServer();
+    /// Pumps every client once and advances the clock by ms. Test helper.
+    public void Step(IEnumerable<LobbyClient> clients, long ms = 25);
+```
+
+## Keepalive.Core/Lobby.cs
+
+```csharp
+/// A joined lobby: roster, data channels to peers, lockstep, voice and chat.
+public sealed class Lobby : IAsyncDisposable
+    public const int HostTimeoutMs;
+    public const int PeerTimeoutMs;
+    public const int PingEveryMs;
+    public const int ClaimWaitMs;
+    public const int MigrationGraceMs;
+    public string Code { get; }
+    public int LocalPeerId;
+    public int HostPeerId;
+    public bool IsHost;
+    public LobbyPhase Phase;
+    public IReadOnlyDictionary<string, string> Meta;
+    public string ResumeToken { get; private set; }
+    public SyncMode Mode { get; }
+    public int TickRate { get; }
+    public bool LateJoin { get; }
+    public LockstepSession? Lockstep { get; }
+    public VoiceChannel Voice { get; }
+    public TextChat Chat { get; }
+    /// True once the data channel to the host is up and welcomed (always true on the host).
+    public bool IsReady;
+    public IReadOnlyList<Peer> Peers;
+    public event Action? Ready;
+    public event Action<Peer>? PeerJoined;
+    public event Action<Peer, string>? PeerLeft;
+    public event Action<Peer>? JoinRequested;
+    public event Action<int>? HostChanged;
+    public event Action<LobbyPhase>? PhaseChanged;
+    public event Action<int, ReadOnlyMemory<byte>, Channel>? MessageReceived;
+    public event Action<string>? SessionEnded;
+    public Task StartAsync();
+    public Task SetMetaAsync(IReadOnlyDictionary<string, string> meta);
+    public Task KickAsync(int peerId);
+    public Task ApproveAsync(int peerId, bool ok);
+    public Task LeaveAsync();
+    public ValueTask DisposeAsync();
+    public void Send(int peerId, ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
+    public void Broadcast(ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
+    /// The ONE per-frame call for a game in a lobby: pumps the owning LobbyClient and transport (signaling, peer links), delivers events on the calling thread, advances lockstep, voice and timeouts.
+    public void Pump();
+```
+
 ## Keepalive.Core/LobbyClient.cs
 
 ```csharp
-/// Entry point: talks to keepalive-server over the transport's signaling socket and hands out Lobbys. Call Pump (or the lobby's) once per frame: that is when requests complete and events fire.
+/// Entry point: talks to keepalive-server over the transport's signaling socket and hands out Lobbys. Requests complete (and their continuations are signalled) from inside Pump, never from another thread.
 public sealed class LobbyClient : IAsyncDisposable
     public event Action<LobbyError>? Error;
     public LobbyClient(KeepaliveConfig config, ITransport transport);
     public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default);
     public Task<Lobby> JoinAsync(string code, CancellationToken ct = default);
     public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default);
-    public async Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null, CancellationToken ct = default);
-    /// Polls the transport and the signaling socket. Safe to call every frame, with or without a lobby.
+    public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null, CancellationToken ct = default);
+    /// Polls the transport and the signaling socket. You need it only before a lobby exists (to complete HostAsync, JoinAsync or ListAsync); once you hold a Lobby, call Lobby.Pump, which does this too. Calling both is harmless.
     public void Pump();
     public async ValueTask DisposeAsync();
 ```
@@ -132,6 +203,70 @@ public sealed class LockstepSession
     public bool TryNextFrame(out Frame frame);
     /// Report the game's state hash for a tick (call every HashEveryTicks).
     public void ReportHash(long tick, ulong hash);
+```
+
+## Keepalive.Core/TextChat.cs
+
+```csharp
+/// Text chat (DESIGN s.9b): sender to host to all on the reliable channel, host stamps id and ts.
+public sealed class TextChat
+    public const int MaxBytes;
+    public const int HistoryLimit;
+    public const int RateWindowMs;
+    public const int RateBurst;
+    public const int RatePer5s;
+    public IReadOnlyList<ChatLine> History;
+    public Func<string, string>? Filter { get; set; }
+    public event Action<ChatLine>? Received;
+    public event Action<uint, string>? Rejected;
+    /// Send a line (at most 256 UTF-8 bytes). Over-long text is rejected locally with reason "length".
+    public void Send(string text);
+    public void HostMute(int peerId, bool muted);
+```
+
+## Keepalive.Core/Voice.cs
+
+```csharp
+/// Voice codec (DESIGN s.9a): 48 kHz mono, 20 ms frames of FrameSamples samples.
+public interface IVoiceCodec : IDisposable
+    int SampleRate { get; }
+    int FrameSamples { get; }
+    /// Bits per second for the encoder (16000-40000, default 24000).
+    int Bitrate { get; set; }
+    /// Encode one frame; returns the number of bytes written to output.
+    int Encode(ReadOnlySpan<short> pcm, Span<byte> output);
+    /// Decode one frame for the given speaker stream. An empty packet asks for loss concealment (PLC).
+    int Decode(int streamId, ReadOnlySpan<byte> packet, Span<short> pcm);
+    /// Forget a speaker's decoder state.
+    void ReleaseStream(int streamId);
+/// Microphone capture and speaker playback (Godot buses, Web Audio, or a test double).
+public interface IVoiceAudio : IDisposable
+    bool StartCapture();
+    void StopCapture();
+    /// Fills frame with captured 48 kHz mono samples; false when a full frame is not ready.
+    bool ReadCapture(Span<short> frame);
+    void Play(int peerId, ReadOnlySpan<short> pcm, float gain);
+/// Voice: capture, gate, encode, packetize (2 frames per packet), jitter buffer, decode, playback.
+public sealed class VoiceChannel
+    public const int FramesPerPacket;
+    public const int FrameMs;
+    public const int JitterFrames;
+    public const int HangoverMs;
+    public const int MaxPacketBytes;
+    public const int MaxSpeakers;
+    public const int MaxPacketsPerSecond;
+    public const double VadThreshold;
+    public bool Enabled { get => _enabled; set; }
+    public VoiceMode Mode { get; set; }
+    public bool Muted { get; set; }
+    public float InputLevel { get; private set; }
+    public IVoiceCodec? Codec { get; set; }
+    public IVoiceAudio? Audio { get; set; }
+    public event Action<int, bool>? Speaking;
+    public event Action<string>? VoiceError;
+    public void PushToTalk(bool down);
+    public void SetMuted(int peerId, bool muted);
+    public void SetVolume(int peerId, float gain);
 ```
 
 ## Keepalive.Core/Wire.cs
@@ -165,6 +300,9 @@ public static class Wire
         public ulong U64();
         public ReadOnlySpan<byte> Bytes(int n);
         public ReadOnlySpan<byte> Rest();
+    /// Strict structural check of one frame (spec/binary.md): null when valid or of an unknown type (those are ignored), else "too_short", "trailing", "too_long" or "bad_utf8".
+    public static string? Validate(ReadOnlySpan<byte> frame);
+    public static string DecodeUtf8(ReadOnlySpan<byte> b);
     public static byte Type(ReadOnlySpan<byte> frame);
     public static int Route(ReadOnlySpan<byte> frame);
     public static ReadOnlySpan<byte> Body(ReadOnlySpan<byte> frame);
@@ -190,4 +328,32 @@ public static class Wire
     public static byte[] BuildChatReject(uint id, byte reason);
     /// Strips C0/C1 control characters and bidi override/isolate characters (DESIGN s.9b).
     public static string SanitizeChat(string text);
+```
+
+## Keepalive.Godot/GodotTransport.cs
+
+```csharp
+/// ITransport over Godot's engine classes: WebSocketPeer for signaling and WebRtcPeerConnection/WebRtcDataChannel for the peer links. Desktop builds need the webrtc-native GDExtension (see demo-godot/fetch-webrtc.ps1); a future web export supplies the classes itself. All Godot objects are touched only from Poll and the calling thread, so call Pump on the main thread.
+public sealed class GodotTransport : ITransport
+    public long NowMs;
+    public ISignalingSocket ConnectSignaling(Uri url);
+    public IPeerLink CreatePeerLink(PeerLinkOptions options);
+    public void Poll();
+```
+
+## Keepalive.Godot/GodotVoiceAudio.cs
+
+```csharp
+/// Microphone capture (AudioStreamMicrophone into a muted bus with an AudioEffectCapture) and per-speaker playback (AudioStreamGenerator players on the "KeepaliveVoice" bus, so a game can duck its music against it). Needs the project setting audio/driver/enable_input = true for capture; with the Dummy audio driver (headless runs) capture simply yields no frames.
+public sealed class GodotVoiceAudio : IVoiceAudio
+    public const string MicBus;
+    public const string VoiceBus;
+    public GodotVoiceAudio(Node parent);
+    /// Convenience: enables voice on a lobby with the Opus codec and this audio adapter.
+    public static GodotVoiceAudio Attach(Node parent, VoiceChannel voice);
+    public bool StartCapture();
+    public void StopCapture();
+    public bool ReadCapture(Span<short> frame);
+    public void Play(int peerId, ReadOnlySpan<short> pcm, float gain);
+    public void Dispose();
 ```
