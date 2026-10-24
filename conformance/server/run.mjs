@@ -41,7 +41,7 @@ export async function runSuite(opts, out = console.log) {
   }
   const all = buildSuite(opts);
   const selected = all.filter((t) => {
-    if (t.rateLimitOnly && !opts.ratelimit) return false;
+    if (opts.ratelimit ? !t.rateLimitOnly : t.rateLimitOnly) return false;
     if (t.slowOnly && !opts.slow) return false;
     if (opts.groups && !opts.groups.includes(t.group)) return false;
     if (opts.only && !`${t.group} ${t.name}`.toLowerCase().includes(opts.only.toLowerCase())) return false;
