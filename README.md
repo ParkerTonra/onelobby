@@ -25,8 +25,8 @@ lobby.on("peerReady", (peer) => lobby.send(peer.peerId, new TextEncoder().encode
 
 Open it in two tabs (the second with `?join=` plus the code) and each logs the other's `hello!`.
 For a local server use `ws://127.0.0.1:8080/ws` ([docs/recipes/self-host.md](docs/recipes/self-host.md)).
-Next: [docs/recipes/js-web.md](docs/recipes/js-web.md), [raw-mode.md](docs/recipes/raw-mode.md), or C# and Godot in
-[AGENTS.md](AGENTS.md). AI coding agents: start at [AGENTS.md](AGENTS.md) or [llms.txt](llms.txt).
+Next: [docs/recipes/js-web.md](docs/recipes/js-web.md), [raw-mode.md](docs/recipes/raw-mode.md), or C# with Godot or Unity in
+[AGENTS.md](AGENTS.md) ([Unity recipe](docs/recipes/unity.md)). AI coding agents: start at [AGENTS.md](AGENTS.md) or [llms.txt](llms.txt).
 
 ## Run a server
 

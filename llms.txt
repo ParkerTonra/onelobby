@@ -1,7 +1,7 @@
 # OneLobby
 
 > Open-source, game-agnostic multiplayer kit: lobby server with join codes, TURN relay, WebRTC data-channel clients for
-> JavaScript, .NET and Godot 4 C#. Lockstep or raw messaging, voice and text chat, self-hostable, games stay playable offline.
+> JavaScript, .NET, Godot 4 C# and Unity 6. Lockstep or raw messaging, voice and text chat, self-hostable, games stay playable offline.
 
 ## Start here
 
@@ -22,6 +22,7 @@ build dist/onelobby.global.min.js (window.OneLobby).
 ## Recipes
 
 - [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project
+- [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over com.unity.webrtc, OneLobbyRunner, voice); desktop and mobile, no WebGL
 - [Browser JS](docs/recipes/js-web.md): the same in a plain web page
 - [Generic .NET](docs/recipes/dotnet-generic.md): console or any engine, with the in-memory transport for tests
 - [Raw mode](docs/recipes/raw-mode.md): bring your own netcode (host-authoritative, turn-based)

@@ -5,6 +5,7 @@
 | `OneLobby.Core` | Engine-agnostic client (netstandard2.1 + net8.0): `LobbyClient`, `Lobby`, `LockstepSession`, `VoiceChannel`, `TextChat`, `ITransport`/`IPeerLink`/`ISignalingSocket`, `IVoiceCodec`, `IVoiceAudio`, and `InMemoryNetwork` (a fake lobby server + loopback links + manual clock, for offline tests) |
 | `OneLobby.Opus` | `OpusVoiceCodec` (Concentus, BSD-3-Clause; see `THIRD_PARTY.md`) |
 | `OneLobby.Godot` | `GodotTransport` (WebSocketPeer + WebRtcPeerConnection), `GodotVoiceAudio` (mic capture, per-speaker playback) |
+| `../unity/com.onelobby.unity` | Unity 6 UPM package: `UnityTransport` (com.unity.webrtc + ClientWebSocket), `UnityVoiceAudio`, `OneLobbyRunner`; ships Core/Opus as netstandard2.1 DLLs via `clients/unity/build-unity-package.ps1` (`docs/recipes/unity.md`) |
 | `OneLobby.Gridpaint` | The shared demo game (`spec/demo-game.md`) |
 | `OneLobby.Core.Tests` | xunit: spec vectors, goldens, lobby, lockstep, migration, desync, chat, voice, Opus |
 | `OneLobby.Conformance` | stdio adapter for `conformance/peer` |
