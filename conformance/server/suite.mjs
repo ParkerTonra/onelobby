@@ -585,7 +585,13 @@ export function buildSuite(opts) {
     }
     assert.ok(hit >= 0 && hit <= n, `join limited at ${hit}, limit ${n}`);
     if (opts.fresh) assert.equal(hit, n);
-  }, { rateLimitOnly: true });
+  }, { rateLimitOnly: true, after: 'wait' });
+  T('hello', 'path telemetry is accepted silently; a bad value is bad_request', async (t) => {
+    const h = await t.host();
+    h.send({ t: 'path', path: 'relayed' }); h.send({ t: 'path', path: 'direct' });
+    await h.callError({ t: 'path', path: 'sideways' }, 'bad_request');
+    await h.call({ t: 'ping', n: 1 }, 'pong');
+  });
   T('ratelimit', 'signal: bursts above N/s -> rate_limited, the rest forwarded', async (t) => {
     const n = lim().rateSignal;
     const h = await t.host(); const j = await t.join(h.lobby.code, {}, h);

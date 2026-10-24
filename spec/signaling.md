@@ -64,6 +64,12 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
   The server updates the host and broadcasts `host_changed{hostId, epoch}` to all members (sender included).
   Otherwise ignored, no reply. **(decision)**
 
+## Path telemetry
+
+`path{path:"relayed"|"direct"}` (client -> server, DESIGN s.10): sent once after ICE completes for a peer connection. No
+reply, never an error for a valid value; the server counts relayed vs direct. A bad `path` value: `bad_request`.
+**(decision)**
+
 ## Resume
 
 `hello{resumeToken}` where the token was issued in a `lobby` message, within 60 s of the socket dropping and the lobby still

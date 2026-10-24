@@ -194,6 +194,7 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
         const p = addPeer(l, pend.conn, pend.name, m.peerId);
         sendTo(pend.conn, lobbyMsg(l, p)); return everyone(l, { t: 'peer_joined', peer: { peerId: p.peerId, name: p.name } }, p.peerId);
       }
+      case 'path': if (!['relayed', 'direct'].includes(m.path)) return bad('path', 'path'); return;
       case 'host_changed': {
         if (!l) return; if (m.hostId !== me.peerId || !isInt(m.epoch, 1, 65535) || m.epoch <= l.epoch) return;
         l.hostId = m.hostId; l.epoch = m.epoch; return everyone(l, { t: 'host_changed', hostId: l.hostId, epoch: l.epoch });

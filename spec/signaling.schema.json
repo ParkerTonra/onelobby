@@ -85,7 +85,7 @@
       "oneOf": [
         { "$ref": "#/$defs/c_hello" }, { "$ref": "#/$defs/c_create" }, { "$ref": "#/$defs/c_join" }, { "$ref": "#/$defs/c_list" },
         { "$ref": "#/$defs/c_leave" }, { "$ref": "#/$defs/c_signal" }, { "$ref": "#/$defs/c_meta" }, { "$ref": "#/$defs/c_phase" },
-        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }
+        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }, { "$ref": "#/$defs/c_path" }
       ]
     },
     "c_hello": {
@@ -148,6 +148,12 @@
       "properties": { "t": { "const": "approve" }, "peerId": { "$ref": "#/$defs/peerId" }, "ok": { "type": "boolean" } }
     },
     "c_ping": { "type": "object", "required": ["t", "n"], "properties": { "t": { "const": "ping" }, "n": { "type": "integer", "minimum": 0 } } },
+    "c_path": {
+      "description": "Telemetry (DESIGN s.10): sent once per peer connection after ICE completes. No reply. Ignored when not in a lobby.",
+      "type": "object",
+      "required": ["t", "path"],
+      "properties": { "t": { "const": "path" }, "path": { "enum": ["relayed", "direct"] } }
+    },
     "c_host_changed": {
       "description": "Additive (s.9 'host_changed to keepalive-server'): the new host announces a migration so the server mirror follows. Accepted when hostId is the sender's own peerId, the sender is a current member, and epoch is greater than the lobby's current epoch (0 at creation).",
       "type": "object",
