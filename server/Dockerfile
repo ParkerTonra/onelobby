@@ -17,6 +17,6 @@ USER $APP_UID
 ENV DOTNET_EnableDiagnostics=0 \
     DOTNET_gcServer=0
 EXPOSE 8080
+# Listens on :8080, or on $PORT when the host sets it (Render, Railway, Heroku-style platforms).
 # Flags (or KEEPALIVE_* env vars) are appended: --listen, --turn-urls, --turn-secret, --public-url, --allowed-games, --max-lobbies ...
 ENTRYPOINT ["dotnet", "keepalive-server.dll"]
-CMD ["--listen", ":8080"]

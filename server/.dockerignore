@@ -1,0 +1,5 @@
+# Local build output carries host-specific restore paths (Windows NuGet folders) that break the Linux build.
+**/bin/
+**/obj/
+Keepalive.Server.Tests/
+load/
