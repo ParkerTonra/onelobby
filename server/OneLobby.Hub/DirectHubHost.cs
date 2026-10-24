@@ -264,10 +264,25 @@ public sealed class DirectHubHost : IDisposable
     }
 
     /// <summary>Stops listening and closes every joiner socket.</summary>
+    /// <summary>The router mapping started by <see cref="OpenPortAsync"/>, if any; removed on <see cref="Dispose"/>.</summary>
+    public PortMapper? PortMapper { get; private set; }
+
+    /// <summary>
+    /// Asks the home router to forward TCP and UDP <see cref="Port"/> here (UPnP, then NAT-PMP; docs/direct-ip.md s.2a).
+    /// Runs off the game thread; the mapping is renewed while hosting and deleted on <see cref="Dispose"/>.
+    /// </summary>
+    public Task<PortMapResult> OpenPortAsync(PortMapperOptions? options = null, CancellationToken ct = default)
+    {
+        if (PortMapper != null) throw new InvalidOperationException("the port is already being opened");
+        PortMapper = new PortMapper(Port, options);
+        return Task.Run(() => PortMapper.OpenAsync(ct), ct);
+    }
+
     public void Dispose()
     {
         if (Disposed) return;
         Disposed = true;
+        try { PortMapper?.Dispose(); } catch (Exception) { }
         try { _listener.Stop(); } catch (Exception) { }
         foreach (var c in _conns.Keys)
         {

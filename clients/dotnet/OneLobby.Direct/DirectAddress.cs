@@ -74,6 +74,26 @@ namespace OneLobby.Direct
         }
 
         /// <summary>
+        /// The IPv4 address a same-network join code carries when the router was not found: the address the OS would
+        /// use to reach the internet (a UDP connect sends nothing), else the first private IPv4 of <see cref="Local"/>.
+        /// Null when the machine has no IPv4.
+        /// </summary>
+        public static string? LanIPv4()
+        {
+            try
+            {
+                using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                s.Connect(new IPEndPoint(IPAddress.Parse("192.0.2.1"), 9)); // TEST-NET-1: routed like the internet, never contacted
+                var ip = ((IPEndPoint)s.LocalEndPoint!).Address;
+                if (!IPAddress.Any.Equals(ip) && !IPAddress.IsLoopback(ip)) return ip.ToString();
+            }
+            catch (SocketException) { /* no default route: offline LAN party, look at the interfaces instead */ }
+            foreach (var a in Local(1))
+                if (!a.StartsWith("[", StringComparison.Ordinal)) return a.Substring(0, a.LastIndexOf(':'));
+            return null;
+        }
+
+        /// <summary>
         /// This machine's addresses with the port, for the host screen ("Your address"): every up, non-loopback interface,
         /// IPv4 first, link-local addresses left out. Empty when the platform will not say.
         /// </summary>

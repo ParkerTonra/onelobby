@@ -94,6 +94,18 @@ namespace OneLobby
         /// </summary>
         public IReadOnlyList<string> DirectAddresses { get; internal set; } = Array.Empty<string>();
 
+        /// <summary>
+        /// Direct-IP host only: the code friends paste to join, e.g. <c>6B01-RGFE-P2B</c> (docs/direct-ip.md s.2a). Show it
+        /// with <see cref="JoinCodeKind"/>. Empty when this machine has no IPv4 address.
+        /// </summary>
+        public string JoinCode { get; internal set; } = "";
+
+        /// <summary>Whether <see cref="JoinCode"/> carries the router's public address (internet) or this PC's LAN address.</summary>
+        public JoinCodeKind JoinCodeKind { get; internal set; }
+
+        /// <summary>Direct-IP host only: how the router port-open went, for logs ("UPnP", "no UPnP gateway answered; ...").</summary>
+        public string PortMapping { get; internal set; } = "";
+
         /// <summary>Direct IP has no migration: the hub lives in the host (docs/direct-ip.md s.2).</summary>
         private bool DirectJoiner => _c.Direct && !IsHost;
 

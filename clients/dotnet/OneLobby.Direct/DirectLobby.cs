@@ -19,6 +19,13 @@ namespace OneLobby.Direct
         public string? Name { get; set; }
         public bool LateJoin { get; set; } = true;
         public IReadOnlyDictionary<string, string>? Meta { get; set; }
+        /// <summary>
+        /// Ask the home router to forward TCP + UDP P (UPnP, then NAT-PMP) so the join code works from the internet
+        /// (docs/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on.
+        /// </summary>
+        public bool OpenPort { get; set; } = true;
+        /// <summary>Test seam and knobs for the router request; null = defaults (description "OneLobby &lt;GameId&gt;").</summary>
+        public PortMapperOptions? PortMapping { get; set; }
     }
 
     /// <summary>
@@ -53,23 +60,47 @@ namespace OneLobby.Direct
                 return Task.FromException<Lobby>(new OneLobbyException("port_in_use",
                     "cannot listen on port " + port + " (" + e.SocketErrorCode + "): is another copy of the game hosting?"));
             }
-            try { client.UseDirect(inner => new DirectHostTransport(inner, hub), new Uri("onelobby-direct://host/"), hub); }
+            DirectHostTransport transport = null!;
+            try { client.UseDirect(inner => transport = new DirectHostTransport(inner, hub), new Uri("onelobby-direct://host/"), hub); }
             catch (Exception e)
             {
                 hub.Dispose();
                 return Task.FromException<Lobby>(e);
             }
             var name = string.IsNullOrEmpty(o.Name) ? client.Config.DisplayName + "'s game" : o.Name!;
+            // The router request runs off the game thread alongside lobby creation; its answer is handed back from Pump.
+            Task<PortMapResult?> mapping = o.OpenPort
+                ? MapAsync(hub, o.PortMapping ?? new PortMapperOptions { Description = "OneLobby " + client.Config.GameId })
+                : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta), ct);
-            return FinishHost(create, hub);
+            return FinishHost(create, mapping, transport, hub);
         }
 
-        private static async Task<Lobby> FinishHost(Task<Lobby> create, DirectHubHost hub)
+        private static async Task<PortMapResult?> MapAsync(DirectHubHost hub, PortMapperOptions options)
+        {
+            try { return await hub.OpenPortAsync(options).ConfigureAwait(false); }
+            catch (Exception e) { return new PortMapResult { Detail = e.Message }; }
+        }
+
+        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub)
         {
             try
             {
                 var lobby = await create.ConfigureAwait(false);
+                await transport.AfterPump(mapping).ConfigureAwait(false);
+                var map = mapping.Result;
                 lobby.DirectAddresses = DirectAddress.Local(hub.Port);
+                lobby.PortMapping = map == null ? "off" : map.Detail;
+                if (map is { Mapped: true } && PortMapper.IsPublicIPv4(map.ExternalIPv4))
+                {
+                    lobby.JoinCode = OneLobby.JoinCode.Encode(map.ExternalIPv4!, hub.Port);
+                    lobby.JoinCodeKind = JoinCodeKind.Internet;
+                }
+                else if ((map?.LocalIPv4 ?? DirectAddress.LanIPv4()) is { } lan)
+                {
+                    lobby.JoinCode = OneLobby.JoinCode.Encode(lan, hub.Port);
+                    lobby.JoinCodeKind = JoinCodeKind.SameNetwork;
+                }
                 return lobby;
             }
             catch
@@ -80,13 +111,22 @@ namespace OneLobby.Direct
         }
 
         /// <summary>
-        /// Joins the lobby hosted at <paramref name="address"/> (<c>ip</c>, <c>ip:port</c>, <c>[v6]:port</c>; the port
-        /// defaults to <c>OneLobbyConfig.DirectPort</c>). The typed address is also offered to ICE as the host's UDP
-        /// candidate, so a host behind a forwarded port is reachable.
+        /// Joins the lobby behind a join code (<c>6B01-RGFE-P2B</c>, from the host's <see cref="Lobby.JoinCode"/>) or an
+        /// address (<c>ip</c>, <c>ip:port</c>, <c>[v6]:port</c>; the port defaults to <c>OneLobbyConfig.DirectPort</c>). The
+        /// host's address is also offered to ICE as its UDP candidate, so a host behind a forwarded port is reachable.
+        /// A mistyped code fails at once with <c>bad_code</c>.
         /// </summary>
         public static Task<Lobby> JoinDirectAsync(this LobbyClient client, string address, string? password = null, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
+            if (OneLobby.JoinCode.LooksLikeCode(address))
+            {
+                if (!OneLobby.JoinCode.TryDecode(address, out var ip, out var port, out var err))
+                    return Task.FromException<Lobby>(new OneLobbyException(err!, err == "unknown_version"
+                        ? "'" + address + "' is a join code from a newer version of the game"
+                        : "'" + address + "' is not a valid join code: check for a typo"));
+                address = ip + ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
             if (!DirectAddress.TryParse(address, client.Config.DirectPort, out var a))
                 return Task.FromException<Lobby>(new OneLobbyException("bad_address",
                     "'" + address + "' is not an address: use 192.168.1.20, 192.168.1.20:47810 or [2001:db8::1]:47810"));

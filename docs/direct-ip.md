@@ -1,7 +1,8 @@
 # Direct-IP hosting (proof of concept)
 
 Status: design, 2026-10-24. Decided by Parker: OneLobby is the API layer *above* platforms; the first backend that
-ships is **direct IP**, with no server of anyone's. Steam, EOS, relay, LAN discovery and the hosted `onelobby-server`
+ships is **direct IP with join codes** (option A, approved by Parker 2026-10-24 ~13:15 PT): the host's game is the
+server, and the code is the host's address in disguise, so nobody ever sees or types an IP. No server of anyone's. Steam, EOS, relay, LAN discovery and the hosted `onelobby-server`
 directory are parked (s.7). For the PoC this note supersedes DESIGN s.3 (server in every handshake), s.6 (server-issued
 codes), s.10 (coturn) and s.13 (docker self-hosting); those sections stay true for the parked hosted backend.
 
@@ -13,6 +14,10 @@ nothing in the flow is on a timer.
 | Source | Establishes | Backs |
 |---|---|---|
 | [Factorio wiki: Multiplayer](https://wiki.factorio.com/Multiplayer) | "Factorio servers use port 34197." "Factorio uses UDP only." Hidden servers: "Clients will have to connect using the server's IP address." "Make sure you configure your router's port forwarding correctly for port 34197." (spot-checked) | s.2 one fixed port, join by IP, forwarding is the host's job |
+| [Factorio wiki: Multiplayer](https://wiki.factorio.com/Multiplayer) (visibility) | Server visibility "May be either public, LAN or hidden"; "Factorio's devs keep a list of all public servers that declare themselves to the service"; LAN games: "Join any game that is hosted on your local network" | s.7 later: the visibility model to copy; a public list is a convenience on top, never required |
+| [Valheim: dedicated server guide](https://www.valheimgame.com/support/a-guide-to-dedicated-servers/) (crossplay) | Crossplay joins by "the public IP address and port number, a join code or via the server list"; crossplay "Runs the Server on the Crossplay backend (PlayFab)" and "transmits data via a relay server" | s.2a why our codes encode the address instead of copying Valheim's service-backed codes |
+| [Crockford Base32](https://www.crockford.com/base32.html) | "Hyphens are ignored during decoding." Its check symbol "encodes the number _modulo_ 37" using "5 additional symbols" (`*~$=U`), which is why `dc1` carries its checksum in a normal character instead | s.2a code format |
+| [miniupnp](https://github.com/miniupnp/miniupnp) | miniupnpc is the UPnP IGD client used to open ports on home routers; "NAT-PMP and PCP support was added to MiniUPnPd" | s.2a port mapper |
 | [Terraria wiki: server guide](https://terraria.wiki.gg/wiki/Guide:Setting_up_a_Terraria_server) | Menu "Multiplayer" then "Host & Play"; join via "Multiplayer->Join via IP->...Type in the IP"; "enter a password (or leave blank...)"; port "7777" by default | s.2 menu shape, optional password |
 | [Valheim: dedicated server guide](https://www.valheimgame.com/support/a-guide-to-dedicated-servers/) | Hidden servers are "only joinable via the 'Join IP'-button"; "Valheim uses the specified Port AND specified Port+1"; `-password` | s.2 port pair, password |
 | [Stardew Valley wiki: Multiplayer](https://wiki.stardewvalley.net/Multiplayer) | "By default, the server uses UDP port 24642." Join "Via IP address." "This may require an open firewall port or virtual LAN service like Hamachi." | s.4 virtual-LAN fallback |
@@ -26,7 +31,7 @@ nothing in the flow is on a timer.
 | [libdatachannel](https://github.com/paullouisageneau/libdatachannel) | "WebSocket protocol (RFC6455), client and server side"; "WebSocket is the protocol of choice for WebRTC signaling"; OneLobby's natives build with `NO_WEBSOCKET`, so s.5 step 3 stays managed | s.5 step 3 |
 | [RFC 8445 (ICE)](https://datatracker.ietf.org/doc/html/rfc8445) | Host candidates have "a transport address obtained directly from a local interface"; no STUN/TURN is needed to offer them | s.2 no ICE servers |
 | [RFC 6092](https://datatracker.ietf.org/doc/html/rfc6092) | IPv6 home routers: "transport layer traffic is not forwarded into the interior network" by default | s.4 IPv6 does not remove forwarding |
-| [CERT VU#357851](https://www.kb.cert.org/vuls/id/357851), [RFC 6887 (PCP)](https://datatracker.ietf.org/doc/html/rfc6887) | Routers that "accept UPnP requests over the WAN"; mitigation "Disable UPnP". PCP "MAP request can be used explicitly to create a dynamic inbound mapping" | s.7 auto port-open is later and opt-in |
+| [CERT VU#357851](https://www.kb.cert.org/vuls/id/357851), [RFC 6887 (PCP)](https://datatracker.ietf.org/doc/html/rfc6887) | Routers that "accept UPnP requests over the WAN"; mitigation "Disable UPnP". PCP "MAP request can be used explicitly to create a dynamic inbound mapping" | s.2a router port-open from inside the home, with a visible toggle |
 
 Not verified, kept out of the rules: whether a browser page served over https may open `ws://` to a raw IP (MDN's
 mixed-content and WebSocket pages are silent), the exact Windows Firewall first-run behaviour (third-party source
@@ -57,37 +62,76 @@ join-by-IP. There is no third party:
   remote host candidate. Without it a joiner on the internet only learns the host's private LAN address. The host
   learns the joiner's public mapping as a peer-reflexive candidate from the incoming checks. *To be proven by the
   smoke test (s.5 step 7); it follows from ICE but nothing above states it for this setup.*
-- **One lobby per hub.** The embedded hub runs in single-lobby mode: a `join` without a code joins the one lobby, so
-  joiners type only the address. Codes, the public list and TURN credentials are off.
+- **One lobby per hub.** The embedded hub runs in single-lobby mode: a `join` without a hub code joins the one lobby.
+  The hub's own server-issued codes (DESIGN s.6), the public list and TURN credentials are off; the join code (s.2a)
+  carries the address instead.
 - **Optional password**, checked by the hub on `join` (Terraria, Valheim, Factorio all offer one, none require one).
 - **Host leaves = the session ends.** The hub lives in the host; there is nothing to migrate to. Listen servers in the
   sources behave the same. Lockstep host migration stays a feature of the hosted backend.
 
+## 2a. Join codes (the address in disguise)
+
+Valheim's short codes need PlayFab plus a relay (s.1), a service someone runs. Ours need nothing: the code *is* the
+host's address, so a friend pastes it from Discord and the game decodes it locally.
+
+**Format (`dc1`):**
+
+| Bits | Field |
+|---|---|
+| 2 | version, `00` = IPv4 |
+| 32 | IPv4 address |
+| 16 | port |
+| 5 | CRC-5 over the 50 bits above |
+
+55 bits = **11 Crockford characters**, all from the normal 32-symbol alphabet (Crockford's own mod-37 check symbol
+needs `*~$=U`, awkward to paste), shown `K3J7-X9QA-2MT` (grouped 4-4-3, hyphens and spaces ignored,
+case-insensitive, i/l → 1, o → 0). The CRC catches any single mistyped character before the joiner waits on a
+timeout (`bad_code` at once instead of `direct_unreachable` after 5 s). Version bits leave
+room for an IPv6 or swarm-lookup code later without breaking old codes. IPv6 hosts in the PoC show the plain
+address instead (an IPv6 code would be ~30 characters).
+
+**Which address goes in the code** (host side, at `HostDirect`):
+1. **Router port-open, on by default** (host-menu toggle "Open port automatically"): find the gateway, ask it to
+   map TCP and UDP `P` to this PC and report its external IPv4. Try UPnP IGD (SSDP `M-SEARCH` to
+   `239.255.255.250:1900`, then `GetExternalIPAddress` + `AddPortMapping`, lease 2 h, renewed while hosting,
+   `DeletePortMapping` on stop), then NAT-PMP/PCP on the gateway (RFC 6887 MAP). These are requests from inside the
+   home to the player's own router, the normal use; CERT VU#357851 is about routers that accept them *from the WAN*.
+2. If mapping works and the external address is public: **internet code** from it.
+3. If there is no UPnP/PCP, or the external address is private or carrier-grade NAT (`100.64.0.0/10`): **LAN code**
+   from the PC's LAN address, plus the s.4 help text ("friends outside your network need a forwarded port or a virtual
+   LAN"). A virtual-LAN address (Tailscale `100.x`, ZeroTier, Hamachi) also encodes fine as a LAN code.
+
+The host cannot test its own internet code from inside (many routers do not hairpin), so the screen says which kind of
+code it is ("Internet code" / "Same-network code") rather than claiming it works.
+
+**Mapper:** write a small one in `OneLobby.Hub` (SSDP + two SOAP calls + NAT-PMP, a few hundred lines) instead of a
+dependency: Open.NAT and Mono.Nat licences and maintenance are unverified, and miniupnpc is native.
+
 ## 3. Game-facing API (additions only)
 
 ```csharp
-// OneLobby.Direct, extension methods on LobbyClient (complete inside Pump, like HostAsync).
-var client = new LobbyClient(config, new DataChannelTransport());   // config.DirectPort defaults to 47810
-
 // Host: starts the embedded hub + listener, connects this client in-memory, creates the lobby.
-var lobby = await client.HostDirectAsync(new DirectHostOptions { Port = 47810, Password = null, MaxPlayers = 4 });
-lobby.DirectAddresses;   // e.g. ["192.168.1.20:47810"]: every non-loopback IPv4/IPv6 interface, for the UI
+var lobby = await OneLobby.HostDirect(config, new DirectHostOptions { Port = 47810, Password = null, MaxPlayers = 4, OpenPort = true });
+lobby.JoinCode;          // "K3J7-X9QA-2MT"
+lobby.JoinCodeKind;      // Internet | SameNetwork
+lobby.DirectAddresses;   // e.g. ["192.168.1.20:47810"]: for an "Advanced" fold-out only
 
-// Joiner: "ip", "ip:port", "[v6]:port"; port defaults to config.DirectPort.
-var lobby = await client.JoinDirectAsync("203.0.113.7:47810", password: null);
+// Joiner: a join code, or (advanced) "ip", "ip:port", "[v6]:port"; port defaults to config.DirectPort.
+var lobby = await OneLobby.JoinDirect(config, "K3J7-X9QA-2MT", password: null);
 ```
 
-Everything after that is the existing `Lobby` API. Errors map to the existing codes plus `direct_unreachable`
-(no answer on TCP `P` within 5 s), `bad_password`, `bad_address` and `port_in_use` (host). Joiners end with
-`SessionEnded("host_left")` when the host goes.
+Everything after that is the existing `Lobby` API. Errors map to the existing codes plus `bad_code` (CRC
+fails), `direct_unreachable` (no answer on TCP `P` within 5 s) and `bad_password`.
 
 ## 4. What the host is told (reference menus)
 
-- "Your address: `192.168.1.20:47810`" with Copy. Friends on the same network use it as is.
-- "Friends outside your network: forward TCP and UDP port 47810 on your router to this PC, then give them your
-  public IP with the port, or use a virtual LAN (Tailscale, ZeroTier, Hamachi) and give them that address." (Factorio,
+- "Join code: `K3J7-X9QA-2MT`" in large monospace with Copy, labelled "Internet code" or "Same-network code".
+  The joiner's screen has one box: "Paste a join code".
+- Same-network code only: "Friends outside your network can't use this code yet. Turn on UPnP on your router, or
+  forward TCP and UDP port 47810 to this PC, or use a virtual LAN (Tailscale, ZeroTier, Hamachi)." (Factorio,
   Minecraft, Terraria wikis on forwarding; Stardew on Hamachi.) IPv6 needs the same: home routers block inbound by
   default (RFC 6092).
+- The raw address sits under an "Advanced" fold-out, never in the main flow.
 - "If Windows asks, allow access on Private networks." The game cannot see the answer, so the text stays on the host
   screen until someone joins.
 
@@ -108,9 +152,14 @@ Everything after that is the existing `Lobby` API. Errors map to the existing co
    no network.
 5. **Port pin:** `PeerLinkOptions` gains `PortRangeBegin/End`; the host sets both to `P`.
 6. **Typed-address candidate:** `PeerLinkOptions` gains `ExtraRemoteCandidates`; `JoinDirect` fills it from the address.
-7. **Smoke test:** host and joiner as two processes on one machine (`127.0.0.1`), then on two LAN machines, then one
-   joiner through a forwarded port. The third run is what proves the s.2 candidate rule.
-8. **Docs:** a "Host by IP" recipe in `docs/recipes/` and a README line; the hosted-server docs say "later".
+7. **Join code codec** (`OneLobby.Core`, pure, shared with JS later): encode/decode `dc1`, CRC-5, grouping;
+   tests: round-trip, every single-character typo caught, i/l/o folding, version bits rejected when unknown.
+8. **Port mapper** (`OneLobby.Hub`): UPnP IGD + NAT-PMP/PCP per s.2a, with a fake gateway in tests; `HostDirect`
+   picks the code kind per s.2a and removes mappings on stop.
+9. **Smoke test:** host and joiner as two processes on one machine (`127.0.0.1` code), then two LAN machines
+   (same-network code), then a joiner on another network with the host's UPnP on (internet code). The third run
+   proves both the router mapping and the s.2 candidate rule.
+10. **Docs:** a "Host with a join code" recipe in `docs/recipes/` and a README line; the hosted-server docs say "later".
 
 Scope: .NET / Unity through `OneLobby.DataChannel`, desktop. Godot (`GodotTransport`, needs a Godot `TCPServer` +
 `WebSocketPeer` listener) and browsers are after the PoC.
@@ -126,12 +175,19 @@ Scope: .NET / Unity through `OneLobby.DataChannel`, desktop. Godot (`GodotTransp
 
 ## 7. Parked (later, in this order)
 
-1. LAN discovery: the Minecraft pattern (multicast announce every 1.5 s; Mirror and Godot use UDP broadcast).
+Factorio is the model for the whole ladder (Parker: "factorio does everything i want already"): visibility
+public / LAN / hidden, and LAN and hidden games keep working with no service at all.
+
+1. LAN game list: the Minecraft pattern (multicast announce every 1.5 s; Mirror and Godot use UDP broadcast).
+   Factorio's "Browse LAN games".
 2. Optional STUN / relay (see s.8).
 3. Steam and EOS backends (directory + transport per s.6).
-4. UPnP / PCP auto port-open, opt-in only (CERT VU#357851).
-5. Browser joiners (needs the https-to-`ws://` question tested, likely `wss` with a real certificate).
-6. The hosted `onelobby-server` directory with codes, list and TURN (DESIGN s.3/6/10/13 as written).
+4. Browser joiners (needs the https-to-`ws://` question tested, likely `wss` with a real certificate).
+5. Internet game list of strangers' games, and short codes that work behind any NAT. This is the only rung that needs
+   a shared directory. SKG-safe options: a swarm where every running copy holds part of the list (BitTorrent-style
+   DHT; Parker is interested, too big for now), or an optional hosted directory (`onelobby-server`, DESIGN
+   s.3/6/10/13 as written; Factorio's dev-run list is the precedent). Either way it sits on top of rungs 1 and the
+   PoC, never in place of them.
 
 ## 8. Taste call (1)
 

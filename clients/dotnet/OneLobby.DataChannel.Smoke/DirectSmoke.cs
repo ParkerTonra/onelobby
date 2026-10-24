@@ -8,11 +8,13 @@ using OneLobby.DataChannel;
 using OneLobby.Direct;
 
 // Direct-IP smoke test (docs/direct-ip.md s.5 step 7): no lobby server anywhere.
-//   host-direct [port] [password]       hosts on TCP+UDP port (default 47810), prints "addresses ...", echoes every
+//   host-direct [port] [password|-]     hosts on TCP+UDP port (default 47810), asks the router to open it (UPnP/NAT-PMP),
+//                                       prints "addresses ..." and "join code ...", echoes every
 //                                       message back as "echo:<text>", prints each joiner's selected ICE pair, exits
 //                                       0 after a joiner says "bye" (or 1 after 120 s with nobody).
-//   join-direct <address> [password]    joins, prints the selected ICE pair, sends "hello direct" (reliable) and
+//   join-direct <code|address> [pw]     joins by join code (6B01-RGFE-P2B) or address, prints the selected ICE pair, sends "hello direct" (reliable) and
 //                                       "fast direct" (fast, repeated), waits for both echoes, prints PASS/FAIL, says bye.
+//     --no-upnp                         (host) do not ask the router; the code is then a same-network code.
 //     --only-typed                      (join) drop every candidate the host offers, so only the typed address can
 //                                       connect: the outside-joiner case on one machine (OnlyTypedTransport).
 // The joiner's "pair" line is the evidence for the s.2 candidate rule: through a forwarded port, its remote candidate
@@ -46,10 +48,14 @@ internal static class DirectSmoke
             if (args[0] == "host-direct")
             {
                 var port = args.Length > 1 ? int.Parse(args[1]) : DirectLobby.DefaultPort;
-                var t = client.HostDirectAsync(new DirectHostOptions { Port = port, Password = args.Length > 2 ? args[2] : null, MaxPlayers = 8 });
-                if (!Wait(() => t.IsCompleted, client.Pump, 5000) || t.IsFaulted) { Say("FAIL host: " + t.Exception?.GetBaseException().Message); return 1; }
+                var t = client.HostDirectAsync(new DirectHostOptions
+                {
+                    Port = port, Password = args.Length > 2 && args[2] != "-" ? args[2] : null, MaxPlayers = 8, OpenPort = !args.Contains("--no-upnp"),
+                });
+                if (!Wait(() => t.IsCompleted, client.Pump, 15000) || t.IsFaulted) { Say("FAIL host: " + (t.Exception?.GetBaseException().ToString() ?? "timed out")); return 1; }
                 var lobby = t.Result;
                 Say("addresses " + string.Join(" ", lobby.DirectAddresses));
+                Say($"join code {lobby.JoinCode} ({lobby.JoinCodeKind}); router: {lobby.PortMapping}");
                 Say("hosting on TCP+UDP " + port + "; waiting for joiners (120 s)");
                 var bye = false;
                 var reported = 0;

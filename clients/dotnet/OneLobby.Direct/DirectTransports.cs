@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using OneLobby.Server;
 
 namespace OneLobby.Direct
@@ -36,6 +37,26 @@ namespace OneLobby.Direct
         {
             _host.Pump();
             _inner.Poll();
+            for (var i = _waits.Count - 1; i >= 0; i--)
+                if (_waits[i].Work.IsCompleted)
+                {
+                    var tcs = _waits[i].Done;
+                    _waits.RemoveAt(i);
+                    tcs.TrySetResult(true);
+                }
+        }
+
+        private readonly List<(Task Work, TaskCompletionSource<bool> Done)> _waits = new List<(Task, TaskCompletionSource<bool>)>();
+
+        /// <summary>
+        /// Completes from inside the next <see cref="Poll"/> after <paramref name="work"/> finishes, so continuations run
+        /// on the game's pumping thread like every other lobby callback (the router request finishes on the thread pool).
+        /// </summary>
+        public Task AfterPump(Task work)
+        {
+            var done = new TaskCompletionSource<bool>();
+            _waits.Add((work, done));
+            return done.Task;
         }
     }
 

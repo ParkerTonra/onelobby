@@ -87,7 +87,7 @@ public sealed class DirectIpTests
         }
         var sw = Stopwatch.StartNew();
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw", MaxPlayers = 3 }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw", MaxPlayers = 3, OpenPort = false }), Pump, "host");
         Assert.True(host.IsHost);
         Assert.Equal("", host.Code);
         _log.WriteLine("host addresses: " + string.Join(", ", host.DirectAddresses));
@@ -155,7 +155,7 @@ public sealed class DirectIpTests
         var joinClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         Lobby? host = null;
         void Pump() { if (host != null) host.Pump(); else hostClient.Pump(); joinClient.Pump(); }
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw" }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw", OpenPort = false }), Pump, "host");
         var t = joinClient.JoinDirectAsync("127.0.0.1", "PW");
         PumpUntil(() => t.IsCompleted, Pump, "join");
         var e = Assert.IsType<OneLobbyException>(t.Exception!.GetBaseException());
@@ -183,8 +183,8 @@ public sealed class DirectIpTests
         var port = FreePort();
         var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c1.HostDirectAsync(), c1.Pump, "host");
-        var t = c2.HostDirectAsync();
+        var host = Await(c1.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c1.Pump, "host");
+        var t = c2.HostDirectAsync(new DirectHostOptions { OpenPort = false });
         Assert.True(t.IsFaulted);
         Assert.Equal("port_in_use", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
         host.LeaveAsync();
@@ -220,6 +220,41 @@ public sealed class DirectIpTests
     {
         var t = new LobbyClient(Cfg, new DataChannelTransport()).JoinDirectAsync("nope nope");
         Assert.Equal("bad_address", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
+    }
+
+    [Fact]
+    public void JoinByTheSameNetworkCode()
+    {
+        var port = FreePort();
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host" }, new DataChannelTransport());
+        var joinClient = new LobbyClient(Cfg with { DisplayName = "Ann" }, new DataChannelTransport());
+        Lobby? host = null, ann = null;
+        void Pump()
+        {
+            if (host != null) host.Pump(); else hostClient.Pump();
+            if (ann != null) ann.Pump(); else joinClient.Pump();
+        }
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Port = port, OpenPort = false }), Pump, "host");
+        if (host.JoinCode != "") Assert.Equal(JoinCodeKind.SameNetwork, host.JoinCodeKind);
+        Assert.Equal("off", host.PortMapping);
+        if (host.JoinCode == "") { host.LeaveAsync(); return; } // no IPv4 on this machine
+        Assert.True(JoinCode.TryDecode(host.JoinCode, out var ip, out var p, out _));
+        Assert.Equal(port, p);
+        _log.WriteLine($"code {host.JoinCode} -> {ip}:{p}");
+        ann = Await(joinClient.JoinDirectAsync(host.JoinCode.ToLowerInvariant().Replace('-', ' ')), Pump, "join by code");
+        PumpUntil(() => ann.IsReady && host.Peers.Count == 2, Pump, "link up");
+        host.LeaveAsync();
+        _ = hostClient.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData("6B01-RGFE-P2C", "bad_code")]   // one character off a valid code
+    [InlineData("6b01 rgfe p2c", "bad_code")]   // same typo, typed loosely
+    public void MistypedCodesFailAtOnce(string input, string code)
+    {
+        var t = new LobbyClient(Cfg, new DataChannelTransport()).JoinDirectAsync(input);
+        Assert.True(t.IsFaulted);
+        Assert.Equal(code, ((OneLobbyException)t.Exception!.GetBaseException()).Code);
     }
 
     [Fact]
