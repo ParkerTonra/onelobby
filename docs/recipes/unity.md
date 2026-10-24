@@ -1,27 +1,33 @@
 # Recipe: Unity 6 (desktop and mobile)
 
-Unity uses `OneLobby.Core` unchanged (shipped as a netstandard2.1 DLL) and adds the `com.onelobby.unity` package for the
-WebRTC transport (`UnityTransport`, over Unity's `com.unity.webrtc`), microphone capture and playback (`UnityVoiceAudio`)
-and a `OneLobbyRunner` MonoBehaviour that pumps the client every frame. All protocol and netcode logic stays in Core, so
-the same game-side code works in Godot or any .NET engine. Unity snippets are tagged `csharp unity`: `check-snippets.mjs`
+Unity uses `OneLobby.Core` and the engine-agnostic WebRTC transport `OneLobby.DataChannel` (libdatachannel) unchanged,
+shipped as netstandard2.1 DLLs plus one native library per platform. The `com.onelobby.unity` package adds only Unity
+plumbing: `UnityTransport` (wraps `DataChannelTransport`, native log to the console), microphone capture and playback
+(`UnityVoiceAudio`) and a `OneLobbyRunner` MonoBehaviour that pumps the client every frame. All protocol, netcode and
+transport logic stays out of Unity, so the same game-side code works in Godot or any .NET engine. Unity snippets are tagged `csharp unity`: `check-snippets.mjs`
 does not compile them (they need UnityEngine); the same code is compiled in a Unity 6000.2 project by the package's
 sample and tests.
 
-Platforms: Windows x64, macOS (Apple Silicon), Linux x64, iOS, Android ARM64, as `com.unity.webrtc` 3.0.0 supports.
-**Not WebGL** (see "WebGL" below). Unity 6000.0 or newer; tested with 6000.2.7f2. API Compatibility Level: the default
+Platforms: wherever a native build exists. Built and live-tested: Windows x64, Linux x64 (editor and standalone).
+macOS (universal) and Android arm64 have build scripts and a CI job but have not been run yet; iOS needs a static
+`__Internal` build (not done); **not WebGL** (see "WebGL" below). Unity 6000.0 or newer; tested with 6000.2.7f2. API Compatibility Level: the default
 .NET Standard 2.1 works (.NET Framework too).
 
 ## 1. Add the package
 
-Build the DLLs once from a clone of this repo (needs the .NET 8 SDK; it runs `dotnet publish -f netstandard2.1` and copies
-OneLobby.Core, OneLobby.Opus and the dependencies Unity lacks into the package's `Runtime/Plugins/`):
+From a clone of this repo, build the native library for each platform you ship (Visual Studio C++ workload for Windows,
+Docker for Linux; or take the CI artifacts), then the package (needs the .NET 8 SDK; it runs
+`dotnet publish -f netstandard2.1` and copies OneLobby.Core, OneLobby.DataChannel, OneLobby.Opus, the dependencies Unity
+lacks, the natives under `Runtime/Plugins/<platform>/` with their import settings, and the licence texts):
 
 ```
+powershell -ExecutionPolicy Bypass -File clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1   # datachannel.dll
+clients/dotnet/OneLobby.DataChannel/native/build-linux.sh                                              # libdatachannel.so
 powershell -File clients/unity/build-unity-package.ps1     # Windows (or pwsh)
 clients/unity/build-unity-package.sh                       # macOS / Linux
 ```
 
-Then add it to your project's `Packages/manifest.json` (Unity resolves `com.unity.webrtc` 3.0.0 itself):
+Then add it to your project's `Packages/manifest.json` (no other Unity packages needed):
 
 ```json
 {
@@ -166,22 +172,23 @@ principle). Mobile needs the microphone permission (iOS: Microphone Usage Descri
 `Permission.Microphone`). Voice on Unity has not been verified on real audio hardware yet; data channels are the
 tested path.
 
-## Threading and Unity WebRTC notes
+## Threading notes
 
 - Everything OneLobby raises (events, task completions) happens inside `Pump`, on the thread that calls it. `OneLobbyRunner`
   calls it from `Update` with `[DefaultExecutionOrder(-100)]`, so your scripts see this frame's messages.
-- `com.unity.webrtc` posts its callbacks (channel open, message, ICE candidate) to Unity's main-thread
-  `SynchronizationContext`; `UnityTransport` only queues them and hands them to Core in `Poll`. Its async operations
-  (CreateOffer, SetLocal/RemoteDescription, GetStats) are polled for `IsDone` from `Poll`, so no coroutine is needed.
-  `StartCoroutine(WebRTC.Update())` is only for video tracks and is not needed.
+- libdatachannel calls back on its own threads; `DataChannelTransport` only copies the data into lock-free queues there
+  and hands it to Core in `Poll`. The callbacks are static methods marked `[MonoPInvokeCallback]` and native code only
+  holds integer ids, so IL2CPP is supported by design (not yet tested in an IL2CPP build).
 - The signaling WebSocket is `System.Net.WebSockets.ClientWebSocket` on the thread pool, also queue-only.
-- `Peer.Relayed` and `PingMs` come from the selected ICE candidate pair (WebRTC stats, refreshed every 2 s).
+- `Peer.Relayed` comes from the selected ICE candidate pair; ping is measured by Core itself.
+- Set `UnityTransport.LogNativeWarnings = true` before the first transport to see libdatachannel warnings in the Console.
 
 ## WebGL
 
-`com.unity.webrtc` does not support WebGL, and `ClientWebSocket` does not work there either. A WebGL build would need a
+A native library cannot load in WebGL, and `ClientWebSocket` does not work there either. A WebGL build would need a
 `.jslib` transport that drives the browser's `RTCPeerConnection` and `WebSocket` (the JS client's `WebRtcLink` shows the
-exact channel setup) behind the same `ITransport`. Not built yet.
+exact channel setup) behind the same `ITransport`. Not built yet. (libdatachannel's datachannel-wasm wrapper is the other
+route.)
 
 ## Done when
 
@@ -193,5 +200,10 @@ exact channel setup) behind the same `ITransport`. Not built yet.
   `Unity.exe -batchmode -projectPath <project> -runTests -testPlatform EditMode` with the server running
   (`ONELOBBY_TEST_SERVER` overrides the URL). It connects two `UnityTransport` peers and checks reliable, fast and broadcast.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".
-- No Unity licence at hand (CI)? `clients/unity/mono-probe/run.ps1` runs Core, the shipped DLLs and the WebSocket
-  adapter on Unity's own Mono against a server (no WebRTC).
+- No Unity licence at hand (CI)? `clients/unity/mono-probe/run.ps1` runs the package's DLLs and `datachannel.dll` on the
+  editor's own 64-bit Mono runtime (unityjit profile): two peers host, list, join and exchange reliable + fast messages over
+  real WebRTC through a server.
+
+Licences: the native library bundles libdatachannel and libjuice (MPL-2.0), usrsctp (BSD-3-Clause), plog (MIT) and
+Mbed TLS (Apache-2.0). A shipped game must credit them and say where the MPL source is; texts in
+`Runtime/Plugins/Licenses/`, details in `clients/dotnet/OneLobby.DataChannel/THIRD_PARTY.md`.

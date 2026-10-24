@@ -1,24 +1,29 @@
 # OneLobby for Unity (`com.onelobby.unity`)
 
 Lobbies with join codes, WebRTC peer-to-peer data channels, `raw` or `lockstep` netcode, text chat and voice for Unity 6.
-All protocol and netcode logic lives in the engine-agnostic `OneLobby.Core` (shipped as a DLL); this package only adds:
+All protocol and netcode logic lives in the engine-agnostic `OneLobby.Core`, and the WebRTC transport in the equally
+engine-agnostic `OneLobby.DataChannel` (libdatachannel); both ship as DLLs plus one native library per platform. This
+package only adds:
 
 | Type | What |
 |---|---|
-| `UnityTransport : ITransport` | `com.unity.webrtc` peer links (three negotiated data channels, DESIGN s.8) + `ClientWebSocket` signaling |
+| `UnityTransport : ITransport` | `OneLobby.DataChannel.DataChannelTransport` (three negotiated data channels, DESIGN s.8, + `ClientWebSocket` signaling), native log to the console |
 | `UnityVoiceAudio : IVoiceAudio` | `Microphone` capture to 48 kHz mono 20 ms frames, one `AudioSource` per speaker (`OnAudioFilterRead`) |
 | `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread) |
 
-Platforms: what `com.unity.webrtc` 3.0.0 supports (Windows x64, macOS Apple Silicon, Linux x64, iOS, Android ARM64). WebGL is
-not supported by `com.unity.webrtc`; see `docs/recipes/unity.md` for the status.
+Platforms: whatever natives `Runtime/Plugins` holds. Built and tested here: Windows x64 and Linux x64. The CI workflow
+also builds macOS (universal) and Android arm64 (not yet run). Not yet: iOS (needs a static `__Internal` build) and WebGL;
+see `docs/recipes/unity.md`.
 
 ## Install
 
-1. Build the DLLs once (needs the .NET 8 SDK): `powershell -File clients/unity/build-unity-package.ps1`
-   (or `clients/unity/build-unity-package.sh`). This fills `Runtime/Plugins/` (not committed).
+1. Build the native library once per platform you target (`clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1`,
+   `build-linux.sh`, or the CI artifacts), then the package (needs the .NET 8 SDK):
+   `powershell -File clients/unity/build-unity-package.ps1` (or `clients/unity/build-unity-package.sh`). This fills
+   `Runtime/Plugins/` (not committed) with the DLLs, the natives under their platform folders and the licence texts.
 2. In your Unity project's `Packages/manifest.json`:
    `"com.onelobby.unity": "file:C:/path/to/onelobby/clients/unity/com.onelobby.unity"`.
-   Unity pulls `com.unity.webrtc` 3.0.0 as a dependency. A tarball for "Add package from tarball" comes from `-Pack` / `--pack`.
+   No other Unity packages are needed. A tarball for "Add package from tarball" comes from `-Pack` / `--pack`.
 
 The full walkthrough, with the game loop and the "Done when" checks, is `docs/recipes/unity.md`.
 
@@ -31,7 +36,6 @@ The full walkthrough, with the game loop and the "Done when" checks, is `docs/re
 
 ## Licences
 
-MIT (this package). Bundled DLLs: `System.Text.Json`, `System.Text.Encodings.Web`, `Microsoft.Bcl.AsyncInterfaces`,
-`System.Runtime.CompilerServices.Unsafe` (MIT, .NET Foundation) and Concentus (BSD-3-Clause; credit it if you ship voice).
-`com.unity.webrtc` is a dependency resolved by Unity, not redistributed here; it is under the Unity Companion License.
-See `THIRD_PARTY.md`.
+MIT (this package). Bundled: libdatachannel and libjuice (MPL-2.0), usrsctp (BSD-3-Clause), plog (MIT), Mbed TLS
+(Apache-2.0) inside the native library; `System.Text.Json` and friends (MIT); Concentus (BSD-3-Clause). A shipped game
+must credit them and say where the MPL source is; see `THIRD_PARTY.md`.

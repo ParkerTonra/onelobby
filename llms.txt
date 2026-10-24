@@ -22,9 +22,9 @@ build dist/onelobby.global.min.js (window.OneLobby).
 ## Recipes
 
 - [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project
-- [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over com.unity.webrtc, OneLobbyRunner, voice); desktop and mobile, no WebGL
+- [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over OneLobby.DataChannel/libdatachannel, OneLobbyRunner, voice); desktop now, no WebGL
 - [Browser JS](docs/recipes/js-web.md): the same in a plain web page
-- [Generic .NET](docs/recipes/dotnet-generic.md): console or any engine, with the in-memory transport for tests
+- [Generic .NET](docs/recipes/dotnet-generic.md): console or any engine; DataChannelTransport (libdatachannel WebRTC) for real play, the in-memory transport for tests
 - [Raw mode](docs/recipes/raw-mode.md): bring your own netcode (host-authoritative, turn-based)
 - [Voice and chat](docs/recipes/voice-and-chat.md): push-to-talk, mute, text chat
 - [Headless testing](docs/recipes/testing.md): two browser contexts with playwright-core, fake mic

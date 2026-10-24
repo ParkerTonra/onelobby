@@ -1,7 +1,8 @@
 # OneLobby for AI coding agents
 
 OneLobby is an open-source, game-agnostic multiplayer kit: a lobby server (join codes, public list), a TURN relay, and
-client libraries (`onelobby` for JS, `OneLobby.Core` + `OneLobby.Godot` or `com.onelobby.unity` for C#). Peers talk over WebRTC data channels;
+client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneLobby.Godot`, `OneLobby.DataChannel`
+(libdatachannel WebRTC for any .NET app) or the `com.onelobby.unity` package). Peers talk over WebRTC data channels;
 the server never sees game data.
 Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
@@ -9,7 +10,7 @@ You do not need to open `clients/`, `server/` or `spec/` to integrate a game. Th
 ## API surface (same shape in both languages)
 
 ```csharp
-// C#: OneLobby.Core (Godot: new GodotTransport(); Unity: new UnityTransport() or the OneLobbyRunner component)
+// C#: OneLobby.Core + a transport: new DataChannelTransport() (any .NET), new GodotTransport(), Unity: new UnityTransport() or OneLobbyRunner
 var client = new LobbyClient(new OneLobbyConfig("com.you.game", "1", new Uri(lobbyServerUrl),
                              SyncMode.Raw, DisplayName: "Ann"), transport);
 Lobby lobby = await client.HostAsync(new LobbyOptions("Ann's game", MaxPlayers: 4, Visibility: Visibility.Public));
@@ -123,7 +124,7 @@ Full reference (generated): `docs/api/`.
 - Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`
 - Browser JS: `docs/recipes/js-web.md`
-- Any .NET app (console, other engines, tests): `docs/recipes/dotnet-generic.md`
+- Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

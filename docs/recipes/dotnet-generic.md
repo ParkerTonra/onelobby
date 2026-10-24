@@ -1,7 +1,10 @@
 # Recipe: generic .NET
 
 `OneLobby.Core` is engine-agnostic (`netstandard2.1` and `net8.0`). It needs an `ITransport` that opens WebRTC data
-channels: `OneLobby.Godot` provides one for Godot; for tests use `InMemoryNetwork` (in `OneLobby.Core`). Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `OneLobby.Core`.
+channels. For any .NET app (console, server-side bot, MonoGame, Stride, Unity) use `DataChannelTransport` from
+`OneLobby.DataChannel` (libdatachannel, section 4); Godot has `OneLobby.Godot`; tests use `InMemoryNetwork` (in
+`OneLobby.Core`). Snippets tagged `csharp compile` are compiled by `docs/check-snippets.mjs` against `OneLobby.Core` and
+`OneLobby.DataChannel`.
 
 ## 1. Reference
 
@@ -95,9 +98,43 @@ For lockstep instead of raw, set `SyncMode.Lockstep`, then per frame:
 `lobby.Lockstep!.Submit(bytes)`, `while (lobby.Lockstep.TryNextFrame(out var f)) { apply f.Commands; sim.Tick(); }`,
 and `ReportHash(tick, hash)` every `HashEveryTicks` ticks. Set `Lockstep.Snapshot` (host) and `Restore` (joiner) for late join.
 
+## 4. A real network: `DataChannelTransport`
+
+`OneLobby.DataChannel` is a complete transport for plain .NET: WebRTC data channels through the native libdatachannel
+library (P/Invoke, works on CoreCLR, Mono and IL2CPP) and a `ClientWebSocket` signaling socket. It talks to browsers,
+Godot and Unity peers in the same lobby. Build the native library once (it is not committed):
+
+```
+powershell -ExecutionPolicy Bypass -File clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1   # win-x64, MSVC + CMake
+clients/dotnet/OneLobby.DataChannel/native/build-linux.sh                                              # linux-x64, Docker
+TARGET=osx clients/dotnet/OneLobby.DataChannel/native/build-posix.sh                                   # on a Mac (universal)
+```
+
+They write `runtimes/<rid>/native/`; a `ProjectReference` to `OneLobby.DataChannel` copies the library next to your
+program. Then:
+
+```csharp compile file=RealNet.cs
+using OneLobby;
+using OneLobby.DataChannel;
+
+public static class RealNet
+{
+    // Same Net wrapper as above, over real WebRTC. Pump from one thread (your game loop): native callbacks only queue.
+    public static Net Create(string lobbyServer, string displayName)
+    {
+        DataChannelTransport.NativeLog += line => System.Console.WriteLine(line);   // optional: libdatachannel warnings
+        return new Net(lobbyServer, new DataChannelTransport(), displayName);
+    }
+}
+```
+
+`clients/dotnet/OneLobby.DataChannel.Smoke` is a complete command-line peer (`host <ws>` / `join <ws> <code>`), and
+`integration/crossplay-datachannel.mjs` uses it to check browser <-> .NET in both directions. Licences of the native
+parts (MPL-2.0, Apache-2.0, BSD, MIT) and what a shipped game must include: `clients/dotnet/OneLobby.DataChannel/THIRD_PARTY.md`.
+
 ## Done when
 
 - `dotnet build` is clean with the snippets above.
-- Two processes (or two tests using the in-memory transport) host and join: `lobby.Peers.Count == 2` on both sides, and a
+- Two processes on `DataChannelTransport` (or two tests using the in-memory transport) host and join: `lobby.Peers.Count == 2` on both sides, and a
   byte array sent with `Send` arrives in `MessageReceived` with the sender's `PeerId`.
 - Pointing `lobbyServer` at a dead address makes `HostAsync` return `null` and set `Status`, with the game still running.

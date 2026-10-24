@@ -44,8 +44,11 @@ for p in $ours; do
   [ -f "$out/$p.xml" ] && cp "$out/$p.xml" "$plugins/"
 done
 for d in $ship_deps; do [ -f "$out/$d.dll" ] && cp "$out/$d.dll" "$deps/"; done
+mkdir -p "$plugins/Licenses"
+cp "$dotnetdir/OneLobby.DataChannel/native/licenses/"* "$plugins/Licenses/"
 meta "$plugins" folder
 meta "$deps" folder
+meta "$plugins/Licenses" folder
 find "$plugins" -type f ! -name '*.meta' | while read -r f; do
   case "$f" in *.dll) meta "$f" dll ;; *) meta "$f" text ;; esac
 done

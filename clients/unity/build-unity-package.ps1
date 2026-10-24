@@ -57,8 +57,12 @@ foreach ($d in $shipDeps) {
     $f = Join-Path $out "$d.dll"
     if (Test-Path $f) { Copy-Item $f $deps }
 }
+$lic = Join-Path $plugins 'Licenses'
+New-Item -ItemType Directory -Force $lic | Out-Null
+Copy-Item (Join-Path $dotnet 'OneLobby.DataChannel/native/licenses/*') $lic
 Write-Meta $plugins 'folder'
 Write-Meta $deps 'folder'
+Write-Meta $lic 'folder'
 Get-ChildItem $plugins -File -Recurse | Where-Object { $_.Extension -ne '.meta' } | ForEach-Object {
     Write-Meta $_.FullName $(if ($_.Extension -eq '.dll') { 'dll' } else { 'text' })
 }

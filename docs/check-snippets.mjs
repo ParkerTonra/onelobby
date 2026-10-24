@@ -2,7 +2,7 @@
 // Extracts every fenced snippet tagged `ts compile` or `csharp compile` from AGENTS.md and docs/recipes/*.md and
 // type-checks it against the real client code.
 //   ```ts compile file=net.ts        -> tsc --noEmit with "onelobby" mapped to clients/js/packages/client/src/index.ts
-//   ```csharp compile file=Net.cs    -> temp csproj with a ProjectReference to clients/dotnet/OneLobby.Core
+//   ```csharp compile file=Net.cs    -> temp csproj with ProjectReferences to clients/dotnet/OneLobby.Core (+ OneLobby.DataChannel)
 // Snippets of one markdown file share a folder, so ts snippets can import each other ("./settings"). Untagged fences and
 // ```csharp godot fences are documentation only. Flags: --strict (a missing client counts as a failure).
 import { execFileSync } from "node:child_process";
@@ -94,6 +94,7 @@ if (ts.length) {
 const cs = snippets.filter((s) => s.lang === "csharp" || s.lang === "cs");
 if (cs.length) {
   const proj = path.join(root, "clients", "dotnet", "OneLobby.Core", "OneLobby.Core.csproj");
+  const dcProj = path.join(root, "clients", "dotnet", "OneLobby.DataChannel", "OneLobby.DataChannel.csproj");
   if (!fs.existsSync(proj)) {
     waiting += cs.length;
     console.warn(`WAITING ${cs.length} csharp snippets: OneLobby.Core.csproj has not landed`);
@@ -115,7 +116,7 @@ if (cs.length) {
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="${fwd(proj)}" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="${fwd(proj)}" />${fs.existsSync(dcProj) ? `<ProjectReference Include="${fwd(dcProj)}" />` : ""}</ItemGroup>
 </Project>
 `);
     try {
