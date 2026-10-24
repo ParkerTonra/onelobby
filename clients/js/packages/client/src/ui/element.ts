@@ -2,7 +2,7 @@
  * `<one-lobby>`: a drop-in lobby (host, join by code or invite link, player list, start) for people who paste
  * HTML rather than write code. Zero dependencies; shadow DOM; themed with CSS custom properties.
  *
- *   <one-lobby server="wss://lobby.example.com" game="my-game" max-players="4"></one-lobby>
+ *   <one-lobby server="https://your-name.onrender.com" game="my-game" max-players="4">fallback text</one-lobby>
  *
  * Game API: el.send(data), el.shared.set/add/get, el.isHost, el.players, events message / player-joined /
  * player-left / start / error / shared-change (all bubble, `event.detail` carries the data).
@@ -13,6 +13,7 @@ import { OneLobbyError } from "../signaling.js";
 import { LobbyController, type Player, type SharedState, type UiState } from "./controller.js";
 import { codeFromUrl, shareUrl } from "../friendly.js";
 import { LOBBY_CSS } from "./styles.js";
+import { lobbyServerUrl } from "./server-url.js";
 
 export const LOBBY_TAG = "one-lobby";
 const NAME_KEY = "onelobby-name";
@@ -69,8 +70,8 @@ const TEMPLATE = `
     </div>
   </div>
 </div>
-<slot></slot>
 `;
+// No <slot>: text placed inside <one-lobby> is a fallback that shows only while the script has not loaded.
 
 /** The element's public surface (for TypeScript users). */
 export interface OneLobbyElement extends HTMLElement {
@@ -86,12 +87,6 @@ export interface OneLobbyElement extends HTMLElement {
   leave(): Promise<void>;
 }
 
-function wsUrl(raw: string): string {
-  const s = raw.trim();
-  if (/^https?:\/\//i.test(s)) return s.replace(/^http/i, "ws");
-  if (!/^wss?:\/\//i.test(s)) return "wss://" + s;
-  return s;
-}
 
 function readStored(): string {
   try {
@@ -181,7 +176,7 @@ function makeClass(): CustomElementConstructor {
             this.$("status").textContent = "You're invited! Type your name, then press Join.";
             input.focus();
           }
-        } else if (!code && this._controller.state === "idle" && this.getAttribute("server")) {
+        } else if (!code && this._controller.state === "idle" && lobbyServerUrl(this.getAttribute("server"))) {
           // A reload in the middle of a game: quietly take this tab's seat back (OneLobby rememberSeat).
           void this._controller.resume(input.value.trim());
         }
@@ -216,12 +211,13 @@ function makeClass(): CustomElementConstructor {
     }
 
     private makeKit(name: string): OneLobby {
-      const server = this.getAttribute("server");
-      if (!server) throw new OneLobbyError("no_server", "the <one-lobby> tag has no server attribute");
+      // missing, still the guide's placeholder, or not an address: say so instead of "couldn't reach the server"
+      const server = lobbyServerUrl(this.getAttribute("server"));
+      if (!server) throw new OneLobbyError("no_server", "the <one-lobby> tag has no usable server address");
       return new OneLobby({
         gameId: this.getAttribute("game") || "onelobby-drop-in",
         netVersion: this.getAttribute("version") || "1",
-        lobbyServer: wsUrl(server),
+        lobbyServer: server,
         mode: "raw",
         displayName: name,
         // joiners give up (with a friendly "couldn't connect" and a retry button) after this long
@@ -270,7 +266,7 @@ function makeClass(): CustomElementConstructor {
       status.classList.toggle("error", s === "error");
       const hint = this.$("hint");
       const hintText = s === "error"
-        ? (c.error?.code === "no_server" ? 'Add server="…" to the <one-lobby> tag. See the guide for where to get one.' : c.error?.hint ?? "")
+        ? (c.error?.code === "no_server" ? 'Put your lobby server address in server="…" on the <one-lobby> tag (it looks like https://your-name.onrender.com). The guide shows how to get one.' : c.error?.hint ?? "")
         : "";
       hint.textContent = hintText;
       hint.hidden = !hintText;

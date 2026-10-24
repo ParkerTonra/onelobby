@@ -9,7 +9,7 @@ You need a OneLobby lobby server (the WebSocket URL, like `wss://lobby.example.c
 ## Use it from a `<script>` tag (no build tools)
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js"></script>
 <script>
   const kit = new OneLobby.OneLobby({
     gameId: "com.you.yourgame",            // any unique name for your game
@@ -26,8 +26,16 @@ The file also works saved next to your page (`<script src="onelobby.global.min.j
 
 ## No code at all
 
-`<one-lobby server="wss://lobby.example.com/ws" game="my-game" max-players="4"></one-lobby>` after the
-`<script>` tag above gives a complete lobby box. See the [no-code guide](https://github.com/ParkerTonra/onelobby/blob/main/docs/no-code.md).
+After the `<script>` tag above, this gives a complete lobby box (the sentence inside only shows if the script did not
+load):
+
+```html
+<one-lobby server="https://your-name.onrender.com" game="my-game" max-players="4">
+  If you can read this, the OneLobby script didn't load.
+</one-lobby>
+```
+
+See the [no-code guide](https://github.com/ParkerTonra/onelobby/blob/main/docs/no-code.md).
 
 ## Install with npm
 
@@ -43,7 +51,7 @@ const lobby = await kit.host({ name: "My game", maxPlayers: 4 });
 console.log("Tell your friend this code:", formatCode(lobby.code));
 ```
 
-Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelobby@0.1/dist/onelobby.bundle.mjs"`.
+Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.bundle.mjs"`.
 
 ## Made for players
 

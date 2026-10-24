@@ -42,6 +42,7 @@ https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js (CDNs pi
 ## Later releases
 
 Bump `version` in `package.json` **and** `LIB_VERSION` in `src/onelobby.ts` (prepublish-check fails if they differ),
-commit, then `npm publish`. The script-tag URL `.../onelobby@0.1/...` follows patch releases automatically. The
+update the pinned version in every CDN URL in the docs and examples (`git grep -n "onelobby@"`), commit, then
+`npm publish`. CDN URLs are pinned (`onelobby@0.1.0`) so a page never silently picks up a different release. The
 deprecated `Keepalive` / `KeepaliveError` aliases can be dropped in the next minor release once Ant Arena imports
 `OneLobby`.

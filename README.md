@@ -1,8 +1,8 @@
 # OneLobby
 
-OneLobby adds Host lobby / Join lobby to any game: players share a join code and play together over a direct
-(WebRTC) connection, with voice and text chat built in. The lobby server is open source and anyone can run one, so a
-game outlives whoever made it (Stop Killing Games).
+OneLobby adds **Host a game** and **Join a game** buttons to your web game: players share a short code and play
+together, with voice and text chat built in. Anyone can run the small server that introduces players, so your game
+keeps working even if you stop running one yourself.
 
 ## I don't code
 
@@ -30,10 +30,11 @@ Next: [docs/recipes/js-web.md](docs/recipes/js-web.md), [raw-mode.md](docs/recip
 
 ## Run a server
 
-- Easy: lobby server only, free host, a few clicks: [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)
+- Easy: a free lobby server in a few clicks: [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)
 - Advanced: lobby server plus TURN relay on your own machine: [deploy/RUN_YOUR_OWN.md](deploy/RUN_YOUR_OWN.md)
 
-Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError` and the server's `KEEPALIVE_*` env vars still work
-for one version (deprecated).
+## For developers: project notes
 
-Design and wire protocol: [DESIGN.md](DESIGN.md). Status: MVP in progress on branch `dev`.
+Players' browsers connect directly (WebRTC); the lobby server only introduces them. Design and wire protocol:
+[DESIGN.md](DESIGN.md). Status: early (version 0.1). Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError`
+and the server's `KEEPALIVE_*` environment variables still work for one version (deprecated).

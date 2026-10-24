@@ -1,19 +1,20 @@
 # Get a lobby server in five minutes (no coding)
 
-Your game needs a lobby server so players can find each other with a join code. This page gets you one on
-[Render](https://render.com), a hosting site with a free plan. You click a button, sign in, and copy an address.
-No Linux, no DNS, no ports to open.
+You click a button, sign in, and copy an address like `https://your-name.onrender.com`. That address is your lobby
+server, and your game needs nothing else from this page.
 
-What you get: the OneLobby lobby server on a free `https://...onrender.com` address with a certificate. Players connect
-to each other directly; the server only introduces them.
-What you do not get: a TURN relay (explained below). Most players do not need one. When you do, use
-[RUN_YOUR_OWN.md](RUN_YOUR_OWN.md), the advanced path.
+A lobby server lets players find each other with a join code. This page puts one on [Render](https://render.com), a
+hosting site with a free plan. Nothing to install. The game itself runs between the players; the server only
+introduces them.
 
 ## Steps
 
 1. **Click the button.**
 
    [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ParkerTonra/onelobby)
+
+   If the button doesn't work (Render shows an error or a "not found" page), the OneLobby project isn't public at that
+   address yet. Ask whoever gave you this guide for the current link, then come back to step 2.
 
 2. **Sign in or sign up.** Render asks you to log in. GitHub, GitLab, Google or email all work. The free plan does not
    ask for a credit card.
@@ -24,14 +25,14 @@ What you do not get: a TURN relay (explained below). Most players do not need on
    the status says **Live**.
 5. **Copy your address.** Near the top of the service page is a link like `https://onelobby-server-ab12.onrender.com`.
    Click it: the page should say `onelobby-server lk1, connect over WebSocket`. That means it works.
-6. **Give your game the lobby server address.** Take your address, change `https://` to `wss://` and add `/ws`:
+6. **Give your game the address.** Paste it exactly as you copied it, for example:
 
-   ```
-   wss://onelobby-server-ab12.onrender.com/ws
+   ```html
+   <one-lobby server="https://onelobby-server-ab12.onrender.com" ...>
    ```
 
-   Paste that wherever your game or the `<one-lobby>` element asks for the lobby server
-   (see [docs/no-code.md](../docs/no-code.md)). Without `/ws` works too; with it is the usual form.
+   (see [docs/no-code.md](../docs/no-code.md)). Developers using the JavaScript library can also write it as
+   `wss://onelobby-server-ab12.onrender.com/ws`; both reach the same server.
 
 ## What it costs
 
@@ -50,7 +51,11 @@ As of 24 October 2026, from [Render's free plan page](https://render.com/docs/fr
 
 Prices change; check the two links above for today's numbers.
 
-## TURN in one sentence, and when you need it
+## Advanced: you can skip this
+
+Everything below is for later, or for people comfortable with server settings. Your lobby server already works.
+
+### When some players can never connect (TURN relay)
 
 A TURN relay is a server that passes game traffic between two players whose networks will not let them connect
 directly. You need one if some players can never join (the join hangs or times out every time) while others can,
@@ -59,7 +64,7 @@ reachable on many ports, which free web hosts like Render do not allow, so it ne
 [RUN_YOUR_OWN.md](RUN_YOUR_OWN.md), then add `ONELOBBY_TURN_URLS` and `ONELOBBY_TURN_SECRET` to this server's
 **Environment** tab (or move the lobby server onto that machine too).
 
-## Optional settings
+### Optional settings
 
 On the service page, open **Environment**, add a variable, and save; Render restarts the server.
 
@@ -75,7 +80,7 @@ Leave `ONELOBBY_TRUST_PROXY` set to `true`: it lets the server tell players apar
 Good to know: `/metrics` (server counters, no player data) is public on this setup; the advanced path restricts it.
 To update to a newer OneLobby version, open the service and choose **Manual Deploy**, then **Deploy latest commit**.
 
-## Other hosts
+### Other hosts
 
 Any host that runs a Docker image and allows WebSockets works. Build from the `server/` folder with
 `server/Dockerfile`; the server listens on the `PORT` the host gives it (8080 if none) and answers health checks on

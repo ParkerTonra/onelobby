@@ -850,6 +850,7 @@ export type KeepaliveEvents = OneLobbyEvents;
 export { defineLobbyElement, LOBBY_TAG } from "./element.js";
 export type { OneLobbyElement } from "./element.js";
 export { LobbyController, SharedState } from "./controller.js";
+export { lobbyServerUrl } from "./server-url.js";
 export type { Player, UiState, ControllerEvents, ControllerOptions, KitLike } from "./controller.js";
 ```
 
@@ -1003,4 +1004,18 @@ export declare class LobbyController {
     }>): void;
 }
 export {};
+```
+
+## ui/server-url
+
+```ts
+/**
+ * The `server="..."` attribute of `<one-lobby>` as a WebSocket URL, or null when it is missing, still the placeholder
+ * from the guide, or not an address at all. Null makes the element say "This page is missing its lobby server
+ * address" instead of the less helpful "Couldn't reach the game server".
+ *
+ * Accepts what people paste: `https://name.onrender.com` (the address Render shows), `wss://host/ws`, or a bare host.
+ * http(s) becomes ws(s); the server answers on `/` and `/ws`, so no path is needed.
+ */
+export declare function lobbyServerUrl(raw: string | null | undefined): string | null;
 ```

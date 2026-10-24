@@ -16,7 +16,7 @@
   <title>Click Together</title>
 
   <!-- STEP 1: load OneLobby. This one line adds the <one-lobby> box to the page. -->
-  <script src="https://unpkg.com/onelobby/dist/onelobby.global.min.js"></script>
+  <script src="https://unpkg.com/onelobby@0.1.0/dist/onelobby.global.min.js"></script>
 
   <style>
     /* Plain page styling. Change colours and sizes freely. */
@@ -36,15 +36,16 @@
   <h1>Click Together</h1>
 
   <!-- STEP 2: the lobby box. It does hosting, joining, codes, invite links and the player list for you.
-       server      = your lobby server address (CHANGE THIS)
+       server      = your lobby server address, like https://your-name.onrender.com (CHANGE THIS)
        game        = any short name for your game, no spaces (players only meet others with the same name)
        max-players = how many people can be in one game
        theme       = light, dark, or auto (follows the visitor's device) -->
   <one-lobby
-    server="wss://YOUR-LOBBY-SERVER.example.com"
+    server="https://YOUR-LOBBY-SERVER.onrender.com"
     game="click-together"
     max-players="6"
     theme="light">
+    If you can read this, the OneLobby script didn't load. Check the script line near the top and your internet connection.
   </one-lobby>
 
   <!-- STEP 3: your game. It stays hidden until the host presses Start. -->
@@ -58,7 +59,8 @@
 </main>
 
 <script type="module">
-  // Find the lobby box and the parts of our game on the page.
+  // Wait until the lobby box is ready, then find it and the parts of our game on the page.
+  await customElements.whenDefined("one-lobby");
   const lobby = document.querySelector("one-lobby");
   const game = document.querySelector("#game");
   const count = document.querySelector("#count");

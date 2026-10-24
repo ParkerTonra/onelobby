@@ -39,6 +39,9 @@ if (!lobby) {
   }
 }
 
+// The address as Render shows it (https://name.onrender.com): http(s), no /ws. The element turns it into ws(s).
+const pageServer = lobby.replace(/^ws/, "http").replace(/\/ws$/, "");
+
 // ---- static site: the example page, with its server="..." pointed at our lobby ----------------------------------
 const types = { ".html": "text/html", ".js": "text/javascript", ".map": "application/json" };
 const site = createServer(async (req, res) => {
@@ -49,7 +52,10 @@ const site = createServer(async (req, res) => {
     const rel = normalize(p.slice(1));
     if (rel.startsWith("..")) throw new Error("bad path");
     let body = await readFile(join(example, rel));
-    if (rel === "index.html") body = Buffer.from(body.toString().replace(/server="wss:\/\/YOUR-LOBBY-SERVER[^"]*"/,`server="${lobby}"`));
+    // ?placeholder keeps the example's server="https://YOUR-LOBBY-SERVER..." as a non-developer would leave it.
+    // Otherwise use the plain http(s) address form the guide tells people to paste (no /ws).
+    if (rel === "index.html" && !url.searchParams.has("placeholder"))
+      body = Buffer.from(body.toString().replace(/server="[^"]*YOUR-LOBBY-SERVER[^"]*"/, `server="${pageServer}"`));
     res.writeHead(200, { "content-type": types[extname(rel)] ?? "application/octet-stream" });
     res.end(body);
   } catch { res.writeHead(404).end(); }
@@ -59,10 +65,11 @@ const page0 = `http://localhost:${site.address().port}/`;
 
 const browser = await chromium.launch({ executablePath: exe, headless: true });
 // The page loads the element from unpkg; serve that URL from this checkout's build instead.
-const profile = async (viewport) => {
+const profile = async (viewport, { missingScript = false } = {}) => {
   const ctx = await browser.newContext({ viewport, permissions: ["clipboard-read", "clipboard-write"] });
-  await ctx.route("https://unpkg.com/onelobby/dist/**", async (route) => {
-    const rel = new URL(route.request().url()).pathname.replace(/^\/onelobby\/dist\//, "");
+  await ctx.route("https://unpkg.com/onelobby*/dist/**", async (route) => {
+    if (missingScript) return route.fulfill({ status: 404, body: "" });
+    const rel = new URL(route.request().url()).pathname.replace(/^\/onelobby(@[^/]+)?\/dist\//, "");
     try { route.fulfill({ status: 200, contentType: types[extname(rel)] ?? "text/plain", body: await readFile(join(dist, rel)) }); }
     catch { route.fulfill({ status: 404, body: "" }); }
   });
@@ -76,6 +83,17 @@ const open = async (ctx, url, name) => {
   return p;
 };
 const status = (p) => p.locator("one-lobby #status").textContent();
+const FALLBACK = "If you can read this, the OneLobby script didn't load";
+// Is the fallback sentence (light-DOM text inside <one-lobby>) actually drawn? The element itself stays visible, so ask
+// the layout engine about the text node: no client rects = not rendered (the shadow root has no <slot>).
+const fallbackShown = (p) => p.evaluate((needle) => {
+  const el = document.querySelector("one-lobby");
+  const t = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.includes(needle));
+  if (!t) return false;
+  const r = document.createRange();
+  r.selectNodeContents(t);
+  return [...r.getClientRects()].some((x) => x.width > 0 && x.height > 0);
+}, FALLBACK);
 const waitStatus = (p, re, ms = 20000) =>
   p.waitForFunction((src) => new RegExp(src).test(document.querySelector("one-lobby").shadowRoot.getElementById("status").textContent), re.source, { timeout: ms });
 
@@ -85,6 +103,7 @@ try {
   const ctxB = await profile({ width: 390, height: 844 }); // a phone
   const A = await open(ctxA, page0, "Sam");
   await A.screenshot({ path: join(shots, "1-start.png") });
+  check("fallback text inside the element is hidden once the script loads", !(await fallbackShown(A)));
   await A.fill("one-lobby #name", "Sam");
   await A.click("one-lobby #host");
   await waitStatus(A, /Waiting for players/);
@@ -156,6 +175,16 @@ try {
   await D.screenshot({ path: join(shots, "5-error.png") });
   await D.click("one-lobby #back");
   check("back returns to the start", await D.isVisible("one-lobby #host"));
+
+  // the script line is dead (typo, offline, not yet on the CDN): the fallback sentence shows instead of a blank page
+  const F = await open(await profile({ width: 800, height: 700 }, { missingScript: true }), page0, "NoScript");
+  check("missing script: the fallback sentence is visible", await fallbackShown(F));
+
+  // the placeholder server address left in: the plain "missing its lobby server address" message, not "couldn't reach"
+  const G = await open(ctxC, page0 + "?placeholder", "Placeholder");
+  await G.click("one-lobby #host");
+  await waitStatus(G, /missing its lobby server address/);
+  check("placeholder server: says the address is missing", true, await status(G));
 
   // keyboard: Tab to the host button and press Enter
   const E = await open(await profile({ width: 800, height: 700 }), page0, "Keys");

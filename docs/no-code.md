@@ -20,15 +20,14 @@ game itself.
 
 ## What you need
 
-1. **A lobby server address.** It looks like `wss://lobby.example.com`. You can get one of two ways:
+1. **A lobby server address.** It looks like `https://your-name.onrender.com`. You can get one of two ways:
    - Ask someone who already runs one (a friend, a club, a teacher) for its address.
    - Make your own for free in a few clicks: [deploy/EASY_SERVER.md](../deploy/EASY_SERVER.md) walks you through it
      (a free hosting account, one button, then copy the address). You only do this once, and every game you make can
-     share it. For a server that also relays connections on strict networks, see
-     [deploy/RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md).
-2. **A place to put your page** so friends can open it. Any free static web host works: GitHub Pages, Netlify Drop
-   (drag a folder onto the page), Cloudflare Pages, or your school or club website. For trying it alone on your own
-   computer you can just double-click the file, but friends on other computers need a web address.
+     share it.
+2. **A place to put your page** so friends can open it. The easiest is Netlify Drop: free, no account needed to start,
+   steps in [Putting your page online](#putting-your-page-online) below. For trying it alone on your own computer you
+   can just double-click the file; friends on other computers need a web address.
 3. A text editor (Notepad is fine).
 
 ## Copy-paste steps
@@ -37,30 +36,48 @@ The fastest start is the finished example in [examples/drop-in/index.html](../ex
 where everyone shares one click counter and can wave at each other. Copy that file, then:
 
 1. Open it in your text editor.
-2. Find the line `server="wss://YOUR-LOBBY-SERVER.example.com"` and put your lobby server address between the quotes.
+2. Find the line `server="https://YOUR-LOBBY-SERVER.onrender.com"` and put your lobby server address between the
+   quotes, for example `server="https://maya-lobby.onrender.com"`.
 3. Change `game="click-together"` to a short name for your game, without spaces. Only players with the same game
    name can meet, so pick something unique, like `maya-space-race`.
-4. Save, upload to your web host, and open the page.
+4. Save. Double-click the file to try it alone, then [put it online](#putting-your-page-online) to play with friends.
 
-If you'd rather add a lobby to a page you already have, paste these two pieces in.
+If you'd rather add a lobby to a page you already have, paste these three pieces in.
 
-In the `<head>` part of the page:
+**1. In the `<head>` part of the page** (this loads OneLobby):
 
 ```html
-<script src="https://unpkg.com/onelobby/dist/onelobby.global.min.js"></script>
+<script src="https://unpkg.com/onelobby@0.1.0/dist/onelobby.global.min.js"></script>
 ```
 
-Where you want the lobby box to appear:
+**2. Where you want the lobby box to appear.** The sentence inside only shows if the line above didn't work, so you
+notice straight away:
 
 ```html
-<one-lobby server="wss://YOUR-LOBBY-SERVER.example.com" game="my-game" max-players="4"></one-lobby>
+<one-lobby server="https://YOUR-LOBBY-SERVER.onrender.com" game="my-game" max-players="4">
+  If you can read this, the OneLobby script didn't load. Check the script line in the head and your internet connection.
+</one-lobby>
+```
+
+**3. Your game's code. Paste it just before `</body>`** (the end of the page). Put all your game lines inside this one
+block, where it says so:
+
+```html
+<script type="module">
+  // Wait until the lobby box is ready (this also makes it work if the block ends up somewhere else on the page).
+  await customElements.whenDefined("one-lobby");
+  const lobby = document.querySelector("one-lobby");
+
+  // Your game lines go here. For example: show a message when the host presses Start.
+  lobby.addEventListener("start", () => { alert("The game has started!"); });
+</script>
 ```
 
 ### Settings on the lobby box
 
 | Setting | What it does | Example |
 |---|---|---|
-| `server` | Your lobby server address. Required. | `server="wss://lobby.example.com"` |
+| `server` | Your lobby server address. Required. | `server="https://maya-lobby.onrender.com"` |
 | `game` | A short name for your game. Players only meet others with the same name. | `game="maya-space-race"` |
 | `max-players` | How many people fit in one game (2 or more). | `max-players="6"` |
 | `name` | Optional. Sets the player's name and hides the name box. | `name="Guest"` |
@@ -69,7 +86,8 @@ Where you want the lobby box to appear:
 
 ### Making the game react
 
-Your page talks to the lobby box with a few short lines. Copy them from the example and change the words.
+Your game talks to the lobby box with a few short lines. Put them in the block from piece 3 above, where it says
+"Your game lines go here", and change the words.
 
 | You want to... | Write this |
 |---|---|
@@ -77,14 +95,14 @@ Your page talks to the lobby box with a few short lines. Copy them from the exam
 | Add 1 to a number everyone shares | `lobby.shared.add("score")` |
 | Set a shared value | `lobby.shared.set("color", "red")` |
 | Read a shared value | `lobby.shared.get("score")` |
+| Reset a shared value (for a new round) | `lobby.shared.set("score", null)` (it reads as empty again) |
 | Do something when a shared value changes | `lobby.addEventListener("shared-change", () => { ... })` |
 | Send a message to everyone else | `lobby.send("hello")` |
 | Do something when a message arrives | `lobby.addEventListener("message", (event) => { ... event.detail.data ... event.detail.from.name ... })` |
 | Know when someone joins or leaves | `player-joined` and `player-left` events, with `event.detail.player.name` |
 | Check if you are the host | `lobby.isHost` |
 | List the players | `lobby.players` (each has a `name`) |
-
-Where `lobby` is `document.querySelector("one-lobby")`.
+| Know which player you are | `lobby.players.find((p) => p.isMe).name` |
 
 **Shared values** are the easy way to keep everyone in step: the host's page keeps the official copy, everyone's page
 asks it to make changes, and every page gets the same result in the same order. Use `add` for scores and counters, so
@@ -110,6 +128,19 @@ The lobby box follows your colours if you set these on it in your page's style s
 
 Others: `--onelobby-muted` (quiet text), `--onelobby-border`, `--onelobby-field` (input background), `--onelobby-danger` (error text).
 
+## Putting your page online
+
+Netlify Drop puts a page on the internet by dragging a folder onto a web page:
+
+1. Make a new folder on your computer (for example `my-game`) and put your page in it.
+2. Name the page file `index.html` (exactly that), so it opens first.
+3. Open [app.netlify.com/drop](https://app.netlify.com/drop) and drag the whole folder onto the box on that page.
+4. Wait a few seconds, then copy the address it shows (it ends in `.netlify.app`). That is the link you send friends.
+
+A site made without an account is removed after a while: sign up for free on that page (it offers to "claim" the site)
+to keep it. To change your game later, drag the folder again from your site's **Deploys** page. Any other free static
+web host works too: GitHub Pages, Cloudflare Pages, or your school or club website.
+
 ## Playing with friends
 
 1. Open your page and type your name.
@@ -128,12 +159,14 @@ The lobby box explains problems in plain words and offers **Try again**. The com
 
 | You see | What it means | What to do |
 |---|---|---|
-| This page is missing its lobby server address | The `server="..."` setting is empty or missing. | Add your lobby server address (see "What you need"). |
-| Couldn't reach the game server | The address is wrong, the lobby server is off, or you're offline. | Check the address (it should start with `wss://`), check your internet, ask whoever runs the server. |
+| The sentence "If you can read this, the OneLobby script didn't load" | The script line in the `<head>` is missing, mistyped, or you are offline. | Copy piece 1 again exactly, check your internet, reload. |
+| This page is missing its lobby server address | The `server="..."` setting is empty, still says `YOUR-LOBBY-SERVER`, or isn't an address. | Put your lobby server address in it (see "What you need"). |
+| Couldn't reach the game server | The address is wrong, the lobby server is off or asleep, or you're offline. | Check the address (it looks like `https://your-name.onrender.com`). A free server that was asleep wakes up in about a minute: try again. Check your internet, or ask whoever runs the server. |
+| My buttons do nothing | Your game lines are outside the piece 3 block, or above it on the page. | Put every game line inside the `<script type="module">` block from piece 3, and paste that block just before `</body>`. |
 | We couldn't find a lobby with that code | A typo, or everyone already left. | Check the code. Letters and numbers only; `O` and `0` count as the same, so do `I`, `L` and `1`. |
 | That lobby is full | Already `max-players` people in it. | The host can raise `max-players` and host again. |
 | You and the host are running different versions of the game | One of you has an older copy of the page. | Both reload the page. |
-| Couldn't connect to the other players | Your two networks won't let the browsers reach each other directly (common on school, work or public Wi-Fi). It gives up after about 15 seconds. | Try again, or switch one person to a phone hotspot. The lobby server owner can turn on a relay (see [RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md)) so this almost always works. |
+| Couldn't connect to the other players | Your two networks won't let the browsers reach each other directly (common on school, work or public Wi-Fi). It gives up after about 15 seconds. | Try again, or switch one person to a phone hotspot. If it keeps happening, whoever runs the lobby server can add a relay (advanced, for them: [RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md)). |
 | This game server doesn't host this game | The lobby server only allows certain game names. | Ask the server owner to allow your `game` name. |
 | The game server is full right now | Too many games at once on that server. | Try again in a few minutes. |
 
