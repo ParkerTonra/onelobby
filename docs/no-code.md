@@ -22,9 +22,9 @@ game itself.
 
 1. **A lobby server address.** It looks like `wss://lobby.example.com`. You can get one of two ways:
    - Ask someone who already runs one (a friend, a club, a teacher) for its address.
-   - Run your own. It is one program on a small rented computer (about the price of a coffee a month). Step by step
-     instructions, including a one-click option, are in [deploy/RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md). You only
-     do this once, and every game you make can share it.
+   - Run your own. It is one small program on a rented computer or a free/cheap hosting service. Step by step
+     instructions are in [deploy/RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md). You only do this once, and every game you
+     make can share it.
 2. **A place to put your page** so friends can open it. Any free static web host works: GitHub Pages, Netlify Drop
    (drag a folder onto the page), Cloudflare Pages, or your school or club website. For trying it alone on your own
    computer you can just double-click the file, but friends on other computers need a web address.
@@ -118,7 +118,8 @@ Others: `--ka-muted` (quiet text), `--ka-border`, `--ka-field` (input background
 4. You see everyone in the **Players** list. Press **Start** when everyone's in.
 5. Friends who open the link after the start still join, and see the game as it is now.
 
-If the host closes their page, another player automatically takes over as host and the game carries on.
+If the host closes their page, another player automatically takes over as host and the game carries on. If someone
+reloads the page by accident, they get their seat back on their own (same tab, as long as the game is still going).
 
 ## When something goes wrong
 
@@ -127,12 +128,13 @@ The lobby box explains problems in plain words and offers **Try again**. The com
 | You see | What it means | What to do |
 |---|---|---|
 | This page is missing its lobby server address | The `server="..."` setting is empty or missing. | Add your lobby server address (see "What you need"). |
-| Couldn't reach the lobby server | The address is wrong, the lobby server is off, or you're offline. | Check the address (it should start with `wss://`), check your internet, ask whoever runs the server. |
-| No game with that code | A typo, or the host already left. | Check the code. Letters and numbers only; `O` and `0` count as the same, so do `I`, `L` and `1`. |
-| That game is full | Already `max-players` people in it. | The host can raise `max-players` and host again. |
-| You and the host have different versions of the game | One of you has an older copy of the page. | Both reload the page. |
-| Couldn't connect to the host | Your two networks won't let the browsers reach each other directly (common on school or office Wi-Fi). | Try again, or switch one person to a phone hotspot. The lobby server owner can turn on a relay (see RUN_YOUR_OWN.md, the TURN section) so this always works. |
-| This lobby server doesn't host this game | The lobby server only allows certain game names. | Ask the server owner to allow your `game` name. |
+| Couldn't reach the game server | The address is wrong, the lobby server is off, or you're offline. | Check the address (it should start with `wss://`), check your internet, ask whoever runs the server. |
+| We couldn't find a lobby with that code | A typo, or everyone already left. | Check the code. Letters and numbers only; `O` and `0` count as the same, so do `I`, `L` and `1`. |
+| That lobby is full | Already `max-players` people in it. | The host can raise `max-players` and host again. |
+| You and the host are running different versions of the game | One of you has an older copy of the page. | Both reload the page. |
+| Couldn't connect to the other players | Your two networks won't let the browsers reach each other directly (common on school, work or public Wi-Fi). It gives up after about 15 seconds. | Try again, or switch one person to a phone hotspot. The lobby server owner can turn on a relay (see [RUN_YOUR_OWN.md](../deploy/RUN_YOUR_OWN.md)) so this almost always works. |
+| This game server doesn't host this game | The lobby server only allows certain game names. | Ask the server owner to allow your `game` name. |
+| The game server is full right now | Too many games at once on that server. | Try again in a few minutes. |
 
 It also helps to:
 

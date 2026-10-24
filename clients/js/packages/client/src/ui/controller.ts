@@ -5,7 +5,7 @@
 import { KeepaliveError } from "../signaling.js";
 import type { Lobby, Peer } from "../lobby.js";
 import type { HostOptions } from "../keepalive.js";
-import { describeError, type FriendlyError } from "./friendly-shim.js";
+import { describeError, type FriendlyError } from "../friendly.js";
 import { normalizeCode } from "../crockford.js";
 
 export type UiState = "idle" | "connecting" | "lobby" | "playing" | "error";
@@ -21,6 +21,9 @@ export interface Player {
 export interface KitLike {
   host(h: HostOptions): Promise<Lobby>;
   join(code: string): Promise<Lobby>;
+  /** Take back the seat this tab held before a reload (Keepalive `rememberSeat`); null when there is none. */
+  resume?(): Promise<Lobby | null>;
+  readonly rememberedCode?: string | null;
 }
 
 export interface ControllerEvents {
@@ -38,9 +41,6 @@ export interface ControllerOptions {
   maxPlayers: number | (() => number);
   /** Lobby name shown to the server (not to players). */
   lobbyName?: string;
-  /** How long a joiner waits for the direct link to the host before giving up. */
-  joinTimeoutMs?: number;
-  setTimer?: (fn: () => void, ms: number) => () => void;
 }
 
 /** Wire envelope inside raw frames. Kept tiny and versioned by key names only. */
@@ -90,8 +90,7 @@ export class LobbyController {
   onChange: () => void = () => {};
   onEvent: <K extends keyof ControllerEvents>(type: K, detail: ControllerEvents[K]) => void = () => {};
 
-  private lastAction: { kind: "host" } | { kind: "join"; code: string } | null = null;
-  private cancelTimer: (() => void) | null = null;
+  private lastAction: { kind: "host" } | { kind: "join"; code: string } | { kind: "resume" } | null = null;
   private unsub: Array<() => void> = [];
   private gen = 0;
   /** Host: changes made so far. Joiner: the newest change applied (older queued ones are skipped). */
@@ -109,7 +108,7 @@ export class LobbyController {
     const l = this.lobby;
     if (!l) return [];
     const list = l.peers.map((p) => this.toPlayer(p));
-    if (!list.some((p) => p.isMe)) list.push({ id: l.localPeerId, name: this.name, isHost: l.isHost, isMe: true });
+    if (!list.some((p) => p.isMe)) list.push({ id: l.localPeerId, name: this.name || `Player ${l.localPeerId}`, isHost: l.isHost, isMe: true });
     return list.sort((a, b) => a.id - b.id);
   }
 
@@ -119,7 +118,7 @@ export class LobbyController {
       case "idle":
         return "Host a game, or type a code to join one.";
       case "connecting":
-        return this.lastAction?.kind === "join" ? "Joining…" : "Creating a game…";
+        return this.lastAction?.kind === "join" ? "Joining…" : this.lastAction?.kind === "resume" ? "Getting your seat back…" : "Creating a game…";
       case "error":
         return this.error?.message ?? "Something went wrong.";
       case "lobby": {
@@ -144,7 +143,7 @@ export class LobbyController {
   private toPlayer(p: Peer | undefined, id?: number): Player {
     const l = this.lobby!;
     const pid = p?.peerId ?? id ?? 0;
-    return { id: pid, name: p?.name || (pid === l.localPeerId ? this.name : `Player ${pid}`), isHost: pid === l.hostPeerId, isMe: pid === l.localPeerId };
+    return { id: pid, name: p?.name || (pid === l.localPeerId && this.name) || `Player ${pid}`, isHost: pid === l.hostPeerId, isMe: pid === l.localPeerId };
   }
 
   // ---- actions -----------------------------------------------------------------------------------------------------
@@ -164,10 +163,22 @@ export class LobbyController {
     return this.run(name, (kit) => kit.join(norm));
   }
 
+  /**
+   * Take back this tab's seat after a page reload, if the kit remembers one (host or joiner). Quietly stays on the
+   * start screen when there is nothing to resume or the seat is gone. Resolves true when back in a game.
+   */
+  async resume(name: string): Promise<boolean> {
+    const kit = this.opts.makeKit(name);
+    if (!kit.resume || !kit.rememberedCode) return false;
+    this.lastAction = { kind: "resume" };
+    await this.run(name, () => kit.resume!(), true);
+    return !!this.lobby;
+  }
+
   /** Repeat whatever failed last (host or join). */
   retry(): Promise<void> {
     const a = this.lastAction;
-    if (!a) {
+    if (!a || a.kind === "resume") {
       this.reset();
       return Promise.resolve();
     }
@@ -202,25 +213,28 @@ export class LobbyController {
 
   // ---- internals ---------------------------------------------------------------------------------------------------
 
-  private async run(name: string, go: (kit: KitLike) => Promise<Lobby>): Promise<void> {
+  private async run(name: string, go: (kit: KitLike) => Promise<Lobby | null>, quiet = false): Promise<void> {
     this.detach();
     const gen = ++this.gen;
-    this.name = (name || "").trim().slice(0, 24) || "Player";
+    this.name = (name || "").trim().slice(0, 24); // empty: other players see "Player N"
     this.state = "connecting";
     this.error = null;
     this.onChange();
-    let lobby: Lobby;
+    let lobby: Lobby | null;
     try {
       lobby = await go(this.opts.makeKit(this.name));
     } catch (e) {
-      if (gen === this.gen) this.fail(e);
+      if (gen !== this.gen) return;
+      if (quiet) this.reset();
+      else this.fail(e);
       return;
     }
     if (gen !== this.gen) {
-      void lobby.leave();
+      void lobby?.leave();
       return;
     }
-    this.attach(lobby);
+    if (lobby) this.attach(lobby);
+    else this.reset();
   }
 
   private attach(l: Lobby): void {
@@ -257,16 +271,9 @@ export class LobbyController {
       if (reason === "left") return;
       this.fail(new KeepaliveError(reason));
     }));
-    if (this.linking) {
-      const ms = this.opts.joinTimeoutMs ?? 20_000;
-      const timer = this.opts.setTimer ?? ((fn, t) => { const h = setTimeout(fn, t); return () => clearTimeout(h); });
-      this.cancelTimer = timer(() => {
-        if (this.lobby === l && this.linking) {
-          void l.leave();
-          this.fail(new KeepaliveError("join_timeout"));
-        }
-      }, ms);
-    }
+    // A joiner that cannot reach the host: the kit gives up after its readyTimeoutMs, leaves, and ends the session
+    // with "ice_failed", which lands in the sessionEnded handler above.
+    l.ready.then(() => { if (this.lobby === l) this.linked(); }, () => {});
     this.onChange();
     if (this.state === "playing" && !this.linking) this.onEvent("start", {});
   }
@@ -274,8 +281,6 @@ export class LobbyController {
   private linked(): void {
     if (!this.linking) return;
     this.linking = false;
-    this.cancelTimer?.();
-    this.cancelTimer = null;
     this.onChange();
     if (this.state === "playing") this.onEvent("start", {});
   }
@@ -283,8 +288,6 @@ export class LobbyController {
   private detach(): void {
     this.gen++;
     for (const u of this.unsub.splice(0)) u();
-    this.cancelTimer?.();
-    this.cancelTimer = null;
     this.lobby = null;
     this.linking = false;
   }

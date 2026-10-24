@@ -93,7 +93,7 @@ try {
   check("code shown big", /^[0-9A-Z]{6}$/.test(code), code);
   await A.click("keepalive-lobby #copyLink");
   const invite = await A.evaluate(() => navigator.clipboard.readText());
-  check("copy invite link puts a join link on the clipboard", invite.includes(`join=${code}`), invite);
+  check("copy invite link puts a join link on the clipboard", invite.replace(/-/g, "").includes(`join=${code}`), invite);
   check("copy button confirms", (await A.locator("keepalive-lobby #copyLink").textContent()) === "Link copied!");
   await A.screenshot({ path: join(shots, "2-host-waiting.png") });
 
@@ -126,13 +126,24 @@ try {
   check("message arrives with the sender's name", true);
   await A.screenshot({ path: join(shots, "4-playing.png") });
 
+  // the joiner reloads mid-game: same seat, game still showing, count intact
+  await B.reload();
+  await B.waitForSelector("#game:not([hidden])", { timeout: 20000 });
+  await B.waitForFunction(() => document.querySelector("#count").textContent === "5", null, { timeout: 10000 });
+  await sleep(500);
+  const afterReload = await A.locator("keepalive-lobby #players li").count();
+  check("reload takes the same seat back", afterReload === 2, `${afterReload} players at the host`);
+  await B.click("#click");
+  await A.waitForFunction(() => document.querySelector("#count").textContent === "6", null, { timeout: 10000 });
+  check("clicks after the reload still count", true);
+
   // late joiner gets the current count
   const ctxC = await profile({ width: 800, height: 700 });
   const C = await open(ctxC, invite, "Kim");
   await C.fill("keepalive-lobby #name", "Kim");
   await C.click("keepalive-lobby #join");
   await C.waitForSelector("#game:not([hidden])", { timeout: 15000 });
-  await C.waitForFunction(() => document.querySelector("#count").textContent === "5", null, { timeout: 10000 });
+  await C.waitForFunction(() => document.querySelector("#count").textContent === "6", null, { timeout: 10000 });
   check("late joiner sees the game and the current count", true);
 
   // friendly error + retry
@@ -140,7 +151,7 @@ try {
   await D.fill("keepalive-lobby #name", "Lee");
   await D.fill("keepalive-lobby #code", "ZZZ ZZZ");
   await D.click("keepalive-lobby #join");
-  await waitStatus(D, /No game with that code/);
+  await waitStatus(D, /couldn't find a lobby with that code/);
   check("unknown code: plain-language error with a retry button", await D.isVisible("keepalive-lobby #retry"), await status(D));
   await D.screenshot({ path: join(shots, "5-error.png") });
   await D.click("keepalive-lobby #back");

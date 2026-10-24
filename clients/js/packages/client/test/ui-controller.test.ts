@@ -1,15 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { Keepalive } from "../src/keepalive.js";
 import { LobbyController } from "../src/ui/controller.js";
-import { codeFromUrl, describeError, shareUrl } from "../src/ui/friendly-shim.js";
+import type { KeepaliveOptions, SeatStorage } from "../src/keepalive.js";
 import { rig, type Rig } from "./helpers.js";
 
-function player(r: Rig, opts: { maxPlayers?: number; joinTimeoutMs?: number } = {}) {
+/** A kit like the element builds (raw mode, no voice) on the in-memory server. */
+const kit = (r: Rig, name: string, extra: Partial<KeepaliveOptions> = {}, adv: KeepaliveOptions["advanced"] = {}) =>
+  new Keepalive({
+    gameId: "gridpaint", netVersion: "1", lobbyServer: "mem://server", mode: "raw", displayName: name, ...extra,
+    advanced: { socketFactory: r.server.socketFactory, linkFactory: r.net.factoryFor(name), clock: r.clock, voiceCodec: null, createMic: null, createSink: null, storage: null, ...adv },
+  });
+
+class MapStorage implements SeatStorage {
+  m = new Map<string, string>();
+  getItem(k: string) { return this.m.get(k) ?? null; }
+  setItem(k: string, v: string) { this.m.set(k, v); }
+  removeItem(k: string) { this.m.delete(k); }
+}
+
+function player(r: Rig, opts: { maxPlayers?: number; makeKit?: (name: string) => Keepalive } = {}) {
   const c = new LobbyController({
-    makeKit: (name) => r.make(name, { mode: "raw" }),
+    makeKit: opts.makeKit ?? ((name) => kit(r, name)),
     maxPlayers: opts.maxPlayers ?? 4,
-    joinTimeoutMs: opts.joinTimeoutMs ?? 5000,
-    setTimer: (fn, ms) => r.clock.setTimeout(fn, ms),
   });
   const events: [string, any][] = [];
   const states: string[] = [];
@@ -125,12 +137,12 @@ describe("<keepalive-lobby> controller", () => {
     const [A, B, C, D] = [player(r, { maxPlayers: 2 }), player(r), player(r), player(r)];
     await B.c.join("hello!", "Alex");
     expect(B.c.state).toBe("error");
-    expect(B.c.error).toMatchObject({ code: "bad_code", message: "That code doesn't look right." });
+    expect(B.c.error).toMatchObject({ code: "bad_code", message: "That doesn't look like a lobby code." });
     expect(B.of("error").length).toBe(1);
 
     await C.c.join("ZZZZZZ", "Kim");
     expect(C.c.error?.code).toBe("unknown_code");
-    expect(C.c.statusText).toBe("No game with that code.");
+    expect(C.c.statusText).toBe("We couldn't find a lobby with that code.");
 
     await A.c.host("Sam");
     await B.c.join(A.c.code!, "Alex");
@@ -153,26 +165,58 @@ describe("<keepalive-lobby> controller", () => {
       remoteId, isOpen: false, onSignal: null, onOpen: null, onClose: null, onMessage: null, onPath: null,
       startOffer() {}, handleSignal() {}, send() {}, close() {},
     });
-    const c = new LobbyController({
-      makeKit: (name) => new Keepalive({
-        gameId: "gridpaint", netVersion: "1", lobbyServer: "mem://server", mode: "raw", displayName: name,
-        socketFactory: r.server.socketFactory, linkFactory: { create: (o) => dead(o.remoteId) as never }, clock: r.clock,
-        voiceCodec: null, createMic: null, createSink: null,
-      }),
-      maxPlayers: 4,
-      joinTimeoutMs: 3000,
-      setTimer: (fn, ms) => r.clock.setTimeout(fn, ms),
+    const B = player(r, {
+      makeKit: (name) => kit(r, name, { readyTimeoutMs: 3000 }, { linkFactory: { create: (o) => dead(o.remoteId) as never } }),
     });
     await A.c.host("Sam");
-    await c.join(A.c.code!, "Alex");
-    expect(c.statusText).toBe("Connecting to Sam…");
+    await B.c.join(A.c.code!, "Alex");
+    expect(B.c.statusText).toBe("Connecting to Sam…");
     await r.clock.run(2900);
-    expect(c.state).toBe("lobby");
+    expect(B.c.state).toBe("lobby");
     await r.clock.run(200);
-    expect(c.state).toBe("error");
-    expect(c.error?.code).toBe("join_timeout");
+    expect(B.c.state).toBe("error");
+    expect(B.c.error?.code).toBe("ice_failed");
+    expect(B.c.error?.hint).toMatch(/hotspot/);
+    expect(B.of("error").length).toBe(1);
     await r.clock.run(100);
     expect(A.c.players.map((p) => p.name)).toEqual(["Sam"]); // it left the lobby cleanly
+  });
+
+  it("a reloaded page takes its seat back (resume), and there is nothing to resume on a fresh tab", async () => {
+    const r = rig();
+    const A = player(r);
+    const store = new MapStorage();
+    const B = player(r, { makeKit: (name) => kit(r, name, {}, { storage: store }) });
+    await A.c.host("Sam");
+    await B.c.join(A.c.code!, "Alex");
+    await r.clock.run(50);
+    const saved = new MapStorage();
+    for (const [k, v] of store.m) saved.setItem(k, v);
+    // "reload": the old page's socket dies; storage survives
+    r.server.sockets[1].close();
+    await B.c.leave(); // the old page is gone (its leave cannot reach the server any more)
+    await r.clock.run(50);
+    const B2 = player(r, { makeKit: (name) => kit(r, name, {}, { storage: saved }) });
+    expect(await B2.c.resume("Alex")).toBe(true);
+    expect(B2.states).toEqual(["connecting", "lobby"]);
+    expect(B2.c.code).toBe(A.c.code);
+    await r.clock.run(50);
+    expect(B2.c.statusText).toBe("Connected! Waiting for Sam to start.");
+    expect(A.c.players.length).toBe(2);
+
+    const fresh = player(r, { makeKit: (name) => kit(r, name, {}, { storage: new MapStorage() }) });
+    expect(await fresh.c.resume("Kim")).toBe(false);
+    expect(fresh.c.state).toBe("idle");
+  });
+
+  it("an empty name shows as Player N", async () => {
+    const r = rig();
+    const [A, B] = [player(r), player(r)];
+    await A.c.host("Sam");
+    await B.c.join(A.c.code!, "  ");
+    await r.clock.run(50);
+    expect(A.c.players.map((p) => p.name)).toEqual(["Sam", "Player 2"]);
+    expect(B.c.players.map((p) => p.name)).toEqual(["Sam", "Player 2"]);
   });
 
   it("the host leaving: the joiner takes over (migration) and the status follows", async () => {
@@ -186,18 +230,5 @@ describe("<keepalive-lobby> controller", () => {
     expect(B.of("player-left").map((d) => d.player.name)).toEqual(["Sam"]);
     expect(B.c.isHost).toBe(true);
     expect(B.c.statusText).toMatch(/Waiting for players/);
-  });
-});
-
-describe("friendly shim", () => {
-  it("invite links round-trip", () => {
-    const u = shareUrl("K7M2QX", "https://example.com/game.html?x=1#top");
-    expect(u).toBe("https://example.com/game.html?x=1&join=K7M2QX");
-    expect(codeFromUrl(u)).toBe("K7M2QX");
-    expect(codeFromUrl("https://example.com/?join=k7m-2qx")).toBe("K7M2QX");
-    expect(codeFromUrl("https://example.com/")).toBeNull();
-  });
-  it("unknown errors still read as plain language", () => {
-    expect(describeError(new Error("boom"))).toMatchObject({ code: "unknown", message: "Something went wrong." });
   });
 });

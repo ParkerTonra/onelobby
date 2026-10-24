@@ -11,7 +11,7 @@ import { formatCode } from "../crockford.js";
 import { Keepalive } from "../keepalive.js";
 import { KeepaliveError } from "../signaling.js";
 import { LobbyController, type Player, type SharedState, type UiState } from "./controller.js";
-import { codeFromUrl, shareUrl } from "./friendly-shim.js";
+import { codeFromUrl, shareUrl } from "../friendly.js";
 import { LOBBY_CSS } from "./styles.js";
 
 export const LOBBY_TAG = "keepalive-lobby";
@@ -181,6 +181,9 @@ function makeClass(): CustomElementConstructor {
             this.$("status").textContent = "You're invited! Type your name, then press Join.";
             input.focus();
           }
+        } else if (!code && this._controller.state === "idle" && this.getAttribute("server")) {
+          // A reload in the middle of a game: quietly take this tab's seat back (Keepalive rememberSeat).
+          void this._controller.resume(input.value.trim());
         }
       }
     }
@@ -206,8 +209,9 @@ function makeClass(): CustomElementConstructor {
     }
 
     private playerName(): string {
-      const v = (this.$("name") as HTMLInputElement).value.trim() || this.getAttribute("name") || "Player";
-      if (!this.getAttribute("name")) store(v);
+      // empty is fine: other players then see "Player 2" and so on
+      const v = (this.$("name") as HTMLInputElement).value.trim() || this.getAttribute("name") || "";
+      if (!this.getAttribute("name") && v) store(v);
       return v;
     }
 
@@ -220,9 +224,9 @@ function makeClass(): CustomElementConstructor {
         lobbyServer: wsUrl(server),
         mode: "raw",
         displayName: name,
-        createMic: null,
-        createSink: null,
-        voiceCodec: null,
+        // joiners give up (with a friendly "couldn't connect" and a retry button) after this long
+        readyTimeoutMs: 15_000,
+        advanced: { createMic: null, createSink: null, voiceCodec: null },
       });
     }
 
