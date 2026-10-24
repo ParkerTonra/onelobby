@@ -30,3 +30,7 @@ export { WebRtcLink, webRtcLinkFactory } from "./webrtc.js";
 export { systemClock } from "./clock.js";
 export { Gridpaint, paintCmd, colourOf, PALETTE, GRID_W, GRID_H, seedFromCode, fnv1a64 } from "./gridpaint.js";
 export type { Hub } from "./hub.js";
+export { encodeJoinCode, decodeJoinCode, normalizeJoinCode, looksLikeJoinCode, JOIN_CODE_LENGTH } from "./joincode.js";
+export { parseDirectAddress, DEFAULT_DIRECT_PORT } from "./direct-address.js";
+export type { DirectAddress } from "./direct-address.js";
+export { webRtcLinkFactoryFor } from "./webrtc.js";

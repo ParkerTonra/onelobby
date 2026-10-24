@@ -9,6 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="OneLobby.Core.Tests" />
     <InternalsVisibleTo Include="OneLobby.Conformance" />
+    <InternalsVisibleTo Include="OneLobby.Direct" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />

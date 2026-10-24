@@ -15,4 +15,7 @@
     <ProjectReference Include="..\OneLobby.DataChannel\OneLobby.DataChannel.csproj" />
     <ProjectReference Include="..\..\..\server\OneLobby.Server\OneLobby.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OneLobby.Direct\OneLobby.Direct.csproj" />
+  </ItemGroup>
 </Project>

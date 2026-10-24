@@ -7,6 +7,9 @@ import { deflateSync } from 'node:zlib';
 import { encode, fromJson, toJson, hex, unhex, chunkPayload, MAX_FRAME } from './codec.mjs';
 import { runLog, Gridpaint, paintCmd, seedFromCode, fnv1a64 } from './gridpaint.mjs';
 import { credential } from './turn.mjs';
+import { ALPHABET } from './codes.mjs';
+import * as jc from './joincode.mjs';
+const group = jc.group;
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'vectors');
 const write = (name, obj) => writeFileSync(join(dir, name), JSON.stringify(obj, null, 2) + '\n');
@@ -140,6 +143,40 @@ write('gridpaint.json', {
   commandLog: log,
   golden,
   snapshotAtTick100_code_7HQ4K2: { tick: 100, bytes: hex(snap100), hash: g.hash().toString() },
+});
+
+// ---- joincode.json: dc1 join codes (docs/direct-ip.md s.2a) ----
+const jcValid = [
+  ['127.0.0.1', 47810], ['192.168.1.20', 47810], ['10.0.0.188', 47810], ['203.0.113.7', 47810],
+  ['0.0.0.0', 1], ['255.255.255.255', 65535], ['100.101.102.103', 41641], ['8.8.8.8', 34197],
+].map(([ip, port]) => ({ ip, port, code: jc.encode(ip, port) }));
+const firstRaw = jc.encodeRaw('203.0.113.7', 47810);
+const typos = [];
+for (let i = 0; i < jc.LENGTH; i++)
+  for (const c of ALPHABET) if (c !== firstRaw[i]) typos.push(firstRaw.slice(0, i) + c + firstRaw.slice(i + 1));
+const v1 = (() => { // a well-formed code with version 01: must decode as unknown_version, not as an address
+  const data = (1n << 48n) | (BigInt(0xcb007107) << 16n) | 47810n;
+  let v = (data << 5n) | BigInt(jc.crc5(data, 50)), s = '';
+  for (let i = 0; i < jc.LENGTH; i++) { s = ALPHABET[Number(v & 31n)] + s; v >>= 5n; }
+  return s;
+})();
+write('joincode.json', {
+  desc: 'dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens.',
+  valid: jcValid,
+  aliases: [
+    { input: jcValid[3].code.toLowerCase(), ip: '203.0.113.7', port: 47810, note: 'lower case' },
+    { input: jcValid[3].code.replace(/-/g, ' '), ip: '203.0.113.7', port: 47810, note: 'spaces instead of hyphens' },
+    { input: jcValid[3].code.replace(/-/g, ''), ip: '203.0.113.7', port: 47810, note: 'no separators' },
+    { input: jcValid[3].code.replace(/1/g, 'l').replace(/0/g, 'o'), ip: '203.0.113.7', port: 47810, note: 'l for 1, o for 0' },
+  ],
+  invalid: [
+    { input: '', error: 'bad_code' },
+    { input: firstRaw.slice(0, 10), error: 'bad_code', note: 'too short' },
+    { input: firstRaw + '0', error: 'bad_code', note: 'too long' },
+    { input: firstRaw.slice(0, 10) + 'U', error: 'bad_code', note: 'U is not in the alphabet' },
+    { input: group(v1), error: 'unknown_version', note: 'version bits 01, valid crc' },
+  ],
+  singleTypos: { of: jc.group(firstRaw), error: 'bad_code', count: typos.length, inputs: typos },
 });
 
 console.log('vectors written:', frames.length, 'frames');

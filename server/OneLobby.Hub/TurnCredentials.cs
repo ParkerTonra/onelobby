@@ -14,7 +14,7 @@ public static class TurnCredentials
 
     public static string Sign(string secret, string username)
     {
-        byte[] mac = HMACSHA1.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(username));
+        byte[] mac = Compat.HmacSha1(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(username));
         return Convert.ToBase64String(mac);
     }
 }

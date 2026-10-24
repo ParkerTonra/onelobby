@@ -56,6 +56,11 @@ export interface LobbyConfig {
    * On failure `ready` rejects with OneLobbyError("ice_failed"), the error is reported and the lobby is left.
    */
   readyTimeoutMs?: number;
+  /**
+   * Direct IP (docs/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
+   * (link, peer_left, a host_changed from the hub as it shuts down, or the signaling socket) ends with "host_left".
+   */
+  direct?: boolean;
 }
 
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
@@ -89,6 +94,17 @@ export class Lobby extends Emitter<LobbyEvents> {
   resumeToken: string;
   /** Last measured round trip to the host in ms (joiners), or 0. */
   rtt = 0;
+  /**
+   * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/direct-ip.md
+   * s.2a). Show it with joinCodeKind. Empty when the machine has no IPv4 address, and on joiners.
+   */
+  joinCode = "";
+  /** "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN address. */
+  joinCodeKind: "internet" | "same_network" | "none" = "none";
+  /** Direct-IP host only: this machine's addresses with the port, for an "Advanced" fold-out. */
+  directAddresses: string[] = [];
+  /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
+  portMapping = "";
 
   private signaling: SignalingClient;
   private cfg: LobbyConfig;
@@ -538,6 +554,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
   private handleHostLost(reason: string): void {
     if (this.isHost || this.ended) return;
+    if (this.cfg.direct) {
+      this.teardown("host_left");
+      return;
+    }
     const failed = this.hostPeerId;
     const gone = this.roster.get(failed);
     if (gone) {
@@ -615,6 +635,11 @@ export class Lobby extends Emitter<LobbyEvents> {
         this.removePeer(Number(m.peerId), String(m.reason ?? "left"));
         break;
       case "host_changed": {
+        if (this.cfg.direct) {
+          // the hub promotes a joiner as the host leaves; in direct mode the hub is going with it
+          if (!this.isHost) this.teardown("host_left");
+          break;
+        }
         const id = Number(m.hostId);
         if (typeof m.epoch === "number" && m.epoch > this.epoch) this.epoch = m.epoch & 0xffff;
         if (id === this.hostPeerId) break;
@@ -713,6 +738,10 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   private onServerClosed(): void {
     if (this.ended) return;
+    if (this.cfg.direct && !this.isHost) {
+      this.teardown("host_left");
+      return;
+    }
     this.serverUp = false;
     this.emit("serverLost");
     // Alone with no peers: nothing keeps this session alive.

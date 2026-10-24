@@ -24,7 +24,7 @@ public sealed class Hub
     private static readonly Regex GameIdRx = new("^[A-Za-z0-9._-]{1,64}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly object _gate = new();
-    private readonly ServerOptions _o;
+    private readonly HubOptions _o;
     private readonly IClock _clock;
     private readonly ILogger _log;
     private readonly Func<int, int> _rand;
@@ -37,8 +37,9 @@ public sealed class Hub
     private readonly Dictionary<string, int> _gameLobbies = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IpState> _ips = new(StringComparer.Ordinal);
     private long _nextSession;
+    private bool _createdOnce;
     private int _members;
-    private readonly string _logSalt = Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
+    private readonly string _logSalt = Compat.Hex(Compat.RandomBytes(8));
 
     private int Scale => Math.Max(1, _o.RateScale);
 
@@ -50,7 +51,7 @@ public sealed class Hub
         public int Sockets;
     }
 
-    public Hub(ServerOptions options, IClock? clock = null, ILogger? logger = null, Func<int, int>? randomInt = null)
+    public Hub(HubOptions options, IClock? clock = null, ILogger? logger = null, Func<int, int>? randomInt = null)
     {
         _o = options;
         _clock = clock ?? new SystemClock();
@@ -81,7 +82,7 @@ public sealed class Hub
             {
                 Id = ++_nextSession,
                 Ip = ip,
-                ConnId = Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
+                ConnId = Compat.Hex(Compat.RandomBytes(6)).ToLowerInvariant(),
                 Send = send,
                 Close = close,
                 LastSeen = _clock.NowMs,
@@ -317,6 +318,7 @@ public sealed class Hub
             if (!ip.Create.TryHit(now)) { RateLimited(s, "create", ip.Create.RetryAfterMs(now), null); return; }
             if (ip.Open >= _o.OpenLobbiesPerIp * Scale) { RateLimited(s, "open_lobbies", 5000, "max_lobbies"); return; }
         }
+        if (_o.SingleLobby && _createdOnce) { Error(s, "server_full", "this host runs one lobby"); return; }
         if (_lobbies.Count >= _o.MaxLobbies || _members >= _o.MaxPeers) { Error(s, "server_full", "server is at its lobby limit"); return; }
         if (_o.GameQuotas.TryGetValue(s.GameId, out int quota) && _gameLobbies.GetValueOrDefault(s.GameId) >= quota)
         { Error(s, "server_full", "lobby quota for this game is reached"); return; }
@@ -348,6 +350,7 @@ public sealed class Hub
             MaxPlayers = maxPlayers, CreatedAt = now, OwnerIp = s.Ip, Meta = meta!,
         };
         _lobbies[code] = lobby;
+        _createdOnce = true;
         _gameLobbies[s.GameId] = _gameLobbies.GetValueOrDefault(s.GameId) + 1;
         ip.Open++;
         Metrics.Inc("onelobby_lobbies_created_total");
@@ -363,10 +366,22 @@ public sealed class Hub
         var ip = IpOf(s.Ip);
         long now = _clock.NowMs;
         if (!_o.DisableIpLimits && !ip.Join.TryHit(now)) { RateLimited(s, "join", ip.Join.RetryAfterMs(now), null); return; }
-        string? code = Crockford.Normalize(Str(m, "code"));
-        if (code is null) { Error(s, "bad_request", "malformed join code", Field("code")); return; }
-        if (!_lobbies.TryGetValue(code, out var lobby) || lobby.GameId != s.GameId)
-        { Error(s, "unknown_code", "no lobby with that code"); return; }
+        Lobby? lobby;
+        if (_o.SingleLobby && m["code"] is null)
+        {
+            // direct IP: the address is the invitation, so a join without a code means the one lobby
+            lobby = _lobbies.Values.FirstOrDefault();
+            if (lobby is null || lobby.GameId != s.GameId) { Error(s, "unknown_code", "this host has no open lobby for that game"); return; }
+        }
+        else
+        {
+            string? code = Crockford.Normalize(Str(m, "code"));
+            if (code is null) { Error(s, "bad_request", "malformed join code", Field("code")); return; }
+            if (!_lobbies.TryGetValue(code, out lobby) || lobby.GameId != s.GameId)
+            { Error(s, "unknown_code", "no lobby with that code"); return; }
+        }
+        if (_o.Password is { } pw && !string.Equals(Str(m, "password"), pw, StringComparison.Ordinal))
+        { Error(s, "bad_password", "wrong password for this lobby"); return; }
         if (lobby.NetVersion != s.NetVersion)
         {
             Error(s, "version_mismatch", $"host is on {lobby.NetVersion}, you are on {s.NetVersion}",
@@ -418,6 +433,7 @@ public sealed class Hub
     private void List(Session s, JsonObject m)
     {
         string? vis = Str(m, "visibility");
+        if (!_o.IssueCodes) { Send(s, new JsonObject { ["t"] = "lobbies", ["items"] = new JsonArray() }); return; }
         if (vis != "public") { Error(s, "bad_request", "only public lobbies can be listed", Field("visibility")); return; }
         int limit = 50;
         if (m["limit"] is not null)
@@ -634,7 +650,7 @@ public sealed class Hub
         return null;
     }
 
-    private static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+    private static string NewToken() => Compat.Hex(Compat.RandomBytes(16)).ToLowerInvariant();
 
     // ---------------------------------------------------------------- output helpers
 
@@ -652,7 +668,7 @@ public sealed class Hub
             peers.Add(new JsonObject { ["peerId"] = p.PeerId, ["name"] = p.Name, ["joinedAt"] = p.JoinedAt });
         return new JsonObject
         {
-            ["t"] = "lobby", ["code"] = l.Code, ["gameId"] = l.GameId, ["netVersion"] = l.NetVersion,
+            ["t"] = "lobby", ["code"] = _o.IssueCodes ? l.Code : "", ["gameId"] = l.GameId, ["netVersion"] = l.NetVersion,
             ["hostId"] = l.HostId, ["you"] = you.PeerId, ["mode"] = l.Mode, ["tickRate"] = l.TickRate,
             ["lateJoin"] = l.LateJoin, ["phase"] = l.Phase, ["meta"] = MetaObj(l), ["peers"] = peers,
             ["resumeToken"] = you.Token, ["name"] = l.Name, ["maxPlayers"] = l.MaxPlayers,
@@ -705,7 +721,7 @@ public sealed class Hub
         _log.LogInformation("lobby {Event} code={Code} game={Game} players={Players} ip={Ip}", ev, l.Code, l.GameId, l.Members.Count, s is null ? "-" : HashIp(s.Ip));
 
     private string HashIp(string ip) =>
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(_logSalt + ip)), 0, 4).ToLowerInvariant();
+        Compat.Hex(Compat.Sha256(System.Text.Encoding.UTF8.GetBytes(_logSalt + ip)), 0, 4).ToLowerInvariant();
 
     // ---------------------------------------------------------------- tolerant JSON readers
 

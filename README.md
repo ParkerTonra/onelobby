@@ -9,6 +9,12 @@ keeps working even if you stop running one yourself.
 Put multiplayer on your web game by pasting a snippet: [docs/no-code.md](docs/no-code.md).
 You also need a lobby server; [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md) gets you a free one in a few clicks.
 
+## No server at all: host by IP
+
+A .NET game (desktop, Unity) or a Node game server can host straight from the player's PC: it opens its port on the
+router and shows a join code (`6B01-RGFE-P2B`, the host's address in disguise), friends paste it, nobody runs a server. See [docs/recipes/direct-ip.md](docs/recipes/direct-ip.md). This is the first backend that ships; the hosted
+lobby server below (join codes, public list, relay) comes later.
+
 ## Quickstart for developers
 
 Install `onelobby` (see [its README](clients/js/packages/client/README.md)), then in a browser module:

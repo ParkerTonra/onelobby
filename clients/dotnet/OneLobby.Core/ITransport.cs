@@ -43,7 +43,21 @@ namespace OneLobby
         bool TryReceive(out PeerChannel channel, out byte[] frame);
     }
 
-    public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly);
+    /// <summary>What a transport needs to build one peer link.</summary>
+    /// <param name="RemotePeerId">The peer at the other end.</param>
+    /// <param name="Initiator">True: this side creates the offer.</param>
+    /// <param name="IceServers">STUN/TURN servers from the hub's <c>welcome</c>.</param>
+    /// <param name="RelayOnly">Only relay candidates (TURN).</param>
+    /// <param name="PortRangeBegin">First local UDP port ICE may bind (0 = any). Direct-IP hosts pin
+    /// <c>PortRangeBegin = PortRangeEnd = P</c> so one forwarded port carries every peer (docs/direct-ip.md s.2).</param>
+    /// <param name="PortRangeEnd">Last local UDP port ICE may bind (0 = any).</param>
+    /// <param name="ExtraRemoteCandidates">ICE candidate lines the link adds for the remote side once the remote
+    /// description is set, e.g. <c>candidate:1 1 UDP 2122317823 203.0.113.7 47810 typ host</c>: a direct-IP joiner adds
+    /// the address it typed, because the host only knows and offers its private LAN addresses.</param>
+    /// <param name="NoIceServers">Use exactly <paramref name="IceServers"/>, even when empty: no default STUN server
+    /// (direct IP talks to no outside server).</param>
+    public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly,
+        int PortRangeBegin = 0, int PortRangeEnd = 0, IReadOnlyList<string>? ExtraRemoteCandidates = null, bool NoIceServers = false);
 
     /// <summary>Engine-specific plumbing. OneLobby.Godot and <c>InMemoryNetwork</c> implement it.</summary>
     public interface ITransport

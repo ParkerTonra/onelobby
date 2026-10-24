@@ -47,6 +47,11 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
      already assigned). `approve{peerId, ok:true}`: joiner gets `lobby`, everyone else `peer_joined`. `ok:false`: joiner
      gets `error{kicked, data:{reason:"denied"}}` **(decision)**.
   8. otherwise joiner gets `lobby`, everyone already in gets `peer_joined{peer}`.
+- Direct-IP hub (a hub embedded in the host's game, docs/direct-ip.md; not onelobby-server): one lobby per hub.
+  `join` without `code` joins that lobby (none open: `unknown_code`); `join` may carry `password` and a mismatch is
+  `error{bad_password}`, checked after the lobby is found and before step 3; a second `create` is `server_full`, even
+  after the first lobby closed; `lobby.code` is `""`, `list` replies `lobbies{items:[]}`, `welcome.ice` is `[]`.
+  **(decision)**
 - The `lobby` message is the full state. It is also re-sent to **every member** (with that member's own `you`) after the
   host changes `meta` or `phase` **(decision)** so roster, phase and metadata stay in sync with no extra message type.
 - `leave`: no reply to the leaver. Others get `peer_left{peerId, reason:"left"}`. If the host left and others remain, the

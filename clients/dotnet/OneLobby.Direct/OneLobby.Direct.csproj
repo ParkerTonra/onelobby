@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <RootNamespace>OneLobby.Direct</RootNamespace>
+    <AssemblyName>OneLobby.Direct</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Host and join OneLobby lobbies by IP address: the host's game runs the signaling hub, no server of anyone's (docs/direct-ip.md).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneLobby.DataChannel.Tests" />
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\..\..\server\OneLobby.Hub\OneLobby.Hub.csproj" />
+  </ItemGroup>
+</Project>

@@ -41,6 +41,9 @@ namespace OneLobby.DataChannel
 
         public long NowMs => Clock.ElapsedMilliseconds;
 
+        /// <summary>Live links (diagnostics and tests).</summary>
+        internal IReadOnlyList<DataChannelPeerLink> Links => _links;
+
         public ISignalingSocket ConnectSignaling(Uri url)
         {
             var s = new WebSocketSignalingSocket(url);

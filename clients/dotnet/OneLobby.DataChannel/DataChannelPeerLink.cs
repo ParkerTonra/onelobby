@@ -49,6 +49,10 @@ namespace OneLobby.DataChannel
         private int _pathTries;
         private long _nextPathMs;
         private bool _relayed;
+        /// <summary>The selected ICE pair once known (diagnostics and tests), e.g. "a=candidate:... 47810 typ host".</summary>
+        internal string? LocalCandidate { get; private set; }
+        internal string? RemoteCandidate { get; private set; }
+        internal PeerLinkOptions Options => _opts;
 
         public bool Disposed { get; private set; }
         public bool IsFailed { get; private set; }
@@ -76,7 +80,7 @@ namespace OneLobby.DataChannel
             foreach (var s in options.IceServers)
                 foreach (var u in s.Urls)
                     if (ToLibUrl(u, s.Username, s.Credential) is { } lu) urls.Add(lu);
-            if (urls.Count == 0) urls.Add(DataChannelTransport.DefaultStun);
+            if (urls.Count == 0 && !options.NoIceServers) urls.Add(DataChannelTransport.DefaultStun);
 
             var strings = new List<IntPtr>();
             try
@@ -96,6 +100,10 @@ namespace OneLobby.DataChannel
                     IceServersCount = strings.Count,
                     IceTransportPolicy = options.RelayOnly ? 1 : 0,
                     DisableAutoNegotiation = 1,
+                    PortRangeBegin = (ushort)options.PortRangeBegin,
+                    PortRangeEnd = (ushort)options.PortRangeEnd,
+                    // one pinned port shared by every peer connection (direct-IP host): libjuice's UDP mux
+                    EnableIceUdpMux = (byte)(options.PortRangeBegin > 0 && options.PortRangeBegin == options.PortRangeEnd ? 1 : 0),
                 };
                 try { _pc = Rtc.rtcCreatePeerConnection(ref config); }
                 catch (Exception e) when (e is DllNotFoundException || e is EntryPointNotFoundException || e is BadImageFormatException)
@@ -252,6 +260,8 @@ namespace OneLobby.DataChannel
             var l = Rtc.FromUtf8z((IntPtr)local) ?? "";
             var r = Rtc.FromUtf8z((IntPtr)remote) ?? "";
             _relayed = l.Contains(" typ relay") || r.Contains(" typ relay");
+            LocalCandidate = l;
+            RemoteCandidate = r;
             _pathTries = int.MaxValue; // known: stop asking
         }
 
@@ -276,6 +286,9 @@ namespace OneLobby.DataChannel
                 fixed (byte* ps = sdp) fixed (byte* pt = tb) r = Rtc.rtcSetRemoteDescription(_pc, ps, pt);
                 if (r < 0) { Fail("rtcSetRemoteDescription " + type + " " + r); return; }
                 _remoteSet = true;
+                // e.g. the address a direct-IP joiner typed (docs/direct-ip.md s.2), tagged with the remote's media id
+                if (_opts.ExtraRemoteCandidates != null)
+                    foreach (var extra in _opts.ExtraRemoteCandidates) AddIce(extra, MidOf(s.Sdp));
                 while (_pendingIce.Count > 0) { var (c, m) = _pendingIce.Dequeue(); AddIce(c, m); }
                 if (type == "offer")
                 {
@@ -289,6 +302,17 @@ namespace OneLobby.DataChannel
                 if (_remoteSet) AddIce(s.Candidate!, s.SdpMid);
                 else _pendingIce.Enqueue((s.Candidate!, s.SdpMid));
             }
+        }
+
+        /// <summary>The first <c>a=mid:</c> of an SDP (OneLobby offers one bundled data-channel section).</summary>
+        internal static string? MidOf(string sdp)
+        {
+            var i = sdp.IndexOf("a=mid:", StringComparison.Ordinal);
+            if (i < 0) return null;
+            i += 6;
+            var end = i;
+            while (end < sdp.Length && sdp[end] != '\r' && sdp[end] != '\n') end++;
+            return sdp.Substring(i, end - i).Trim();
         }
 
         private void AddIce(string cand, string? mid)

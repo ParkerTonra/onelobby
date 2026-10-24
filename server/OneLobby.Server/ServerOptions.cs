@@ -1,34 +1,11 @@
 namespace OneLobby.Server;
 
-public sealed class ServerOptions
+/// <summary>onelobby-server's settings: the hub's (<see cref="HubOptions"/>) plus listening and proxy options.</summary>
+public sealed class ServerOptions : HubOptions
 {
     public string Listen { get; set; } = ":8080";
-    public List<string> TurnUrls { get; set; } = new();
-    public string TurnSecret { get; set; } = "";
-    public List<string> StunUrls { get; set; } = new() { "stun:stun.l.google.com:19302" };
     public string PublicUrl { get; set; } = "";
-    public string Region { get; set; } = "";
-    /// <summary>Empty = every gameId allowed.</summary>
-    public HashSet<string> AllowedGames { get; set; } = new(StringComparer.Ordinal);
-    public Dictionary<string, int> GameQuotas { get; set; } = new(StringComparer.Ordinal);
-    public int MaxLobbies { get; set; } = 1000;
-    public int MaxPeers { get; set; } = 10000;
-    /// <summary>Default and advertised maxPlayers limit (welcome.limits.maxPlayers); create accepts 2..this. Hard cap 250.</summary>
-    public int HardMaxPlayers { get; set; } = 64;
-    public int RateScale { get; set; } = 1;
-    public int TurnTtlSeconds { get; set; } = 3600;
-    public int MaxMessageBytes { get; set; } = 16 * 1024;
     public bool TrustProxy { get; set; }
-    /// <summary>Testing only (load script): turns off the per-IP limits of DESIGN s.12.</summary>
-    public bool DisableIpLimits { get; set; }
-    public int CreatePerMin { get; set; } = 10;
-    public int JoinPerMin { get; set; } = 60;
-    public int SignalPerSec { get; set; } = 20;
-    public int OpenLobbiesPerIp { get; set; } = 8;
-    public long IdleTimeoutMs { get; set; } = 30_000;
-    public long ResumeWindowMs { get; set; } = 60_000;
-    public long CodeReuseMs { get; set; } = 24L * 3600 * 1000;
-    public int ListLimitMax { get; set; } = 100;
 
     public const string Help = @"onelobby-server: lobby and signaling server for OneLobby (protocol lk1)
 

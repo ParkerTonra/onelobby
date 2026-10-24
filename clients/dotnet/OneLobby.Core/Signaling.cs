@@ -72,6 +72,12 @@ namespace OneLobby
         }
 
         public static string Join(string code) => Build(w => { w.WriteString("t", "join"); w.WriteString("code", code); });
+        /// <summary>Direct IP: the hub runs one lobby, so no code (docs/direct-ip.md s.2).</summary>
+        public static string JoinDirect(string? password) => Build(w =>
+        {
+            w.WriteString("t", "join");
+            if (!string.IsNullOrEmpty(password)) w.WriteString("password", password);
+        });
 
         public static string List(IReadOnlyDictionary<string, string>? filter) => Build(w =>
         {

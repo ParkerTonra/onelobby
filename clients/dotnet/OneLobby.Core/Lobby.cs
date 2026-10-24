@@ -88,6 +88,27 @@ namespace OneLobby
         public VoiceChannel Voice { get; }
         public TextChat Chat { get; }
 
+        /// <summary>
+        /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen,
+        /// e.g. <c>192.168.1.20:47810</c>. Empty otherwise.
+        /// </summary>
+        public IReadOnlyList<string> DirectAddresses { get; internal set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Direct-IP host only: the code friends paste to join, e.g. <c>6B01-RGFE-P2B</c> (docs/direct-ip.md s.2a). Show it
+        /// with <see cref="JoinCodeKind"/>. Empty when this machine has no IPv4 address.
+        /// </summary>
+        public string JoinCode { get; internal set; } = "";
+
+        /// <summary>Whether <see cref="JoinCode"/> carries the router's public address (internet) or this PC's LAN address.</summary>
+        public JoinCodeKind JoinCodeKind { get; internal set; }
+
+        /// <summary>Direct-IP host only: how the router port-open went, for logs ("UPnP", "no UPnP gateway answered; ...").</summary>
+        public string PortMapping { get; internal set; } = "";
+
+        /// <summary>Direct IP has no migration: the hub lives in the host (docs/direct-ip.md s.2).</summary>
+        private bool DirectJoiner => _c.Direct && !IsHost;
+
         /// <summary>True once the data channel to the host is up and welcomed (always true on the host).</summary>
         public bool IsReady => _ready;
 
@@ -750,6 +771,7 @@ namespace OneLobby
         internal void OnSocketClosed()
         {
             if (_closed) return;
+            if (DirectJoiner) { End("host_left"); return; }
             // data channels keep the running game alive (DESIGN s.9); only a joiner without a host link is stranded
             if (!IsHost && !_ready && !_awaitingClaim) End("server_closed");
         }
@@ -785,6 +807,7 @@ namespace OneLobby
         /// <summary>The host is gone. If <paramref name="alreadyRemoved"/> is false the old host is dropped from the roster first.</summary>
         private void HostLost(bool alreadyRemoved = false)
         {
+            if (DirectJoiner) { End("host_left"); return; }
             if (!alreadyRemoved && _peers.TryGetValue(_hostId, out var old)) DropPeer(old, "timeout");
             _ready = false;
             ElectHost();
@@ -802,6 +825,7 @@ namespace OneLobby
         private void SwitchHost(int id)
         {
             if (id == _hostId) return;
+            if (DirectJoiner) { End("host_left"); return; }
             if (!IsHost && _peers.TryGetValue(_hostId, out var old) && id != old.Id && _peers.ContainsKey(id)) DropPeer(old, "timeout");
             _ready = false;
             if (id == _you) BecomeHost();

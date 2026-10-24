@@ -28,13 +28,23 @@ export class WebRtcLink implements PeerLink {
   private pendingIce: RTCIceCandidateInit[] = [];
   private closed = false;
   private opened = 0;
+  private extra: string[];
 
-  constructor(opts: LinkOptions) {
+  /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
+  constructor(opts: LinkOptions, rtc: typeof RTCPeerConnection = globalThis.RTCPeerConnection) {
     this.remoteId = opts.remoteId;
-    this.pc = new RTCPeerConnection({
+    this.extra = opts.extraRemoteCandidates ?? [];
+    const config: RTCConfiguration & Record<string, unknown> = {
       iceServers: opts.iceServers as RTCIceServer[],
       iceTransportPolicy: opts.relayOnly ? "relay" : "all",
-    });
+    };
+    if (opts.portRange) {
+      // libdatachannel names (node-datachannel passes its config through); one pinned port = every peer on it
+      config.portRangeBegin = opts.portRange.begin;
+      config.portRangeEnd = opts.portRange.end;
+      if (opts.portRange.begin === opts.portRange.end) config.enableIceUdpMux = true;
+    }
+    this.pc = new rtc(config);
     this.pc.onicecandidate = (e) => {
       if (e.candidate) this.onSignal?.({ ice: e.candidate.toJSON() as { candidate: string } });
     };
@@ -58,7 +68,8 @@ export class WebRtcLink implements PeerLink {
       };
       ch.onclose = () => this.fail(`channel ${name} closed`);
       ch.onmessage = (e) => {
-        const data = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : new Uint8Array((e.data as Blob) as never);
+        const d = e.data as unknown;
+        const data = d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d as never);
         this.onMessage?.(name, data);
       };
       this.channels[name] = ch;
@@ -82,6 +93,11 @@ export class WebRtcLink implements PeerLink {
       if (s.sdp) {
         await this.pc.setRemoteDescription({ type: s.sdp.type, sdp: s.sdp.sdp });
         for (const c of this.pendingIce.splice(0)) await this.pc.addIceCandidate(c);
+        if (this.extra.length) {
+          // docs/direct-ip.md s.2: the address the joiner typed is the host's reachable candidate
+          const mid = /^a=mid:(\S+)/m.exec(s.sdp.sdp)?.[1] ?? "0";
+          for (const candidate of this.extra.splice(0)) await this.pc.addIceCandidate({ candidate, sdpMid: mid, sdpMLineIndex: 0 });
+        }
         if (s.sdp.type === "offer") {
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
@@ -146,3 +162,8 @@ export class WebRtcLink implements PeerLink {
 }
 
 export const webRtcLinkFactory: LinkFactory = { create: (opts) => new WebRtcLink(opts) };
+
+/** A link factory over a given RTCPeerConnection class, e.g. `import { RTCPeerConnection } from "node-datachannel/polyfill"`. */
+export function webRtcLinkFactoryFor(rtc: typeof RTCPeerConnection): LinkFactory {
+  return { create: (opts) => new WebRtcLink(opts, rtc) };
+}

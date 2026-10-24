@@ -8,4 +8,7 @@
     <TieredPGO>true</TieredPGO>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OneLobby.Hub\OneLobby.Hub.csproj" />
+  </ItemGroup>
 </Project>

@@ -4,7 +4,7 @@
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents } from "./onelobby.js";
+export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { Lobby } from "./lobby.js";
@@ -19,6 +19,11 @@ export type { VoiceMode } from "./voice-core.js";
 export type { VoiceCodec, VoiceEncoderHandle, VoiceDecoderHandle, FrameSource, AudioSink, VoiceError } from "./voice-types.js";
 export { webCodecsOpusAvailable } from "./voice-browser.js";
 export { normalizeCode, formatCode } from "./crockford.js";
+// Direct IP (docs/direct-ip.md): kit.joinDirect(code); the code is the host's address in disguise. Hosting is in
+// onelobby/direct (Node). webRtcLinkFactoryFor gives Node joiners a WebRTC stack (node-datachannel/polyfill).
+export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
+export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";
+export { webRtcLinkFactoryFor } from "./webrtc.js";
 export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 // Types for the seams in OneLobbyOptions (ChannelName also tags raw messages).

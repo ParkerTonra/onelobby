@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OneLobby.DataChannel.Tests" />
+    <InternalsVisibleTo Include="OneLobby.DataChannel.Smoke" />
     <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
   </ItemGroup>
   <!-- Natives built by native/build-*.{ps1,sh} (not committed). NuGet layout under runtimes/, plus a copy next to the
