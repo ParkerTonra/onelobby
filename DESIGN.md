@@ -745,7 +745,7 @@ bytes and no netcode. This layer is that netcode, written once and engine-agnost
 ≤ 128 kbit/s, host upstream ≤ 3 × 128 = 384 kbit/s (fits a 1 Mbit/s home uplink), client upstream ≤ 16 kbit/s, snapshots
 ≤ 1200 bytes. Gaffer's heavier physics scene targets 256 kbit/s. Measured by
 `BandwidthFourPlayersFiftyAliensUnderBudget` (40 ms latency, 15 ms jitter, 5% loss, 10 s): average snapshot 378 bytes,
-largest 655 (the join-time full snapshot); **93.3 kbit/s per client, 279.7 kbit/s host upstream, 12.5 kbit/s client
+largest 655 (the join-time full snapshot); **93.2 kbit/s per client, 279.5 kbit/s host upstream, 12.5 kbit/s client
 upstream** (inputs x4 plus lobby pings).
 
 ### 19.3 API (C#, `OneLobby.Replication`)
