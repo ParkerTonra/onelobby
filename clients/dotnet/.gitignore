@@ -1,0 +1,6 @@
+bin/
+obj/
+.godot/
+*.user
+demo-godot/addons/godot_webrtc/
+demo-godot/.godot/
