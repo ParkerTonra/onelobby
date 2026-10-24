@@ -21,6 +21,7 @@ public class HubTests
         Assert.Equal(TurnCredentials.Sign("s3cret", user), (string)turn["credential"]!);
         Assert.Equal(2, turn["urls"]!.AsArray().Count);
         Assert.Equal(16384, (int)w["limits"]!["maxMsg"]!);
+        Assert.Null(w["peerId"]);
     }
 
     [Fact]
@@ -83,7 +84,7 @@ public class HubTests
         Assert.DoesNotContain('‮', name);
         Assert.DoesNotContain('\n', name);
         Assert.True(name.Length <= 24);
-        Assert.StartsWith("Bob the Great", name);
+        Assert.StartsWith("  Bob  the", name); // only control chars and bidi overrides are stripped, no trimming (spec)
         Assert.Equal("Player", Text.Sanitize("\u0001\u0002", 24, "Player"));
     }
 
@@ -167,8 +168,8 @@ public class HubTests
         var mism = T.Ready(hub, "10.0.0.4", ver: "2").Join(h.Code);
         Assert.Equal("version_mismatch", mism.LastError);
         var data = mism.Last("error")["data"]!;
-        Assert.Equal("1", (string)data["host"]!);
-        Assert.Equal("2", (string)data["yours"]!);
+        Assert.Equal("1", (string)data["hostNetVersion"]!);
+        Assert.Equal("2", (string)data["yourNetVersion"]!);
     }
 
     [Fact]
@@ -269,7 +270,8 @@ public class HubTests
         var (h, j, code) = T.Pair(hub);
         var third = T.Ready(hub, "10.0.0.3").Join(code);
         h.Send("{\"t\":\"kick\",\"peerId\":2}");
-        Assert.Equal("kicked", (string)j.Last("peer_left")["reason"]!);
+        Assert.Equal("kicked", j.LastError);
+        Assert.False(j.Has("peer_left"));
         Assert.Equal(2, (int)third.Last("peer_left")["peerId"]!);
         Assert.Equal("kicked", (string)h.Last("peer_left")["reason"]!);
         j.Join(code);
@@ -296,6 +298,7 @@ public class HubTests
         int kid = (int)h.Last("join_request")["peer"]!["peerId"]!;
         h.Send($"{{\"t\":\"approve\",\"peerId\":{kid},\"ok\":false}}");
         Assert.Equal("kicked", k.LastError);
+        Assert.Equal("denied", (string)k.Last("error")["data"]!["reason"]!);
         Assert.False(k.Has("lobby"));
     }
 
@@ -352,21 +355,23 @@ public class HubTests
         var (h, j, code) = T.Pair(hub);
         string token = (string)h.Last("lobby")["resumeToken"]!;
         h.Disconnect();
+        Assert.Equal("timeout", (string)j.Last("peer_left")["reason"]!);
         Assert.Equal(2, (int)j.Last("host_changed")["hostId"]!); // server mirror
-        Assert.False(j.Has("peer_left"));
+        Assert.Equal(1, (int)j.Last("host_changed")["epoch"]!);
         clock.Advance(30_000); hub.Tick();
         var back = new Client(hub, "10.0.0.1").Hello(resume: token);
-        Assert.True((bool)back.Last("welcome")["resumed"]!);
         Assert.Equal(1, (int)back.Last("welcome")["peerId"]!);
+        Assert.Equal(1, (int)j.Last("peer_joined")["peer"]!["peerId"]!);
+        Assert.Equal(2, ((JsonArray)back.Last("lobby")["peers"]!).Count);
         var l = back.Last("lobby");
         Assert.Equal(1, (int)l["you"]!);
         Assert.Equal(2, (int)l["hostId"]!);
         Assert.NotEqual(token, (string)l["resumeToken"]!);
         clock.Advance(40_000); hub.Tick();
-        Assert.False(j.Has("peer_left"));
+        Assert.Equal(1, j.Inbox.Count(m => (string?)m["t"] == "peer_left")); // only the original timeout
         // old token is dead
         var again = new Client(hub, "10.0.0.5").Hello(resume: token);
-        Assert.False((bool)again.Last("welcome")["resumed"]!);
+        Assert.Null(again.Last("welcome")["peerId"]);
     }
 
     [Fact]
@@ -376,12 +381,16 @@ public class HubTests
         var (h, j, _) = T.Pair(hub);
         string token = (string)j.Last("lobby")["resumeToken"]!;
         j.Disconnect();
-        clock.Advance(59_999); hub.Tick();
-        Assert.False(h.Has("peer_left"));
-        clock.Advance(1); hub.Tick();
         Assert.Equal("timeout", (string)h.Last("peer_left")["reason"]!);
+        clock.Advance(59_999); hub.Tick();
+        // slot still reserved: counts toward players in the list
+        var v = T.Ready(hub, "10.0.0.8"); v.Send("{\"t\":\"list\"}");
+        Assert.Equal(2, (int)v.Last("lobbies")["items"]![0]!["players"]!);
+        clock.Advance(1); hub.Tick();
+        v.Send("{\"t\":\"list\"}");
+        Assert.Equal(1, (int)v.Last("lobbies")["items"]![0]!["players"]!);
         var late = new Client(hub, "10.0.0.2").Hello(resume: token);
-        Assert.False((bool)late.Last("welcome")["resumed"]!);
+        Assert.Null(late.Last("welcome")["peerId"]);
         Assert.False(late.Has("lobby"));
     }
 
@@ -394,6 +403,7 @@ public class HubTests
         var fresh = new Client(hub, "10.0.0.2").Hello(resume: token);
         Assert.True(fresh.Has("lobby"));
         Assert.True(j.Closed);
+        Assert.Equal(2, (int)fresh.Last("welcome")["peerId"]!);
     }
 
     [Fact]
@@ -419,6 +429,7 @@ public class HubTests
         for (int i = 0; i < 10; i++) { c.Create(); c.Send("{\"t\":\"leave\"}"); }
         c.Create();
         Assert.Equal("rate_limited", c.LastError);
+        Assert.InRange((long)c.Last("error")["data"]!["retryAfterMs"]!, 1, 60_000);
         clock.Advance(60_000);
         c.Create();
         Assert.Equal("lobby", (string?)c.Inbox.Last()["t"]);
@@ -429,7 +440,9 @@ public class HubTests
     {
         var (hub, _) = T.NewHub(o => o.CreatePerMin = 100);
         for (int i = 0; i < 8; i++) Assert.True(T.Ready(hub).Create().Has("lobby"));
-        Assert.Equal("rate_limited", T.Ready(hub).Create().LastError);
+        var over = T.Ready(hub).Create();
+        Assert.Equal("rate_limited", over.LastError);
+        Assert.Equal("max_lobbies", (string)over.Last("error")["data"]!["reason"]!);
         Assert.True(T.Ready(hub, "10.0.0.2").Create().Has("lobby"));
     }
 
@@ -515,6 +528,105 @@ public class HubTests
         Assert.Contains("keepalive_path_total{path=\"relayed\"} 2", text);
         Assert.Contains("keepalive_lobbies 1", text);
         Assert.Contains("keepalive_sockets 2", text);
+    }
+
+    [Fact]
+    public void Max_players_is_capped_by_the_advertised_limit()
+    {
+        var (hub, _) = T.NewHub();
+        var c = T.Ready(hub);
+        Assert.Equal(64, (int)c.Last("welcome")["limits"]!["maxPlayers"]!);
+        c.Send("{\"t\":\"create\",\"maxPlayers\":65}");
+        Assert.Equal("bad_request", c.LastError);
+        Assert.Equal("maxPlayers", (string)c.Last("error")["data"]!["field"]!);
+        var (hub2, _) = T.NewHub(o => o.HardMaxPlayers = 250);
+        Assert.True(T.Ready(hub2).Send("{\"t\":\"create\",\"maxPlayers\":250}").Has("lobby"));
+    }
+
+    [Fact]
+    public void Malformed_code_is_bad_request_and_hello_validates_gameId()
+    {
+        var (hub, _) = T.NewHub();
+        Assert.Equal("bad_request", T.Ready(hub).Join("7HQ4KU").LastError);
+        Assert.Equal("bad_request", T.Ready(hub, "10.0.0.2").Join("ABC").LastError);
+        var bad = new Client(hub, "10.0.0.3").Hello("bad id!");
+        Assert.Equal("bad_request", bad.LastError);
+        Assert.False(bad.Has("welcome"));
+    }
+
+    [Fact]
+    public void Meta_and_phase_changes_resend_lobby_to_every_member()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j, _) = T.Pair(hub);
+        h.Send("{\"t\":\"phase\",\"phase\":\"in_game\"}");
+        Assert.Equal("in_game", (string)j.Last("lobby")["phase"]!);
+        Assert.Equal(2, (int)j.Last("lobby")["you"]!);
+        Assert.Equal(1, (int)h.Last("lobby")["you"]!);
+        h.Send("{\"t\":\"meta\",\"meta\":{\"k\":\"v\"}}");
+        Assert.Equal("v", (string)j.Last("lobby")["meta"]!["k"]!);
+    }
+
+    [Fact]
+    public void Client_host_changed_claim_needs_higher_epoch_and_own_peer_id()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j, _) = T.Pair(hub);
+        j.Send("{\"t\":\"host_changed\",\"hostId\":1,\"epoch\":1}");   // not own id: ignored
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":0}");   // epoch not greater: ignored
+        Assert.False(h.Has("host_changed"));
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");
+        Assert.Equal(2, (int)h.Last("host_changed")["hostId"]!);
+        Assert.Equal(3, (int)j.Last("host_changed")["epoch"]!);
+        j.Send("{\"t\":\"phase\",\"phase\":\"in_game\"}");
+        Assert.False(j.Has("error"));
+        h.Send("{\"t\":\"phase\",\"phase\":\"lobby\"}");
+        Assert.Equal("not_host", h.LastError);
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");     // stale epoch
+        Assert.Equal(1, h.Inbox.Count(m => (string?)m["t"] == "host_changed"));
+    }
+
+    [Fact]
+    public void Signal_needs_sdp_or_ice_and_a_connected_member()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j, _) = T.Pair(hub);
+        j.Send("{\"t\":\"signal\",\"to\":1}");
+        Assert.Equal("bad_request", j.LastError);
+        j.Send("{\"t\":\"signal\",\"to\":2,\"ice\":{\"candidate\":\"x\"}}"); // to self
+        Assert.Equal(2, j.Inbox.Count(m => (string?)m["t"] == "error"));
+        h.Disconnect();
+        j.Send("{\"t\":\"signal\",\"to\":1,\"ice\":{\"candidate\":\"x\"}}"); // dropped peer
+        Assert.Equal(3, j.Inbox.Count(m => (string?)m["t"] == "error"));
+    }
+
+    [Fact]
+    public void Rate_scale_multiplies_per_ip_limits()
+    {
+        var (hub, _) = T.NewHub(o => o.RateScale = 20);
+        var c = T.Ready(hub);
+        for (int i = 0; i < 100; i++) { c.Create(); c.Send("{\"t\":\"leave\"}"); }
+        Assert.Null(c.LastError);
+    }
+
+    [Fact]
+    public void Shared_spec_vectors()
+    {
+        string? dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "spec", "codes.json"))) dir = Path.GetDirectoryName(dir);
+        if (dir is null) return; // server built outside the monorepo
+        var codes = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "spec", "codes.json")))!;
+        foreach (var v in codes["valid"]!.AsArray())
+            Assert.Equal((string)v!["canonical"]!, Crockford.Normalize((string)v["input"]!));
+        foreach (var v in codes["invalid"]!.AsArray())
+            Assert.Null(Crockford.Normalize((string)v!["input"]!));
+        var turn = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "spec", "vectors", "turn-rest.json")))!;
+        foreach (var v in turn["vectors"]!.AsArray())
+            Assert.Equal((string)v!["credential"]!, TurnCredentials.Sign((string)v["secret"]!, (string)v["username"]!));
+        var mint = turn["mint"]!;
+        var (u, c) = TurnCredentials.Mint((string)mint["secret"]!, (long)mint["nowSeconds"]! + (long)mint["ttl"]!, (string)mint["userId"]!);
+        Assert.Equal((string)mint["expectUsername"]!, u);
+        Assert.Equal((string)mint["expectCredential"]!, c);
     }
 
     [Fact]

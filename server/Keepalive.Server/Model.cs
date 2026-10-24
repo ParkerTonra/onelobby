@@ -45,6 +45,7 @@ public sealed class Lobby
     public string Mode = "lockstep";
     public int TickRate = 20;
     public bool LateJoin;
+    public bool RelayOnly;
     public string Phase = "lobby";
     public int MaxPlayers;
     public long CreatedAt;
@@ -54,6 +55,7 @@ public sealed class Lobby
     public List<Member> Pending = new();
     public HashSet<string> Kicked = new(StringComparer.Ordinal);
     public int HostId;
+    public int Epoch;
     public int NextPeerId = 1;
 
     public Member? Find(int peerId)

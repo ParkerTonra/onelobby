@@ -13,7 +13,9 @@ public sealed class ServerOptions
     public Dictionary<string, int> GameQuotas { get; set; } = new(StringComparer.Ordinal);
     public int MaxLobbies { get; set; } = 1000;
     public int MaxPeers { get; set; } = 10000;
-    public int HardMaxPlayers { get; set; } = 250;
+    /// <summary>Default and advertised maxPlayers limit (welcome.limits.maxPlayers); create accepts 2..this. Hard cap 250.</summary>
+    public int HardMaxPlayers { get; set; } = 64;
+    public int RateScale { get; set; } = 1;
     public int TurnTtlSeconds { get; set; } = 3600;
     public int MaxMessageBytes { get; set; } = 16 * 1024;
     public bool TrustProxy { get; set; }
@@ -43,6 +45,8 @@ public sealed class ServerOptions
   --turn-ttl <seconds>     TURN credential lifetime, default 3600       (KEEPALIVE_TURN_TTL)
   --max-msg <bytes>        signaling message cap, default 16384         (KEEPALIVE_MAX_MSG)
   --trust-proxy            take client IP from X-Forwarded-For          (KEEPALIVE_TRUST_PROXY)
+  --max-players <n>        largest maxPlayers a lobby may ask for, <=250 (KEEPALIVE_MAX_PLAYERS, default 64)
+  --rate-scale <n>         testing only: multiply the per-IP limits     (KEEPALIVE_RATE_SCALE, default 1)
   --disable-ip-limits      testing only: no per-IP rate limits          (KEEPALIVE_DISABLE_IP_LIMITS)
 ";
 
@@ -63,7 +67,7 @@ public sealed class ServerOptions
     private static readonly string[] Keys =
     {
         "listen", "turn-urls", "turn-secret", "stun-urls", "public-url", "allowed-games", "max-lobbies", "max-peers",
-        "game-quotas", "region", "turn-ttl", "max-msg", "trust-proxy", "disable-ip-limits",
+        "game-quotas", "region", "turn-ttl", "max-msg", "trust-proxy", "disable-ip-limits", "max-players", "rate-scale",
     };
 
     /// <summary>Environment first, then flags override. Throws ArgumentException on bad input.</summary>
@@ -79,11 +83,13 @@ public sealed class ServerOptions
                 case "turn-secret": o.TurnSecret = val; break;
                 case "stun-urls": o.StunUrls = Split(val); break;
                 case "public-url": o.PublicUrl = val; break;
-                case "allowed-games": o.AllowedGames = new(Split(val), StringComparer.Ordinal); break;
+                case "allowed-games": o.AllowedGames = new(Split(val).Where(g => g != "*"), StringComparer.Ordinal); break;
                 case "max-lobbies": o.MaxLobbies = Int(key, val); break;
                 case "max-peers": o.MaxPeers = Int(key, val); break;
                 case "game-quota": case "game-quotas": AddQuotas(o, val); break;
                 case "region": o.Region = val; break;
+                case "max-players": o.HardMaxPlayers = Math.Clamp(Int(key, val), 2, 250); break;
+                case "rate-scale": o.RateScale = Math.Max(1, Int(key, val)); break;
                 case "turn-ttl": o.TurnTtlSeconds = Int(key, val); break;
                 case "max-msg": o.MaxMessageBytes = Int(key, val); break;
                 case "trust-proxy": o.TrustProxy = Bool(val); break;

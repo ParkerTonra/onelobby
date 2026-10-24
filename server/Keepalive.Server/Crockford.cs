@@ -21,8 +21,8 @@ public static class Crockford
         int n = 0;
         foreach (char raw in input)
         {
-            if (raw == ' ' || raw == '-' || raw == '_') continue;
-            char ch = char.ToUpperInvariant(raw);
+            if (raw == ' ' || raw == '-') continue;
+            char ch = raw is >= 'a' and <= 'z' ? (char)(raw - 32) : raw; // ASCII-only uppercasing
             if (ch == 'I' || ch == 'L') ch = '1';
             else if (ch == 'O') ch = '0';
             if (Alphabet.IndexOf(ch) < 0 || n >= Length) return null;
