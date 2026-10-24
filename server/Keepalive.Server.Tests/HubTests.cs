@@ -212,13 +212,13 @@ public class HubTests
         Assert.Equal("A", (string)items[0]!["hostName"]!);
         Assert.Equal(1, (int)items[0]!["players"]!);
 
-        viewer.Send("{\"t\":\"list\",\"meta\":{\"map\":\"y\"}}");
+        viewer.Send("{\"t\":\"list\",\"visibility\":\"public\",\"meta\":{\"map\":\"y\"}}");
         Assert.Equal("two", (string)viewer.Last("lobbies")["items"]![0]!["name"]!);
-        viewer.Send("{\"t\":\"list\",\"limit\":1}");
+        viewer.Send("{\"t\":\"list\",\"visibility\":\"public\",\"limit\":1}");
         var page = viewer.Last("lobbies");
         Assert.Single(page["items"]!.AsArray());
         string cur = (string)page["cursor"]!;
-        viewer.Send($"{{\"t\":\"list\",\"limit\":1,\"cursor\":\"{cur}\"}}");
+        viewer.Send($"{{\"t\":\"list\",\"visibility\":\"public\",\"limit\":1,\"cursor\":\"{cur}\"}}");
         Assert.Equal("two", (string)viewer.Last("lobbies")["items"]![0]!["name"]!);
         Assert.Null(viewer.Last("lobbies")["cursor"]);
         viewer.Send("{\"t\":\"list\",\"visibility\":\"private\"}");
@@ -258,7 +258,7 @@ public class HubTests
         h.Send("{\"t\":\"meta\",\"meta\":{\"a\":\"b\"}}");
         Assert.False(h.Has("error"));
         var viewer = T.Ready(hub, "10.0.0.9");
-        viewer.Send("{\"t\":\"list\"}");
+        viewer.Send("{\"t\":\"list\",\"visibility\":\"public\"}");
         Assert.Equal("b", (string)viewer.Last("lobbies")["items"]![0]!["meta"]!["a"]!);
         h.Send("{\"t\":\"phase\",\"phase\":\"bogus\"}"); Assert.Equal("bad_request", h.LastError);
     }
@@ -384,10 +384,10 @@ public class HubTests
         Assert.Equal("timeout", (string)h.Last("peer_left")["reason"]!);
         clock.Advance(59_999); hub.Tick();
         // slot still reserved: counts toward players in the list
-        var v = T.Ready(hub, "10.0.0.8"); v.Send("{\"t\":\"list\"}");
+        var v = T.Ready(hub, "10.0.0.8"); v.Send("{\"t\":\"list\",\"visibility\":\"public\"}");
         Assert.Equal(2, (int)v.Last("lobbies")["items"]![0]!["players"]!);
         clock.Advance(1); hub.Tick();
-        v.Send("{\"t\":\"list\"}");
+        v.Send("{\"t\":\"list\",\"visibility\":\"public\"}");
         Assert.Equal(1, (int)v.Last("lobbies")["items"]![0]!["players"]!);
         var late = new Client(hub, "10.0.0.2").Hello(resume: token);
         Assert.Null(late.Last("welcome")["peerId"]);

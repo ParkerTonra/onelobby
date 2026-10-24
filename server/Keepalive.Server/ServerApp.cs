@@ -13,6 +13,7 @@ public static class ServerApp
         var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
         builder.WebHost.UseUrls(listenUrl ?? options.ListenUrl());
         builder.Logging.ClearProviders();
+        builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
         builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(sp => new Hub(options, clock, sp.GetRequiredService<ILoggerFactory>().CreateLogger("keepalive")));

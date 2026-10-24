@@ -223,6 +223,8 @@ public sealed class Hub
             CloseSession(s);
             return;
         }
+        if (m["name"] is not null && Str(m, "name") is null) { Error(s, "bad_request", "name must be a string", Field("name")); return; }
+        if (m["client"] is not null && m["client"] is not JsonObject) { Error(s, "bad_request", "client must be an object", Field("client")); return; }
         string? gameId = Str(m, "gameId");
         string? netVersion = Str(m, "netVersion");
         if (gameId is null || !GameIdRx.IsMatch(gameId)) { Error(s, "bad_request", "gameId must match [A-Za-z0-9._-]{1,64}", Field("gameId")); return; }
@@ -319,6 +321,7 @@ public sealed class Hub
         if (_o.GameQuotas.TryGetValue(s.GameId, out int quota) && _gameLobbies.GetValueOrDefault(s.GameId) >= quota)
         { Error(s, "server_full", "lobby quota for this game is reached"); return; }
 
+        if (m["name"] is not null && Str(m, "name") is null) { Error(s, "bad_request", "name must be a string", Field("name")); return; }
         string vis = Str(m, "visibility") ?? "public";
         string mode = Str(m, "mode") ?? "lockstep";
         if (vis is not ("public" or "unlisted" or "private")) { Error(s, "bad_request", "visibility must be public, unlisted or private", Field("visibility")); return; }
@@ -414,7 +417,7 @@ public sealed class Hub
 
     private void List(Session s, JsonObject m)
     {
-        string vis = Str(m, "visibility") ?? "public";
+        string? vis = Str(m, "visibility");
         if (vis != "public") { Error(s, "bad_request", "only public lobbies can be listed", Field("visibility")); return; }
         int limit = 50;
         if (m["limit"] is not null)

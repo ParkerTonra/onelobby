@@ -83,7 +83,7 @@ public sealed class ServerOptions
                 case "turn-secret": o.TurnSecret = val; break;
                 case "stun-urls": o.StunUrls = Split(val); break;
                 case "public-url": o.PublicUrl = val; break;
-                case "allowed-games": o.AllowedGames = new(Split(val).Where(g => g != "*"), StringComparer.Ordinal); break;
+                case "allowed-games": { var g = Split(val); o.AllowedGames = g.Contains("*") ? new(StringComparer.Ordinal) : new(g, StringComparer.Ordinal); } break;
                 case "max-lobbies": o.MaxLobbies = Int(key, val); break;
                 case "max-peers": o.MaxPeers = Int(key, val); break;
                 case "game-quota": case "game-quotas": AddQuotas(o, val); break;
