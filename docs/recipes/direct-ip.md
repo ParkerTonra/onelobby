@@ -158,6 +158,26 @@ design). `decodeJoinCode` / `looksLikeJoinCode` validate a "Paste a join code" b
   the answer. On a network Windows calls **Public**, the firewall also drops the router's UPnP answer, so the code is a
   same-network one; switching the network to Private (Settings > Network) fixes both.
 
+## 6. Shipping: the firewall
+
+Windows Firewall rules belong to a program file, not a port. The program that hosts is the one that needs inbound
+access: your game's exe for a .NET or Unity host, `node.exe` for a Node host. Players never need Node unless the game
+itself runs on Node.
+
+- **First run.** The first time an exe listens, Windows asks "Allow access?", ticked for the current network type. One
+  click on a Private network is enough. Windows asks once per exe: if the player answered on a Public network (or said
+  no), the rule only covers Public (or blocks), and joiners from outside are dropped with no new prompt. Tell them to
+  fix it under Windows Security > Firewall > Allow an app.
+- **Installer.** Installers already run as admin, so they can add the rule up front and the player never sees a
+  prompt. For example (NSIS, Inno Setup, WiX all run commands like this):
+  `netsh advfirewall firewall add rule name="Your Game" dir=in action=allow program="C:\Program Files\Your Game\game.exe" profile=private`.
+  Remove it on uninstall (`netsh advfirewall firewall delete rule name="Your Game"`).
+- **Router.** Separate from the firewall: `OpenPort` asks the router to forward 47810 (UPnP, NAT-PMP). With UPnP off,
+  the host forwards TCP and UDP 47810 by hand, as most PC games ask (Factorio documents its UDP port the same way).
+- **Dev machines.** Node often has an old Public-only rule from its installer's first prompt. A Private allow for
+  `node.exe` (admin PowerShell: `New-NetFirewallRule -DisplayName "Node.js (Private)" -Direction Inbound -Action Allow
+  -Profile Private -Program "C:\Program Files\nodejs\node.exe"`) lets a Node host be reached from outside.
+
 ## Done when
 
 1. Build the smoke tools: `dotnet build clients/dotnet/OneLobby.DataChannel.Smoke -c Release`, and in `clients/js`
