@@ -48,6 +48,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js",
+      "default": "./dist/ui/index.js"
+    },
     "./global": "./dist/keepalive.global.js",
     "./bundle": {
       "types": "./dist/global.d.ts",
@@ -62,7 +67,9 @@
   ],
   "sideEffects": [
     "./dist/keepalive.global.js",
-    "./dist/keepalive.global.min.js"
+    "./dist/keepalive.global.min.js",
+    "./dist/ui/index.js",
+    "./dist/ui/element.js"
   ],
   "engines": {
     "node": ">=18"

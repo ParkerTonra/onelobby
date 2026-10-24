@@ -9,7 +9,8 @@
     "build": "npm run build -w @keepalive/client",
     "test": "npm test -w @keepalive/client",
     "typecheck": "npm run typecheck -w @keepalive/client",
-    "demo": "node demo/serve.mjs"
+    "demo": "node demo/serve.mjs",
+    "e2e:dropin": "npm run build && node e2e/dropin.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

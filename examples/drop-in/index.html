@@ -1,0 +1,89 @@
+<!doctype html>
+<!--
+  A complete tiny multiplayer game: everyone in the game shares ONE click counter, and anyone can wave at the others.
+
+  How to use it (no coding needed):
+    1. Save this file somewhere (or upload it to any website host, e.g. GitHub Pages or Netlify Drop).
+    2. Change the server="..." line below to your lobby server address (see docs/no-code.md, "What you need").
+    3. Open the page, press "Host a game", and send the invite link to a friend.
+
+  Lines starting with // inside <script> are notes for you; the browser ignores them.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Click Together</title>
+
+  <!-- STEP 1: load Keepalive. This one line adds the <keepalive-lobby> box to the page. -->
+  <script type="module" src="https://unpkg.com/@keepalive/client/dist/ui/index.js"></script>
+
+  <style>
+    /* Plain page styling. Change colours and sizes freely. */
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f4f6f8; color: #1b1f24; }
+    main { max-width: 28rem; margin: 0 auto; display: grid; gap: 16px; }
+    h1 { margin: 0; }
+    #game { background: #fff; border: 1px solid #d0d7de; border-radius: 12px; padding: 16px; text-align: center; }
+    #count { font-size: 4rem; font-weight: 700; margin: 8px 0; }
+    #game button { font-size: 1.25rem; min-height: 48px; padding: 8px 20px; border-radius: 8px; border: 0; margin: 4px;
+                   background: #0b5cad; color: #fff; cursor: pointer; }
+    #game button.second { background: #e8eef4; color: #1b1f24; }
+    #news { min-height: 1.5em; color: #57606a; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Click Together</h1>
+
+  <!-- STEP 2: the lobby box. It does hosting, joining, codes, invite links and the player list for you.
+       server      = your lobby server address (CHANGE THIS)
+       game        = any short name for your game, no spaces (players only meet others with the same name)
+       max-players = how many people can be in one game
+       theme       = light, dark, or auto (follows the visitor's device) -->
+  <keepalive-lobby
+    server="wss://YOUR-LOBBY-SERVER.example.com"
+    game="click-together"
+    max-players="6"
+    theme="light">
+  </keepalive-lobby>
+
+  <!-- STEP 3: your game. It stays hidden until the host presses Start. -->
+  <section id="game" hidden>
+    <div>Clicks so far, all of you together:</div>
+    <div id="count">0</div>
+    <button id="click">Click!</button>
+    <button id="wave" class="second">Wave at everyone</button>
+    <p id="news" aria-live="polite"></p>
+  </section>
+</main>
+
+<script type="module">
+  // Find the lobby box and the parts of our game on the page.
+  const lobby = document.querySelector("keepalive-lobby");
+  const game = document.querySelector("#game");
+  const count = document.querySelector("#count");
+  const news = document.querySelector("#news");
+
+  // When the host presses Start, show the game (this happens on everyone's screen).
+  lobby.addEventListener("start", () => { game.hidden = false; });
+
+  // The Click button adds 1 to a number that everyone shares. Keepalive keeps it the same on every screen.
+  document.querySelector("#click").addEventListener("click", () => lobby.shared.add("clicks"));
+
+  // Whenever a shared number changes (anyone clicked), show the new value.
+  lobby.addEventListener("shared-change", () => { count.textContent = lobby.shared.get("clicks") ?? 0; });
+
+  // The Wave button sends a little message to everyone else.
+  document.querySelector("#wave").addEventListener("click", () => lobby.send("wave"));
+
+  // When a message arrives, say who sent it.
+  lobby.addEventListener("message", (event) => {
+    if (event.detail.data === "wave") news.textContent = event.detail.from.name + " waves at you!";
+  });
+
+  // Tell everyone when someone comes or goes.
+  lobby.addEventListener("player-joined", (event) => { news.textContent = event.detail.player.name + " joined."; });
+  lobby.addEventListener("player-left", (event) => { news.textContent = event.detail.player.name + " left."; });
+</script>
+</body>
+</html>
