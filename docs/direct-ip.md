@@ -66,16 +66,20 @@ join-by-IP. There is no third party:
 ## 3. Game-facing API (additions only)
 
 ```csharp
+// OneLobby.Direct, extension methods on LobbyClient (complete inside Pump, like HostAsync).
+var client = new LobbyClient(config, new DataChannelTransport());   // config.DirectPort defaults to 47810
+
 // Host: starts the embedded hub + listener, connects this client in-memory, creates the lobby.
-var lobby = await OneLobby.HostDirect(config, new DirectHostOptions { Port = 47810, Password = null, MaxPlayers = 4 });
+var lobby = await client.HostDirectAsync(new DirectHostOptions { Port = 47810, Password = null, MaxPlayers = 4 });
 lobby.DirectAddresses;   // e.g. ["192.168.1.20:47810"]: every non-loopback IPv4/IPv6 interface, for the UI
 
 // Joiner: "ip", "ip:port", "[v6]:port"; port defaults to config.DirectPort.
-var lobby = await OneLobby.JoinDirect(config, "203.0.113.7:47810", password: null);
+var lobby = await client.JoinDirectAsync("203.0.113.7:47810", password: null);
 ```
 
 Everything after that is the existing `Lobby` API. Errors map to the existing codes plus `direct_unreachable`
-(no answer on TCP `P` within 5 s) and `bad_password`.
+(no answer on TCP `P` within 5 s), `bad_password`, `bad_address` and `port_in_use` (host). Joiners end with
+`SessionEnded("host_left")` when the host goes.
 
 ## 4. What the host is told (reference menus)
 
@@ -137,3 +141,27 @@ port or both use a virtual LAN; nothing can ever go offline (Stop Killing Games)
 STUN server for the host's public address, so more friends connect without forwarding, but every game then depends on
 a server nobody here runs.
 `Default:` no outside servers; STUN becomes an opt-in setting in the parked list.
+
+## 9. Build status (2026-10-24, branch `direct-ip/poc`)
+
+| Step | State | Where |
+|---|---|---|
+| 1 Hub library | done; server tests green | `server/OneLobby.Hub` (netstandard2.1 + net8.0), `HubOptions` <- `ServerOptions` |
+| 2 Hub options | done, 8 unit tests | `HubOptions.SingleLobby/Password/IssueCodes`, `HubOptions.ForDirect` |
+| 3 Listener | done, 5 tests over real TCP | `DirectHubHost` (TcpListener dual-stack, RFC 6455 upgrade, `CreateFromStream`) |
+| 4 In-memory socket | done | `clients/dotnet/OneLobby.Direct/HubSignalingSocket.cs` |
+| 5 Port pin | done | `PeerLinkOptions.PortRangeBegin/End`; one pinned port turns on libjuice ICE UDP mux, so every peer shares UDP `P` |
+| 6 Typed-address candidate | done | `PeerLinkOptions.ExtraRemoteCandidates` (added after the remote description, with its `a=mid`), `NoIceServers` |
+| 7 Smoke | run 1 passed; runs 2 and 3 to do by hand | `OneLobby.DataChannel.Smoke host-direct` / `join-direct` print the selected ICE pair |
+| 8 Docs | done | `docs/recipes/direct-ip.md`, README, AGENTS.md, llms.txt, spec/signaling.md, self-host "later" |
+
+Smoke run 1 (one Windows machine, two processes): `join-direct 127.0.0.1` and `join-direct <LAN IPv4>` both PASS, link
+open in about 200 ms, host side of the selected pair on UDP 47810, joiner ends with `host_left`. In-process live test:
+host + two joiners, both host-side pairs on the pinned port (the mux works). On one machine ICE picks a global IPv6
+host candidate, so the typed-address candidate is not what connects there: **runs 2 (two LAN machines) and 3 (one
+joiner through a forwarded port) are still owed, and run 3 is what proves the s.2 candidate rule.** Its evidence is the
+joiner's `pair ... remote[...]` line showing the typed public address.
+
+Found while building: libjuice binds `P` with address reuse, so a second process can bind UDP `P` without an error;
+only the TCP listener reports `port_in_use`. Kicks are per address, so two joiners on one machine (same IP) share a ban.
+Not yet confirmed: `WebSocket.CreateFromStream` on Unity's Mono profile (s.5 step 3).

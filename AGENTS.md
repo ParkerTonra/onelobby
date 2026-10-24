@@ -128,7 +128,9 @@ Full reference (generated): `docs/api/`.
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
-- Run your own server: `docs/recipes/self-host.md`
+- Host by IP, no server (.NET desktop, Unity): `docs/recipes/direct-ip.md` (`client.HostDirectAsync` / `JoinDirectAsync`
+  from `OneLobby.Direct`; host leaving ends the session, no codes, port 47810 TCP+UDP)
+- Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).
 Docs index for tools: `llms.txt`. Design and wire protocol: `DESIGN.md`, `spec/`.
