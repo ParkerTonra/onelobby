@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CodecError, decodeMessage, encodeMessage, Reassembler, splitChunks, type Message } from "../src/index.js";
+import { CodecError, decodeMessage, encodeMessage, Reassembler, splitChunks, type Message } from "../src/internals.js";
 import { hex, specJson, unhex } from "./spec.js";
 
 // Adapter: spec JSON form <-> our Message shape.

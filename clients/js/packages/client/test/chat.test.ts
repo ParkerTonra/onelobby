@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChatLimiter, sanitizeChat, type ChatMessage } from "../src/index.js";
+import { ChatLimiter, sanitizeChat, type ChatMessage } from "../src/internals.js";
 import { settle } from "../src/testing.js";
 import { rig } from "./helpers.js";
 

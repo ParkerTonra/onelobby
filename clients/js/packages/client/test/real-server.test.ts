@@ -1,7 +1,7 @@
 // Runs only when KEEPALIVE_SERVER=ws://localhost:8080/ws is set (stream A's server). Real WebSocket + real timers;
 // peer links are in-memory (Node has no RTCPeerConnection), so this checks the signaling contract end to end.
 import { describe, expect, it } from "vitest";
-import { Keepalive, KeepaliveError } from "../src/index.js";
+import { Keepalive, KeepaliveError } from "../src/internals.js";
 import { MemoryNetwork } from "../src/testing.js";
 import { FakeCodec, Player } from "./helpers.js";
 

@@ -6,7 +6,7 @@ import {
   VoicePacketizer,
   VoiceRelayPolicy,
   type VoicePacket,
-} from "../src/index.js";
+} from "../src/internals.js";
 import { settle } from "../src/testing.js";
 import { rig } from "./helpers.js";
 

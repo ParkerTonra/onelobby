@@ -1,5 +1,5 @@
-import { Gridpaint, Keepalive, type Lobby } from "../src/index.js";
-import type { AudioSink, FrameSource, VoiceCodec } from "../src/index.js";
+import { Gridpaint, Keepalive, type Lobby } from "../src/internals.js";
+import type { AudioSink, FrameSource, VoiceCodec } from "../src/internals.js";
 import { ManualClock, MemoryNetwork, MemoryServer } from "../src/testing.js";
 
 export class FakeCodec implements VoiceCodec {
