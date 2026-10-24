@@ -24,11 +24,21 @@ namespace OneLobby
             public Action<Exception> Fail = _ => { };
             public bool Sent;
             public long DeadlineMs;
+            public long ConnectDeadlineMs;
             public CancellationTokenRegistration Reg;
         }
 
         internal OneLobbyConfig Config { get; }
-        internal ITransport Transport { get; }
+        internal ITransport Transport { get; private set; }
+        private readonly ITransport _baseTransport;
+        /// <summary>Where the hub is: the config's lobby server, or a direct-IP host (docs/direct-ip.md).</summary>
+        private Uri _hubUri;
+        /// <summary>Direct IP: the hub lives in the host, so the host leaving ends the session (no migration).</summary>
+        internal bool Direct { get; private set; }
+        /// <summary>Disposed when the lobby closes (a direct host's embedded hub and listener).</summary>
+        private IDisposable? _owned;
+        /// <summary>Direct-IP joiner: no WebSocket answer within this long means direct_unreachable (0 = off).</summary>
+        internal const long DirectConnectTimeoutMs = 5000;
         internal IReadOnlyList<IceServer> Ice { get; private set; } = Array.Empty<IceServer>();
         internal ISignalingSocket? Socket { get; private set; }
 
@@ -46,8 +56,30 @@ namespace OneLobby
         public LobbyClient(OneLobbyConfig config, ITransport transport)
         {
             Config = config ?? throw new ArgumentNullException(nameof(config));
-            Transport = transport ?? throw new ArgumentNullException(nameof(transport));
+            Transport = _baseTransport = transport ?? throw new ArgumentNullException(nameof(transport));
+            _hubUri = config.LobbyServer;
         }
+
+        /// <summary>
+        /// Points this client at a direct-IP hub (OneLobby.Direct): <paramref name="wrap"/> decorates the transport given
+        /// to the constructor, <paramref name="hub"/> replaces the lobby server, <paramref name="owned"/> is disposed when
+        /// the lobby closes. Fails if a lobby or request is active.
+        /// </summary>
+        internal void UseDirect(Func<ITransport, ITransport> wrap, Uri hub, IDisposable? owned)
+        {
+            if (_op != null || _lobby != null) throw new InvalidOperationException("leave the current lobby first");
+            Socket?.Dispose();
+            Socket = null;
+            _owned?.Dispose();
+            Transport = wrap(_baseTransport);
+            _hubUri = hub;
+            _owned = owned;
+            Direct = true;
+        }
+
+        /// <summary>Direct-IP join: the hub runs one lobby, so no code; the optional password is checked by the hub.</summary>
+        internal Task<Lobby> JoinSingleLobbyAsync(string? password, CancellationToken ct = default) =>
+            Run(null, Signaling.JoinDirect(password), new[] { "lobby" }, EnterLobby, ct);
 
         public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
             Run(null, Signaling.Create(Config, options), new[] { "lobby" }, EnterLobby, ct);
@@ -86,6 +118,7 @@ namespace OneLobby
             if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
             var tcs = new TaskCompletionSource<T>();
             var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
+            if (Direct) op.ConnectDeadlineMs = Transport.NowMs + DirectConnectTimeoutMs;
             op.Complete = e =>
             {
                 try { tcs.TrySetResult(finish(e)); }
@@ -98,7 +131,7 @@ namespace OneLobby
             if (Socket == null || Socket.State == SocketState.Closed)
             {
                 Socket?.Dispose();
-                Socket = Transport.ConnectSignaling(Config.LobbyServer);
+                Socket = Transport.ConnectSignaling(_hubUri);
                 _welcomed = false;
                 _helloWired = false;
             }
@@ -133,7 +166,17 @@ namespace OneLobby
 
         internal void SendRaw(string json) { if (Socket != null && Socket.State == SocketState.Open) Socket.Send(json); }
 
-        internal void LobbyClosed(Lobby l) { if (_lobby == l) _lobby = null; }
+        internal void LobbyClosed(Lobby l)
+        {
+            if (_lobby != l) return;
+            _lobby = null;
+            if (_owned != null)
+            {
+                // a direct host's hub: queued messages (the host's own "leave") flush, then joiners are disconnected
+                _owned.Dispose();
+                _owned = null;
+            }
+        }
 
         internal void RaiseError(LobbyError e) => Error?.Invoke(e);
 
@@ -155,6 +198,15 @@ namespace OneLobby
                     sock.Send(Signaling.Hello(Config, _helloResume));
                 }
                 while (sock.TryReceive(out var text)) Dispatch(text);
+                if (Direct && _op != null && !_welcomed && (sock.State == SocketState.Closed
+                    || (sock.State == SocketState.Connecting && _op.ConnectDeadlineMs > 0 && now > _op.ConnectDeadlineMs)))
+                {
+                    // docs/direct-ip.md s.3: no answer on the host's TCP port
+                    FailOp(new OneLobbyException("direct_unreachable",
+                        "no answer from the host at " + _hubUri.Host + ":" + _hubUri.Port + " (" + (sock.CloseReason ?? "timed out") + ")"));
+                    if (sock.State != SocketState.Closed) { sock.Dispose(); Socket = null; }
+                    return;
+                }
                 if (sock.State == SocketState.Closed)
                 {
                     FailOp(new OneLobbyException("server_closed", sock.CloseReason ?? "closed"));
@@ -219,6 +271,8 @@ namespace OneLobby
             if (_lobby != null) await _lobby.LeaveAsync().ConfigureAwait(false);
             Socket?.Dispose();
             Socket = null;
+            _owned?.Dispose();
+            _owned = null;
         }
     }
 }

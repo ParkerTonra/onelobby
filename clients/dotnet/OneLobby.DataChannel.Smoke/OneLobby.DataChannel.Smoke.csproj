@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
     <ProjectReference Include="..\OneLobby.DataChannel\OneLobby.DataChannel.csproj" />
+    <ProjectReference Include="..\OneLobby.Direct\OneLobby.Direct.csproj" />
   </ItemGroup>
 </Project>

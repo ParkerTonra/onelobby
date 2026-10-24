@@ -23,7 +23,8 @@ namespace OneLobby
         int TickRate = 20,
         int HashEveryTicks = 20,
         string DisplayName = "Player",
-        bool RelayOnly = false);
+        bool RelayOnly = false,
+        int DirectPort = 47810);
 
     public sealed record LobbyOptions(
         string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted,
