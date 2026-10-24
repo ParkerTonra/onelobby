@@ -68,6 +68,7 @@ Download the `keepalive-server` binary for your platform from the releases page,
 
 ## Good to know
 
+- `--trust-proxy` is already set in compose and the unit, so per-IP limits see each player's real address behind Caddy.
 - `TURN_SECRET` must be the same for `keepalive-server` and coturn; compose passes one value to both.
 - Players' relay traffic is capped (`total-quota`, `user-quota`, `max-bps`) and cannot reach private addresses
   (`denied-peer-ip` in `turnserver.conf`), so the relay cannot be used to probe your home network.

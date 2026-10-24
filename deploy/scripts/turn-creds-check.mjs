@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Mints a TURN REST credential the way keepalive-server does (DESIGN s.10) and checks it.
-//   username   = "<expiry unix seconds>:<peerId>"
+//   username   = "<expiry unix seconds>:<userId>" (userId = the server connection id)
 //   credential = base64(HMAC-SHA1(secret, username))
 // Usage:
-//   node turn-creds-check.mjs                      self-test + vector from ../../spec/turn-rest.md if present
-//   node turn-creds-check.mjs mint <secret> <peerId> [ttlSeconds=3600]   print JSON creds (used by smoke.sh)
+//   node turn-creds-check.mjs                      self-test + vectors from ../../spec/vectors/turn-rest.json
+//   node turn-creds-check.mjs                      self-test + vectors from ../../spec/vectors/turn-rest.json
 import { createHmac } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -41,24 +41,20 @@ const m = mint("s3cret", "p7", 1_700_000_000, 3600);
 check("username shape", m.username, "1700003600:p7");
 check("credential length", m.credential.length, 28);
 
-// 3. The spec vector, once stream E lands spec/turn-rest.md. Accepted format: any lines containing
-//    `secret`, `username` and `credential` followed by a value (optionally in backticks or quotes).
+// 3. spec/vectors/turn-rest.json (stream E): fixed vectors plus the fixed-time mint case.
 const here = dirname(fileURLToPath(import.meta.url));
-const specPath = join(here, "..", "..", "spec", "turn-rest.md");
-if (existsSync(specPath)) {
-  const text = readFileSync(specPath, "utf8");
-  const pick = (k) => {
-    const re = new RegExp(`${k}\s*[:=|]\s*[\`"']?([^\`"'\s|]+)`, "i");
-    return (text.match(re) || [])[1];
-  };
-  const secret = pick("secret"), username = pick("username"), credential = pick("credential");
-  if (secret && username && credential) {
-    check("spec/turn-rest.md vector",
-      createHmac("sha1", secret).update(username).digest("base64"), credential);
-  } else {
-    console.log("skip spec/turn-rest.md exists but no secret/username/credential triple found");
+const vecPath = join(here, "..", "..", "spec", "vectors", "turn-rest.json");
+if (existsSync(vecPath)) {
+  const v = JSON.parse(readFileSync(vecPath, "utf8"));
+  v.vectors.forEach((x, i) => check(`spec vector ${i} (${x.username})`,
+    createHmac("sha1", x.secret).update(x.username).digest("base64"), x.credential));
+  const mm = v.mint;
+  if (mm) {
+    const got = mint(mm.secret, mm.userId, mm.nowSeconds, mm.ttl);
+    check("spec mint username", got.username, mm.expectUsername);
+    check("spec mint credential", got.credential, mm.expectCredential);
   }
 } else {
-  console.log("skip spec/turn-rest.md not landed yet (stream E)");
+  console.log("skip spec/vectors/turn-rest.json not found");
 }
 process.exit(failed ? 1 : 0);

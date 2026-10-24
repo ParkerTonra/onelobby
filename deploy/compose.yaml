@@ -14,13 +14,15 @@ services:
       - --public-url
       - wss://${LOBBY_DOMAIN:?set LOBBY_DOMAIN in .env}
       - --turn-urls
-      - turn:${LOBBY_DOMAIN}:3478,turn:${LOBBY_DOMAIN}:3478?transport=tcp,turns:${LOBBY_DOMAIN}:${TURN_TLS_PORT:-5349}?transport=tcp
-      - --turn-secret
-      - ${TURN_SECRET:?set TURN_SECRET in .env}
+      - turn:${LOBBY_DOMAIN}:3478?transport=udp,turn:${LOBBY_DOMAIN}:3478?transport=tcp,turns:${LOBBY_DOMAIN}:${TURN_TLS_PORT:-5349}?transport=tcp
+      - --trust-proxy
       - --allowed-games
       - ${ALLOWED_GAMES:-*}
       - --max-lobbies
       - ${MAX_LOBBIES:-1000}
+    environment:
+      # Read from the environment so the secret does not show in `ps` (flag --turn-secret is equivalent).
+      KEEPALIVE_TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
     expose:
       - "8080"
     networks: [web]

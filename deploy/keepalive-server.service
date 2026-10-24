@@ -6,10 +6,10 @@
 #   sudo cp keepalive-server.service /etc/systemd/system/ && sudo systemctl enable --now keepalive-server
 #
 # /etc/keepalive.env (mode 600):
-#   TURN_SECRET=<same value as coturn's static-auth-secret>
+#   KEEPALIVE_TURN_SECRET=<same value as coturn's static-auth-secret>
 #   LOBBY_DOMAIN=lobby.example.com
-#   ALLOWED_GAMES=*
-#   MAX_LOBBIES=1000
+#   KEEPALIVE_ALLOWED_GAMES=*
+#   KEEPALIVE_MAX_LOBBIES=1000
 # Caddy (or another TLS proxy) still goes in front: point it at 127.0.0.1:8080.
 [Unit]
 Description=Keepalive lobby and signaling server
@@ -23,10 +23,8 @@ EnvironmentFile=/etc/keepalive.env
 ExecStart=/usr/local/bin/keepalive-server \
   --listen 127.0.0.1:8080 \
   --public-url wss://${LOBBY_DOMAIN} \
-  --turn-urls turn:${LOBBY_DOMAIN}:3478,turn:${LOBBY_DOMAIN}:3478?transport=tcp,turns:${LOBBY_DOMAIN}:5349?transport=tcp \
-  --turn-secret ${TURN_SECRET} \
-  --allowed-games ${ALLOWED_GAMES} \
-  --max-lobbies ${MAX_LOBBIES}
+  --trust-proxy \
+  --turn-urls turn:${LOBBY_DOMAIN}:3478?transport=udp,turn:${LOBBY_DOMAIN}:3478?transport=tcp,turns:${LOBBY_DOMAIN}:5349?transport=tcp
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
