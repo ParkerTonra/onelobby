@@ -645,5 +645,15 @@ public class HubTests
         Assert.Equal("http://0.0.0.0:8080", new ServerOptions().ListenUrl());
         Assert.Throws<ArgumentException>(() => ServerOptions.Parse(new[] { "--nope", "1" }, _ => null));
     }
+
+    [Fact]
+    public void Options_honor_host_PORT_below_explicit_listen()
+    {
+        Assert.Equal("http://0.0.0.0:10000", ServerOptions.Parse(Array.Empty<string>(), k => k == "PORT" ? "10000" : null).ListenUrl());
+        Assert.Equal("http://0.0.0.0:7000", ServerOptions.Parse(Array.Empty<string>(),
+            k => k == "PORT" ? "10000" : k == "KEEPALIVE_LISTEN" ? ":7000" : null).ListenUrl());
+        Assert.Equal("http://127.0.0.1:9000", ServerOptions.Parse(new[] { "--listen", "127.0.0.1:9000" }, k => k == "PORT" ? "10000" : null).ListenUrl());
+        Assert.Throws<ArgumentException>(() => ServerOptions.Parse(Array.Empty<string>(), k => k == "PORT" ? "web" : null));
+    }
 }
 

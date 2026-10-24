@@ -19,7 +19,8 @@ client.Pump();                                             // only until you hol
 lobby.Pump();                                              // then this, every frame; events fire on the calling thread
 lobby.Send(peerId, bytes); lobby.Broadcast(bytes);         // Channel.Reliable (default) or Channel.Fast
 lobby.MessageReceived += (from, payload, channel) => { };
-lobby.PeerJoined / PeerLeft / HostChanged / PhaseChanged / SessionEnded
+lobby.PeerJoined / PeerReady / PeerLeft / HostChanged / PhaseChanged / SessionEnded
+lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to host open (host: at once)
 await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
@@ -35,7 +36,8 @@ const lobby = await kit.join("7HQ 4K2");                   // also kit.rejoin(re
 const list = await kit.list();                             // LobbySummary[]
 lobby.send(peerId, bytes); lobby.broadcast(bytes);         // { channel: "fast" } optional
 lobby.on("message", (from, bytes, channel) => {});
-lobby.on("peerJoined" | "peerLeft" | "hostChanged" | "phase" | "sessionEnded", handler);
+lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "sessionEnded", handler);
+lobby.on("ready", () => {}); await lobby.ready;            // joiner: link to host open (host: at once)
 await lobby.start(); await lobby.kick(id); await lobby.leave();
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
 lobby.voice.enabled = true; lobby.voice.pushToTalk(down);

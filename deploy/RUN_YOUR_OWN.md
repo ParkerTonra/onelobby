@@ -3,6 +3,9 @@
 You get a lobby server, a relay for players behind strict networks, and automatic HTTPS, on one small machine.
 A 1 vCPU / 1 GB VM or a Raspberry Pi 4 is enough.
 
+This is the advanced path. If you only need a lobby server and no relay, [EASY_SERVER.md](EASY_SERVER.md) gets you one
+on a free host in a few clicks.
+
 ## Five steps
 
 1. **Get a machine and a name.** Any Linux box with a public IP and Docker (with the compose plugin). Point a DNS
@@ -19,7 +22,8 @@ A 1 vCPU / 1 GB VM or a Raspberry Pi 4 is enough.
    docker compose up -d
    ```
    Caddy fetches a certificate on first start (give it a minute; ports 80 and 443 must be reachable).
-5. **Point your game at it.** Set the game's `lobby_server` to `wss://lobby.example.com`.
+5. **Point your game at it.** Set the game's `lobby_server` to `wss://lobby.example.com/ws`. The server accepts
+   WebSockets on `/` as well, so `wss://lobby.example.com` also works; the recipes and examples use the `/ws` form.
 
 ## Ports
 

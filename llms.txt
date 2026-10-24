@@ -8,6 +8,11 @@
 - [AGENTS.md](AGENTS.md): what Keepalive is, the API on one screen for C# and JS, and the rules
 - [examples/tictactoe/README.md](examples/tictactoe/README.md): a single-player browser game to practise on
 
+Lobby events (JS `lobby.on(name)`; C# has PascalCase events for most, e.g. `PeerReady`, `MessageReceived`): peerJoined, peerReady (data link to that peer open; reliable
+sends made before it are queued and flushed, not dropped), ready and the `lobby.ready` promise (C# `Ready`, `ReadyAsync`:
+a joiner's link to the host is open; the host is ready at once), peerLeft, joinRequested, hostChanged, phase,
+message, metaChanged, serverLost, sessionEnded.
+
 ## Recipes
 
 - [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project
@@ -25,6 +30,7 @@
 
 ## Operations
 
+- [Easy server](deploy/EASY_SERVER.md): lobby server only on a free host (Render blueprint), no relay
 - [Run your own server](deploy/RUN_YOUR_OWN.md): five steps, port table, smoke test
 
 ## Optional

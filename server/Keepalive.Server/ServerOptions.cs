@@ -32,7 +32,7 @@ public sealed class ServerOptions
 
     public const string Help = @"keepalive-server: lobby and signaling server for Keepalive (protocol lk1)
 
-  --listen <addr>          :8080, host:port or a full http(s) URL       (KEEPALIVE_LISTEN)
+  --listen <addr>          :8080, host:port or a full http(s) URL       (KEEPALIVE_LISTEN, else :$PORT)
   --turn-urls <a,b>        turn:host:3478,turns:host:443                (KEEPALIVE_TURN_URLS)
   --turn-secret <s>        coturn static-auth-secret                    (KEEPALIVE_TURN_SECRET)
   --stun-urls <a,b>        default stun:stun.l.google.com:19302         (KEEPALIVE_STUN_URLS)
@@ -74,6 +74,11 @@ public sealed class ServerOptions
     public static ServerOptions Parse(string[] args, Func<string, string?> env)
     {
         var o = new ServerOptions();
+        // Hosts such as Render, Railway and Heroku tell the app which port to use in PORT.
+        // Lowest precedence: KEEPALIVE_LISTEN and --listen still win.
+        string? port = env("PORT");
+        if (!string.IsNullOrEmpty(port))
+            o.Listen = ":" + (int.TryParse(port, out int p) && p is > 0 and < 65536 ? p : throw new ArgumentException($"PORT '{port}' is not a port number"));
         void Apply(string key, string val)
         {
             switch (key)

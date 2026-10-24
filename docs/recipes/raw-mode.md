@@ -17,9 +17,11 @@ One tag byte, then payload. The game owns this layout; Keepalive never looks ins
 value to a number and back, and never send names or JSON text for something that has an id. Here the example game's
 `"X" | "O" | ""` cells and `"" | "X" | "O" | "draw"` winner become `0..3` in the code below.
 
-**Send initial state on `peerReady`, not `peerJoined`.** `peerJoined` fires when the player enters the roster; the data
-channel to them may not be open yet, so an early `send` is dropped. `peerReady` (host side) fires when the link to that peer
-is open. A joiner's own `ready` event means its link to the host is open.
+**Send initial state on `peerReady`, not `peerJoined`.** `peerJoined` fires when the player enters the roster, before the
+data channel to them is open. Reliable sends made before then are not lost: they are queued and flushed in order once the
+link opens (`fast` sends are dropped). Waiting for `peerReady` (host side: the link to that peer is open) still matters
+here, because the state you send should be the state at the moment they can receive it, not a stale copy from earlier.
+A joiner's own `ready` event (or `await lobby.ready`) means its link to the host is open.
 
 ```ts compile file=sync.ts
 import type { Lobby } from "@keepalive/client";
