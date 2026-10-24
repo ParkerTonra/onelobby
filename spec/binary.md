@@ -36,7 +36,7 @@ with the id of the connection the frame arrived on. **(decision)** `cmd`, `hash`
 | id | name | body | notes |
 |---|---|---|---|
 | 0x01 | `hi` | `proto:u8=1, peerId:u16, lastTick:i64` | joiner -> host on `reliable` after the channels open. `lastTick` = last tick whose frame the joiner applied; **-1 = no state** (fresh joiner) |
-| 0x02 | `welcome_dc` | `tick:i64, tickRate:u8, mode:u8, hostId:u16` | host -> joiner. `tick` = host's last emitted frame. `mode`: **1 = lockstep, 2 = raw** (0 reserved) **(decision)** |
+| 0x02 | `welcome_dc` | `tick:i64, tickRate:u8, mode:u8, hostId:u16` | host -> joiner. `tick` = the host game's applied tick, which is the tick the following `snapshot` carries (0 before the game starts and in raw mode) **(decision, 2026-10-23: "last emitted frame" raced the snapshot by one tick)**. `mode`: **1 = lockstep, 2 = raw** (0 reserved) **(decision)** |
 | 0x10 | `cmd` | `seq:u32, len:u16, bytes[len]` | joiner (and host's own queue) -> host. `seq` per sender, starts at 1, +1 each command |
 | 0x11 | `frame` | `tick:i64, n:u16, n x (peerId:u16, len:u16, bytes[len])` | host -> everyone. Ticks strictly consecutive (+1). `n = 0` frames are sent |
 | 0x12 | `hash` | `tick:i64, hash:u64` | peer -> host, for each tick `T` with `T % hashEvery == 0` (T > 0) after applying frame `T` |
