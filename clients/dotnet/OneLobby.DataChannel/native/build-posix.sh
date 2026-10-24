@@ -52,7 +52,10 @@ cmake --build build-mbedtls --target install
 mlib="$(dirname "$(find "$work/prefix" -name libmbedcrypto.a | head -1)")"
 extra=()
 if [ "$target" != "osx" ]; then
-  extra+=(-DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group $mlib/libmbedtls.a $mlib/libmbedx509.a $mlib/libmbedcrypto.a -Wl,--end-group$([ "$target" = linux-x64 ] && echo " -lpthread")")
+  # not "$([ ... ] && echo ...)" inline: a false test fails the whole assignment and set -e exits without a message
+  pthread=""
+  if [ "$target" = linux-x64 ]; then pthread=" -lpthread"; fi
+  extra+=(-DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group $mlib/libmbedtls.a $mlib/libmbedx509.a $mlib/libmbedcrypto.a -Wl,--end-group$pthread")
 fi
 rm -rf build-ldc
 cmake -S libdatachannel -B build-ldc "${common[@]}" -DUSE_MBEDTLS=ON -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON \
