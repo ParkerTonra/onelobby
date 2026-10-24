@@ -69,7 +69,7 @@ mentioned as colour, never as a rule.
 |---|---|
 | Host lobby / Join lobby in every game, two calls | Accounts, friends lists, presence (games or adapters do that) |
 | The host's own game is the server (listen server), no second install | Dedicated headless servers (possible later: a client with no renderer hosts) |
-| Browser and desktop peers in one lobby over WebRTC data channels | Voice/video |
+| Browser and desktop peers in one lobby over WebRTC data channels | Video |
 | Deterministic lockstep with host-ordered command frames, plus raw messaging for games that bring their own netcode | Rollback/prediction netcode (GGPO-style). Needs save/restore every frame; wrong fit for a 20 TPS management sim |
 | Voice chat (Opus over its own data channel: push-to-talk, voice activity, mute, per-player volume) and text chat (lobby and in-game) as first-class channels, never seen by the server | Voice mixing servers (SFU/MCU), recording, moderation services |
 | Agent-friendly docs: `AGENTS.md`, `llms.txt`, one recipe per engine, copy-paste examples, so an AI coding agent integrates a game in one session | A hosted docs site with search |
@@ -151,7 +151,7 @@ invariant-globalization-only; the engine forum shows no shipped release through 
 | Consequence | Decision |
 |---|---|
 | Lowkey cannot run in a browser today | Lowkey's first multiplayer is desktop ⇄ desktop over WebRTC through `keepalive-server` + coturn. Browser cross-play for Lowkey waits on Godot; nothing in this design changes when it arrives (the browser supplies the WebRTC classes Godot already uses) |
-| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.15, stream 5's `spec/demo-game.md`) |
+| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.15, stream E's `spec/demo-game.md`) |
 | Godot web exports need COOP/COEP headers for threads | `deploy/` ships a Caddy snippet that sets them for any game page it serves |
 | Lowkey's sim uses `InvariantGlobalization` already | Matches the prototype's invariant-only constraint; keep it |
 
@@ -557,7 +557,7 @@ conformance harness read alike.
 
 | Piece | Form |
 |---|---|
-| `keepalive-server` | Static binary (Go; linux/amd64, linux/arm64, windows, macOS), flags or env: `--listen :8080 --turn-urls turn:relay.example:3478,turns:relay.example:443 --turn-secret ... --public-url wss://lobby.example --allowed-games ... --max-lobbies 1000`. `/healthz`, `/metrics` (Prometheus) |
+| `keepalive-server` | Single-file self-contained .NET build (linux-x64, linux-arm64, win-x64, osx-arm64; Native AOT where it builds), flags or env: `--listen :8080 --turn-urls turn:relay.example:3478,turns:relay.example:443 --turn-secret ... --public-url wss://lobby.example --allowed-games ... --max-lobbies 1000`. `/healthz`, `/metrics` (Prometheus) |
 | Relay | Stock `coturn/coturn` image + the shipped `turnserver.conf` (REST auth, narrowed port range, quotas) |
 | TLS | Caddy with automatic certificates in front of both (`compose.yaml`); COOP/COEP snippet for serving a Godot web build |
 | One command | `git clone … && cp .env.example .env && docker compose up -d` on a 1 vCPU VM or a Raspberry Pi 4 |
@@ -567,9 +567,9 @@ conformance harness read alike.
 | Agent docs | Root `AGENTS.md` (what the repo is, the API surface in one screen, the rules) and `llms.txt` (links to every recipe and the API reference in plain text); `docs/recipes/{godot-csharp,js-web,dotnet-generic,raw-mode,voice-and-chat,self-host}.md`, each a copy-paste integration under 150 lines with a "done when" check. Plain files, nothing in the protocol |
 | Release | Every tag publishes `keepalive-server` binaries + images; the game's "About → Multiplayer" screen links this repo. Satisfies "an offline mode or the ability to host private servers" (SKG) |
 
-Why Go for `keepalive-server` (taste call 1 can overturn it): one static binary with no runtime, trivial cross-compilation for
-ARM boards, the Nakama / coturn ecosystem is Go/C, and the server is ~1,500 lines of WebSocket routing with no game
-logic, so Parker's C# fluency buys little there.
+Why C# for `keepalive-server` (taste call 1, decided 2026-10-23 by the desk under Parker's go-ahead): .NET 10 is already on
+Parker's machine and Go is not; one language across server, `Keepalive.Core` and Lowkey; ASP.NET Core WebSockets +
+single-file/AOT publish still give one file to run, and the Docker image is the self-host default.
 
 ---
 
@@ -607,13 +607,13 @@ chat are protocol (E), JS implementation (C) and .NET implementation (D); they a
 
 | # | Stream | Owns | Consumes | Provides | Done when |
 |---|---|---|---|---|---|
-| A | Signaling / lobby server | `server/` (Go module `keepalive-server`) | `spec/signaling.schema.json`, `spec/codes.json`, `spec/turn-rest.md` | A `keepalive-server` binary + `ghcr` image; `/healthz`; TURN REST creds | `go test ./...` green; `conformance/server` suite (stream E) passes 100%; two `wscat` sessions can create/list/join and exchange a `signal`; 1,000 lobbies / 5,000 sockets on one core in the load script |
-| B | Relay + self-host packaging | `deploy/` (`compose.yaml`, `Caddyfile`, `turnserver.conf`, `.env.example`, `RUN_YOUR_OWN.md`, `scripts/smoke.sh`, systemd unit) | Stream A's image name and flags (from DESIGN s.13) | A working `docker compose up` stack | `scripts/smoke.sh` on a clean Ubuntu VM: `keepalive-server` `/healthz` 200 over TLS, `turnutils_uclient` gets an allocation with REST creds minted by `keepalive-server`, TCP 443 TURN works with UDP blocked by `iptables` |
+| A | Signaling / lobby server | `server/` (.NET 10 ASP.NET Core minimal app `Keepalive.Server` + `Keepalive.Server.Tests`) | `spec/signaling.schema.json`, `spec/codes.json`, `spec/turn-rest.md` | A `keepalive-server` binary + `ghcr` image; `/healthz`; TURN REST creds | `dotnet test server/` green; `conformance/server` suite (stream E) passes 100%; two `wscat` sessions can create/list/join and exchange a `signal`; 1,000 lobbies / 5,000 sockets on one core in the load script |
+| B | Relay + self-host packaging | `deploy/` (`compose.yaml`, `Caddyfile`, `turnserver.conf`, `.env.example`, `RUN_YOUR_OWN.md`, `scripts/smoke.sh`, systemd unit) | Stream A's image name and flags (from DESIGN s.13) | A working `docker compose up` stack | `docker compose config` validates; `scripts/smoke.sh` written for a clean Ubuntu VM (`/healthz` 200 over TLS, `turnutils_uclient` allocation with REST creds minted by `keepalive-server`, TCP 443 TURN with UDP blocked) and run locally when Docker is up; a `scripts/turn-creds-check` proves the server's HMAC creds match coturn's `use-auth-secret` algorithm |
 | C | JS client + browser demo | `clients/js/` (`packages/client`, `demo/`) | `spec/*`, `spec/demo-game.md` | `@keepalive/client` ESM + `.d.ts` including `voice` (WebCodecs/WASM Opus, AudioWorklet) and `chat`; `demo/` = gridpaint (s.15.1) with a chat line and push-to-talk | `vitest` with the in-memory transport covers the lockstep scheduler, chunking, Crockford decode, migration rule, chat limits, voice packetization; two tabs on `localhost` host/join via a local `keepalive-server` and play gridpaint 60 s with equal hashes; a third tab late-joins via snapshot and receives `chat_history`; closing the host tab migrates within 5 s; a tone played into tab A's mic input is heard in tab B |
 | D | .NET core + Godot client + demo | `clients/dotnet/` (`Keepalive.Core`, `Keepalive.Core.Tests`, `Keepalive.Godot`, `demo-godot/` with webrtc-native addon) | `spec/*`, `spec/demo-game.md` | NuGet-shaped `Keepalive.Core` (incl. `TextChat`, `VoiceChannel`, `IVoiceCodec`), `Keepalive.Godot` (transport, Godot audio capture/playback, Opus codec with a verified-licence managed port) + demo scene | `dotnet test` green (same cases as C against the in-memory transport); two headless Godot instances host/join through a local `keepalive-server` and play gridpaint 60 s with equal hashes; **cross-play**: the Godot demo hosts, stream C's browser demo joins, hashes equal for 60 s, a chat line crosses both ways, a voice test tone from Godot decodes in the browser |
 | E | Protocol spec + conformance harness | `spec/` (JSON schemas, binary test vectors incl. `voice`/`chat` frames, `codes.json`, `demo-game.md`), `conformance/` (Node) | DESIGN.md s.6-s.9b only | The frozen spec as files; `conformance/server` (drives any `keepalive-server` over WebSocket: every message, every error code, rate limits); `conformance/peer` (a scripted fake host/joiner that drives any client lib: frames, desync, snapshot, migration, chat limits, voice forwarding) | Vectors round-trip in both C and D's codecs; `conformance/server` red against an empty server, green against stream A; `conformance/peer` runs against C and D |
-| F | Lowkey integration notes + spike | `integrations/lowkey/` (notes, `hash-cost.md`, `codec/` sample + test) | `Keepalive.Core` API (s.11.1), Lowkey repo read-only | Exact change list for the Lowkey repo (s.14 expanded to file + line), measured `StateHash()` cost at day 1/15/30 saves, a `Codec` round-trip test over every Lowkey `Command` type | `dotnet test` in `integrations/lowkey/codec` green against a Lowkey build; notes reviewed by the desk; `HANDOFF.md` in the Lowkey repo gets a one-line pointer |
-| G | Agent-friendly docs | `AGENTS.md`, `llms.txt`, `docs/` (`recipes/`, `api/` generated from C's `.d.ts` and D's XML docs by `docs/build.mjs`) | The public API of C and D (s.11), `deploy/RUN_YOUR_OWN.md` | Plain-file docs an agent reads first: one-screen API surface, the rules (ids not names, bytes not objects, host is truth), six recipes ≤ 150 lines each with a "done when", copy-paste snippets that compile | `docs/build.mjs` regenerates `docs/api/` with no diff on a clean tree; the **agent test**: a fresh Sonnet agent given only `AGENTS.md` and the sentence "add Keepalive raw-mode multiplayer with chat to `demo/tictactoe`" ships a passing `conformance/peer` run in one session without opening `clients/`; every snippet in `docs/recipes/` is extracted and compiled by `docs/check-snippets.mjs` in CI |
+| F | Lowkey integration notes + spike | `integrations/lowkey/` (notes, `hash-cost.md`, `codec/` sample + test) | `Keepalive.Core` API (s.11.1), Lowkey repo read-only | Exact change list for the Lowkey repo (s.14 expanded to file + line), measured `StateHash()` cost at day 1/15/30 saves, a `Codec` round-trip test over every Lowkey `Command` type | `dotnet test` in `integrations/lowkey/codec` green against a Lowkey build; notes reviewed by the desk (the desk, not stream F, adds any pointer in the Lowkey repo) |
+| G | Agent-friendly docs | `AGENTS.md`, `llms.txt`, `examples/tictactoe/` (single-player JS skeleton, no networking), `docs/` (`recipes/`, `api/` generated from C's `.d.ts` and D's XML docs by `docs/build.mjs`) | The public API of C and D (s.11), `deploy/RUN_YOUR_OWN.md` | Plain-file docs an agent reads first: one-screen API surface, the rules (ids not names, bytes not objects, host is truth), six recipes ≤ 150 lines each with a "done when", copy-paste snippets that compile | `docs/build.mjs` regenerates `docs/api/` with no diff on a clean tree; the **agent test**: a fresh Sonnet agent given only `AGENTS.md` and the sentence "add Keepalive raw-mode multiplayer with chat to `examples/tictactoe`" ships a passing `conformance/peer` run in one session without opening `clients/`; every snippet in `docs/recipes/` is extracted and compiled by `docs/check-snippets.mjs` in CI |
 
 ### 15.1 Shared demo game: gridpaint (`spec/demo-game.md`, owned by E)
 
@@ -676,7 +676,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 Today: nothing exists. Yes: `keepalive-server` is a Go static binary (one file, cross-compiles to a Raspberry Pi, matches the coturn/Nakama
 ecosystem; ~1,500 lines, no game logic). No: C# with `dotnet publish --self-contained -p:PublishSingleFile=true` (one language
 across the repo; ~70 MB binary, slower start, ARM builds still fine).
-`Default:` Go.
+`Default:` Go. **Decided: C#** (Go is not installed; one language across the repo; see s.13).
 
 **2. Should your public lobby server accept any game?**
 Today: the design supports both. Yes: any developer can point their game at `lobby.keepalive.example` with no sign-up; per-game quotas
