@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Description>Command-line peer for cross-play checks: hosts or joins a raw-mode lobby over DataChannelTransport and echoes messages.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\OneLobby.DataChannel\OneLobby.DataChannel.csproj" />
+  </ItemGroup>
+</Project>
