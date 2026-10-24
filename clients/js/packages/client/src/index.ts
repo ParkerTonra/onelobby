@@ -1,5 +1,7 @@
 export { Keepalive, LIB_NAME, LIB_VERSION } from "./keepalive.js";
 export type { KeepaliveOptions, HostOptions, ListOptions, KeepaliveEvents } from "./keepalive.js";
+export { DEFAULT_READY_TIMEOUT_MS } from "./keepalive.js";
+export type { AdvancedOptions, SeatStorage } from "./keepalive.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
 export { Lockstep, MAX_DESYNCS, HOST_SILENCE_MS } from "./lockstep.js";
@@ -41,3 +43,5 @@ export { systemClock } from "./clock.js";
 export type { Clock } from "./clock.js";
 export { Gridpaint, paintCmd, colourOf, PALETTE, GRID_W, GRID_H, seedFromCode, fnv1a64 } from "./gridpaint.js";
 export type { Hub } from "./hub.js";
+export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
+export type { FriendlyError } from "./friendly.js";
