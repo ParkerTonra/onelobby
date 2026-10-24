@@ -1,0 +1,13 @@
+{
+  "name": "@keepalive/conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keepalive conformance harness: conformance/server (drives a keepalive-server) and conformance/peer (drives a client lib).",
+  "scripts": {
+    "test": "node --test peer/selftest.test.mjs server/selftest.test.mjs",
+    "server": "node server/run.mjs",
+    "peer": "node peer/run.mjs"
+  },
+  "dependencies": { "ws": "^8.18.0" }
+}
