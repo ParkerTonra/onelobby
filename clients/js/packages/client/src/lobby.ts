@@ -24,6 +24,10 @@ export type Peer = PeerInfo;
 
 export type LobbyEvents = {
   peerJoined: [Peer];
+  /** The peer's data channels are open and the handshake is done: reliable sends reach it now (earlier ones were queued and flushed). */
+  peerReady: [Peer];
+  /** Joiner: the link to the host is open (the host itself is ready from the start). Also available as `lobby.ready`. */
+  ready: [];
   peerLeft: [Peer, reason: string];
   joinRequested: [Peer];
   hostChanged: [hostId: number];
@@ -83,6 +87,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   private chunkId = 1;
   private reassemblers = new Map<number, Reassembler>();
   private hub: Hub;
+  private outbox = new Map<number, { msg: Message; route: number; channel?: ChannelName }[]>();
+  private markReady: () => void = () => {};
+  /** Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a joiner. */
+  readonly ready: Promise<void> = new Promise<void>((res) => (this.markReady = res));
 
   constructor(cfg: LobbyConfig) {
     super();
@@ -125,6 +133,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.signaling.onMessage = (m) => this.onSignaling(m);
     this.signaling.onClose = () => this.onServerClosed();
 
+    if (this.isHost) this.markReady();
     if (this.isHost && this.mode === "lockstep") {
       if (this.phase === "in_game") this.lockstep.hostStart();
       else this.lockstep.hostIdle();
@@ -215,7 +224,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   broadcast(bytes: Uint8Array, opts: { channel?: "reliable" | "fast" } = {}): void {
     const channel = opts.channel ?? "reliable";
     if (this.isHost) {
-      for (const p of this.connectedPeerIds()) this.sendTo(p, { type: "raw", bytes }, this.localPeerId, channel);
+      // peers whose channels are not open yet get reliable broadcasts queued and flushed in order
+      for (const p of this.roster.keys()) if (p !== this.localPeerId) this.sendTo(p, { type: "raw", bytes }, this.localPeerId, channel);
     } else {
       this.sendTo(this.hostPeerId, { type: "raw", bytes }, 0, channel);
     }
@@ -231,9 +241,24 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   private sendTo(peerId: number, msg: Message, route: number, channel?: ChannelName): void {
     const link = this.links.get(peerId);
-    if (!link || !link.isOpen) return;
+    const ch0 = channel ?? this.channelFor(msg);
+    const queueable = msg.type === "raw" || msg.type === "chat" || msg.type === "cmd";
+    // game data to a host-side peer waits for its `hi`; protocol messages only need the link
+    const ready = !!link?.isOpen && (!queueable || !this.isHost || this.connected.has(peerId));
+    if (!ready) {
+      // Reliable game data for a peer that is in the roster (or is the host) but not connected yet waits for its handshake.
+      const known = this.roster.has(peerId) || peerId === this.hostPeerId;
+      if (queueable && ch0 === "reliable" && known && !this.ended) {
+        let q = this.outbox.get(peerId);
+        if (!q) this.outbox.set(peerId, (q = []));
+        if (q.length >= 1000) q.shift();
+        q.push({ msg, route, channel });
+      }
+      return;
+    }
+    if (!link) return;
     try {
-      const ch = channel ?? this.channelFor(msg);
+      const ch = ch0;
       let bytes: Uint8Array;
       try {
         bytes = encodeMessage(msg, route);
@@ -304,6 +329,10 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.hiSentTo.add(link);
     this.lockstep.touch();
     link.send("reliable", encodeMessage(this.lockstep.hiMessage(this.localPeerId)));
+    this.markReady();
+    this.emit("ready");
+    this.emit("peerReady", this.roster.get(link.remoteId) ?? { peerId: link.remoteId, name: "" });
+    this.flush(link.remoteId);
   }
 
   private onLinkClosed(peerId: number, link: PeerLink, _reason: string): void {
@@ -389,6 +418,15 @@ export class Lobby extends Emitter<LobbyEvents> {
     }, 0);
     this.chat.sendHistory(from);
     if (this.mode === "lockstep") this.lockstep.onPeerHi(from, lastTick);
+    this.emit("peerReady", this.roster.get(from) ?? { peerId: from, name: "" });
+    this.flush(from);
+  }
+
+  private flush(peerId: number): void {
+    const q = this.outbox.get(peerId);
+    if (!q) return;
+    this.outbox.delete(peerId);
+    for (const m of q) this.sendTo(peerId, m.msg, m.route, m.channel);
   }
 
   private onRaw(from: number, route: number, bytes: Uint8Array, channel: ChannelName): void {
@@ -563,6 +601,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       this.hiSentTo.delete(link);
     }
     this.connected.delete(peerId);
+    this.outbox.delete(peerId);
     this.lockstep.onPeerLeft(peerId);
     this.chat.onPeerLeft(peerId);
     this.voice.onPeerLeft(peerId);

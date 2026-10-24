@@ -34,7 +34,7 @@ frame handed out by `nextFrame()`; `restore(tick, bytes)` receives that tick and
 ```
 cd clients/js
 npm install
-npm test                 # vitest (162 tests); also: npm run typecheck, npm run build
+npm test                 # vitest (165 tests); also: npm run typecheck, npm run build
 KEEPALIVE_SERVER=ws://localhost:8080/ws npm test    # adds the real-server smoke test (real WebSocket, in-memory peer links)
 node ../../conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs   # after npm run build; 28/28
 ```
