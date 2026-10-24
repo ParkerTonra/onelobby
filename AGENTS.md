@@ -43,6 +43,33 @@ lobby.lockstep.submit(cmd); for (let f; (f = lobby.lockstep.nextFrame()); ) { /*
 lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lobby.lockstep.restore = (tick, b) => {};
 ```
 
+## Using it from this repo (not on npm yet)
+
+`@keepalive/client` is not published. Build it once in a clone of this repo, then point your project at the build:
+
+```
+git clone https://github.com/ParkerTonra/keepalive
+cd keepalive/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
+```
+
+Either depend on it with a `file:` path, or bundle with an esbuild alias (no package install in your project):
+
+```
+# in your project
+npm install file:/path/to/keepalive/clients/js/packages/client
+# or, plain-JS project with no package.json
+/path/to/keepalive/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:@keepalive/client=/path/to/keepalive/clients/js/packages/client/dist/index.js
+```
+
+Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
+`<script type="module" src="./src/main.js">` cannot resolve the bare name `@keepalive/client`, so bundle first.
+Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
+
+## Codes and peers
+
+The server returns codes ungrouped (`C5AFX8`); show them grouped (`C5A FX8`) with `formatCode` or by hand. `join` accepts
+either form. `lobby.peers` includes the local player and the host, so a two-player lobby has `peers.length === 2` on both sides.
+
 Useful fields: `lobby.code`, `localPeerId`, `hostPeerId`, `isHost`, `phase`, `peers`, `meta`, `resumeToken`.
 Full reference (generated): `docs/api/`.
 
@@ -70,6 +97,7 @@ Full reference (generated): `docs/api/`.
 - Any .NET app (console, Unity-free engines, tests): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
+- Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Run your own server: `docs/recipes/self-host.md`
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).

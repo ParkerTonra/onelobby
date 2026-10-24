@@ -146,8 +146,12 @@ public sealed class Lobby : IAsyncDisposable
     public TextChat Chat { get; }
     /// True once the data channel to the host is up and welcomed (always true on the host).
     public bool IsReady;
+    /// Completes when IsReady first becomes true (immediately for a host).
+    public Task ReadyAsync;
     public IReadOnlyList<Peer> Peers;
     public event Action? Ready;
+    /// A peer's data channels are open and its handshake is done: from here Send/Broadcast reach it at once. (PeerJoined fires earlier, when the server announces the peer; reliable sends made in between are queued and delivered in order when the link opens.) On a joiner this fires once for the host.
+    public event Action<Peer>? PeerReady;
     public event Action<Peer>? PeerJoined;
     public event Action<Peer, string>? PeerLeft;
     public event Action<Peer>? JoinRequested;

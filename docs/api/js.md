@@ -109,6 +109,10 @@ export type Phase = "lobby" | "in_game";
 export type Peer = PeerInfo;
 export type LobbyEvents = {
     peerJoined: [Peer];
+    /** The peer's data channels are open and the handshake is done: reliable sends reach it now (earlier ones were queued and flushed). */
+    peerReady: [Peer];
+    /** Joiner: the link to the host is open (the host itself is ready from the start). Also available as `lobby.ready`. */
+    ready: [];
     peerLeft: [Peer, reason: string];
     joinRequested: [Peer];
     hostChanged: [hostId: number];
@@ -146,6 +150,8 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     resumeToken: string;
     /** Last measured round trip to the host in ms (joiners), or 0. */
     rtt: number;
+    /** Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a joiner. */
+    readonly ready: Promise<void>;
     constructor(cfg: LobbyConfig);
     get isHost(): boolean;
     get peers(): Peer[];

@@ -9,9 +9,9 @@ anyone else's server: the lobby server URL is a setting. The full walkthrough is
 dotnet run --project server/Keepalive.Server -- --listen :8080
 ```
 
-Then run your game with the lobby server set to `ws://localhost:8080` (Godot: `--lobby-server=ws://127.0.0.1:8080`, not `localhost`; browser:
-`?lobby=ws://localhost:8080` or localStorage `lobby_server`). Two peers on one machine connect directly; no relay needed.
-Check it is alive: `curl http://localhost:8080/healthz`.
+Then run your game with the lobby server set to `ws://127.0.0.1:8080/ws` (Godot: `--lobby-server=ws://127.0.0.1:8080/ws`, not `localhost`; browser:
+`?lobby=ws://127.0.0.1:8080/ws` or localStorage `lobby_server`). Two peers on one machine connect directly; no relay needed.
+Check it is alive: `curl http://127.0.0.1:8080/healthz`. The WebSocket endpoint is the `/ws` path (the URL games use ends in `/ws`).
 
 ## Production
 
@@ -36,5 +36,5 @@ use their own server without rebuilding. Add `--allowed-games com.you.yourgame` 
 
 - `curl https://lobby.example.com/healthz` returns 200 over TLS.
 - `deploy/scripts/smoke.sh` passes on the machine.
-- A game build with `lobby_server=wss://lobby.example.com` hosts a lobby on one network and a phone on mobile data joins
+- A game build with `lobby_server=wss://lobby.example.com/ws` hosts a lobby on one network and a phone on mobile data joins
   it by code; with the setting changed back, the game still starts and plays offline.

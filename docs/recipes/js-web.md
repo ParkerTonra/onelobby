@@ -4,11 +4,32 @@ Add Host / Join / Browse buttons to a web game with `@keepalive/client`. Works i
 Snippets tagged `ts compile file=NAME` are type-checked by `docs/check-snippets.mjs` (all snippets of one recipe share a
 folder, so they can import each other).
 
-## 1. Install
+## 1. Install: using it from this repo (not on npm yet)
+
+`@keepalive/client` is not published. Build it once in a clone of this repo, then point your project at the build:
 
 ```
-npm install @keepalive/client
+git clone https://github.com/ParkerTonra/keepalive
+cd keepalive/clients/js && npm ci && npm run build -w packages/client     # writes packages/client/dist
 ```
+
+Either depend on it with a `file:` path, or bundle with an esbuild alias (no package install in your project):
+
+```
+# in your project
+npm install file:/path/to/keepalive/clients/js/packages/client
+# or, plain-JS project with no package.json
+/path/to/keepalive/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:@keepalive/client=/path/to/keepalive/clients/js/packages/client/dist/index.js
+```
+
+Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
+`<script type="module" src="./src/main.js">` cannot resolve the bare name `@keepalive/client`, so bundle first.
+Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
+
+## Codes and peers
+
+The server returns codes ungrouped (`C5AFX8`); show them grouped (`C5A FX8`) with `formatCode` or by hand. `join` accepts
+either form. `lobby.peers` includes the local player and the host, so a two-player lobby has `peers.length === 2` on both sides.
 
 ## 2. Settings: the lobby server is not a constant
 
@@ -16,14 +37,14 @@ npm install @keepalive/client
 export function lobbyServerUrl(): string {
   const params = new URLSearchParams(location.search);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="lobby-server"]')?.content;
-  return localStorage.getItem("lobby_server") ?? params.get("lobby") ?? meta ?? "wss://lobby.keepalive.example";
+  return localStorage.getItem("lobby_server") ?? params.get("lobby") ?? meta ?? "wss://lobby.keepalive.example/ws";
 }
 ```
 
 ## 3. Connect: Host, Join, Browse
 
 ```ts compile file=net.ts
-import { Keepalive } from "@keepalive/client";
+import { Keepalive, formatCode } from "@keepalive/client";
 import type { Lobby, LobbySummary } from "@keepalive/client";
 import { lobbyServerUrl } from "./settings";
 
@@ -39,7 +60,7 @@ let lobby: Lobby | null = null;
 
 export async function hostLobby(): Promise<string> {
   lobby = await kit.host({ name: "My game", maxPlayers: 2, visibility: "public" });
-  return lobby.code;            // show this: "7HQ 4K2"
+  return formatCode(lobby.code); // the server returns "C5AFX8"; show it grouped: "C5A FX8"
 }
 
 export async function joinLobby(code: string): Promise<void> {

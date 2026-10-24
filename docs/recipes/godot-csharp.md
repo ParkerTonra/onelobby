@@ -27,7 +27,7 @@ using Keepalive.Godot;
 
 public partial class Net : Node
 {
-    public const string DefaultServer = "wss://lobby.keepalive.example";
+    public const string DefaultServer = "wss://lobby.keepalive.example/ws";
     LobbyClient _client = null!;
     public Lobby? Lobby { get; private set; }
     [Signal] public delegate void StatusEventHandler(string text);
@@ -35,7 +35,7 @@ public partial class Net : Node
     public override void _Ready()
     {
         string server = DefaultServer;
-        foreach (var arg in OS.GetCmdlineArgs())                              // --lobby-server=ws://localhost:8080
+        foreach (var arg in OS.GetCmdlineArgs())                              // --lobby-server=ws://127.0.0.1:8080/ws
             if (arg.StartsWith("--lobby-server=")) server = arg["--lobby-server=".Length..];
         var cfg = new ConfigFile();
         if (cfg.Load("user://settings.cfg") == Error.Ok)
@@ -117,6 +117,6 @@ does this) if you use threads. Voice needs `audio/driver/enable_input` on.
 ## Done when
 
 - The project builds with `dotnet build` and the menu shows Host / Join / Browse.
-- With a local `keepalive-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080`; use 127.0.0.1, not localhost): one presses Host and shows a
+- With a local `keepalive-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080/ws`; use 127.0.0.1, not localhost): one presses Host and shows a
   code, the other joins it, and a message sent by one arrives in the other's `MessageReceived`.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".
