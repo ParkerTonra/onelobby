@@ -25,6 +25,11 @@ public static class ServerApp
         app.MapGet("/healthz", () => Results.Text("ok\n"));
         app.MapGet("/metrics", () => Results.Text(hub.Metrics.Render(), "text/plain; version=0.0.4"));
         app.Map("/ws", ctx => HandleSocket(ctx, hub, options));
+        app.Map("/", async ctx =>
+        {
+            if (ctx.WebSockets.IsWebSocketRequest) await HandleSocket(ctx, hub, options);
+            else await Results.Text("keepalive-server lk1, connect over WebSocket (/ or /ws)").ExecuteAsync(ctx);
+        });
         return app;
     }
 

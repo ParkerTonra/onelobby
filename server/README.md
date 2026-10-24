@@ -6,7 +6,7 @@ WebRTC data channels once the handshake is done.
 
 | Path | What |
 |---|---|
-| `/ws` | WebSocket, text frames, one JSON object per frame |
+| `/ws` and `/` | WebSocket upgrade, text frames, one JSON object per frame (so `ws://host:8080` works without a path). A plain `GET /` returns a one-line text hint |
 | `/healthz` | `200 ok` |
 | `/metrics` | Prometheus text: `keepalive_lobbies`, `keepalive_sockets`, `keepalive_path_total{path="relayed\|direct"}`, `keepalive_messages_total{type}`, `keepalive_errors_total{code}`, `keepalive_rate_limit_hits_total{kind}`, ... |
 

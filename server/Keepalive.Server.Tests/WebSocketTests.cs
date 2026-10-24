@@ -78,6 +78,18 @@ public class WebSocketTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Root_path_accepts_websocket_and_plain_get()
+    {
+        using var http = new HttpClient();
+        Assert.Contains("keepalive-server lk1", await http.GetStringAsync(_http + "/"));
+        var p = new Peer();
+        await p.ConnectAsync(_http.Replace("http://", "ws://"));
+        await p.SendAsync("{\"t\":\"hello\",\"proto\":\"lk1\",\"gameId\":\"g\",\"netVersion\":\"1\",\"name\":\"R\",\"client\":{\"lib\":\"t\",\"ver\":\"0\",\"platform\":\"t\"}}");
+        Assert.NotNull(await p.RecvAsync("welcome"));
+        await p.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Health_and_metrics_endpoints()
     {
         using var http = new HttpClient();
