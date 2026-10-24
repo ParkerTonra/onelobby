@@ -1,0 +1,68 @@
+# Builds the libdatachannel natives for OneLobby.DataChannel (versions pinned in
+# clients/dotnet/OneLobby.DataChannel/native/versions.env) and runs the live two-peer WebRTC test where it can.
+# Not enabled yet: Parker decides whether to push it (the repo is public).
+name: datachannel-natives
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "clients/dotnet/OneLobby.DataChannel/**"
+      - ".github/workflows/datachannel-natives.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - name: Build datachannel.dll (MSVC, CMake, Ninja from the VS install)
+        shell: pwsh
+        run: clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1 -WorkDir "$env:RUNNER_TEMP/ldc"
+      - name: Live WebRTC test (two peers through an in-process OneLobby.Server)
+        run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests
+      - uses: actions/upload-artifact@v4
+        with: { name: native-win-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/win-x64/native/ }
+
+  linux-x64:
+    runs-on: ubuntu-22.04   # glibc 2.35, same as the Docker build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+      - name: Build libdatachannel.so
+        run: TARGET=linux-x64 bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
+      - name: Live WebRTC test
+        run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests
+      - uses: actions/upload-artifact@v4
+        with: { name: native-linux-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/linux-x64/native/ }
+
+  macos-universal:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - run: brew install ninja
+      - name: Build libdatachannel.dylib (arm64 + x86_64)
+        run: TARGET=osx bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
+      - run: lipo -info clients/dotnet/OneLobby.DataChannel/runtimes/osx/native/libdatachannel.dylib
+      - name: Live WebRTC test
+        run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests
+      - uses: actions/upload-artifact@v4
+        with: { name: native-osx, path: clients/dotnet/OneLobby.DataChannel/runtimes/osx/native/ }
+
+  android-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+      - name: Build libdatachannel.so (NDK, API 24, arm64-v8a, 16 KB pages)
+        run: TARGET=android-arm64 ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: native-android-arm64, path: clients/dotnet/OneLobby.DataChannel/runtimes/android-arm64/native/ }
