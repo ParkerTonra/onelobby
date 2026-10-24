@@ -1,4 +1,4 @@
-import { Keepalive, Gridpaint, paintCmd, PALETTE, GRID_W, formatCode } from "/lib/index.js";
+import { Keepalive, Gridpaint, paintCmd, PALETTE, GRID_W, formatCode } from "/lib/internals.js";
 
 const $ = (id) => document.getElementById(id);
 const server = document.querySelector('meta[name="keepalive-lobby-server"]').content;

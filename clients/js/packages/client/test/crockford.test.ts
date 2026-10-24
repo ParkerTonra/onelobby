@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeCrockford, encodeCrockford, formatCode, normalizeCode } from "../src/index.js";
+import { decodeCrockford, encodeCrockford, formatCode, normalizeCode } from "../src/internals.js";
 import { specJson } from "./spec.js";
 
 const codes = specJson("codes.json");

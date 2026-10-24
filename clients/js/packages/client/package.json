@@ -1,20 +1,82 @@
 {
   "name": "@keepalive/client",
   "version": "0.1.0",
-  "description": "Keepalive browser client: lobbies, WebRTC data channels, lockstep, text and voice chat. Zero runtime dependencies.",
+  "description": "Multiplayer for browser games: host/join lobbies by short code, peer-to-peer WebRTC, lockstep sync, text and voice chat. Zero runtime dependencies; works from a plain <script> tag.",
+  "keywords": [
+    "multiplayer",
+    "lobby",
+    "webrtc",
+    "p2p",
+    "peer-to-peer",
+    "netcode",
+    "lockstep",
+    "game",
+    "gamedev",
+    "browser-game",
+    "voice-chat",
+    "keepalive"
+  ],
   "license": "MIT",
+  "author": "Parker Tonra",
+  "homepage": "https://REPLACE-ME.example/keepalive#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://REPLACE-ME.example/keepalive.git",
+    "directory": "clients/js/packages/client"
+  },
+  "bugs": {
+    "url": "https://REPLACE-ME.example/keepalive/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "unpkg": "./dist/keepalive.global.min.js",
+  "jsdelivr": "./dist/keepalive.global.min.js",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./internals": {
+      "types": "./dist/internals.d.ts",
+      "import": "./dist/internals.js",
+      "default": "./dist/internals.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./global": "./dist/keepalive.global.js",
+    "./bundle": {
+      "types": "./dist/global.d.ts",
+      "default": "./dist/keepalive.bundle.mjs"
+    },
+    "./package.json": "./package.json"
   },
-  "files": ["dist"],
-  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": [
+    "./dist/keepalive.global.js",
+    "./dist/keepalive.global.min.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test && node scripts/prepublish-check.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

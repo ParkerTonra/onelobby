@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Lockstep, type Hub, type Message } from "../src/index.js";
+import { Lockstep, type Hub, type Message } from "../src/internals.js";
 import { ManualClock, settle } from "../src/testing.js";
 import { Player, play, rig } from "./helpers.js";
 

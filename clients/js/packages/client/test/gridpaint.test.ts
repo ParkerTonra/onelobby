@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Gridpaint, fnv1a64, paintCmd, seedFromCode } from "../src/index.js";
+import { Gridpaint, fnv1a64, paintCmd, seedFromCode } from "../src/internals.js";
 import { hex, specJson, unhex } from "./spec.js";
 
 const gp = specJson("vectors/gridpaint.json");

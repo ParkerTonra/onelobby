@@ -18,7 +18,7 @@ const arg = (name, dflt) => {
 const port = Number(arg("port", process.env.PORT ?? 5173));
 const lobby = arg("lobby", process.env.KEEPALIVE_LOBBY ?? "ws://localhost:8080/ws");
 
-if (!existsSync(join(dist, "index.js")) || process.argv.includes("--build")) {
+if (!existsSync(join(dist, "internals.js")) || process.argv.includes("--build")) {
   console.log("building @keepalive/client ...");
   execSync("npx tsc -p tsconfig.build.json", { cwd: pkg, stdio: "inherit" });
 }

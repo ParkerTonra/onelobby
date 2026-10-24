@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimWins, claimWinsWrapped, pickNewHost } from "../src/index.js";
+import { claimWins, claimWinsWrapped, pickNewHost } from "../src/internals.js";
 import { settle } from "../src/testing.js";
 import { Player, play, rig } from "./helpers.js";
 

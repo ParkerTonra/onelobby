@@ -24,6 +24,8 @@ frame handed out by `nextFrame()`; `restore(tick, bytes)` receives that tick and
 | Path | What |
 |---|---|
 | `packages/client` | the library (`src/`), vitest suite (`test/`) |
+| `packages/client/src/internals.ts` | low-level pieces (codec, chunking, migration, jitter buffer, gridpaint, clocks); export `@keepalive/client/internals`. The root export is the small public API |
+| `packages/client/dist/keepalive.global*.js`, `keepalive.bundle.mjs` | single-file `<script src>` (sets `window.Keepalive`) and ESM bundles, from `src/global.ts` via `scripts/bundle.mjs`; publish steps in `packages/client/PUBLISHING.md` |
 | `packages/client/src/testing.ts` | `ManualClock`, `MemoryNetwork` (in-memory peer links), `MemoryServer` (lk1 server double); export `@keepalive/client/testing` |
 | `demo/` | gridpaint in the browser: plain HTML + the built lib, `serve.mjs` dev server |
 | `e2e/tabs.mjs` | Playwright (core) script: host, joiner, late joiner, chat, voice, host-close migration in real Edge/Chrome |
@@ -34,7 +36,7 @@ frame handed out by `nextFrame()`; `restore(tick, bytes)` receives that tick and
 ```
 cd clients/js
 npm install
-npm test                 # vitest (165 tests); also: npm run typecheck, npm run build
+npm test                 # vitest (172 tests); also: npm run typecheck, npm run build
 KEEPALIVE_SERVER=ws://localhost:8080/ws npm test    # adds the real-server smoke test (real WebSocket, in-memory peer links)
 node ../../conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs   # after npm run build; 28/28
 ```

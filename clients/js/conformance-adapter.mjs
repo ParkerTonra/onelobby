@@ -2,7 +2,7 @@
 //   node conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.mjs
 // The library runs for real (real timers); only the three data channels per peer and the signaling socket are replaced:
 // channels go through the harness as `send`/`recv`, signaling is a stub. The game is gridpaint, written against the public API.
-import { Gridpaint, Lobby, paintCmd, systemClock } from "./packages/client/dist/index.js";
+import { Gridpaint, Lobby, paintCmd, systemClock } from "./packages/client/dist/internals.js";
 
 const hex = (b) => Buffer.from(b).toString("hex");
 const unhex = (s) => new Uint8Array(Buffer.from(s, "hex"));
