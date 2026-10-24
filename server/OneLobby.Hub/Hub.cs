@@ -24,7 +24,7 @@ public sealed class Hub
     private static readonly Regex GameIdRx = new("^[A-Za-z0-9._-]{1,64}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly object _gate = new();
-    private readonly ServerOptions _o;
+    private readonly HubOptions _o;
     private readonly IClock _clock;
     private readonly ILogger _log;
     private readonly Func<int, int> _rand;
@@ -38,7 +38,7 @@ public sealed class Hub
     private readonly Dictionary<string, IpState> _ips = new(StringComparer.Ordinal);
     private long _nextSession;
     private int _members;
-    private readonly string _logSalt = Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
+    private readonly string _logSalt = Compat.Hex(Compat.RandomBytes(8));
 
     private int Scale => Math.Max(1, _o.RateScale);
 
@@ -50,7 +50,7 @@ public sealed class Hub
         public int Sockets;
     }
 
-    public Hub(ServerOptions options, IClock? clock = null, ILogger? logger = null, Func<int, int>? randomInt = null)
+    public Hub(HubOptions options, IClock? clock = null, ILogger? logger = null, Func<int, int>? randomInt = null)
     {
         _o = options;
         _clock = clock ?? new SystemClock();
@@ -81,7 +81,7 @@ public sealed class Hub
             {
                 Id = ++_nextSession,
                 Ip = ip,
-                ConnId = Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
+                ConnId = Compat.Hex(Compat.RandomBytes(6)).ToLowerInvariant(),
                 Send = send,
                 Close = close,
                 LastSeen = _clock.NowMs,
@@ -634,7 +634,7 @@ public sealed class Hub
         return null;
     }
 
-    private static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+    private static string NewToken() => Compat.Hex(Compat.RandomBytes(16)).ToLowerInvariant();
 
     // ---------------------------------------------------------------- output helpers
 
@@ -705,7 +705,7 @@ public sealed class Hub
         _log.LogInformation("lobby {Event} code={Code} game={Game} players={Players} ip={Ip}", ev, l.Code, l.GameId, l.Members.Count, s is null ? "-" : HashIp(s.Ip));
 
     private string HashIp(string ip) =>
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(_logSalt + ip)), 0, 4).ToLowerInvariant();
+        Compat.Hex(Compat.Sha256(System.Text.Encoding.UTF8.GetBytes(_logSalt + ip)), 0, 4).ToLowerInvariant();
 
     // ---------------------------------------------------------------- tolerant JSON readers
 

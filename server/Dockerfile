@@ -4,8 +4,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY Directory.Build.props ./
+COPY OneLobby.Hub/OneLobby.Hub.csproj OneLobby.Hub/
 COPY OneLobby.Server/OneLobby.Server.csproj OneLobby.Server/
 RUN dotnet restore OneLobby.Server/OneLobby.Server.csproj
+COPY OneLobby.Hub/ OneLobby.Hub/
 COPY OneLobby.Server/ OneLobby.Server/
 RUN dotnet publish OneLobby.Server/OneLobby.Server.csproj -c Release -o /out --no-restore -p:UseAppHost=false
 
