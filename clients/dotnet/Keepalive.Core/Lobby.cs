@@ -17,7 +17,8 @@ namespace Keepalive
             public int Id;
             public string Name = "";
             public IPeerLink? Link;
-            public bool OpenHandled, Hello, HiSent;
+            public bool OpenHandled, Hello, HiSent, ReadyRaised;
+            public readonly List<(PeerChannel Ch, byte[] Data)> Pending = new();
             public long LastRxMs, OpenedMs;
             public int PingMs;
             public int Resyncs;
@@ -90,10 +91,21 @@ namespace Keepalive
         /// <summary>True once the data channel to the host is up and welcomed (always true on the host).</summary>
         public bool IsReady => _ready;
 
+        private readonly TaskCompletionSource<bool> _readyTcs = new();
+
+        /// <summary>Completes when <see cref="IsReady"/> first becomes true (immediately for a host).</summary>
+        public Task ReadyAsync => _readyTcs.Task;
+
         public IReadOnlyList<Peer> Peers => _peers.Values.Select(r =>
             new Peer(r.Id, r.Name, r.PingMs, r.Link?.Relayed ?? false)).ToList();
 
         public event Action? Ready;
+        /// <summary>
+        /// A peer's data channels are open and its handshake is done: from here Send/Broadcast reach it at once.
+        /// (<see cref="PeerJoined"/> fires earlier, when the server announces the peer; reliable sends made in between are
+        /// queued and delivered in order when the link opens.) On a joiner this fires once for the host.
+        /// </summary>
+        public event Action<Peer>? PeerReady;
         public event Action<Peer>? PeerJoined;
         public event Action<Peer, string>? PeerLeft;
         public event Action<Peer>? JoinRequested;
@@ -158,7 +170,7 @@ namespace Keepalive
         public void Broadcast(ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable)
         {
             var ch = channel == Channel.Fast ? PeerChannel.Fast : PeerChannel.Reliable;
-            if (IsHost) { var f = Wire.BuildRaw(_you, payload); foreach (var r in HelloPeers()) SendLink(r, ch, f); }
+            if (IsHost) { var f = Wire.BuildRaw(_you, payload); foreach (var r in _peers.Values.Where(x => x.Id != _you && x.Link != null).ToList()) SendLink(r, ch, f); }
             else SendToHost(ch, Wire.BuildRaw(0, payload));
         }
 
@@ -172,6 +184,7 @@ namespace Keepalive
             if (IsHost)
             {
                 _ready = true;
+                _readyTcs.TrySetResult(true);
                 foreach (var r in _peers.Values.ToList()) if (r.Id != _you) ConnectPeer(r, true);
             }
             else
@@ -209,7 +222,13 @@ namespace Keepalive
 
         private void SendLink(PeerRec r, PeerChannel ch, byte[] data)
         {
-            if (r.Link == null || !r.Link.IsOpen) return;
+            if (r.Link == null || r.Link.IsFailed) return;
+            if (!r.Link.IsOpen)
+            {
+                // the connection is still being set up: keep reliable sends in order and flush them when it opens
+                if (ch == PeerChannel.Reliable && r.Pending.Count < 1024) r.Pending.Add((ch, data));
+                return;
+            }
             if (data.Length <= Wire.MaxFrame) { r.Link.Send(ch, data); return; }
             foreach (var chunk in Chunker.Split(++_bigId, data)) r.Link.Send(PeerChannel.Reliable, chunk);
         }
@@ -334,6 +353,16 @@ namespace Keepalive
             {
                 SendHi(rec);
             }
+            var queued = rec.Pending.ToArray();
+            rec.Pending.Clear();
+            foreach (var (ch, data) in queued) SendLink(rec, ch, data);
+        }
+
+        private void RaiseReady(PeerRec rec)
+        {
+            if (rec.ReadyRaised) return;
+            rec.ReadyRaised = true;
+            PeerReady?.Invoke(ToPeer(rec));
         }
 
         private void SendHi(PeerRec rec)
@@ -383,6 +412,7 @@ namespace Keepalive
                     var proto = r.U8(); r.U16(); var lastTick = r.I64();
                     if (proto != Wire.ProtoVersion) return;
                     rec.Hello = true;
+                    RaiseReady(rec);
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildWelcomeDc(Lockstep?.Head ?? 0, TickRate,
                         Mode == SyncMode.Raw ? Wire.ModeRaw : Wire.ModeLockstep, _you));
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildChatHistory(Chat.History));
@@ -495,7 +525,8 @@ namespace Keepalive
                     var tick = r.I64(); r.U8(); r.U8(); var host = r.U16();
                     if (host != _hostId) return;
                     if (tick > 0) SetPhase(LobbyPhase.InGame);
-                    if (!_ready) { _ready = true; Ready?.Invoke(); }
+                    if (!_ready) { _ready = true; Ready?.Invoke(); _readyTcs.TrySetResult(true); }
+                    RaiseReady(rec);
                     return;
                 }
                 case Wire.ChatHistory:
