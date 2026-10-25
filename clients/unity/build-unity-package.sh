@@ -85,7 +85,7 @@ if [ "${1:-}" = "--pack" ]; then
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$pkg/package.json" | head -1)"
   stage="$(mktemp -d)"
   cp -R "$pkg" "$stage/package"
-  tar -czf "$here/com.onelobby.unity-$version.tgz" -C "$stage" package
+  tar $(tar --version 2>/dev/null | grep -q GNU && echo --force-local) -czf "$here/com.onelobby.unity-$version.tgz" -C "$stage" package
   rm -rf "$stage"
   echo "packed $here/com.onelobby.unity-$version.tgz"
 fi

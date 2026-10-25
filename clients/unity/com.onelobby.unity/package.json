@@ -1,6 +1,6 @@
 {
   "name": "com.onelobby.unity",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "displayName": "OneLobby",
   "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice, and hosting by IP with a join code (no server). Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) over the engine-agnostic OneLobby.Core, OneLobby.DataChannel (libdatachannel) and OneLobby.Direct.",
   "unity": "6000.0",
