@@ -23,8 +23,14 @@ namespace OneLobby.Unity
         public SyncMode Mode = SyncMode.Raw;
         public string DisplayName = "Player";
         public bool KeepAcrossScenes = true;
+        [Tooltip("While hosting or joining, force Application.runInBackground = true so an unfocused window keeps pumping " +
+                 "(otherwise the handshake stalls and the joiner waits at ReadyAsync). The previous value is restored when the lobby ends.")]
+        public bool KeepRunningInBackground = true;
 
         private LobbyClient? _client;
+        private bool _holdingBackground;
+        private bool _previousRunInBackground;
+        private static bool _loggedBackground;
 
         public UnityTransport Transport { get; } = new UnityTransport();
         /// <summary>The current lobby, or null. Cleared when the session ends.</summary>
@@ -60,10 +66,46 @@ namespace OneLobby.Unity
             else _client?.Pump();
         }
 
-        public async Task<Lobby> HostAsync(LobbyOptions options) => Adopt(await Client.HostAsync(options));
-        public async Task<Lobby> JoinAsync(string code) => Adopt(await Client.JoinAsync(code));
-        public async Task<Lobby> RejoinAsync(string resumeToken) => Adopt(await Client.RejoinAsync(resumeToken));
+        public Task<Lobby> HostAsync(LobbyOptions options) => Enter(() => Client.HostAsync(options));
+        public Task<Lobby> JoinAsync(string code) => Enter(() => Client.JoinAsync(code));
+        public Task<Lobby> RejoinAsync(string resumeToken) => Enter(() => Client.RejoinAsync(resumeToken));
         public Task<IReadOnlyList<LobbySummary>> ListAsync() => Client.ListAsync();
+
+        /// <summary>Runs a Host/Join call with the background hold on from the start; drops the hold if the call fails.</summary>
+        private async Task<Lobby> Enter(Func<Task<Lobby>> start)
+        {
+            HoldBackground();
+            try { return Adopt(await start()); }
+            catch
+            {
+                if (Lobby == null) ReleaseBackground();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Unity's default runInBackground = false stops Update in an unfocused player, so nothing pumps the lobby: the
+        /// host stops relaying the handshake and a joiner never gets ready. Keep running while a lobby is held.
+        /// </summary>
+        private void HoldBackground()
+        {
+            if (!KeepRunningInBackground || _holdingBackground) return;
+            _holdingBackground = true;
+            _previousRunInBackground = Application.runInBackground;
+            if (_previousRunInBackground) return;
+            Application.runInBackground = true;
+            if (_loggedBackground) return;
+            _loggedBackground = true;
+            Debug.Log("OneLobby: set Application.runInBackground = true while in a lobby, so an unfocused window keeps the " +
+                      "connection alive (restored when the lobby ends; turn off OneLobbyRunner.KeepRunningInBackground to opt out).");
+        }
+
+        private void ReleaseBackground()
+        {
+            if (!_holdingBackground) return;
+            _holdingBackground = false;
+            Application.runInBackground = _previousRunInBackground;
+        }
 
         private Lobby Adopt(Lobby lobby)
         {
@@ -72,6 +114,7 @@ namespace OneLobby.Unity
             {
                 if (Lobby != lobby) return;
                 Lobby = null;
+                ReleaseBackground();
                 LobbyChanged?.Invoke(null);
             };
             LobbyChanged?.Invoke(lobby);
@@ -85,6 +128,7 @@ namespace OneLobby.Unity
             if (l == null) return;
             Lobby = null;
             await l.LeaveAsync();
+            ReleaseBackground();
             LobbyChanged?.Invoke(null);
         }
 
@@ -93,6 +137,7 @@ namespace OneLobby.Unity
             var c = _client;
             _client = null;
             Lobby = null;
+            ReleaseBackground();
             if (c != null) _ = c.DisposeAsync().AsTask();
         }
     }
