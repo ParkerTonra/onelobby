@@ -67,7 +67,8 @@ namespace OneLobby.Direct
             for (var p = port; hub == null; p++)
             {
                 try { hub = new DirectHubHost(p, HubOptions.ForDirect(o.MaxPlayers, o.Password)); }
-                catch (SocketException e) when (p < last && e.SocketErrorCode == SocketError.AddressAlreadyInUse) { }
+                // AccessDenied: Windows reserved the port (Hyper-V, WSL, Docker exclusion ranges); try the next one too
+                catch (SocketException e) when (p < last && e.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AccessDenied) { }
                 catch (SocketException e)
                 {
                     var range = last > port ? "ports " + port + "-" + last : "port " + port;

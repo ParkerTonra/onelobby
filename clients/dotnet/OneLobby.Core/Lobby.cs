@@ -205,6 +205,12 @@ namespace OneLobby
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Leaves the lobby: tells the server, closes every peer link and turns voice off. Completes at once, never throws,
+        /// and a second call does nothing. <see cref="SessionEnded"/> does not fire for your own leave; the other peers see
+        /// <see cref="PeerLeft"/>. A direct-IP host leaving stops its listener, which ends the session for every joiner
+        /// (<c>SessionEnded("host_left")</c>). Do not use the lobby afterwards: host or join again from the LobbyClient.
+        /// </summary>
         public Task LeaveAsync()
         {
             if (_closed) return Task.CompletedTask;

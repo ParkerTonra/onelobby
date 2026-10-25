@@ -147,7 +147,11 @@ namespace OneLobby.Replication
             if (_hostEnts.TryGetValue(id.Value, out var e)) e.Owner = owner;
         }
 
-        /// <summary>Host: entities currently registered.</summary>
+        /// <summary>
+        /// Host: the entities spawned with <see cref="Spawn"/> and not yet despawned, as (id, type id, owner peer id).
+        /// A live view: to despawn while looping, copy it first (<c>HostEntities.ToList()</c>). Empty on a client:
+        /// clients learn entities from <see cref="EntitySpawned"/> / <see cref="EntityDespawned"/>.
+        /// </summary>
         public IEnumerable<EntityInfo> HostEntities => _hostEnts.Select(kv => new EntityInfo(new NetId(kv.Key), kv.Value.Type, kv.Value.Owner));
 
         /// <summary>
