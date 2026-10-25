@@ -23,7 +23,7 @@ import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.4.1";
+export const LIB_VERSION = "0.5.0";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {

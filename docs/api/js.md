@@ -56,7 +56,7 @@ import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 import { type Blueprint } from "./blueprint.js";
 export declare const LIB_NAME = "onelobby";
-export declare const LIB_VERSION = "0.4.1";
+export declare const LIB_VERSION = "0.5.0";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
     getItem(key: string): string | null;
