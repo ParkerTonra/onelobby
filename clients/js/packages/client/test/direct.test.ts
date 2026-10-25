@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:net";
+import { createSocket } from "node:dgram";
 import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby } from "../src/onelobby.js";
 import type { Lobby } from "../src/lobby.js";
@@ -100,6 +101,21 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     const a = await DirectHubHost.listen(port);
     cleanup.push(() => a.close());
     await expect(DirectHubHost.listen(port)).rejects.toMatchObject({ code: "port_in_use" });
+  });
+
+  it("a port another program holds on IPv4 only, TCP or UDP, is port_in_use", async () => {
+    // Windows lets a dual-stack [::] listener bind over a program on 0.0.0.0, and IPv4 joiners then reach that program
+    const port = await freePort();
+    const other = createServer();
+    await new Promise<void>((r) => other.listen(port, "0.0.0.0", () => r()));
+    cleanup.push(() => new Promise<void>((r) => other.close(() => r())));
+    await expect(DirectHubHost.listen(port)).rejects.toMatchObject({ code: "port_in_use" });
+
+    // peer links share UDP P, so a taken UDP half counts too
+    const udp = createSocket("udp4");
+    await new Promise<void>((r) => udp.bind(0, "0.0.0.0", () => r()));
+    cleanup.push(() => void udp.close());
+    await expect(DirectHubHost.listen(udp.address().port)).rejects.toMatchObject({ code: "port_in_use" });
   });
 
   it("GET /healthz answers ok and plain HTTP gets 426", async () => {

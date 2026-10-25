@@ -63,6 +63,7 @@ public sealed class DirectHubHost : IDisposable
 
     private static TcpListener Bind(int port)
     {
+        if (port != 0) ProbeIPv4(port);
         if (Socket.OSSupportsIPv6)
         {
             var l = new TcpListener(IPAddress.IPv6Any, port);
@@ -80,6 +81,20 @@ public sealed class DirectHubHost : IDisposable
         var v4 = new TcpListener(IPAddress.Any, port);
         v4.Start();
         return v4;
+    }
+
+    /// <summary>
+    /// Throws AddressAlreadyInUse when another program holds IPv4 TCP or UDP <paramref name="port"/>. Windows lets the
+    /// dual-stack listener bind over a program on 0.0.0.0 (every IPv4 joiner would then reach that program), and the
+    /// peer links need UDP <paramref name="port"/> too, so both are tried and released before the real bind.
+    /// </summary>
+    private static void ProbeIPv4(int port)
+    {
+        foreach (var (type, proto) in new[] { (SocketType.Stream, ProtocolType.Tcp), (SocketType.Dgram, ProtocolType.Udp) })
+        {
+            using var s = new Socket(AddressFamily.InterNetwork, type, proto);
+            s.Bind(new IPEndPoint(IPAddress.Any, port));
+        }
     }
 
     /// <summary>Call from the game loop (any rate): runs the hub's once-a-second housekeeping.</summary>

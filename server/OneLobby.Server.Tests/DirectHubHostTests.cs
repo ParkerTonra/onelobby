@@ -96,4 +96,30 @@ public class DirectHubHostTests
         using var a = new DirectHubHost(0, HubOptions.ForDirect(4, null));
         Assert.ThrowsAny<SocketException>(() => new DirectHubHost(a.Port, HubOptions.ForDirect(4, null)));
     }
+
+    [Fact]
+    public void Port_held_by_another_program_on_ipv4_only_is_in_use()
+    {
+        // e.g. a Node server listening on 0.0.0.0: Windows lets a dual-stack [::] socket bind the same port, and then
+        // every IPv4 joiner reaches the other program
+        var other = new TcpListener(System.Net.IPAddress.Any, 0);
+        other.Start();
+        try
+        {
+            var port = ((System.Net.IPEndPoint)other.LocalEndpoint).Port;
+            var e = Assert.ThrowsAny<SocketException>(() => new DirectHubHost(port, HubOptions.ForDirect(4, null)));
+            Assert.Equal(SocketError.AddressAlreadyInUse, e.SocketErrorCode);
+        }
+        finally { other.Stop(); }
+    }
+
+    [Fact]
+    public void Udp_port_held_by_another_program_is_in_use()
+    {
+        // peer links share UDP P (ICE UDP mux): a port whose UDP half is taken cannot host either
+        using var other = new UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Any, 0));
+        var port = ((System.Net.IPEndPoint)other.Client.LocalEndPoint!).Port;
+        var e = Assert.ThrowsAny<SocketException>(() => new DirectHubHost(port, HubOptions.ForDirect(4, null)));
+        Assert.Equal(SocketError.AddressAlreadyInUse, e.SocketErrorCode);
+    }
 }

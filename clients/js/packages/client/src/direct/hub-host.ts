@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import { createHash } from "node:crypto";
+import { createSocket } from "node:dgram";
 import { createServer, type Server, type Socket } from "node:net";
 import type { SocketLike } from "../transport.js";
 import { SignalingHub, directHubOptions, type HubDeps, type HubOptions, type Session } from "./hub.js";
@@ -9,6 +10,27 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_HEADER_BYTES = 8192;
 const HANDSHAKE_TIMEOUT_MS = 5000;
 const STATUS_TEXT: Record<number, string> = { 200: "OK", 301: "Moved Permanently", 302: "Found", 404: "Not Found", 500: "Internal Server Error" };
+
+/**
+ * Rejects (EADDRINUSE) when another program holds IPv4 TCP or UDP `port`. Windows lets the dual-stack listener bind
+ * over a program on 0.0.0.0 (every IPv4 joiner would then reach that program), and the peer links need UDP `port`
+ * too, so both are tried and released before the real listen.
+ */
+async function probeIPv4(port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const s = createServer();
+    s.once("error", reject);
+    s.listen({ port, host: "0.0.0.0", exclusive: true }, () => s.close(() => resolve()));
+  });
+  await new Promise<void>((resolve, reject) => {
+    const u = createSocket({ type: "udp4" });
+    u.once("error", (e) => {
+      u.close();
+      reject(e);
+    });
+    u.bind({ port, address: "0.0.0.0", exclusive: true }, () => u.close(() => resolve()));
+  });
+}
 
 export class PortInUseError extends Error {
   readonly code = "port_in_use";
@@ -81,6 +103,7 @@ export class DirectHubHost {
     try {
       if (deps?.host) await tryListen(deps.host);
       else {
+        if (port !== 0) await probeIPv4(port);
         try {
           await tryListen("::", false);
         } catch (e) {
