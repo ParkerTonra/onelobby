@@ -120,6 +120,13 @@ namespace OneLobby
         public IReadOnlyList<Peer> Peers => _peers.Values.Select(r =>
             new Peer(r.Id, r.Name, r.PingMs, r.Link?.Relayed ?? false)).ToList();
 
+        /// <summary>
+        /// True once <see cref="PeerReady"/> has fired for this peer (its data channels are open and its handshake is
+        /// done). Always true for the local player.
+        /// </summary>
+        public bool IsPeerReady(int peerId) =>
+            peerId == _you || (_peers.TryGetValue(peerId, out var r) && r.ReadyRaised && r.Link != null && r.Link.IsOpen);
+
         public event Action? Ready;
         /// <summary>
         /// A peer's data channels are open and its handshake is done: from here Send/Broadcast reach it at once.
@@ -212,20 +219,71 @@ namespace OneLobby
             else
             {
                 if (_peers.TryGetValue(_hostId, out var h)) ConnectPeer(h, false);
+                ArmReadyTimer();
             }
+        }
+
+        // ---- joiner connect timeout (OneLobbyConfig.ReadyTimeout; same rules as the JS client's readyTimeoutMs) -----
+
+        private long _readyDeadlineMs; // 0 = no timer
+        private long _readyRetryBudgetMs; // > 0: the deadline starts a relay-only retry with this budget instead of giving up
+        private bool _relayRetried;
+
+        private void ArmReadyTimer()
+        {
+            var total = (long)Math.Ceiling(_c.Config.ReadyTimeout.TotalMilliseconds);
+            if (total <= 0) return;
+            var canRelay = !_c.Config.RelayOnly && !_c.Direct && HasRelay(_c.Ice);
+            var first = canRelay ? (total + 1) / 2 : total;
+            _readyRetryBudgetMs = canRelay ? total - first : 0;
+            _readyDeadlineMs = NowMs + first;
+        }
+
+        private static bool HasRelay(IReadOnlyList<IceServer> ice) =>
+            ice.Any(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase)
+                || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
+
+        private void CheckReadyTimer(long now)
+        {
+            if (_readyDeadlineMs == 0) return;
+            if (_readyTcs.Task.IsCompleted || _ready || IsHost) { _readyDeadlineMs = 0; return; } // linked, or became host
+            if (now < _readyDeadlineMs) return;
+            if (_readyRetryBudgetMs > 0 && _peers.TryGetValue(_hostId, out var h))
+            {
+                // the direct attempt stalled: dial the host ourselves through the TURN relay (a host answers an offer)
+                _relayRetried = true;
+                _readyDeadlineMs = now + _readyRetryBudgetMs;
+                _readyRetryBudgetMs = 0;
+                ConnectPeer(h, true, relayOnly: true);
+                return;
+            }
+            _readyDeadlineMs = 0;
+            GiveUpConnecting();
+        }
+
+        private void GiveUpConnecting()
+        {
+            var secs = _c.Config.ReadyTimeout.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            var msg = "the link to the host did not open in " + secs + " s" + (_relayRetried ? " (direct or relayed)" : "")
+                + ": likely a firewall or strict NAT";
+            _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg));
+            _c.RaiseError(new LobbyError("ice_failed", msg));
+            if (_closed) return;
+            _c.SendRaw(Signaling.Simple("leave"));
+            End("ice_failed");
         }
 
         internal IEnumerable<PeerRec> PeerRecords() => _peers.Values.ToList();
         private IEnumerable<PeerRec> HelloPeers() => _peers.Values.Where(r => r.Id != _you && r.Hello && r.Link != null && r.Link.IsOpen).ToList();
         internal bool IsLocallyMuted(int peerId) => Voice.IsMuted(peerId);
 
-        private void ConnectPeer(PeerRec rec, bool initiator)
+        private void ConnectPeer(PeerRec rec, bool initiator, bool relayOnly = false)
         {
             rec.Link?.Dispose();
             rec.OpenHandled = false;
             rec.Hello = false;
             rec.HiSent = false;
-            rec.Link = _t.CreatePeerLink(new PeerLinkOptions(rec.Id, initiator, _c.Ice, _c.Config.RelayOnly));
+            rec.Link = _t.CreatePeerLink(new PeerLinkOptions(rec.Id, initiator, _c.Ice, relayOnly || _c.Config.RelayOnly));
             rec.LastRxMs = NowMs;
             if (initiator) rec.Link.StartOffer();
         }
@@ -304,6 +362,8 @@ namespace OneLobby
                     if (_closed) return;
                 }
             }
+            if (_closed) return;
+            CheckReadyTimer(now);
             if (_closed) return;
             Timeouts(now);
             if (now - _lastPingMs >= PingEveryMs)
@@ -739,6 +799,11 @@ namespace OneLobby
                     {
                         if (sig.SdpType != "offer" || IsHost) return;
                         ConnectPeer(rec, false); // a peer is dialing us (a new host, or a rival claimant): its claim decides
+                    }
+                    else if (IsHost && sig.SdpType == "offer" && _epoch == 0 && !rec.Hello && !rec.Link.IsOpen)
+                    {
+                        // a joiner whose link never opened dials us itself (its relay-only retry): answer that offer
+                        ConnectPeer(rec, false);
                     }
                     rec.Link!.ApplySignal(sig);
                     return;
