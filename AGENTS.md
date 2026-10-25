@@ -164,6 +164,31 @@ Full reference (generated): `docs/api/`.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 
+## Integrate a game: the blueprint flow
+
+Every multiplayer choice lives in one file, `onelobby.json`, at the game's root. Schema: `spec/blueprint.schema.json`
+(on npm: `onelobby/blueprint.schema.json`). Smallest valid file: `{ "game": { "id": "com.you.game" } }`; every
+other key has a default. The library reads the runtime keys itself and enforces the switches, so a hand edit wins
+even over code that still calls the API:
+
+```ts
+const kit = OneLobby.fromConfig(await (await fetch("./onelobby.json")).json(), { displayName });
+const lobby = await kit.host();                            // maxPlayers, visibility, lateJoin, meta from the file
+if (kit.blueprint.chat.voice) showVoiceButton();
+```
+
+```csharp
+var bp = Blueprint.Load("onelobby.json");
+var client = LobbyClient.FromBlueprint(bp, new DataChannelTransport(), displayName: "Ann");
+Lobby lobby = await client.HostAsync();                    // or HostDirectAsync() from OneLobby.Direct
+```
+
+A bad file throws `bad_config` with the key's path. Switched-off features throw `voice_disabled`, `chat_disabled`,
+`listing_disabled` (`list()` with `hosting.server` false) and `identity_anonymous`. To integrate an existing game,
+follow `.claude/skills/onelobby/SKILL.md` (Claude Code skill `onelobby`; other agents read it as plain steps): survey
+the game, propose the file with a `$comment` reason per non-default key, plan the menu entry, build with the engine's
+recipe, verify two players headless, report. Design and the reasons behind each key: `docs/design/blueprint.md`.
+
 ## Rules
 
 1. **The game owns the command bytes.** OneLobby moves opaque `Uint8Array` / `byte[]`. Encode and decode yourself; pass

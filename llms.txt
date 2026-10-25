@@ -25,6 +25,7 @@ build dist/onelobby.global.min.js (window.OneLobby).
 
 ## Recipes
 
+- [Blueprint flow](.claude/skills/onelobby/SKILL.md): survey a game, write onelobby.json (schema [spec/blueprint.schema.json](spec/blueprint.schema.json), design [docs/design/blueprint.md](docs/design/blueprint.md)), build with OneLobby.fromConfig / Blueprint.Load, verify two players
 - [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project
 - [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over OneLobby.DataChannel/libdatachannel, OneLobbyRunner, voice); desktop now, no WebGL
 - [Browser JS](docs/recipes/js-web.md): the same in a plain web page
