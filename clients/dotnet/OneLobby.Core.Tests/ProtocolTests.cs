@@ -120,6 +120,15 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void InflateRefusesOutputOverTheCapAndAcceptsOutputAtIt()
+        {
+            var z = Zlib.Deflate(new byte[1_000_000]);   // ~1 KB of zlib for 1 MB of zeros
+            Assert.True(z.Length < 2000);
+            Assert.Throws<FormatException>(() => Zlib.Inflate(z, 100_000));
+            Assert.Equal(1_000_000, Zlib.Inflate(z, 1_000_000).Length);
+        }
+
+        [Fact]
         public void EmptyPayloadIsOneEmptyChunk()
         {
             var chunks = Chunker.Split(1, ReadOnlyMemory<byte>.Empty, 16000).ToList();

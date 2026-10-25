@@ -107,6 +107,14 @@ describe("chunking vs spec/vectors/chunking.json", () => {
     expect(() => decodeMessage(inner)).toThrow(CodecError); // single-frame cap
   });
 
+  it("inflate refuses output over the cap and accepts output at it", async () => {
+    const { deflate, inflate } = await import("../src/deflate.js");
+    const z = await deflate(new Uint8Array(1_000_000)); // ~1 KB of zlib for 1 MB of zeros
+    expect(z.length).toBeLessThan(2000);
+    await expect(inflate(z, 100_000)).rejects.toThrow(CodecError);
+    expect((await inflate(z, 1_000_000)).length).toBe(1_000_000);
+  });
+
   it("snapshot_deflate vector: header decodes and the zlib payload inflates to 260 bytes", async () => {
     const v = chunking.vectors.find((x: any) => x.name === "snapshot_deflate");
     const { inflate } = await import("../src/deflate.js");

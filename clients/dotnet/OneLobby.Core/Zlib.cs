@@ -19,13 +19,20 @@ namespace OneLobby
             return ms.ToArray();
         }
 
-        public static byte[] Inflate(byte[] data)
+        /// <summary>Inflates at most <paramref name="maxBytes"/>; a stream that would grow past it is a FormatException (a few KB can inflate to gigabytes).</summary>
+        public static byte[] Inflate(byte[] data, int maxBytes = Wire.MaxReassembled)
         {
             if (data.Length < 6 || (data[0] & 0x0F) != 8) throw new FormatException("not a zlib stream");
             using var input = new MemoryStream(data, 2, data.Length - 2);
             using var z = new DeflateStream(input, CompressionMode.Decompress);
             using var output = new MemoryStream();
-            z.CopyTo(output);
+            var buf = new byte[81920];
+            int n;
+            while ((n = z.Read(buf, 0, buf.Length)) > 0)
+            {
+                if (output.Length + n > maxBytes) throw new FormatException("snapshot inflates to more than " + maxBytes + " bytes");
+                output.Write(buf, 0, n);
+            }
             return output.ToArray();
         }
     }
