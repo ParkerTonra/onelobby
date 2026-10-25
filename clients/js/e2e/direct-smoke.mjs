@@ -41,7 +41,9 @@ if (args[0] === "host") {
   const waitS = Number(flags.find((f) => f.startsWith("--wait="))?.slice(7) ?? 120);
   // --page: serve a browser join page on the same port; whoever opens joinUrl runs the same echo test as `join`.
   const http = flags.includes("--page") ? joinPage() : undefined;
-  const lobby = await hostDirect(kit, { port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp"), http }).catch((e) => {
+  const lobby = await hostDirect(kit, {
+    port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp"), http, portMapping: { log: say },
+  }).catch((e) => {
     say(`FAIL host: ${e.code ?? ""} ${e.message}`);
     process.exit(1);
   });

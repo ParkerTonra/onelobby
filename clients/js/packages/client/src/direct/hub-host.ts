@@ -139,9 +139,14 @@ export class DirectHubHost {
     return this.portMapper.open();
   }
 
-  /** Stops listening, closes every joiner socket and removes the router mapping. */
-  async close(): Promise<void> {
-    if (this.closed) return;
+  /** Stops listening, closes every joiner socket and removes the router mapping. Every call gets the same promise. */
+  close(): Promise<void> {
+    return (this.closing ??= this.closeOnce());
+  }
+
+  private closing?: Promise<void>;
+
+  private async closeOnce(): Promise<void> {
     this.closed = true;
     clearInterval(this.ticker);
     const unmap = this.portMapper?.close();

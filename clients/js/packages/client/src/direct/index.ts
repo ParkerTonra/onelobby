@@ -110,6 +110,16 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
     throw e;
   }
   lobby.on("sessionEnded", () => void hub.close());
+  // leave() resolves once the router mapping is deleted, so a host that exits right after it does not leave the port
+  // forwarded until the lease runs out (2 h, or never on routers that only grant permanent leases)
+  const leave = lobby.leave.bind(lobby);
+  lobby.leave = async () => {
+    try {
+      await leave();
+    } finally {
+      await hub.close();
+    }
+  };
   const map = await mapping;
   lobby.directAddresses = localAddresses(hub.port);
   lobby.portMapping = map ? map.detail : "off";

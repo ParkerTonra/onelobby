@@ -323,6 +323,48 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     cleanup.push(() => j.leave());
     expect(j.joinCode).toBe(encodeJoinCode("127.0.0.1", b.directHub.port));
   }, 30000);
+
+  it("leave() resolves after the router mapping is deleted, so a host may exit right after it", async () => {
+    // a NAT-PMP gateway on loopback: a map (lifetime > 0) or delete (lifetime 0) takes effect when the packet arrives
+    const gw = createSocket("udp4");
+    const mappings = new Map<string, number>();
+    gw.on("message", (q, r) => {
+      if (q[1] === 0) return void gw.send(Buffer.from([0, 128, 0, 0, 0, 0, 0, 1, 198, 51, 100, 9]), r.port, r.address);
+      const internal = q.readUInt16BE(4);
+      const life = q.readUInt32BE(8);
+      if (life === 0) mappings.delete(`${q[1]} ${internal}`);
+      else mappings.set(`${q[1]} ${internal}`, life);
+      setTimeout(() => {
+        const reply = Buffer.alloc(16);
+        reply[1] = 128 + q[1];
+        reply.writeUInt32BE(1, 4);
+        reply.writeUInt16BE(internal, 8);
+        reply.writeUInt16BE(life === 0 ? 0 : internal, 10);
+        reply.writeUInt32BE(life, 12);
+        gw.send(reply, r.port, r.address);
+      }, 200);
+    });
+    await new Promise<void>((r) => gw.bind(0, "127.0.0.1", () => r()));
+    cleanup.push(() => {
+      gw.close();
+    });
+    const port = await freePort();
+    const log: string[] = [];
+    const host = await hostDirect(kit("Host"), {
+      port,
+      portMapping: {
+        ssdp: { address: "127.0.0.1", port: 9 }, natPmp: { address: "127.0.0.1", port: gw.address().port },
+        tryUpnp: false, discoveryTimeoutMs: 800, log: (l) => log.push(l),
+      },
+    });
+    expect(host.portMapping).toContain("NAT-PMP");
+    expect(mappings.size).toBe(2);
+    await host.leave();
+    // the deletes are sent (the log comes after the sends complete) before leave() resolves; a real router is another
+    // machine, this fake shares our event loop, so give loopback delivery a moment
+    expect(log).toEqual([`direct host mapping deleted port=${port} protocols=TCP,UDP mapping=NAT-PMP`]);
+    await until(() => mappings.size === 0, "gateway sees both deletes", 1000);
+  }, 30000);
 });
 
 export type { Lobby };

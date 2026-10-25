@@ -6,6 +6,7 @@ using System.Threading;
 using OneLobby;
 using OneLobby.DataChannel;
 using OneLobby.Direct;
+using OneLobby.Server;
 
 // Direct-IP smoke test (docs/direct-ip.md s.5 step 7): no lobby server anywhere.
 //   host-direct [port] [password|-]     hosts on TCP+UDP port (default 47810), asks the router to open it (UPnP/NAT-PMP),
@@ -15,6 +16,7 @@ using OneLobby.Direct;
 //   join-direct <code|address> [pw]     joins by join code (6B01-RGFE-P2B) or address, prints the selected ICE pair, sends "hello direct" (reliable) and
 //                                       "fast direct" (fast, repeated), waits for both echoes, prints PASS/FAIL, says bye.
 //     --no-upnp                         (host) do not ask the router; the code is then a same-network code.
+//     --wait=<s>                        (host) how long to wait for a joiner (default 120).
 //     --only-typed                      (join) drop every candidate the host offers, so only the typed address can
 //                                       connect: the outside-joiner case on one machine (OnlyTypedTransport).
 // The joiner's "pair" line is the evidence for the s.2 candidate rule: through a forwarded port, its remote candidate
@@ -24,7 +26,8 @@ internal static class DirectSmoke
     public static int Run(string[] args)
     {
         var onlyTyped = args.Contains("--only-typed");
-        args = args.Where(a => a != "--only-typed").ToArray();
+        var waitS = int.Parse(args.FirstOrDefault(a => a.StartsWith("--wait=", StringComparison.Ordinal))?.Substring(7) ?? "120");
+        args = args.Where(a => a != "--only-typed" && !a.StartsWith("--wait=", StringComparison.Ordinal)).ToArray();
         var sw = Stopwatch.StartNew();
         void Say(string s) { Console.WriteLine(s); Console.Out.Flush(); }
         bool Wait(Func<bool> done, Action pump, int timeoutMs)
@@ -51,12 +54,13 @@ internal static class DirectSmoke
                 var t = client.HostDirectAsync(new DirectHostOptions
                 {
                     Port = port, Password = args.Length > 2 && args[2] != "-" ? args[2] : null, MaxPlayers = 8, OpenPort = !args.Contains("--no-upnp"),
+                    PortMapping = new PortMapperOptions { Description = "OneLobby " + cfg.GameId, Log = Say },
                 });
                 if (!Wait(() => t.IsCompleted, client.Pump, 15000) || t.IsFaulted) { Say("FAIL host: " + (t.Exception?.GetBaseException().ToString() ?? "timed out")); return 1; }
                 var lobby = t.Result;
                 Say("addresses " + string.Join(" ", lobby.DirectAddresses));
                 Say($"join code {lobby.JoinCode} ({lobby.JoinCodeKind}); router: {lobby.PortMapping}");
-                Say("hosting on TCP+UDP " + port + "; waiting for joiners (120 s)");
+                Say("hosting on TCP+UDP " + port + $"; waiting for joiners ({waitS} s)");
                 var bye = false;
                 var reported = 0;
                 lobby.PeerReady += p => Say($"peer_ready {p.PeerId} {p.Name}");
@@ -73,10 +77,12 @@ internal static class DirectSmoke
                     var known = transport.Links.Count(l => l.LocalCandidate != null);
                     if (known > reported) { reported = known; Pairs("host"); }
                     return bye;
-                }, lobby.Pump, 120_000);
+                }, lobby.Pump, waitS * 1000);
                 var end = sw.ElapsedMilliseconds + 300;
                 Wait(() => sw.ElapsedMilliseconds > end, lobby.Pump, 1000);
-                lobby.LeaveAsync();
+                // like a game: wait for the leave (and the router mapping's removal) before exiting
+                var leave = lobby.LeaveAsync();
+                Wait(() => leave.IsCompleted, lobby.Pump, 5000);
                 Say(ok ? "PASS host" : "FAIL host: nobody said bye");
                 return ok ? 0 : 1;
             }
