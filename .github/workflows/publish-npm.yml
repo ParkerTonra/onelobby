@@ -1,0 +1,39 @@
+# Publishes the JS client (clients/js/packages/client) to npm when a tag js-vX.Y.Z is pushed.
+# npm trusted publishing: npm trusts this workflow file through GitHub OIDC, so there is no token and no 2FA prompt,
+# and the package gets a provenance attestation. One-time setup on npmjs.com: package settings > Trusted Publisher >
+# GitHub Actions, repository ParkerTonra/onelobby, workflow publish-npm.yml.
+# Release: bump the version (clients/js/packages/client/PUBLISHING.md), merge to main, then
+#   git tag js-v0.2.0 origin/main && git push origin js-v0.2.0
+name: Publish onelobby to npm
+
+on:
+  push:
+    tags: ["js-v*"]
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or newer (trusted publishing)
+        run: npm install -g npm@11
+      - name: Tag matches the package version
+        working-directory: clients/js/packages/client
+        run: |
+          want="js-v$(node -p "require('./package.json').version")"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then echo "tag $GITHUB_REF_NAME but package.json says $want"; exit 1; fi
+      - name: Install
+        working-directory: clients/js
+        run: npm ci
+      # prepublishOnly runs typecheck, build, tests and scripts/prepublish-check.mjs before anything is uploaded
+      - name: Publish
+        working-directory: clients/js/packages/client
+        run: npm publish
