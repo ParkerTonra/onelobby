@@ -2,8 +2,11 @@
 # npm trusted publishing: npm trusts this workflow file through GitHub OIDC, so there is no token and no 2FA prompt,
 # and the package gets a provenance attestation. One-time setup on npmjs.com: package settings > Trusted Publisher >
 # GitHub Actions, repository ParkerTonra/onelobby, workflow publish-npm.yml.
+# (with environment "npm" set there too, so only runs of the protected environment below can publish).
 # Release: bump the version (clients/js/packages/client/PUBLISHING.md), merge to main, then
 #   git tag js-v0.2.0 origin/main && git push origin js-v0.2.0
+# The job then WAITS for the owner to approve the "npm" environment deployment on GitHub (required reviewer,
+# no admin bypass). Agents never approve it: two confirmations, in chat and on GitHub, for every publish.
 name: Publish onelobby to npm
 
 on:
@@ -17,6 +20,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm # protected: the owner approves each publish on GitHub
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
