@@ -231,7 +231,7 @@ what makes the hand-edit path real: the file wins even over code that still call
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
 | `session.hostLeaves` | `"end"` \| `"migrate"` | `"end"` | both | `migrate` exists for server lobbies (lowest `peerId`, lockstep needs Snapshot/Restore); direct lobbies always end | Photon PUN (lowest actor), Steam automatic owner migration; direct-ip recipe |
-| `session.pause` | `"off"` \| `"host"` \| `"anyone"` | `"off"` for real-time, agent proposes `"host"` for turn-based lockstep | both | **new** (s.10) | Stardew host-only `/pause`; Factorio pauses when empty; Terraria autopause "For singleplayer only"; Mirror/FishNet/Netcode have no network pause |
+| `session.pause` | `"off"` \| `"host"` \| `"anyone"` | `"off"` for real-time action; agent proposes `"anyone"` for RTS, strategy and long co-op sessions, `"host"` when the host runs the world | both | **new** (s.10) | Stardew host-only `/pause`; Factorio pauses when empty; Terraria autopause "For singleplayer only"; Mirror/FishNet/Netcode have no network pause |
 | `session.readyTimeoutMs` | int | 15000 | R | exists | AGENTS.md friendly defaults |
 | `session.peerTimeoutMs` | int, 0 or ≥ 6000 | 0 | R | exists | FishNet Remote Client Timeout |
 | `session.rateLimit` | `{ messages, perMs }` | none | R | exists (`rateLimit`) | browser-game recipe |
@@ -524,7 +524,12 @@ players connected". So the key is three-valued and the default depends on the ga
 |---|---|---|
 | `off` | no network pause; the pause menu is local and the sim keeps running (default for real-time) | |
 | `host` | the host freezes the sim for everyone; a banner says "Paused by Ann" | the host only (Stardew) |
-| `anyone` | any player freezes it (couch co-op feel) | anyone (taste call 3 asks who) |
+| `anyone` | any player freezes it, because life happens (RTS, strategy, long co-op sessions) | anyone; the banner names who paused and who resumed |
+
+Which value the agent proposes (s.5, propose phase): `off` for real-time action (shooters, arcade, physics), where a
+pause would be griefing; `anyone` for RTS, strategy and long co-op sessions, where any player may need to step away
+(classic RTS games let any player pause: to verify per title before citing); `host` when one player clearly runs the
+world (Stardew-style farms). A per-player pause budget (anti-grief) is a later option, not v2.
 
 How it is built: in `lockstep` the host simply stops issuing frames, so every peer freezes in step; `TryNextFrame`
 returns nothing and a `Paused(by)` / `Resumed` event fires. In `raw` and `replication` OneLobby cannot stop the game's
@@ -549,7 +554,7 @@ v1 deliberately has one template. The schema and `fromConfig` are the product; t
 
 ## 12. Open taste calls
 
-Practice settled everything else. Three remain; each has a default that gets built unless the designer says no.
+Practice settled everything else. Three remained; each has a default that gets built unless the designer says no.
 
 **1. May the agent build without stopping when every setting is a default?**
 Today the plan has a hard stop after the proposal (s.5 phase 4). Yes: when the survey finds nothing unusual (no
@@ -563,10 +568,10 @@ a reason (team play, long sessions); the mic prompt and the ESRB "Users Interact
 defaults on for any game with three or more players, the way text chat does.
 `Default:` yes, off unless proposed with a reason.
 
-**3. When the host pauses, can only the host unpause?**
-Today there is no pause. Yes: `session.pause: "host"` means the host freezes and unfreezes; others see "Paused by
-Ann". No: anyone can unpause a host pause (and `"anyone"` becomes the only non-off value).
-`Default:` yes, host-only, as Stardew does it.
+**3. When the host pauses, can only the host unpause?** Decided (designer, 2026-10-25): it depends on the game, so
+both modes stay. In `"host"` only the host pauses and unpauses (Stardew); in `"anyone"` any player pauses and any
+player unpauses ("some games, RTS or an ant colony game, should let anyone pause, because life happens"). The agent
+proposes the mode by genre (s.10).
 
 ---
 
