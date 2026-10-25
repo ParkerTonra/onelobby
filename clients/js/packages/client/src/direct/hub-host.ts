@@ -12,6 +12,25 @@ const HANDSHAKE_TIMEOUT_MS = 5000;
 const STATUS_TEXT: Record<number, string> = { 200: "OK", 301: "Moved Permanently", 302: "Found", 404: "Not Found", 500: "Internal Server Error" };
 
 /**
+ * Whether a WebSocket handshake carrying `origin` is accepted. A web page can open a WebSocket to any address it can
+ * reach, so a browser's Origin must be one we expect: in `allowed` ("*" = all), the same host:port as the request's
+ * Host header (the page this host serves itself), or loopback (localhost, 127.0.0.1, [::1], any port). A request with
+ * no Origin header is a native client and never gets here.
+ */
+export function originAllowed(origin: string, host: string | undefined, allowed: readonly string[]): boolean {
+  if (allowed.includes("*") || allowed.includes(origin)) return true;
+  let u: URL;
+  try {
+    u = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]") return true;
+  return host !== undefined && u.host.toLowerCase() === host.trim().toLowerCase();
+}
+
+/**
  * Rejects (EADDRINUSE) when another program holds IPv4 TCP or UDP `port`. Windows lets the dual-stack listener bind
  * over a program on 0.0.0.0 (every IPv4 joiner would then reach that program), and the peer links need UDP `port`
  * too, so both are tried and released before the real listen.
@@ -76,6 +95,11 @@ export class DirectHubHost {
    * `http://<host address>:<port>/` gets a page that joins with `kit.joinDirect(location.host)`. Null (default): 426.
    */
   http: HttpHandler | null = null;
+  /**
+   * Browser `Origin` values allowed to open a signaling socket, exact match, "*" for all. No Origin header (native
+   * clients), the host's own page (Origin equal to the request's Host) and localhost pages are always allowed.
+   */
+  allowedOrigins: string[] = [];
   /** The bound TCP port (the requested one, or the one the OS picked for 0). */
   readonly port: number;
   portMapper: PortMapper | null = null;
@@ -230,6 +254,11 @@ export class DirectHubHost {
     }
     if (method !== "GET" || !upgrade || !key) {
       reply("426 Upgrade Required", "this port speaks WebSocket (OneLobby direct host)");
+      return false;
+    }
+    const origin = headers.get("origin");
+    if (origin !== undefined && !originAllowed(origin, headers.get("host"), this.allowedOrigins)) {
+      reply("403 Forbidden", "this origin may not join (OneLobby direct host)");
       return false;
     }
     const accept = createHash("sha1").update(key + WS_GUID).digest("base64");

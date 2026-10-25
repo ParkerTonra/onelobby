@@ -19,7 +19,7 @@ import { directHubOptions } from "./hub.js";
 import { isPublicIPv4, lanIPv4, localAddresses, type PortMapResult, type PortMapperOptions } from "./portmap.js";
 import { OneLobbyError } from "../signaling.js";
 
-export { DirectHubHost, LocalHubSocket, PortInUseError } from "./hub-host.js";
+export { DirectHubHost, LocalHubSocket, PortInUseError, originAllowed } from "./hub-host.js";
 export type { HttpHandler, HttpReply } from "./hub-host.js";
 export { SignalingHub, Session, RateWindow, sanitize, defaultHubOptions, directHubOptions, PROTO } from "./hub.js";
 export type { HubOptions, HubDeps } from "./hub.js";
@@ -51,6 +51,12 @@ export interface DirectHostOptions {
    * `kit.joinDirect(location.host)`; the lobby's `joinUrl` is then the link to share.
    */
   http?: HttpHandler;
+  /**
+   * Browser `Origin` values allowed to open a signaling socket (exact match, e.g. "https://play.example"; "*" allows
+   * every origin). Native clients send no Origin and are always allowed, as are pages served from the host's own address
+   * (`http`) and localhost pages, so this is only for a web game hosted somewhere else that joins players to this host.
+   */
+  allowedOrigins?: string[];
   /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped. */
   rateLimit?: RateLimit;
 }
@@ -93,6 +99,7 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
     }
   }
   hub.http = o.http ?? null;
+  hub.allowedOrigins = o.allowedOrigins ?? [];
   // The router request runs alongside lobby creation; it takes up to a few seconds when nothing answers.
   const mapping: Promise<PortMapResult | null> =
     o.openPort === false

@@ -32,6 +32,12 @@ namespace OneLobby.Direct
         public bool OpenPort { get; set; } = true;
         /// <summary>Test seam and knobs for the router request; null = defaults (description "OneLobby &lt;GameId&gt;").</summary>
         public PortMapperOptions? PortMapping { get; set; }
+        /// <summary>
+        /// Browser <c>Origin</c> values allowed to open a signaling socket (exact match; "*" allows every origin). Native
+        /// clients send no Origin and are always allowed, as are pages served from this host's own address and localhost
+        /// pages, so this is only for a web game hosted somewhere else that joins players to this host.
+        /// </summary>
+        public IReadOnlyList<string>? AllowedOrigins { get; set; }
     }
 
     /// <summary>
@@ -67,7 +73,7 @@ namespace OneLobby.Direct
             bool anyBusy = false, anyReserved = false;
             for (var p = port; hub == null; p++)
             {
-                try { hub = new DirectHubHost(p, HubOptions.ForDirect(o.MaxPlayers, o.Password)); }
+                try { hub = new DirectHubHost(p, HubOptions.ForDirect(o.MaxPlayers, o.Password), allowedOrigins: o.AllowedOrigins); }
                 catch (SocketException e)
                 {
                     // AccessDenied: Windows reserved the port (Hyper-V, WSL, Docker exclusion ranges); try the next one too

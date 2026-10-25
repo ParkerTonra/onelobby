@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createServer } from "node:net";
+import { connect as netConnect, createServer } from "node:net";
 import { createSocket } from "node:dgram";
 import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby } from "../src/onelobby.js";
@@ -8,7 +8,7 @@ import { OneLobbyError } from "../src/signaling.js";
 import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
-import { DirectHubHost, defaultHubOptions, directHubOptions, hostDirect } from "../src/direct/index.js";
+import { DirectHubHost, defaultHubOptions, directHubOptions, hostDirect, originAllowed } from "../src/direct/index.js";
 import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
 
 /**
@@ -161,6 +161,34 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     expect(e.message).toContain("Windows has reserved it");
     expect(new PortInUseError(47810, "EADDRINUSE").message).toContain("another copy of the game");
     expect(portFailureHint(true, true)).toContain("busy or reserved");
+  });
+
+  it("a WebSocket upgrade needs no Origin, the host's own page, a loopback origin or an allowed one; else 403", async () => {
+    const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
+    host.allowedOrigins = ["https://play.example"];
+    cleanup.push(() => host.close());
+    const status = (origin: string | null, hostHeader = "game.example:47810") =>
+      new Promise<string>((resolve) => {
+        const s = netConnect(host.port, "127.0.0.1", () => {
+          s.write("GET / HTTP/1.1\r\nHost: " + hostHeader + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n" + (origin === null ? "" : "Origin: " + origin + "\r\n") + "\r\n");
+        });
+        s.once("data", (d) => { resolve(d.toString("latin1").split("\r\n")[0]); s.destroy(); });
+      });
+    expect(await status(null)).toContain("101");
+    expect(await status("http://game.example:47810")).toContain("101");
+    expect(await status("http://localhost:5173")).toContain("101");
+    expect(await status("http://127.0.0.1:3000")).toContain("101");
+    expect(await status("http://[::1]:3000")).toContain("101");
+    expect(await status("https://play.example")).toContain("101");
+    expect(await status("https://evil.example")).toContain("403");
+    expect(await status("https://play.example.evil.example")).toContain("403");
+    expect(await status("null")).toContain("403");
+    expect(await status("http://game.example:9999")).toContain("403");
+    host.allowedOrigins = ["*"];
+    expect(await status("https://evil.example")).toContain("101");
+    expect(originAllowed("http://a:1", "a:1", [])).toBe(true);
+    expect(originAllowed("http://a:1", "b:1", [])).toBe(false);
   });
 
   it("GET /healthz answers ok and plain HTTP gets 426", async () => {

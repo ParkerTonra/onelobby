@@ -102,6 +102,13 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
 
 - `lobby.Code` is empty and `ListAsync` returns nothing. `lobby.JoinCode` is the invitation.
 - When the host leaves, the session ends for everyone (`SessionEnded("host_left")`). No host migration.
+- Browser pages may only open the signaling socket from an origin the host expects. The host accepts a handshake with no
+  `Origin` (every native client: .NET, Unity, Node), an `Origin` equal to the request's `Host` (the page the host serves
+  itself, s.4b) and any loopback origin (`http://localhost`, `127.0.0.1`, `[::1]`, any port); anything else gets
+  `403`. A web game hosted somewhere else that joins players to a direct host lists its origin:
+  `new DirectHostOptions { AllowedOrigins = new[] { "https://play.example" } }` (Unity: the same options object to
+  `runner.HostDirectAsync`; JS/Node: `hostDirect(kit, { allowedOrigins: ["https://play.example"] })`). Exact match;
+  `"*"` allows every origin, which lets any web page the host visits probe the host's network, so only for testing.
 - A joiner whose peer link does not open within `OneLobbyConfig.ReadyTimeout` (15 s) gives up like on the hosted
   server: `ReadyAsync` throws code `ice_failed` and `SessionEnded("ice_failed")` fires (no relay retry: no TURN here).
 - No STUN or TURN: the game only ever talks to the other players and the player's own router.

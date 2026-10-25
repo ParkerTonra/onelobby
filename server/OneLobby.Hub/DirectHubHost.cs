@@ -28,6 +28,7 @@ public sealed class DirectHubHost : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Conn, byte> _conns = new();
     private readonly HubOptions _o;
+    private readonly string[] _allowedOrigins;
     private readonly ILogger _log;
     private readonly Stopwatch _sw = Stopwatch.StartNew();
     private long _nextTickMs = 1000;
@@ -51,9 +52,14 @@ public sealed class DirectHubHost : IDisposable
 
     /// <summary>Binds TCP <paramref name="port"/> on every interface (IPv6 dual-stack where available) and starts accepting.</summary>
     /// <exception cref="SocketException">The port is taken or cannot be bound.</exception>
-    public DirectHubHost(int port, HubOptions options, ILogger? logger = null, IClock? clock = null)
+    /// <param name="allowedOrigins">
+    /// Browser <c>Origin</c> values allowed to open a signaling socket besides the always-allowed ones (no Origin header,
+    /// an Origin equal to the request's Host, loopback origins); exact match, "*" allows every origin.
+    /// </param>
+    public DirectHubHost(int port, HubOptions options, ILogger? logger = null, IClock? clock = null, IEnumerable<string>? allowedOrigins = null)
     {
         _o = options;
+        _allowedOrigins = allowedOrigins?.ToArray() ?? Array.Empty<string>();
         _log = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         Hub = new Hub(options, clock, _log);
         _listener = Bind(port);
@@ -230,7 +236,7 @@ public sealed class DirectHubHost : IDisposable
     /// Reads the HTTP/1.1 request head byte by byte (nothing past the blank line is consumed) and answers 101 with
     /// Sec-WebSocket-Accept, or 400/426 for anything that is not a WebSocket upgrade.
     /// </summary>
-    private static async Task<bool> Handshake(Stream stream, CancellationToken ct)
+    private async Task<bool> Handshake(Stream stream, CancellationToken ct)
     {
         var head = new byte[MaxHeaderBytes];
         int n = 0;
@@ -257,6 +263,9 @@ public sealed class DirectHubHost : IDisposable
                        && h.TryGetValue("Connection", out var conn) && conn.IndexOf("upgrade", StringComparison.OrdinalIgnoreCase) >= 0;
         if (!upgrade || !h.TryGetValue("Sec-WebSocket-Key", out var key) || key.Length == 0)
         { await Reply(stream, "400 Bad Request", null, ct).ConfigureAwait(false); return false; }
+        // A web page can open a WebSocket to any address it can reach, so a browser's Origin must be one we expect.
+        if (h.TryGetValue("Origin", out var origin) && !OriginAllowed(origin, h.TryGetValue("Host", out var hostHeader) ? hostHeader : null, _allowedOrigins))
+        { await Reply(stream, "403 Forbidden", null, ct).ConfigureAwait(false); return false; }
         if (!h.TryGetValue("Sec-WebSocket-Version", out var ver) || ver != "13")
         { await Reply(stream, "426 Upgrade Required", "Sec-WebSocket-Version: 13\r\n", ct).ConfigureAwait(false); return false; }
 
@@ -264,6 +273,19 @@ public sealed class DirectHubHost : IDisposable
         var ok = Encoding.ASCII.GetBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
         await stream.WriteAsync(ok, 0, ok.Length, ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Whether a handshake carrying <paramref name="origin"/> is accepted: it is in <paramref name="allowed"/> ("*" = all), its
+    /// host:port equals the request's <paramref name="host"/> header (the page this host serves itself), or it is a loopback
+    /// origin (localhost, 127.0.0.1, [::1], any port). A request with no Origin header is a native client and never gets here.
+    /// </summary>
+    public static bool OriginAllowed(string origin, string? host, IReadOnlyCollection<string> allowed)
+    {
+        foreach (var a in allowed) if (a == "*" || a == origin) return true;
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https")) return false;
+        if (u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "[::1]") return true;
+        return host != null && string.Equals(u.Authority, host.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>RFC 6455 s.4.2.2: base64(SHA-1(key + GUID)).</summary>

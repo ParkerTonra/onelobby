@@ -90,6 +90,44 @@ public class DirectHubHostTests
         Assert.Equal(0, host.Hub.SocketCount);
     }
 
+    private static async Task<string> UpgradeStatus(DirectHubHost host, string? origin, string hostHeader = "game.example:47810")
+    {
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("127.0.0.1", host.Port);
+        var s = tcp.GetStream();
+        var req = "GET / HTTP/1.1\r\nHost: " + hostHeader + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n" +
+                  (origin is null ? "" : "Origin: " + origin + "\r\n") + "\r\n";
+        await s.WriteAsync(Encoding.ASCII.GetBytes(req));
+        var buf = new byte[512];
+        int n = await s.ReadAsync(buf);
+        return Encoding.ASCII.GetString(buf, 0, n).Split("\r\n")[0];
+    }
+
+    [Fact]
+    public async Task Origin_must_be_absent_the_hosts_own_page_loopback_or_allowed()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), allowedOrigins: new[] { "https://play.example" });
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, null));                                  // native client
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://game.example:47810"));           // the page this host serves
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://localhost:5173"));
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://127.0.0.1:3000"));
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://[::1]:3000"));
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "https://play.example"));                // allowedOrigins
+        Assert.StartsWith("HTTP/1.1 403", await UpgradeStatus(host, "https://evil.example"));
+        Assert.StartsWith("HTTP/1.1 403", await UpgradeStatus(host, "https://play.example.evil.example"));
+        Assert.StartsWith("HTTP/1.1 403", await UpgradeStatus(host, "null"));
+        Assert.StartsWith("HTTP/1.1 403", await UpgradeStatus(host, "http://game.example:9999"));            // other port
+        Assert.Equal(0, host.Hub.SocketCount);
+    }
+
+    [Fact]
+    public async Task Star_allows_every_origin()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), allowedOrigins: new[] { "*" });
+        Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "https://evil.example"));
+    }
+
     [Fact]
     public void Port_in_use_throws()
     {

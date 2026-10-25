@@ -156,6 +156,10 @@ redialling every few seconds so players land back in when the host restarts. No 
 
 The page must be plain `http`: an `https` page may not open `ws://` to an IP address.
 
+The host only upgrades WebSockets whose `Origin` is the page it serves itself (same host and port as the request),
+a loopback page, or one you list in `hostDirect(kit, { allowedOrigins: [...] })`; every other web page gets `403`, so a
+site the host happens to visit cannot reach the lobby. The page this recipe serves needs no setting.
+
 ## 5. What the host needs to know
 
 - Router: UPnP or NAT-PMP on, or TCP and UDP 47810 forwarded by hand. Otherwise `joinUrl` is a same-network address
