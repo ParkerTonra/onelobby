@@ -27,6 +27,10 @@ if [ ! -d "mbedtls-$MBEDTLS_VERSION" ]; then
 fi
 
 common=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5)
+# __FILE__ strings (asserts, logs) name sources relative to the work dir, not this machine's path. Through the
+# environment so CMake keeps its default flags; a fresh configure (rm -rf below) picks it up.
+export CFLAGS="${CFLAGS:-} -ffile-prefix-map=$work/=" CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$work/="
+rm -rf build-mbedtls
 lib=libdatachannel.so
 ldflags=""
 case "$target" in

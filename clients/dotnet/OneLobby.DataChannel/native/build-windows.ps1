@@ -63,15 +63,20 @@ if ($text.Contains('//#define MBEDTLS_SSL_DTLS_SRTP')) { [IO.File]::WriteAllText
 $prefix = Join-Path $WorkDir 'prefix-win-x64'
 $common = "-G Ninja -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0091=NEW " +
           "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+# __FILE__ strings (asserts, logs) name sources relative to the work dir, not this machine's path. Through the
+# environment so CMake keeps its default flags; fresh build dirs (removed below) make a new configure pick it up.
+$trim = "/d1trimfile:$((Resolve-Path $WorkDir).Path.TrimEnd('\'))\"
+$env:CFLAGS = $trim; $env:CXXFLAGS = $trim
 function Invoke-Vs([string]$cmdline) {
     cmd /c "`"$vcvars`" >nul && $cmdline"
     if ($LASTEXITCODE -ne 0) { throw "failed: $cmdline" }
 }
 $mbedBuild = Join-Path $WorkDir 'build-mbedtls-win-x64'
+$ldcBuild = Join-Path $WorkDir 'build-ldc-win-x64'
+foreach ($d in $mbedBuild, $ldcBuild) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }
 Invoke-Vs "`"$cmake`" -S `"$mbedSrc`" -B `"$mbedBuild`" $common -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DCMAKE_INSTALL_PREFIX=`"$prefix`""
 Invoke-Vs "`"$cmake`" --build `"$mbedBuild`" --target install"
 
-$ldcBuild = Join-Path $WorkDir 'build-ldc-win-x64'
 Invoke-Vs "`"$cmake`" -S `"$src`" -B `"$ldcBuild`" $common -DUSE_MBEDTLS=ON -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_PREFIX_PATH=`"$prefix`""
 Invoke-Vs "`"$cmake`" --build `"$ldcBuild`" --target datachannel"
 

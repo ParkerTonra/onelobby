@@ -34,7 +34,8 @@ foreach ($p in $projects) {
     $csproj = Join-Path $dotnet "$p/$p.csproj"
     if (-not (Test-Path $csproj)) { Write-Host "skip $p (not in this checkout)"; continue }
     Write-Host "build $p (netstandard2.1)"
-    dotnet publish $csproj -c Release -f netstandard2.1 -o $out --nologo -v quiet
+    # ContinuousIntegrationBuild: source paths in the DLLs become /_/... instead of this machine's checkout path
+    dotnet publish $csproj -c Release -f netstandard2.1 -o $out --nologo -v quiet -p:ContinuousIntegrationBuild=true
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish $p failed" }
     $ours += $p
 }

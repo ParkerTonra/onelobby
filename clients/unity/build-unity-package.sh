@@ -27,7 +27,8 @@ for p in $projects; do
   csproj="$dotnetdir/$p/$p.csproj"
   if [ ! -f "$csproj" ]; then echo "skip $p (not in this checkout)"; continue; fi
   echo "build $p (netstandard2.1)"
-  dotnet publish "$csproj" -c Release -f netstandard2.1 -o "$out" --nologo -v quiet
+  # ContinuousIntegrationBuild: source paths in the DLLs become /_/... instead of this machine's checkout path
+  dotnet publish "$csproj" -c Release -f netstandard2.1 -o "$out" --nologo -v quiet -p:ContinuousIntegrationBuild=true
   ours="$ours $p"
 done
 
