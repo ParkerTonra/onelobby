@@ -10,7 +10,7 @@
  * `import { RTCPeerConnection } from "node-datachannel/polyfill"`. Its libdatachannel honours the port pin.
  */
 import type { HostOptions, OneLobby } from "../onelobby.js";
-import type { Lobby } from "../lobby.js";
+import type { Lobby, RateLimit } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
 import { encodeJoinCode } from "../joincode.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
@@ -46,6 +46,8 @@ export interface DirectHostOptions {
    * `kit.joinDirect(location.host)`; the lobby's `joinUrl` is then the link to share.
    */
   http?: HttpHandler;
+  /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped. */
+  rateLimit?: RateLimit;
 }
 
 /** A direct host lobby: the normal Lobby, plus the hub behind it. Leaving or ending the lobby stops the hub. */
@@ -86,7 +88,7 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
   let lobby: Lobby;
   try {
     const name = o.name ?? `${kit.options.displayName || "Player"}'s game`;
-    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta };
+    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit };
     lobby = await kit.hostDirectWith(h, { socketFactory: () => hub.connectLocal(), wrapLinks });
   } catch (e) {
     await mapping;

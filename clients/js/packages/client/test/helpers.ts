@@ -48,7 +48,7 @@ export interface Rig {
   clock: ManualClock;
   server: MemoryServer;
   net: MemoryNetwork;
-  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number }): OneLobby;
+  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number; peerTimeoutMs?: number }): OneLobby;
   sinks: Map<string, RecordingSink>;
   mics: Map<string, ToneMic>;
 }
@@ -77,6 +77,7 @@ export function rig(): Rig {
         mode: opts.mode ?? "lockstep",
         tickRate: 20,
         hashEveryTicks: opts.hashEveryTicks ?? 20,
+        peerTimeoutMs: opts.peerTimeoutMs,
         displayName: name,
         socketFactory: server.socketFactory,
         linkFactory: net.factoryFor(name),

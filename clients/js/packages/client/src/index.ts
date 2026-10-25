@@ -8,7 +8,11 @@ export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents, JoinDir
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { Lobby } from "./lobby.js";
-export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
+export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
+export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
+// WebSocket-shaped sockets over a lobby: lobby.asWebSocket() (joiner), lobby.onConnection(conn => ...) (host).
+export { closeCodeFor } from "./socket.js";
+export type { LobbySocket, LobbySocketOptions } from "./socket.js";
 export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";

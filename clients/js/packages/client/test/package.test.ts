@@ -76,6 +76,7 @@ describe("export surface", () => {
       "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "OneLobby", "OneLobbyError", "LIB_NAME", "LIB_VERSION",
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
+      "MIN_PEER_TIMEOUT_MS", "closeCodeFor",
       "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
     ].sort());
   });

@@ -1,7 +1,7 @@
 import { systemClock, type Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
 import { normalizeCode } from "./crockford.js";
-import { Lobby } from "./lobby.js";
+import { Lobby, type RateLimit } from "./lobby.js";
 import {
   OneLobbyError,
   PROTO_ID,
@@ -22,7 +22,7 @@ import { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.1.0";
+export const LIB_VERSION = "0.2.0";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
@@ -65,6 +65,13 @@ export interface OneLobbyOptions {
    */
   readyTimeoutMs?: number;
   /**
+   * Treat a peer as gone after this many ms of silence. Joiners ping the host every 2 s and the host answers, so the
+   * host drops a silent joiner (`peerLeft`, "timeout") and a joiner handles a silent host as lost (a direct lobby
+   * ends with "host_left"). Default 0 (off): a silently dead peer then surfaces when its link or signaling socket
+   * times out, within about 30 s. Values under 6000 are raised to 6000.
+   */
+  peerTimeoutMs?: number;
+  /**
    * Keep this tab's seat across a page reload (sessionStorage): `join(code)` and `resume()` take the seat back
    * instead of joining as a new player. Cleared when the session ends. Default true where sessionStorage exists.
    */
@@ -98,6 +105,8 @@ export interface HostOptions {
   visibility?: "public" | "unlisted" | "private";
   lateJoin?: boolean;
   meta?: Record<string, string>;
+  /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped before `message` fires or is relayed. */
+  rateLimit?: RateLimit;
 }
 
 export interface ListOptions {
@@ -157,7 +166,7 @@ function seatInUse(token: string): boolean {
 
 /** Entry point (DESIGN s.11.2). */
 export class OneLobby extends Emitter<OneLobbyEvents> {
-  readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs">>;
+  readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs" | "peerTimeoutMs">>;
   private socketFactory: SocketFactory;
   private linkFactory: LinkFactory;
   private clock: Clock;
@@ -180,6 +189,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       displayName: (o.displayName ?? "").trim(),
       relayOnly: o.relayOnly ?? false,
       readyTimeoutMs: o.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+      peerTimeoutMs: o.peerTimeoutMs ?? 0,
     };
     const a = o.advanced ?? {};
     const pick = <K extends keyof AdvancedOptions & keyof OneLobbyOptions>(k: K) => (a[k] !== undefined ? a[k] : o[k]);
@@ -300,7 +310,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     }
   }
 
-  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }): Lobby {
+  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit): Lobby {
     const lobby = new Lobby({
       signaling: sig,
       state,
@@ -314,6 +324,8 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       displayName: this.options.displayName,
       voice: { codec: this.voiceCodec, createSource: this.createMic, createSink: this.createSink },
       readyTimeoutMs: this.options.readyTimeoutMs,
+      peerTimeoutMs: this.options.peerTimeoutMs,
+      rateLimit,
     });
     lobby.errorSink = (e) => this.emit("error", e);
     if (this.storage && !direct) {
@@ -345,7 +357,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
         },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state);
+      return this.makeLobby(sig, welcome, state, undefined, h.rateLimit);
     } catch (e) {
       sig.close();
       throw e;
@@ -412,7 +424,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
           lateJoin: h.lateJoin ?? true, meta: h.meta ?? {} },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) });
+      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit);
     } catch (e) {
       sig.close();
       throw e;
