@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OneLobby.DataChannel.Tests" />
+    <InternalsVisibleTo Include="OneLobby.Unity" />
     <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
     <ProjectReference Include="..\..\..\server\OneLobby.Hub\OneLobby.Hub.csproj" />
   </ItemGroup>

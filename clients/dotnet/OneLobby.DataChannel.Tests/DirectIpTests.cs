@@ -248,12 +248,26 @@ public sealed class DirectIpTests
         Assert.True(JoinCode.TryDecode(second.JoinCode, out _, out var p2, out _));
         Assert.NotEqual(port, p2);
         Assert.InRange(p2, port + 1, port + DirectLobby.DefaultFallbackPorts);
+        Assert.Equal(DirectLobby.FormatHostLog(port, p2, second.JoinCode, second.JoinCodeKind, "off"), DirectLobby.HostLogLine(second));
+        Assert.StartsWith("OneLobby: direct host listening on TCP+UDP :" + p2 + " (" + port, DirectLobby.HostLogLine(second));
+        Assert.StartsWith("OneLobby: direct host listening on TCP+UDP :" + port + ";", DirectLobby.HostLogLine(first));
 
         var joiner = Await(j.JoinDirectAsync("127.0.0.1:" + p2), () => { second.Pump(); j.Pump(); }, "join");
         Assert.Equal(JoinCode.Encode("127.0.0.1", p2), joiner.JoinCode);
         joiner.LeaveAsync();
         second.LeaveAsync();
         first.LeaveAsync();
+    }
+
+    [Fact]
+    public void HostLogLineNamesTheBoundPortAndWhichPortsWereBusy()
+    {
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP",
+            DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP"));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off",
+            DirectLobby.FormatHostLog(47810, 47811, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off"));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off",
+            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, ""));
     }
 
     [Theory]

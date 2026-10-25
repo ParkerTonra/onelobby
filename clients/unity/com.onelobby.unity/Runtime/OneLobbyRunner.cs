@@ -83,7 +83,12 @@ namespace OneLobby.Unity
         /// <c>SameNetwork</c> means the router said no and the code only works on this network. Leaving ends the session for
         /// everyone (no host migration). Windows desktop asks the player to allow the game through the firewall once.
         /// </summary>
-        public Task<Lobby> HostDirectAsync(DirectHostOptions? options = null) => Enter(() => DirectClient().HostDirectAsync(options));
+        public async Task<Lobby> HostDirectAsync(DirectHostOptions? options = null)
+        {
+            var lobby = await Enter(() => DirectClient().HostDirectAsync(options));
+            Debug.Log(DirectLobby.HostLogLine(lobby)); // bound port (after any busy-port fallback), code, router mapping
+            return lobby;
+        }
 
         /// <summary>Join a direct host by its join code (<c>6B01-RGFE-P2B</c>) or address (<c>192.168.1.20</c>, <c>ip:port</c>).</summary>
         public Task<Lobby> JoinDirectAsync(string codeOrAddress, string? password = null) =>

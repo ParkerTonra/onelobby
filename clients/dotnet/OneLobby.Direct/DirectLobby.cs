@@ -89,7 +89,22 @@ namespace OneLobby.Direct
                 ? MapAsync(hub, o.PortMapping ?? new PortMapperOptions { Description = "OneLobby " + client.Config.GameId })
                 : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta), ct);
-            return FinishHost(create, mapping, transport, hub);
+            return FinishHost(create, mapping, transport, hub, port);
+        }
+
+        /// <summary>
+        /// One line for the game's log once a direct host is up, e.g.
+        /// <c>OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off</c>.
+        /// Empty for any other lobby. The Unity runner logs it; other hosts can log it themselves.
+        /// </summary>
+        internal static string HostLogLine(Lobby lobby) => lobby.DirectHostLog;
+
+        internal static string FormatHostLog(int requested, int bound, string code, JoinCodeKind kind, string mapping)
+        {
+            var line = "OneLobby: direct host listening on TCP+UDP :" + bound;
+            if (bound != requested) line += " (" + (bound - requested == 1 ? requested.ToString() : requested + "-" + (bound - 1)) + " busy)";
+            line += string.IsNullOrEmpty(code) ? "; no join code (no IPv4 address)" : "; code " + code + " (" + kind + ")";
+            return line + "; port mapping " + (string.IsNullOrEmpty(mapping) ? "off" : mapping);
         }
 
         private static async Task<PortMapResult?> MapAsync(DirectHubHost hub, PortMapperOptions options)
@@ -98,7 +113,7 @@ namespace OneLobby.Direct
             catch (Exception e) { return new PortMapResult { Detail = e.Message }; }
         }
 
-        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub)
+        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort)
         {
             try
             {
@@ -117,6 +132,7 @@ namespace OneLobby.Direct
                     lobby.JoinCode = OneLobby.JoinCode.Encode(lan, hub.Port);
                     lobby.JoinCodeKind = JoinCodeKind.SameNetwork;
                 }
+                lobby.DirectHostLog = FormatHostLog(requestedPort, hub.Port, lobby.JoinCode, lobby.JoinCodeKind, lobby.PortMapping);
                 return lobby;
             }
             catch
