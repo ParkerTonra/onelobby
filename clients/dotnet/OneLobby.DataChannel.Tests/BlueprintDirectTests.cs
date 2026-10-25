@@ -10,7 +10,7 @@ public class BlueprintDirectTests
     public void ToDirectHostOptionsMapsHostingAndLobby()
     {
         var bp = Blueprint.Parse(@"{ ""game"": {""id"":""a""}, ""hosting"": {""directPort"":47812,""openPort"":false,""allowedOrigins"":[""https://a.test""]},
-            ""lobby"": {""maxPlayers"":5,""lateJoin"":false,""meta"":{""k"":""v""}} }");
+            ""lobby"": {""maxPlayers"":5,""lateJoin"":false,""meta"":{""k"":""v""}}, ""session"": {""rateLimit"":{""messages"":30,""perMs"":500}} }");
         var o = bp.ToDirectHostOptions(displayName: "Ann");
         Assert.Equal(47812, o.Port);
         Assert.Equal(DirectLobby.DefaultFallbackPorts, o.FallbackPorts);
@@ -20,6 +20,7 @@ public class BlueprintDirectTests
         Assert.False(o.LateJoin);
         Assert.Equal("v", o.Meta!["k"]);
         Assert.Equal("Ann's game", o.Name);
+        Assert.Equal(new RateLimit(30, 500), o.RateLimit);
     }
 
     [Fact]

@@ -147,6 +147,10 @@ Full reference (generated): `docs/api/`.
   same rules as JS `readyTimeoutMs`. `ReadyAsync` faults with `OneLobbyException` code `ice_failed`, `client.Error`
   fires, the lobby is left and `SessionEnded("ice_failed")` fires; the relay-only retry runs when the server offers
   TURN. Direct-IP joiners get the same timeout (no relay retry: direct IP has no TURN).
+- Liveness: a silent joiner is dropped after 10 s and a silent host is handled as lost after 8 s;
+  `config with { PeerTimeout = TimeSpan.FromSeconds(6) }` sets both (minimum 6 s). `new LobbyOptions(...) { RateLimit =
+  new RateLimit(60, 1000) }` (or `DirectHostOptions.RateLimit`) caps each joiner's incoming raw messages like JS `rateLimit`.
+  A blueprint sets both from `session.peerTimeoutMs` / `session.rateLimit`, and `chat.voiceMode` sets `Voice.Mode`.
 - Unity `OneLobbyRunner` sets `Application.runInBackground = true` from Host/Join until the lobby ends (then restores
   it), so an unfocused window keeps pumping; opt out with `KeepRunningInBackground = false`.
 - A peer that leaves on purpose is not cut off: when the server (or a direct host's socket) says it is gone, the lobby

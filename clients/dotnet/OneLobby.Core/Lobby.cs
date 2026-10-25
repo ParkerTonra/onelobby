@@ -31,6 +31,8 @@ namespace OneLobby
 
         public const int HostTimeoutMs = 8000;
         public const int PeerTimeoutMs = 10000;
+        /// <summary>The smallest <see cref="OneLobbyConfig.PeerTimeout"/> honoured.</summary>
+        public const int MinPeerTimeoutMs = 6000;
         public const int PingEveryMs = 1000;
         public const int ClaimWaitMs = 6000;
         public const int MigrationGraceMs = 1500;
@@ -57,6 +59,9 @@ namespace OneLobby
         private bool _awaitingClaim;
         private long _awaitDeadlineMs;
         private long _lastPingMs;
+        private readonly int _peerTimeoutMs, _hostTimeoutMs;
+        /// <summary>Host: per-peer fixed window for <see cref="RateLimit"/> (window start, count).</summary>
+        private readonly Dictionary<int, (long Start, int N)> _rate = new();
         private uint _pingN;
         private uint _chunkId;
         private int _localResyncs;
@@ -80,6 +85,9 @@ namespace OneLobby
             foreach (var p in msg.Peers) _peers[p.PeerId] = new PeerRec { Id = p.PeerId, Name = p.Name };
             if (!_peers.ContainsKey(_you)) _peers[_you] = new PeerRec { Id = _you, Name = client.Config.DisplayName };
             if (!_peers.ContainsKey(_hostId)) _peers[_hostId] = new PeerRec { Id = _hostId, Name = "host" };
+            var pt = (long)client.Config.PeerTimeout.TotalMilliseconds;
+            _peerTimeoutMs = pt > 0 ? (int)Math.Min(int.MaxValue, Math.Max(pt, MinPeerTimeoutMs)) : PeerTimeoutMs;
+            _hostTimeoutMs = pt > 0 ? _peerTimeoutMs : HostTimeoutMs;
             Voice = new VoiceChannel(this);
             Chat = new TextChat(this);
             if (Mode == SyncMode.Lockstep) Lockstep = new LockstepSession(this);
@@ -102,6 +110,8 @@ namespace OneLobby
         public LockstepSession? Lockstep { get; }
         public VoiceChannel Voice { get; }
         public TextChat Chat { get; }
+        /// <summary>Host: the per-joiner cap on incoming raw messages (<see cref="LobbyOptions.RateLimit"/>); null = none.</summary>
+        public RateLimit? RateLimit { get; internal set; }
 
         /// <summary>
         /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen,
@@ -491,12 +501,22 @@ namespace OneLobby
             Voice.Update(now);
         }
 
+        private bool AllowRaw(int from)
+        {
+            var lim = RateLimit;
+            if (lim == null || lim.Messages <= 0 || lim.PerMs <= 0) return true;
+            var now = NowMs;
+            if (!_rate.TryGetValue(from, out var w) || now - w.Start >= lim.PerMs) w = (now, 0);
+            _rate[from] = (w.Start, w.N + 1);
+            return w.N + 1 <= lim.Messages;
+        }
+
         private void Timeouts(long now)
         {
             if (IsHost)
             {
                 foreach (var r in _peers.Values.ToList())
-                    if (r.Id != _you && r.Link != null && r.OpenHandled && now - r.LastRxMs > PeerTimeoutMs) DropPeer(r, "timeout");
+                    if (r.Id != _you && r.Link != null && r.OpenHandled && now - r.LastRxMs > _peerTimeoutMs) DropPeer(r, "timeout");
                 return;
             }
             if (_awaitingClaim && now > _awaitDeadlineMs)
@@ -508,7 +528,7 @@ namespace OneLobby
                 ElectHost();
                 return;
             }
-            if (!_awaitingClaim && _peers.TryGetValue(_hostId, out var h) && h.OpenHandled && now - h.LastRxMs > HostTimeoutMs)
+            if (!_awaitingClaim && _peers.TryGetValue(_hostId, out var h) && h.OpenHandled && now - h.LastRxMs > _hostTimeoutMs)
                 HostLost();
         }
 
@@ -668,6 +688,7 @@ namespace OneLobby
                 }
                 case Wire.Raw:
                 {
+                    if (!AllowRaw(rec.Id)) return;
                     var payload = body.ToArray();
                     if (route == 0 || route == _you)
                         MessageReceived?.Invoke(rec.Id, payload, ch == PeerChannel.Fast ? Channel.Fast : Channel.Reliable);

@@ -1,3 +1,5 @@
+import { createServer } from "node:net";
+import { createSocket } from "node:dgram";
 import { Gridpaint, OneLobby, type Lobby } from "../src/internals.js";
 import type { AudioSink, FrameSource, VoiceCodec } from "../src/internals.js";
 import { ManualClock, MemoryNetwork, MemoryServer } from "../src/testing.js";
@@ -137,4 +139,36 @@ export async function play(clock: ManualClock, players: Player[], ms: number, st
   }
   await clock.run(0);
   for (const p of players) p.pump();
+}
+
+const bindable = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const tcp = createServer();
+    tcp.once("error", () => resolve(false));
+    tcp.listen(port, () => {
+      const udp = createSocket("udp4");
+      udp.once("error", () => tcp.close(() => resolve(false)));
+      udp.bind(port, () => udp.close(() => tcp.close(() => resolve(true))));
+    });
+  });
+
+/**
+ * A port that, with the `span - 1` after it, binds on TCP and UDP (a direct host takes both). Windows reserves UDP
+ * ranges (Hyper-V, WSL) that a TCP-only probe misses, so an OS-picked TCP port alone is not enough.
+ */
+export async function freePort(span = 4): Promise<number> {
+  for (let tries = 0; tries < 50; tries++) {
+    const p = await new Promise<number>((resolve) => {
+      const s = createServer();
+      s.listen(0, "127.0.0.1", () => {
+        const port = (s.address() as { port: number }).port;
+        s.close(() => resolve(port));
+      });
+    });
+    if (p + span > 65535) continue;
+    let ok = true;
+    for (let i = 0; i < span && ok; i++) ok = await bindable(p + i);
+    if (ok) return p;
+  }
+  throw new Error("no free TCP+UDP port run found");
 }

@@ -10,6 +10,7 @@ import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, defaultHubOptions, directHubOptions, hostDirect, originAllowed } from "../src/direct/index.js";
 import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
+import { freePort } from "./helpers.js";
 
 /**
  * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
@@ -19,16 +20,6 @@ import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
 const links = webRtcLinkFactoryFor(RTCPeerConnection as unknown as typeof globalThis.RTCPeerConnection);
 const kit = (name: string) =>
   new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", displayName: name, rememberSeat: false, advanced: { linkFactory: links } });
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const s = createServer();
-    s.listen(0, "127.0.0.1", () => {
-      const p = (s.address() as { port: number }).port;
-      s.close(() => resolve(p));
-    });
-  });
-}
 
 const until = async (cond: () => boolean, what: string, ms = 10000) => {
   const t0 = Date.now();

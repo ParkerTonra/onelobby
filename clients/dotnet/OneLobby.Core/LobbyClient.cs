@@ -114,7 +114,12 @@ namespace OneLobby
         }
 
         public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
-            Run(null, Signaling.Create(Config, options), new[] { "lobby" }, EnterLobby, ct);
+            Run(null, Signaling.Create(Config, options), new[] { "lobby" }, e =>
+            {
+                var lobby = EnterLobby(e);
+                lobby.RateLimit = options.RateLimit;
+                return lobby;
+            }, ct);
 
         public Task<Lobby> JoinAsync(string code, CancellationToken ct = default)
         {
@@ -142,6 +147,7 @@ namespace OneLobby
         private Lobby EnterLobby(JsonElement reply)
         {
             var lobby = new Lobby(this, Signaling.ParseLobby(reply));
+            if (Blueprint != null) lobby.Voice.Mode = Blueprint.Chat.VoiceMode == "voiceActivity" ? VoiceMode.VoiceActivity : VoiceMode.PushToTalk;
             _lobby = lobby;
             lobby.Start();
             return lobby;

@@ -33,10 +33,9 @@ namespace OneLobby
     public sealed record PlayersSection(string Identity, int MaxNameLength);
     /// <summary><see cref="VoiceMode"/> is "pushToTalk" or "voiceActivity".</summary>
     public sealed record ChatSection(bool Text, bool Voice, string VoiceMode);
-    public sealed record RateLimitSetting(int Messages, int PerMs);
     /// <summary><see cref="HostLeaves"/>: "end" or "migrate". <see cref="Pause"/>: "off", "host" or "anyone".</summary>
     public sealed record SessionSection(string HostLeaves, string Pause, int ReadyTimeoutMs, int PeerTimeoutMs,
-        RateLimitSetting? RateLimit, bool RunInBackground);
+        RateLimit? RateLimit, bool RunInBackground);
     public sealed record SteamSetting(bool Enabled, int? AppId);
     public sealed record EpicSetting(bool Enabled, IReadOnlyDictionary<string, string> Ids);
     public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
@@ -84,8 +83,8 @@ namespace OneLobby
         /// <summary>
         /// Today's <see cref="OneLobbyConfig"/>. <c>LobbyServer</c> is <c>hosting.lobbyServer</c>; when the file has none
         /// (a direct-only game) it is <see cref="NoServer"/>, which never connects, so <c>HostAsync()</c> on a blueprint
-        /// client fails with <c>bad_config</c> instead of dialing nothing. Replication maps to Raw. Peer timeout and
-        /// rate limit have no config field yet and are not applied.
+        /// client fails with <c>bad_config</c> instead of dialing nothing. Replication maps to Raw. <c>session.peerTimeoutMs</c>
+        /// becomes <see cref="OneLobbyConfig.PeerTimeout"/>.
         /// </summary>
         public OneLobbyConfig ToConfig(string? displayName = null)
         {
@@ -93,18 +92,19 @@ namespace OneLobby
             return new OneLobbyConfig(Game.Id, Game.NetVersion, server,
                 Sync.Mode == "lockstep" ? SyncMode.Lockstep : SyncMode.Raw, Sync.TickRate, Sync.HashEveryTicks,
                 displayName ?? "", Hosting.RelayOnly, Hosting.DirectPort)
-            { ReadyTimeout = TimeSpan.FromMilliseconds(Session.ReadyTimeoutMs) };
+            { ReadyTimeout = TimeSpan.FromMilliseconds(Session.ReadyTimeoutMs), PeerTimeout = TimeSpan.FromMilliseconds(Session.PeerTimeoutMs) };
         }
 
         /// <summary>
         /// <see cref="LobbyOptions"/> for a server lobby: listed gives Public, approveJoins Private, else Unlisted.
-        /// <paramref name="name"/> defaults to "&lt;displayName&gt;'s game" ("Player's game" for no name). Password is not a
-        /// LobbyOptions field and is not applied.
+        /// <paramref name="name"/> defaults to "&lt;displayName&gt;'s game" ("Player's game" for no name). <c>session.rateLimit</c>
+        /// becomes <see cref="LobbyOptions.RateLimit"/>. <c>lobby.password</c> only says the game asks for one: the
+        /// host passes the password itself (a direct host's <c>DirectHostOptions.Password</c>).
         /// </summary>
         public LobbyOptions ToLobbyOptions(string? name = null, string? displayName = null) =>
             new LobbyOptions(string.IsNullOrEmpty(name) ? DefaultLobbyName(displayName) : name!, Lobby.MaxPlayers,
                 Lobby.Listed ? Visibility.Public : Lobby.ApproveJoins ? Visibility.Private : Visibility.Unlisted,
-                Lobby.LateJoin, Lobby.Meta.Count == 0 ? null : Lobby.Meta);
+                Lobby.LateJoin, Lobby.Meta.Count == 0 ? null : Lobby.Meta) { RateLimit = Session.RateLimit };
 
         internal static string DefaultLobbyName(string? displayName) => (string.IsNullOrEmpty(displayName) ? "Player" : displayName) + "'s game";
 
@@ -407,9 +407,9 @@ namespace OneLobby
             if (hosting is { } h && h.TryGetProperty("allowedOrigins", out var ao)) foreach (var o in ao.EnumerateArray()) origins.Add(o.GetString()!);
             var meta = new Dictionary<string, string>();
             if (lobby is { } l && l.TryGetProperty("meta", out var m)) foreach (var kv in m.EnumerateObject()) meta[kv.Name] = kv.Value.GetString()!;
-            RateLimitSetting? rate = null;
+            RateLimit? rate = null;
             if (session is { } sj && sj.TryGetProperty("rateLimit", out var rl))
-                rate = new RateLimitSetting((int)rl.GetProperty("messages").GetInt64(), (int)rl.GetProperty("perMs").GetInt64());
+                rate = new RateLimit((int)rl.GetProperty("messages").GetInt64(), (int)rl.GetProperty("perMs").GetInt64());
 
             var steam = new SteamSetting(false, null);
             if (platforms is { } pj && pj.TryGetProperty("steam", out var st))

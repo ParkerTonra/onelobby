@@ -25,6 +25,8 @@ namespace OneLobby.Direct
         public string? Name { get; set; }
         public bool LateJoin { get; set; } = true;
         public IReadOnlyDictionary<string, string>? Meta { get; set; }
+        /// <summary>Per-joiner cap on incoming raw messages (<see cref="LobbyOptions.RateLimit"/>); null = none.</summary>
+        public RateLimit? RateLimit { get; set; }
         /// <summary>
         /// Ask the home router to forward TCP + UDP P (UPnP, then NAT-PMP) so the join code works from the internet
         /// (docs/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on.
@@ -74,8 +76,8 @@ namespace OneLobby.Direct
 
         /// <summary>
         /// <see cref="DirectHostOptions"/> from <c>hosting.*</c> and <c>lobby.*</c>: port (with the 9 fallback ports),
-        /// OpenPort, AllowedOrigins, MaxPlayers, LateJoin, Meta and the lobby name. Password and rate limit have no
-        /// field in the options and are not applied.
+        /// OpenPort, AllowedOrigins, MaxPlayers, LateJoin, Meta, RateLimit and the lobby name. <c>lobby.password</c> only
+        /// says the game asks for one: set <see cref="DirectHostOptions.Password"/> to what the host typed.
         /// </summary>
         public static DirectHostOptions ToDirectHostOptions(this Blueprint bp, string? name = null, string? displayName = null)
         {
@@ -89,6 +91,7 @@ namespace OneLobby.Direct
                 MaxPlayers = bp.Lobby.MaxPlayers,
                 LateJoin = bp.Lobby.LateJoin,
                 Meta = bp.Lobby.Meta.Count == 0 ? null : bp.Lobby.Meta,
+                RateLimit = bp.Session.RateLimit,
                 Name = string.IsNullOrEmpty(name) ? Blueprint.DefaultLobbyName(displayName) : name,
             };
         }
@@ -132,7 +135,7 @@ namespace OneLobby.Direct
             Task<PortMapResult?> mapping = o.OpenPort
                 ? MapAsync(hub, o.PortMapping ?? new PortMapperOptions { Description = "OneLobby " + client.Config.GameId })
                 : Task.FromResult<PortMapResult?>(null);
-            var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta), ct);
+            var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit }, ct);
             return FinishHost(create, mapping, transport, hub, port);
         }
 

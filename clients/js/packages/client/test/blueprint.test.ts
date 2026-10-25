@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createServer } from "node:net";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ManualClock, MemoryNetwork, MemoryServer, settle } from "../src/testing.js";
 import { BlueprintError, ErrorCodes, OneLobby, OneLobbyError, defineBlueprint, describeError, parseBlueprint } from "../src/index.js";
 import { hostDirect } from "../src/direct/index.js";
-import { FakeCodec, RecordingSink, ToneMic } from "./helpers.js";
+import { FakeCodec, RecordingSink, ToneMic, freePort } from "./helpers.js";
 import { specJson } from "./spec.js";
 
 const vectors = specJson("vectors/blueprint.json");
@@ -182,13 +181,7 @@ describe("kit.host() defaults from the blueprint", () => {
 
 describe("hostDirect defaults from the blueprint", () => {
   it("takes the port, maxPlayers and meta from the file", async () => {
-    const port = await new Promise<number>((resolve) => {
-      const s = createServer();
-      s.listen(0, "127.0.0.1", () => {
-        const p = (s.address() as { port: number }).port;
-        s.close(() => resolve(p));
-      });
-    });
+    const port = await freePort();
     const kit = OneLobby.fromConfig(
       { game: { id: "g" }, engine: "node-browser", hosting: { directPort: Math.max(port, 1024), openPort: false }, lobby: { meta: { map: "m" } } },
       { displayName: "Ann", rememberSeat: false },
@@ -224,6 +217,14 @@ describe("enforcement", () => {
     l3.voice.enabled = true;
     await settle();
     expect(l3.voice.enabled).toBe(true);
+  });
+
+  it("chat.voiceMode sets the lobby's starting voice mode", async () => {
+    const w = world();
+    const va = OneLobby.fromConfig({ game: { id: "g" }, engine: "web", chat: { voice: true, voiceMode: "voiceActivity" } }, { advanced: w.advanced("a") });
+    expect((await va.host()).voice.mode).toBe("voiceActivity");
+    const ptt = OneLobby.fromConfig({ game: { id: "g" }, engine: "web" }, { advanced: w.advanced("b") });
+    expect((await ptt.host()).voice.mode).toBe("pushToTalk");
   });
 
   it("chat_disabled: chat.send throws when chat.text is false", async () => {

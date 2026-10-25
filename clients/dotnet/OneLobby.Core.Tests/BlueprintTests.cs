@@ -206,6 +206,26 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void SessionLimitsAndVoiceModeComeFromTheFile()
+        {
+            const string json = @"{""game"":{""id"":""a""}," + Server + @",""chat"":{""voice"":true,""voiceMode"":""voiceActivity""},
+              ""session"":{""peerTimeoutMs"":7000,""rateLimit"":{""messages"":60,""perMs"":1000}}}";
+            var bp = Blueprint.Parse(json);
+            Assert.Equal(TimeSpan.FromSeconds(7), bp.ToConfig().PeerTimeout);
+            Assert.Equal(new RateLimit(60, 1000), bp.ToLobbyOptions().RateLimit);
+            var (rig, c) = BlueprintClient(json);
+            var lobby = rig.Await(c.HostAsync());
+            Assert.Equal(new RateLimit(60, 1000), lobby.RateLimit);
+            Assert.Equal(VoiceMode.VoiceActivity, lobby.Voice.Mode);
+
+            var plain = Blueprint.Parse(@"{""game"":{""id"":""a""}}");
+            Assert.Equal(TimeSpan.Zero, plain.ToConfig().PeerTimeout);
+            Assert.Null(plain.ToLobbyOptions().RateLimit);
+            var (rig2, c2) = BlueprintClient(@"{""game"":{""id"":""a""}," + Server + "}");
+            Assert.Equal(VoiceMode.PushToTalk, rig2.Await(c2.HostAsync()).Voice.Mode);
+        }
+
+        [Fact]
         public void ChatDisabledThrowsAndEnabledDoesNot()
         {
             var (rig, c) = BlueprintClient(@"{""game"":{""id"":""a""}," + Server + @",""chat"":{""text"":false}}");

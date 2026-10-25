@@ -574,8 +574,9 @@ function definedOnly<T extends object>(o: T | undefined): Partial<T> {
   return out;
 }
 
-/** Blueprint switches that gate features on the lobby: voice and text chat. */
+/** Blueprint switches that gate features on the lobby: voice and text chat; chat.voiceMode is the starting voice mode. */
 function guardLobby(lobby: Lobby, bp: Blueprint): void {
+  lobby.voice.mode = bp.chat.voiceMode;
   if (!bp.chat.voice) {
     const voice = lobby.voice;
     const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(voice), "enabled");

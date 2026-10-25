@@ -37,11 +37,26 @@ namespace OneLobby
         /// Set it with <c>config with { ReadyTimeout = TimeSpan.FromSeconds(30) }</c>.
         /// </summary>
         public TimeSpan ReadyTimeout { get; init; } = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// Treat a peer as gone after this long without hearing from it: the host drops a silent joiner
+        /// (<see cref="Lobby.PeerLeft"/>, "timeout") and a joiner handles a silent host as lost. <see cref="TimeSpan.Zero"/>
+        /// (default) keeps the built-in <see cref="Lobby.PeerTimeoutMs"/> / <see cref="Lobby.HostTimeoutMs"/>. Values under
+        /// 6 s (<see cref="Lobby.MinPeerTimeoutMs"/>) are raised to 6 s.
+        /// </summary>
+        public TimeSpan PeerTimeout { get; init; } = TimeSpan.Zero;
     }
+
+    /// <summary>At most <see cref="Messages"/> raw messages per peer in any <see cref="PerMs"/> window (a fixed window, reset every PerMs).</summary>
+    public sealed record RateLimit(int Messages, int PerMs);
 
     public sealed record LobbyOptions(
         string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted,
-        bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null);
+        bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null)
+    {
+        /// <summary>Host: per-joiner cap on incoming raw messages; the excess is dropped before <see cref="Lobby.MessageReceived"/> fires or is relayed.</summary>
+        public RateLimit? RateLimit { get; init; }
+    }
 
     public sealed record LobbySummary(string Code, string Name, string HostName, int Players, int MaxPlayers,
         LobbyPhase Phase, IReadOnlyDictionary<string, string> Meta, string Region, DateTimeOffset CreatedAt);

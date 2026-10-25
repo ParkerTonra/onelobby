@@ -15,7 +15,13 @@ public enum JoinCodeKind { None, SameNetwork, Internet }
 public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyServer, SyncMode Mode = SyncMode.Lockstep, int TickRate = 20, int HashEveryTicks = 20, string DisplayName = "Player", bool RelayOnly = false, int DirectPort = 47810)
     /// Joiner: how long Lobby.ReadyAsync waits for the link to the host to open (default 15 s, TimeSpan.Zero = wait forever). On timeout ReadyAsync faults with OneLobbyException code ice_failed, LobbyClient.Error fires, the lobby is left and Lobby.SessionEnded fires with "ice_failed". When the server offers a TURN relay (and RelayOnly is off, not direct IP), the second half of the budget is one relay-only retry. Set it with config with { ReadyTimeout = TimeSpan.FromSeconds(30) }.
     public TimeSpan ReadyTimeout { get; init; }
-public sealed record LobbyOptions(string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted, bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null);
+    /// Treat a peer as gone after this long without hearing from it: the host drops a silent joiner (Lobby.PeerLeft, "timeout") and a joiner handles a silent host as lost. TimeSpan.Zero (default) keeps the built-in Lobby.PeerTimeoutMs / Lobby.HostTimeoutMs. Values under 6 s (Lobby.MinPeerTimeoutMs) are raised to 6 s.
+    public TimeSpan PeerTimeout { get; init; }
+/// At most Messages raw messages per peer in any PerMs window (a fixed window, reset every PerMs).
+public sealed record RateLimit(int Messages, int PerMs);
+public sealed record LobbyOptions(string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted, bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null)
+    /// Host: per-joiner cap on incoming raw messages; the excess is dropped before Lobby.MessageReceived fires or is relayed.
+    public RateLimit? RateLimit { get; init; }
 public sealed record LobbySummary(string Code, string Name, string HostName, int Players, int MaxPlayers, LobbyPhase Phase, IReadOnlyDictionary<string, string> Meta, string Region, DateTimeOffset CreatedAt);
 public sealed record Peer(int PeerId, string Name, int PingMs, bool Relayed);
 public readonly record struct Frame(long Tick, IReadOnlyList<(int PeerId, ReadOnlyMemory<byte> Command)> Commands);
@@ -48,9 +54,8 @@ public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
 public sealed record PlayersSection(string Identity, int MaxNameLength);
 /// VoiceMode is "pushToTalk" or "voiceActivity".
 public sealed record ChatSection(bool Text, bool Voice, string VoiceMode);
-public sealed record RateLimitSetting(int Messages, int PerMs);
 /// HostLeaves: "end" or "migrate". Pause: "off", "host" or "anyone".
-public sealed record SessionSection(string HostLeaves, string Pause, int ReadyTimeoutMs, int PeerTimeoutMs, RateLimitSetting? RateLimit, bool RunInBackground);
+public sealed record SessionSection(string HostLeaves, string Pause, int ReadyTimeoutMs, int PeerTimeoutMs, RateLimit? RateLimit, bool RunInBackground);
 public sealed record SteamSetting(bool Enabled, int? AppId);
 public sealed record EpicSetting(bool Enabled, IReadOnlyDictionary<string, string> Ids);
 public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
@@ -66,9 +71,9 @@ public sealed record Blueprint(int Version, GameSection Game, string? Engine, Ho
     public static Blueprint Load(string path);
     /// Validates json against the schema, fills defaults, applies the cross-key rules.
     public static Blueprint Parse(string json);
-    /// Today's OneLobbyConfig. LobbyServer is hosting.lobbyServer; when the file has none (a direct-only game) it is NoServer, which never connects, so HostAsync() on a blueprint client fails with bad_config instead of dialing nothing. Replication maps to Raw. Peer timeout and rate limit have no config field yet and are not applied.
+    /// Today's OneLobbyConfig. LobbyServer is hosting.lobbyServer; when the file has none (a direct-only game) it is NoServer, which never connects, so HostAsync() on a blueprint client fails with bad_config instead of dialing nothing. Replication maps to Raw. session.peerTimeoutMs becomes OneLobbyConfig.PeerTimeout.
     public OneLobbyConfig ToConfig(string? displayName = null);
-    /// LobbyOptions for a server lobby: listed gives Public, approveJoins Private, else Unlisted. name defaults to "&lt;displayName&gt;'s game" ("Player's game" for no name). Password is not a LobbyOptions field and is not applied.
+    /// LobbyOptions for a server lobby: listed gives Public, approveJoins Private, else Unlisted. name defaults to "&lt;displayName&gt;'s game" ("Player's game" for no name). session.rateLimit becomes LobbyOptions.RateLimit. lobby.password only says the game asks for one: the host passes the password itself (a direct host's DirectHostOptions.Password).
     public LobbyOptions ToLobbyOptions(string? name = null, string? displayName = null);
     /// Throws identity_anonymous / bad_config (path displayName) when the name breaks players.*.
     public void CheckDisplayName(string? displayName);
@@ -229,6 +234,8 @@ public static class JoinCode
 public sealed class Lobby : IAsyncDisposable
     public const int HostTimeoutMs;
     public const int PeerTimeoutMs;
+    /// The smallest OneLobbyConfig.PeerTimeout honoured.
+    public const int MinPeerTimeoutMs;
     public const int PingEveryMs;
     public const int ClaimWaitMs;
     public const int MigrationGraceMs;
@@ -249,6 +256,8 @@ public sealed class Lobby : IAsyncDisposable
     public LockstepSession? Lockstep { get; }
     public VoiceChannel Voice { get; }
     public TextChat Chat { get; }
+    /// Host: the per-joiner cap on incoming raw messages (LobbyOptions.RateLimit); null = none.
+    public RateLimit? RateLimit { get; internal set; }
     /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen, e.g. 192.168.1.20:47810. Empty otherwise.
     public IReadOnlyList<string> DirectAddresses { get; internal set; }
     /// Direct-IP host only: the code friends paste to join, e.g. 6B01-RGFE-P2B (docs/direct-ip.md s.2a). Show it with JoinCodeKind. Empty when this machine has no IPv4 address.
@@ -357,6 +366,8 @@ public static class LobbyErrorCodes
     public const string Timeout;
     /// RejoinAsync: the seat behind the resume token is gone (resume window over, or the lobby ended).
     public const string InvalidToken;
+    /// The config has no lobby server address (empty hosting.lobbyServer and no override); host, join and list need one.
+    public const string NoServer;
     /// Direct IP: nothing answered on the host's TCP port.
     public const string DirectUnreachable;
     /// Direct IP: the join code or address could not be read.
