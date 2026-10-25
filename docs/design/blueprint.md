@@ -560,13 +560,13 @@ Practice settled everything else. Three remained; each has a default that gets b
 Today the plan has a hard stop after the proposal (s.5 phase 4). Yes: when the survey finds nothing unusual (no
 lockstep, no voice, no platform keys), the agent prints the proposal and builds in the same turn, so "make it
 multiplayer" is one message. No: it always stops once, so the developer reads the file before any code changes.
-`Default:` yes, one message when all defaults; always stop when any key deviates.
+`Default:` yes, one message when all defaults; always stop when any key deviates. Decided (designer, 2026-10-25): default.
 
 **2. Is voice off until the developer asks for it?**
 Today nothing decides. Yes: `chat.voice` defaults to `false` and the agent only proposes `true` when the survey finds
 a reason (team play, long sessions); the mic prompt and the ESRB "Users Interact" disclosure are opt-in. No: voice
 defaults on for any game with three or more players, the way text chat does.
-`Default:` yes, off unless proposed with a reason.
+`Default:` yes, off unless proposed with a reason. Decided (designer, 2026-10-25): default.
 
 **3. When the host pauses, can only the host unpause?** Decided (designer, 2026-10-25): it depends on the game, so
 both modes stay. In `"host"` only the host pauses and unpauses (Stardew); in `"anyone"` any player pauses and any
