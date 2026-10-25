@@ -128,6 +128,12 @@ namespace OneLobby
             new Peer(r.Id, r.Name, r.PingMs, r.Link?.Relayed ?? false)).ToList();
 
         /// <summary>
+        /// Round trip to <paramref name="peerId"/> in ms from OneLobby's own 1 s pings (host: any peer; joiner: the host),
+        /// 0 before the first pong or for an unknown peer. Same value as <see cref="Peer.PingMs"/>, without the list.
+        /// </summary>
+        public int PingMs(int peerId) => _peers.TryGetValue(peerId, out var r) ? r.PingMs : 0;
+
+        /// <summary>
         /// True once <see cref="PeerReady"/> has fired for this peer (its data channels are open and its handshake is
         /// done). Always true for the local player.
         /// </summary>

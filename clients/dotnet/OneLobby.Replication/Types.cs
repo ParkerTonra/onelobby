@@ -59,6 +59,13 @@ namespace OneLobby.Replication
         public double TickMs => 1000.0 / TickRate;
     }
 
+    /// <summary>Host: one client's input counters (<see cref="ReplicationSession.InputStatsFor"/>).</summary>
+    /// <param name="Repeated">Ticks this client had no new input and the previous one was handed out again.</param>
+    /// <param name="Skipped">Inputs dropped by the latency cap (<see cref="ReplicationConfig.MaxInputBuffer"/>).</param>
+    /// <param name="Lost">Inputs that never arrived (every redundant copy lost).</param>
+    /// <param name="BufferDepth">Inputs received and not yet consumed by <see cref="ReplicationSession.TryGetInput"/>.</param>
+    public readonly record struct ClientInputStats(long Repeated, long Skipped, long Lost, int BufferDepth);
+
     /// <summary>Counters for tests and debug overlays. Byte counts are replication payloads, before the 3-byte lobby header.</summary>
     public sealed class ReplicationStats
     {

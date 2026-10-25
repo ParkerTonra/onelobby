@@ -299,6 +299,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     directAddresses: string[];
     /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
     portMapping: string;
+    /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
     /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
     /** Host: per-peer fixed window for rateLimit. */
@@ -855,6 +856,10 @@ export declare class WebRtcLink implements PeerLink {
     onClose: PeerLink["onClose"];
     onMessage: PeerLink["onMessage"];
     onPath: PeerLink["onPath"];
+    /**
+     * Set once setRemoteDescription resolves. Not `pc.remoteDescription`: node-datachannel's polyfill returns an object
+     * there before any is set, and its addIceCandidate throws until one is.
+     */
     /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
     constructor(opts: LinkOptions, rtc?: typeof RTCPeerConnection);
     /**

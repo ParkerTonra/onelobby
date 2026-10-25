@@ -33,6 +33,8 @@ namespace OneLobby.Replication
             public InputFrame Last;
             public bool HasLast;
             public long BytesSent;
+            public uint AckFloor; // SendFullSnapshot: acks at or below this tick no longer count as a baseline
+            public long Repeated, Skipped, Lost;
         }
 
         private readonly Lobby _lobby;
@@ -64,6 +66,7 @@ namespace OneLobby.Replication
         private bool _haveRender;
         private long _lastPumpMs;
         private long _lastInputSendMs = long.MinValue / 2;
+        private long _newestAtMs = -1;
 
         public ReplicationSession(Lobby lobby, ReplicationConfig? config = null)
         {
@@ -91,6 +94,14 @@ namespace OneLobby.Replication
         public bool IsHost { get; }
         public Lobby Lobby => _lobby;
         public int LocalPeerId => _lobby.LocalPeerId;
+        /// <summary>The host's peer id (same as <c>Lobby.HostPeerId</c>).</summary>
+        public int HostPeerId => _lobby.HostPeerId;
+
+        /// <summary>Client: round trip to the host in ms (OneLobby's 1 s pings; 0 until the first pong). Host: 0.</summary>
+        public int RttMs => IsHost ? 0 : _lobby.PingMs(_lobby.HostPeerId);
+
+        /// <summary>Round trip to <paramref name="peerId"/> in ms (host: any client; client: only the host answers).</summary>
+        public int PeerRttMs(int peerId) => _lobby.PingMs(peerId);
         /// <summary>Host: the authoritative sim tick. Client: the local input tick (same rate, its own count).</summary>
         public NetworkClock Clock { get; }
         public ReplicationStats Stats { get; } = new();
@@ -173,6 +184,25 @@ namespace OneLobby.Replication
         public long BytesSentTo(int peerId) => _clients.TryGetValue(peerId, out var c) ? c.BytesSent : 0;
 
         /// <summary>
+        /// Host: one client's input counters (the per-peer split of <see cref="ReplicationStats"/>' Inputs* totals) and how
+        /// many of its inputs are buffered right now. All zero for a peer that is not in <see cref="Clients"/>.
+        /// </summary>
+        public ClientInputStats InputStatsFor(int peerId) =>
+            _clients.TryGetValue(peerId, out var c) ? new ClientInputStats(c.Repeated, c.Skipped, c.Lost, c.Inputs.Count) : default;
+
+        /// <summary>
+        /// Host: the next snapshot this client gets is a full one (no baseline), and deltas resume only once it acknowledges
+        /// a snapshot sent after this call. Use it when a client reports a gap or asks to resync.
+        /// </summary>
+        public void SendFullSnapshot(int peerId)
+        {
+            RequireHost();
+            if (!_clients.TryGetValue(peerId, out var c)) return;
+            c.Ack = 0;
+            c.AckFloor = Clock.Tick;
+        }
+
+        /// <summary>
         /// Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when
         /// none has arrived the previous one is repeated (<see cref="InputFrame.Repeated"/>); false only before the first.
         /// </summary>
@@ -188,12 +218,13 @@ namespace OneLobby.Replication
                 c.Inputs.Remove(k);
                 c.LastConsumed = k;
                 Stats.InputsSkipped++;
+                c.Skipped++;
             }
             if (c.Inputs.Count > 0)
             {
                 var first = c.Inputs.First();
                 c.Inputs.Remove(first.Key);
-                if (first.Key > c.LastConsumed + 1) Stats.InputsLost += first.Key - c.LastConsumed - 1;
+                if (first.Key > c.LastConsumed + 1) { Stats.InputsLost += first.Key - c.LastConsumed - 1; c.Lost += first.Key - c.LastConsumed - 1; }
                 c.LastConsumed = first.Key;
                 c.Last = new InputFrame(first.Key, first.Value.View256 / 256.0, first.Value.Bytes, false);
                 c.HasLast = true;
@@ -202,6 +233,7 @@ namespace OneLobby.Replication
             }
             if (!c.HasLast) return false;
             Stats.InputsRepeated++;
+            c.Repeated++;
             input = new InputFrame(c.Last.Seq, c.Last.ViewTick, c.Last.Bytes, true);
             return true;
         }
@@ -285,7 +317,7 @@ namespace OneLobby.Replication
         {
             if (!_clients.TryGetValue(from, out var c)) return;
             var (ack, _, inputs) = Proto.DecodeInput(payload);
-            if (ack <= Clock.Tick && ack > c.Ack && _sent.ContainsKey(ack)) c.Ack = ack;
+            if (ack <= Clock.Tick && ack > c.Ack && ack > c.AckFloor && _sent.ContainsKey(ack)) c.Ack = ack;
             foreach (var (seq, view, bytes) in inputs)
             {
                 if (seq == 0 || seq <= c.LastConsumed || c.Inputs.ContainsKey(seq)) continue;
@@ -304,6 +336,9 @@ namespace OneLobby.Replication
 
         /// <summary>Client: newest snapshot tick received.</summary>
         public uint LatestTick => _newestTick;
+
+        /// <summary>Client: ms since the newest snapshot (<see cref="LatestTick"/>) arrived; -1 before the first one.</summary>
+        public long SnapshotAgeMs => _newestAtMs < 0 ? -1 : _lobby.NowMs - _newestAtMs;
 
         /// <summary>Client: the last of my inputs the host had applied in the newest snapshot (for <see cref="Reconciler{TInput,TState}"/>).</summary>
         public uint LastProcessedInput => _lastProcessed;
@@ -428,6 +463,7 @@ namespace OneLobby.Replication
             if (h.Tick > _newestTick)
             {
                 _newestTick = h.Tick;
+                _newestAtMs = now;
                 _ack = h.Tick;
                 _lastProcessed = h.LastInputSeq;
             }

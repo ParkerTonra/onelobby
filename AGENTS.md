@@ -40,6 +40,7 @@ while (rep.Clock.TryAdvance()) { rep.TryGetInput(peer, out InputFrame f); /* sim
 while (rep.Clock.TryAdvance()) rep.SubmitInput(inputBytes);                                                   // client
 rep.EntitySpawned / EntityDespawned / EventReceived / HostLost; rep.SendEvent(bytes);
 rep.TrySample<TState>(id, out var s);                      // client: TState : IReplicatedState<TState>, at rep.RenderTick
+rep.RttMs; rep.PeerRttMs(peer); rep.SnapshotAgeMs; rep.InputStatsFor(peer); rep.SendFullSnapshot(peer);   // overlay, resync
 new Reconciler<TInput, TState>(start, step); new HistoryRing<T>(ticks, lerp); rep.RewindTick(f);   // prediction, hitscan
 ```
 
@@ -143,6 +144,9 @@ Full reference (generated): `docs/api/`.
   TURN. Direct-IP joiners get the same timeout (no relay retry: direct IP has no TURN).
 - Unity `OneLobbyRunner` sets `Application.runInBackground = true` from Host/Join until the lobby ends (then restores
   it), so an unfocused window keeps pumping; opt out with `KeepRunningInBackground = false`.
+- Every C# event (lobby, chat, voice, replication) fires synchronously inside `Pump()` on the calling thread, and
+  `ReadyAsync` / `HostAsync` / `JoinAsync` complete there too: pump from the engine's main loop and touch engine APIs
+  directly in handlers.
 - `ReplicationSession.Clients` (host) holds only peers whose link is up (`PeerReady`); `ClientReady` fires when one
   joins it and its first snapshot is a full one.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server

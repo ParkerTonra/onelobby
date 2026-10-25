@@ -257,7 +257,21 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - `rep.Clients` (host) lists peers whose link is up (`lobby.PeerReady`), not every peer the server announced; a peer
   is added with its first snapshot a full one, and `rep.ClientReady` fires then (spawn its avatar there).
   `rep.IsClientReady(peer)` asks for one peer.
-- Lobby facts (`HostPeerId`, `LocalPeerId`, `IsHost`, `Peers`) live on `rep.Lobby`; the session does not copy them.
+- `rep.HostPeerId` and `rep.LocalPeerId` are on the session; other lobby facts (`IsHost`, `Peers`) live on `rep.Lobby`.
+- Every session event (`ClientReady`, `EntitySpawned`, `EventReceived`, `HostLost`, ...) and every lobby event
+  (`SessionEnded`, `PeerLeft`, ...) fires synchronously inside `rep.Pump()`, on the thread that calls it. Pump from your
+  engine's main loop (Unity `Update`, Godot `_Process`) and call engine APIs straight from the handlers; no queue needed.
+- An event is stamped with the sender's tick when sent: the host's `Clock.Tick`, or a client's `floor(ServerTick)`, which
+  is ahead of what that client sees on screen. A client event that refers to what the player saw (a hit claim) must
+  carry its own view tick in the payload (`rep.RenderTick`), or go through input so the host can use `RewindTick(frame)`.
+- An event may arrive before the snapshot of the same tick; to act on it in sync, hold it until `rep.RenderTick >= tick`.
+- Event size: up to about 15 KiB goes in one frame; larger payloads are split and reassembled on the reliable channel
+  (also when `Channel.Fast` was asked for), up to 64 MiB. Keep frequent events small (a few hundred bytes).
+- Diagnostics for an overlay: `rep.RttMs` (client, to the host), `rep.PeerRttMs(peer)` (host, per client),
+  `rep.SnapshotAgeMs` (client: ms since the newest snapshot), `rep.InputStatsFor(peer)` (host: `Repeated`, `Skipped`,
+  `Lost`, `BufferDepth` per client), `rep.BytesSentTo(peer)`. RTT comes from OneLobby's own 1 s pings.
+- A client that reports a gap or asks to resync: `rep.SendFullSnapshot(peer)` on the host; its next snapshot is full and
+  deltas resume after it acknowledges one.
 
 ## Done when
 

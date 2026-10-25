@@ -197,6 +197,8 @@ public sealed class Lobby : IAsyncDisposable
     /// Completes when IsReady first becomes true (immediately for a host).
     public Task ReadyAsync;
     public IReadOnlyList<Peer> Peers;
+    /// Round trip to peerId in ms from OneLobby's own 1 s pings (host: any peer; joiner: the host), 0 before the first pong or for an unknown peer. Same value as Peer.PingMs, without the list.
+    public int PingMs(int peerId);
     /// True once PeerReady has fired for this peer (its data channels are open and its handshake is done). Always true for the local player.
     public bool IsPeerReady(int peerId);
     public event Action? Ready;
@@ -218,6 +220,7 @@ public sealed class Lobby : IAsyncDisposable
     /// Host: ends one player's connection without a ban; it may join again. Its lobby ends with SessionEnded("disconnected"); closeCode (1000 or 3000-4999) and closeReason (at most 120 characters) reach a JS player's asWebSocket() onclose. Others see PeerLeft(peer, "disconnected").
     public Task DisconnectAsync(int peerId, int? closeCode = null, string? closeReason = null);
     public Task ApproveAsync(int peerId, bool ok);
+    /// Leaves the lobby: tells the server, closes every peer link and turns voice off. Completes at once, never throws, and a second call does nothing. SessionEnded does not fire for your own leave; the other peers see PeerLeft. A direct-IP host leaving stops its listener, which ends the session for every joiner (SessionEnded("host_left")). Do not use the lobby afterwards: host or join again from the LobbyClient.
     public Task LeaveAsync();
     public ValueTask DisposeAsync();
     public void Send(int peerId, ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
@@ -535,6 +538,12 @@ public sealed class ReplicationSession : IDisposable
     public bool IsHost { get; }
     public Lobby Lobby;
     public int LocalPeerId;
+    /// The host's peer id (same as Lobby.HostPeerId).
+    public int HostPeerId;
+    /// Client: round trip to the host in ms (OneLobby's 1 s pings; 0 until the first pong). Host: 0.
+    public int RttMs;
+    /// Round trip to peerId in ms (host: any client; client: only the host answers).
+    public int PeerRttMs(int peerId);
     /// Host: the authoritative sim tick. Client: the local input tick (same rate, its own count).
     public NetworkClock Clock { get; }
     public ReplicationStats Stats { get; }
@@ -557,7 +566,7 @@ public sealed class ReplicationSession : IDisposable
     /// Host: remove an entity; clients see it disappear at the snapshot tick it was last absent from.
     public bool Despawn(NetId id);
     public void SetOwner(NetId id, int owner);
-    /// Host: entities currently registered.
+    /// Host: the entities spawned with Spawn and not yet despawned, as (id, type id, owner peer id). A live view: to despawn while looping, copy it first (HostEntities.ToList()). Empty on a client: clients learn entities from EntitySpawned / EntityDespawned.
     public IEnumerable<EntityInfo> HostEntities;
     /// Host: peers receiving snapshots. A peer is added when its link is up (Lobby.PeerReady), not when the server announces it, and its first snapshot is a full one; it is removed on Lobby.PeerLeft.
     public IReadOnlyCollection<int> Clients;
@@ -569,6 +578,10 @@ public sealed class ReplicationSession : IDisposable
     public uint AckedTick(int peerId);
     /// Host: replication bytes sent to one client (payloads, no lobby header).
     public long BytesSentTo(int peerId);
+    /// Host: one client's input counters (the per-peer split of ReplicationStats' Inputs* totals) and how many of its inputs are buffered right now. All zero for a peer that is not in Clients.
+    public ClientInputStats InputStatsFor(int peerId);
+    /// Host: the next snapshot this client gets is a full one (no baseline), and deltas resume only once it acknowledges a snapshot sent after this call. Use it when a client reports a gap or asks to resync.
+    public void SendFullSnapshot(int peerId);
     /// Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when none has arrived the previous one is repeated (InputFrame.Repeated); false only before the first.
     public bool TryGetInput(int peerId, out InputFrame input);
     /// Host: the tick to rewind hit volumes to for a shot in input, clamped to MaxRewindMs.
@@ -583,6 +596,8 @@ public sealed class ReplicationSession : IDisposable
     public double RenderTick;
     /// Client: newest snapshot tick received.
     public uint LatestTick;
+    /// Client: ms since the newest snapshot (LatestTick) arrived; -1 before the first one.
+    public long SnapshotAgeMs;
     /// Client: the last of my inputs the host had applied in the newest snapshot (for Reconciler{TInput,TState}).
     public uint LastProcessedInput;
     /// Client: entities visible at RenderTick.
@@ -632,6 +647,8 @@ public readonly struct InputFrame
 /// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
 public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200)
     public double TickMs;
+/// Host: one client's input counters (ReplicationSession.InputStatsFor).
+public readonly record struct ClientInputStats(long Repeated, long Skipped, long Lost, int BufferDepth);
 /// Counters for tests and debug overlays. Byte counts are replication payloads, before the 3-byte lobby header.
 public sealed class ReplicationStats
     public long SnapshotsSent { get; internal set; }
