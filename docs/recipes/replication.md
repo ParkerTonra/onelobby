@@ -267,6 +267,9 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - Bump `netVersion` when an entity layout or input layout changes.
 - Keep a snapshot under ~1200 bytes: about 120 moving 8-byte entities. Check `rep.Stats.LargestSnapshot`.
 - No host migration: handle `HostLost` by ending the match.
+- Quitting the match on purpose: send the last events (match over, final score), then
+  `await rep.FlushAsync(TimeSpan.FromSeconds(1))` while still pumping, then `LeaveAsync()`. The other side reads
+  everything the leaver sent before it raises `PeerLeft` / `HostLost`.
 - `rep.Clients` (host) lists peers whose link is up (`lobby.PeerReady`), not every peer the server announced; a peer
   is added with its first snapshot a full one, and `rep.ClientReady` fires then (spawn its avatar there).
   `rep.IsClientReady(peer)` asks for one peer.

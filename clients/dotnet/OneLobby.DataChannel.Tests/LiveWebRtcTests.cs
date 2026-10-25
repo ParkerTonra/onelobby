@@ -124,8 +124,23 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
         _log.WriteLine($"PASS in {sw.ElapsedMilliseconds} ms; host roster: {roster}");
         Assert.Equal(2, host.Peers.Count);
 
+        // FlushAsync then an immediate leave: 2 MB queued in libdatachannel all reach the host before PeerLeft
+        atHost.Clear();
+        var hostSawLeave = false;
+        var countAtLeave = -1;
+        host.PeerLeft += (_, _) => { hostSawLeave = true; countAtLeave = atHost.Count; };
+        var chunk = new string('y', 4096);
+        for (var i = 0; i < 500; i++) joiner.Send(host.LocalPeerId, Encoding.UTF8.GetBytes(i + ":" + chunk));
+        _log.WriteLine($"queued after send: {joiner.ReliableBufferedBytes} bytes");
+        var flush = joiner.FlushAsync(TimeSpan.FromSeconds(15));
+        PumpUntil(() => flush.IsCompleted, Pump, "joiner flush");
+        Assert.True(flush.GetAwaiter().GetResult());
+        Assert.Equal(0, joiner.ReliableBufferedBytes);
         joiner.LeaveAsync();
-        PumpUntil(() => host.Peers.Count == 1, Pump, "host sees joiner leave");
+        PumpUntil(() => hostSawLeave, Pump, "host sees joiner leave");
+        Assert.Equal(500, countAtLeave);
+        Assert.Equal(Enumerable.Range(0, 500).Select(i => i + ":" + chunk), atHost.Select(m => m.Text));
+        Assert.Single(host.Peers);
         host.LeaveAsync();
         joinClient.DisposeAsync().AsTask().Wait();
         hostClient.DisposeAsync().AsTask().Wait();

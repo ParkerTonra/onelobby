@@ -24,6 +24,9 @@ namespace OneLobby
             public int Resyncs;
             public long IgnoreHashUntil = -1;
             public readonly ChunkAssembler Chunks = new(); // per sender: every sender numbers its own chunk ids
+            /// <summary>The server said this peer is gone while its link was open: finish when the link closes or at <see cref="DepartAtMs"/>.</summary>
+            public Action? Departure;
+            public long DepartAtMs;
         }
 
         public const int HostTimeoutMs = 8000;
@@ -31,12 +34,18 @@ namespace OneLobby
         public const int PingEveryMs = 1000;
         public const int ClaimWaitMs = 6000;
         public const int MigrationGraceMs = 1500;
+        /// <summary>
+        /// A departure the server announces (peer left, direct host gone) waits up to this long for the peer's open link
+        /// to close, reading it meanwhile, so the last messages it flushed before leaving still arrive.
+        /// </summary>
+        public const int LeaveGraceMs = 500;
 
         private readonly LobbyClient _c;
         private readonly ITransport _t;
         private readonly SortedDictionary<int, PeerRec> _peers = new();
         /// <summary>Host: links of disconnected peers, kept open until a deadline (see <see cref="DisconnectAsync"/>).</summary>
         private readonly List<(IPeerLink Link, long Until)> _lingering = new();
+        private readonly List<(TaskCompletionSource<bool> Tcs, long Until)> _flushes = new();
         /// <summary>How long a kicked / disconnected peer's link stays open, so the hub's notice reaches it first.</summary>
         public const int KickLingerMs = 3000;
         private readonly int _you;
@@ -230,6 +239,46 @@ namespace OneLobby
 
         public ValueTask DisposeAsync() => new(LeaveAsync());
 
+        /// <summary>
+        /// Waits until every reliable message sent so far has left this machine (each link's send queue is empty), so a
+        /// last message (match over, final score) is not cut off by <see cref="LeaveAsync"/>. True when flushed, false
+        /// on <paramref name="timeout"/> (<see cref="System.Threading.Timeout.InfiniteTimeSpan"/> = wait forever) or when
+        /// the lobby ends first. Completes inside <see cref="Pump"/>, so keep pumping while you await it.
+        /// </summary>
+        public Task<bool> FlushAsync(TimeSpan timeout)
+        {
+            if (_closed) return Task.FromResult(false);
+            if (ReliableBufferedBytes == 0) return Task.FromResult(true);
+            var tcs = new TaskCompletionSource<bool>();
+            _flushes.Add((tcs, timeout < TimeSpan.Zero ? long.MaxValue : NowMs + (long)timeout.TotalMilliseconds));
+            return tcs.Task;
+        }
+
+        /// <summary>Reliable bytes queued on all links and not yet handed to the network (0 for transports that do not say).</summary>
+        public long ReliableBufferedBytes
+        {
+            get
+            {
+                long n = 0;
+                foreach (var r in _peers.Values) if (r.Link is IBufferedPeerLink b) n += b.ReliableBufferedBytes;
+                foreach (var (link, _) in _lingering) if (link is IBufferedPeerLink b) n += b.ReliableBufferedBytes;
+                return n;
+            }
+        }
+
+        private void CheckFlushes(long now)
+        {
+            if (_flushes.Count == 0) return;
+            var done = ReliableBufferedBytes == 0;
+            for (var i = _flushes.Count - 1; i >= 0; i--)
+            {
+                var (tcs, until) = _flushes[i];
+                if (!done && now < until) continue;
+                _flushes.RemoveAt(i);
+                tcs.TrySetResult(done);
+            }
+        }
+
         public void Send(int peerId, ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable)
         {
             var ch = channel == Channel.Fast ? PeerChannel.Fast : PeerChannel.Reliable;
@@ -391,12 +440,8 @@ namespace OneLobby
             {
                 if (rec.Link == null || _closed) continue;
                 while (rec.Link.TryTakeSignal(out var sig)) _c.SendRaw(Signaling.Signal(rec.Id, sig));
-                if (rec.Link.IsFailed)
-                {
-                    LinkLost(rec);
-                    continue;
-                }
                 if (rec.Link.IsOpen && !rec.OpenHandled) { rec.OpenHandled = true; rec.OpenedMs = rec.LastRxMs = now; OnLinkOpen(rec); }
+                // drain before handling a failure: frames that arrived before the close are still the peer's last words
                 while (rec.Link != null && rec.Link.TryReceive(out var ch, out var data))
                 {
                     rec.LastRxMs = now;
@@ -404,8 +449,20 @@ namespace OneLobby
                     catch (FormatException) { /* malformed frame: drop */ }
                     if (_closed) return;
                 }
+                if (rec.Link != null && rec.Link.IsFailed)
+                {
+                    if (rec.Departure != null) FinishDeparture(rec);
+                    else LinkLost(rec);
+                    if (_closed) return;
+                }
             }
             if (_closed) return;
+            foreach (var rec in _peers.Values.Where(r => r.Departure != null && now >= r.DepartAtMs).ToList())
+            {
+                FinishDeparture(rec);
+                if (_closed) return;
+            }
+            CheckFlushes(now);
             CheckReadyTimer(now);
             if (_closed) return;
             Timeouts(now);
@@ -815,9 +872,9 @@ namespace OneLobby
                     var id = Signaling.Int(e, "peerId");
                     var reason = Signaling.Str(e, "reason", "left");
                     if (id == _you) { End(reason is "kicked" or "disconnected" ? reason : "server_closed"); return; }
-                    if (!_peers.TryGetValue(id, out var rec)) return;
-                    if (!IsHost && id == _hostId) { DropPeer(rec, reason); HostLost(true); }
-                    else DropPeer(rec, reason);
+                    if (!_peers.TryGetValue(id, out var rec) || rec.Departure != null) return;
+                    if (!IsHost && id == _hostId) Depart(rec, () => { DropPeer(rec, reason); HostLost(true); });
+                    else Depart(rec, () => DropPeer(rec, reason));
                     return;
                 }
                 case "host_changed":
@@ -879,7 +936,12 @@ namespace OneLobby
         internal void OnSocketClosed()
         {
             if (_closed) return;
-            if (DirectJoiner) { End("host_left"); return; }
+            if (DirectJoiner)
+            {
+                if (_peers.TryGetValue(_hostId, out var host)) Depart(host, () => End("host_left"));
+                else End("host_left");
+                return;
+            }
             // data channels keep the running game alive (DESIGN s.9); only a joiner without a host link is stranded
             if (!IsHost && !_ready && !_awaitingClaim) End("server_closed");
         }
@@ -900,6 +962,29 @@ namespace OneLobby
             Lockstep?.DropPending(rec.Id);
             Voice.OnPeerGone(rec.Id);
             PeerLeft?.Invoke(ToPeer(rec), reason);
+        }
+
+        /// <summary>Run <paramref name="finish"/> now, or once the open link to <paramref name="rec"/> closes (at most <see cref="LeaveGraceMs"/>).</summary>
+        private void Depart(PeerRec rec, Action finish)
+        {
+            if (rec.Departure != null) return;
+            if (rec.Link == null) { finish(); return; }
+            rec.Departure = finish;
+            rec.DepartAtMs = NowMs + LeaveGraceMs;
+            if (!rec.Link.IsOpen) FinishDeparture(rec);       // already closed: read what it delivered, then finish
+        }
+
+        private void FinishDeparture(PeerRec rec)
+        {
+            var finish = rec.Departure;
+            rec.Departure = null;
+            if (rec.Link != null) while (rec.Link.TryReceive(out var ch, out var data))
+            {
+                try { HandleFrame(rec, ch, data); }
+                catch (FormatException) { /* malformed frame: drop */ }
+                if (_closed || rec.Link == null) break;
+            }
+            if (!_closed) finish?.Invoke();
         }
 
         private void LinkLost(PeerRec rec)
@@ -1017,6 +1102,8 @@ namespace OneLobby
             foreach (var r in _peers.Values) { r.Link?.Dispose(); r.Link = null; }
             foreach (var (link, _) in _lingering) link.Dispose();
             _lingering.Clear();
+            foreach (var (tcs, _) in _flushes) tcs.TrySetResult(false);
+            _flushes.Clear();
             Voice.Enabled = false;
             _c.LobbyClosed(this);
         }

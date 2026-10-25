@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace OneLobby.Replication
 {
@@ -99,6 +100,12 @@ namespace OneLobby.Replication
         public ReplicationConfig Config { get; }
         public bool IsHost { get; }
         public Lobby Lobby => _lobby;
+
+        /// <summary>
+        /// <see cref="OneLobby.Lobby.FlushAsync"/>: before leaving, wait until reliable events and snapshots sent so far
+        /// have left this machine (true), or the timeout passes (false). Keep calling <see cref="Pump"/> meanwhile.
+        /// </summary>
+        public Task<bool> FlushAsync(TimeSpan timeout) => _lobby.FlushAsync(timeout);
         public int LocalPeerId => _lobby.LocalPeerId;
         /// <summary>The host's peer id (same as <c>Lobby.HostPeerId</c>).</summary>
         public int HostPeerId => _lobby.HostPeerId;

@@ -65,12 +65,14 @@ namespace OneLobby
             public readonly string Token;
             public Link? Other;
             public bool Open, Failed;
+            /// <summary>The other end closed: this end fails at this time, after the frames sent before the close.</summary>
+            public long FailAt = -1;
             public readonly Queue<PeerSignal> Out = new();
             public readonly List<(long At, PeerChannel Ch, byte[] Data)> Inbox = new();
             private long _lastReliableAt;
             public Link(InMemoryTransport owner, PeerLinkOptions options, string token) { Owner = owner; Net = owner.Net; Options = options; Initiator = options.Initiator; Token = token; }
-            public bool IsOpen => Open && !Failed;
-            public bool IsFailed => Failed;
+            public bool IsOpen => Open && !IsFailed;
+            public bool IsFailed => Failed || (FailAt >= 0 && Net.NowMs >= FailAt);
             public int PingMs => (int)(Net.LatencyMs * 2);
             public bool Relayed => false;
             public void StartOffer()
@@ -103,7 +105,7 @@ namespace OneLobby
             }
             public void Send(PeerChannel channel, ReadOnlySpan<byte> frame)
             {
-                if (!IsOpen || Other == null || Other.Failed) return;
+                if (!IsOpen || Other == null || Other.IsFailed) return;
                 Owner.Traffic.Count(channel, frame.Length);
                 if (channel != PeerChannel.Reliable && Net.DropUnreliable != null && Net.DropUnreliable()) return;
                 if (channel == PeerChannel.Reliable && Net.DropReliable != null && Net.DropReliable()) return;
@@ -139,7 +141,8 @@ namespace OneLobby
             {
                 if (Failed) return;
                 Failed = true; Open = false;
-                if (Other != null) { Other.Failed = true; Other.Open = false; }
+                // the close travels like a frame: the other end reads what was already sent, then fails
+                if (Other != null && Other.FailAt < 0) Other.FailAt = Math.Max(Net.NowMs + (long)Net.LatencyMs, _lastReliableAt);
                 Net.Offers.Remove(Token);
             }
         }

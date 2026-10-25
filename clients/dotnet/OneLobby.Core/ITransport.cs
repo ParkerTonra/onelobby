@@ -48,6 +48,16 @@ namespace OneLobby
         bool TryReceive(out PeerChannel channel, out byte[] frame);
     }
 
+    /// <summary>
+    /// Optional on an <see cref="IPeerLink"/>: how many bytes of <see cref="PeerChannel.Reliable"/> frames are queued and
+    /// not yet handed to the network stack (WebRTC <c>bufferedAmount</c>). <see cref="Lobby.FlushAsync"/> waits for 0;
+    /// a link without it counts as always flushed.
+    /// </summary>
+    public interface IBufferedPeerLink
+    {
+        long ReliableBufferedBytes { get; }
+    }
+
     /// <summary>What a transport needs to build one peer link.</summary>
     /// <param name="RemotePeerId">The peer at the other end.</param>
     /// <param name="Initiator">True: this side creates the offer.</param>

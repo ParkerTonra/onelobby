@@ -111,7 +111,7 @@ namespace OneLobby.Godot
         }
     }
 
-    internal sealed class GodotPeerLink : IPeerLink
+    internal sealed class GodotPeerLink : IPeerLink, IBufferedPeerLink
     {
         private readonly WebRtcPeerConnection _pc = new();
         private readonly WebRtcDataChannel[] _ch = new WebRtcDataChannel[3];
@@ -220,6 +220,9 @@ namespace OneLobby.Godot
             signal = null!;
             return false;
         }
+
+        public long ReliableBufferedBytes =>
+            Disposed || IsFailed || _ch[0] == null ? 0 : _ch[0].GetBufferedAmount();
 
         public void Send(PeerChannel channel, ReadOnlySpan<byte> frame)
         {

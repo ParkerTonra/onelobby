@@ -17,7 +17,7 @@ namespace OneLobby.DataChannel
     /// finds nothing and is dropped. No GCHandle is needed: native code only ever holds ids, never managed pointers.
     /// </para>
     /// </summary>
-    internal sealed unsafe class DataChannelPeerLink : IPeerLink
+    internal sealed unsafe class DataChannelPeerLink : IPeerLink, IBufferedPeerLink
     {
         private const int DisconnectGraceMs = 4000;
         private static readonly string[] Labels = { "reliable", "fast", "voice" };
@@ -336,6 +336,16 @@ namespace OneLobby.DataChannel
             var i = (int)channel;
             if (Volatile.Read(ref _open[i]) != 1) return;
             fixed (byte* p = frame) Rtc.rtcSendMessage(_dc[i], p, frame.Length); // < 0: closing; the state check catches it
+        }
+
+        public long ReliableBufferedBytes
+        {
+            get
+            {
+                if (Disposed || IsFailed || _dc[0] < 0) return 0;
+                try { return Math.Max(0, Rtc.rtcGetBufferedAmount(_dc[0])); }
+                catch (DllNotFoundException) { return 0; }
+            }
         }
 
         public bool TryReceive(out PeerChannel channel, out byte[] frame)

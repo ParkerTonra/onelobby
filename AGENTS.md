@@ -25,6 +25,7 @@ lobby.MessageReceived += (from, payload, channel) => { };
 lobby.PeerJoined / PeerReady / PeerLeft / HostChanged / PhaseChanged / SessionEnded
 lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to host open (host: at once)
 await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();   // KickAsync bans; DisconnectAsync(id, code?, reason?) does not
+bool sent = await lobby.FlushAsync(TimeSpan.FromSeconds(1));   // before LeaveAsync: last reliable messages leave first (keep pumping)
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
 lobby.Voice.ReleaseHangMs = 150; lobby.Voice.MuteAll(true); lobby.Voice.IsMuted(id); lobby.Voice.InputLevel; lobby.Voice.IsTransmitting;
@@ -147,6 +148,9 @@ Full reference (generated): `docs/api/`.
   TURN. Direct-IP joiners get the same timeout (no relay retry: direct IP has no TURN).
 - Unity `OneLobbyRunner` sets `Application.runInBackground = true` from Host/Join until the lobby ends (then restores
   it), so an unfocused window keeps pumping; opt out with `KeepRunningInBackground = false`.
+- A peer that leaves on purpose is not cut off: when the server (or a direct host's socket) says it is gone, the lobby
+  keeps reading its link until that closes (at most `Lobby.LeaveGraceMs`, 500 ms), so messages it sent before
+  `LeaveAsync` arrive before `PeerLeft` / `HostChanged` / `SessionEnded`. `FlushAsync` makes sure they left its machine.
 - Every C# event (lobby, chat, voice, replication) fires synchronously inside `Pump()` on the calling thread, and
   `ReadyAsync` / `HostAsync` / `JoinAsync` complete there too: pump from the engine's main loop and touch engine APIs
   directly in handlers.
