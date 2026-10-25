@@ -1,0 +1,189 @@
+{
+  "desc": "onelobby.json loader vectors (spec/blueprint.schema.json, docs/design/blueprint.md s.4). valid: the loader accepts input and, after filling defaults, every dotted path in expect has that value (null = absent / null). invalid: the loader rejects input with exactly this { path, rule } (each input has one error). Paths are dotted, array indexes are numbers, the root is \"\". Rules: type, required, enum, const, range (number bounds), length (string length, key count), pattern, unknown_key (path is the unknown key itself), plus the cross-key rules in the schema's x-rules, checked after defaults are filled.",
+  "valid": [
+    {
+      "name": "minimal_no_engine",
+      "input": { "game": { "id": "com.example.ants" } },
+      "expect": {
+        "version": 1,
+        "game.id": "com.example.ants",
+        "game.netVersion": "1",
+        "game.title": null,
+        "engine": null,
+        "hosting.direct": true,
+        "hosting.server": false,
+        "hosting.lobbyServer": "",
+        "hosting.directPort": 47810,
+        "hosting.openPort": true,
+        "hosting.relayOnly": false,
+        "hosting.allowedOrigins": [],
+        "lobby.maxPlayers": 4,
+        "lobby.listed": false,
+        "lobby.approveJoins": false,
+        "lobby.password": false,
+        "lobby.lateJoin": true,
+        "lobby.rejoin": true,
+        "lobby.joinLink": false,
+        "lobby.meta": {},
+        "sync.mode": "raw",
+        "sync.tickRate": 20,
+        "sync.hashEveryTicks": 20,
+        "players.identity": "name",
+        "players.maxNameLength": 24,
+        "chat.text": true,
+        "chat.voice": false,
+        "chat.voiceMode": "pushToTalk",
+        "session.hostLeaves": "end",
+        "session.pause": "off",
+        "session.readyTimeoutMs": 15000,
+        "session.peerTimeoutMs": 0,
+        "session.rateLimit": null,
+        "session.runInBackground": true,
+        "platforms.steam": false,
+        "platforms.epic": false,
+        "platforms.discord": false,
+        "ui.kind": "generated",
+        "ui.entry": null,
+        "ui.theme": "auto"
+      }
+    },
+    {
+      "name": "web_defaults",
+      "input": { "game": { "id": "com.example.ants" }, "engine": "web" },
+      "expect": { "hosting.direct": false, "hosting.server": true, "lobby.joinLink": true, "ui.kind": "drop-in" }
+    },
+    {
+      "name": "node_browser_defaults",
+      "input": { "game": { "id": "com.example.ants" }, "engine": "node-browser" },
+      "expect": { "hosting.direct": true, "hosting.server": false, "lobby.joinLink": true, "ui.kind": "generated" }
+    },
+    {
+      "name": "unity_defaults",
+      "input": { "game": { "id": "com.example.ants" }, "engine": "unity" },
+      "expect": { "hosting.direct": true, "hosting.server": false, "lobby.joinLink": false, "ui.kind": "generated" }
+    },
+    {
+      "name": "hash_follows_tick_rate",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "lockstep", "tickRate": 30 } },
+      "expect": { "sync.mode": "lockstep", "sync.tickRate": 30, "sync.hashEveryTicks": 30 }
+    },
+    {
+      "name": "explicit_hash",
+      "input": { "game": { "id": "a" }, "sync": { "tickRate": 30, "hashEveryTicks": 90 } },
+      "expect": { "sync.hashEveryTicks": 90 }
+    },
+    {
+      "name": "both_hosting_with_migrate",
+      "input": { "game": { "id": "a" }, "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws" }, "session": { "hostLeaves": "migrate" } },
+      "expect": { "hosting.direct": true, "hosting.server": true, "hosting.lobbyServer": "wss://lobby.example.org/ws", "session.hostLeaves": "migrate" }
+    },
+    {
+      "name": "comments_and_schema_ignored",
+      "input": {
+        "$schema": "https://unpkg.com/onelobby/blueprint.schema.json",
+        "$comment": "written by the onelobby skill",
+        "game": { "id": "a", "$comment": "survey: package.json name" },
+        "chat": { "$comment": "no reason found for voice", "voice": false }
+      },
+      "expect": { "game.id": "a", "chat.voice": false }
+    },
+    {
+      "name": "full_example",
+      "input": {
+        "version": 1,
+        "game": { "id": "com.example.antcolony", "netVersion": "3", "title": "Ant Colony" },
+        "engine": "node-browser",
+        "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47811, "openPort": false, "relayOnly": true, "allowedOrigins": ["https://ants.example.org"] },
+        "lobby": { "maxPlayers": 8, "listed": true, "approveJoins": false, "password": true, "lateJoin": false, "rejoin": false, "joinLink": false, "meta": { "map": "forest" } },
+        "sync": { "mode": "lockstep", "tickRate": 20, "hashEveryTicks": 40 },
+        "players": { "identity": "anonymous", "maxNameLength": 12 },
+        "chat": { "text": false, "voice": true, "voiceMode": "voiceActivity" },
+        "session": { "hostLeaves": "migrate", "pause": "anyone", "readyTimeoutMs": 0, "peerTimeoutMs": 6000, "rateLimit": { "messages": 60, "perMs": 1000 }, "runInBackground": false },
+        "platforms": { "steam": { "appId": 480 }, "epic": false, "discord": true },
+        "ui": { "kind": "none", "entry": "Main menu: Play together", "theme": "dark" }
+      },
+      "expect": {
+        "game.netVersion": "3",
+        "game.title": "Ant Colony",
+        "hosting.directPort": 47811,
+        "hosting.openPort": false,
+        "hosting.relayOnly": true,
+        "hosting.allowedOrigins": ["https://ants.example.org"],
+        "lobby.maxPlayers": 8,
+        "lobby.listed": true,
+        "lobby.password": true,
+        "lobby.lateJoin": false,
+        "lobby.rejoin": false,
+        "lobby.joinLink": false,
+        "lobby.meta": { "map": "forest" },
+        "sync.hashEveryTicks": 40,
+        "players.identity": "anonymous",
+        "players.maxNameLength": 12,
+        "chat.text": false,
+        "chat.voice": true,
+        "chat.voiceMode": "voiceActivity",
+        "session.pause": "anyone",
+        "session.readyTimeoutMs": 0,
+        "session.peerTimeoutMs": 6000,
+        "session.rateLimit": { "messages": 60, "perMs": 1000 },
+        "session.runInBackground": false,
+        "platforms.steam": { "appId": 480 },
+        "platforms.discord": true,
+        "ui.kind": "none",
+        "ui.entry": "Main menu: Play together",
+        "ui.theme": "dark"
+      }
+    },
+    {
+      "name": "replication_on_csharp",
+      "input": { "game": { "id": "a" }, "engine": "godot-csharp", "sync": { "mode": "replication" } },
+      "expect": { "sync.mode": "replication", "session.hostLeaves": "end" }
+    },
+    {
+      "name": "edge_ranges",
+      "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": 64 }, "sync": { "tickRate": 120 }, "hosting": { "directPort": 1024 }, "session": { "peerTimeoutMs": 600000 } },
+      "expect": { "lobby.maxPlayers": 64, "sync.tickRate": 120, "hosting.directPort": 1024, "session.peerTimeoutMs": 600000 }
+    }
+  ],
+  "invalid": [
+    { "name": "not_object", "input": [], "error": { "path": "", "rule": "type" } },
+    { "name": "no_game", "input": {}, "error": { "path": "game", "rule": "required" } },
+    { "name": "no_game_id", "input": { "game": {} }, "error": { "path": "game.id", "rule": "required" } },
+    { "name": "game_id_spaces", "input": { "game": { "id": "my game" } }, "error": { "path": "game.id", "rule": "pattern" } },
+    { "name": "game_id_number", "input": { "game": { "id": 7 } }, "error": { "path": "game.id", "rule": "type" } },
+    { "name": "net_version_empty", "input": { "game": { "id": "a", "netVersion": "" } }, "error": { "path": "game.netVersion", "rule": "length" } },
+    { "name": "version_two", "input": { "version": 2, "game": { "id": "a" } }, "error": { "path": "version", "rule": "const" } },
+    { "name": "unknown_top", "input": { "game": { "id": "a" }, "lobbies": {} }, "error": { "path": "lobbies", "rule": "unknown_key" } },
+    { "name": "typo_in_section", "input": { "game": { "id": "a" }, "lobby": { "maxPlayer": 4 } }, "error": { "path": "lobby.maxPlayer", "rule": "unknown_key" } },
+    { "name": "bad_engine", "input": { "game": { "id": "a" }, "engine": "unreal" }, "error": { "path": "engine", "rule": "enum" } },
+    { "name": "section_not_object", "input": { "game": { "id": "a" }, "chat": true }, "error": { "path": "chat", "rule": "type" } },
+    { "name": "max_players_one", "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": 1 } }, "error": { "path": "lobby.maxPlayers", "rule": "range" } },
+    { "name": "max_players_65", "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": 65 } }, "error": { "path": "lobby.maxPlayers", "rule": "range" } },
+    { "name": "max_players_fraction", "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": 2.5 } }, "error": { "path": "lobby.maxPlayers", "rule": "type" } },
+    { "name": "max_players_string", "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": "4" } }, "error": { "path": "lobby.maxPlayers", "rule": "type" } },
+    { "name": "tick_rate_zero", "input": { "game": { "id": "a" }, "sync": { "tickRate": 0 } }, "error": { "path": "sync.tickRate", "rule": "range" } },
+    { "name": "port_low", "input": { "game": { "id": "a" }, "hosting": { "directPort": 80 } }, "error": { "path": "hosting.directPort", "rule": "range" } },
+    { "name": "peer_timeout_short", "input": { "game": { "id": "a" }, "session": { "peerTimeoutMs": 3000 } }, "error": { "path": "session.peerTimeoutMs", "rule": "range" } },
+    { "name": "voice_string", "input": { "game": { "id": "a" }, "chat": { "voice": "yes" } }, "error": { "path": "chat.voice", "rule": "type" } },
+    { "name": "bad_voice_mode", "input": { "game": { "id": "a" }, "chat": { "voiceMode": "ptt" } }, "error": { "path": "chat.voiceMode", "rule": "enum" } },
+    { "name": "bad_pause", "input": { "game": { "id": "a" }, "session": { "pause": "everyone" } }, "error": { "path": "session.pause", "rule": "enum" } },
+    { "name": "origin_not_string", "input": { "game": { "id": "a" }, "hosting": { "allowedOrigins": ["https://a.example", 5] } }, "error": { "path": "hosting.allowedOrigins.1", "rule": "type" } },
+    { "name": "meta_value_number", "input": { "game": { "id": "a" }, "lobby": { "meta": { "map": 3 } } }, "error": { "path": "lobby.meta.map", "rule": "type" } },
+    {
+      "name": "meta_too_many",
+      "input": { "game": { "id": "a" }, "lobby": { "meta": { "k1": "", "k2": "", "k3": "", "k4": "", "k5": "", "k6": "", "k7": "", "k8": "", "k9": "", "k10": "", "k11": "", "k12": "", "k13": "", "k14": "", "k15": "", "k16": "", "k17": "" } } },
+      "error": { "path": "lobby.meta", "rule": "length" }
+    },
+    { "name": "rate_limit_partial", "input": { "game": { "id": "a" }, "session": { "rateLimit": { "messages": 10 } } }, "error": { "path": "session.rateLimit.perMs", "rule": "required" } },
+    { "name": "name_length_25", "input": { "game": { "id": "a" }, "players": { "maxNameLength": 25 } }, "error": { "path": "players.maxNameLength", "rule": "range" } },
+    { "name": "steam_bad_shape", "input": { "game": { "id": "a" }, "platforms": { "steam": "480" } }, "error": { "path": "platforms.steam", "rule": "type" } },
+    { "name": "hosting_none_explicit", "input": { "game": { "id": "a" }, "hosting": { "direct": false, "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },
+    { "name": "hosting_none_by_default", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },
+    { "name": "listed_and_approve", "input": { "game": { "id": "a" }, "lobby": { "listed": true, "approveJoins": true } }, "error": { "path": "lobby", "rule": "listed_and_approve" } },
+    { "name": "web_direct", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "direct": true } }, "error": { "path": "hosting.direct", "rule": "direct_needs_listener" } },
+    { "name": "replication_on_web", "input": { "game": { "id": "a" }, "engine": "web", "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
+    { "name": "replication_no_engine", "input": { "game": { "id": "a" }, "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
+    { "name": "migrate_with_replication", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "server": true }, "sync": { "mode": "replication" }, "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_with_replication" } },
+    { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } }
+  ]
+}

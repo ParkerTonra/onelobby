@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ParkerTonra/onelobby/spec/blueprint.schema.json",
+  "title": "onelobby.json (OneLobby blueprint)",
+  "description": "One settings file for a game's multiplayer: the agent skill and create-onelobby write it, OneLobby.fromConfig (JS) and Blueprint.Load (C#) read it. Design: docs/design/blueprint.md. Every key but game.id has a default. \"$comment\" keys are allowed anywhere and ignored. Cross-key rules are listed in x-rules; the loaders enforce them with the same rule ids (spec/vectors/blueprint.json).",
+  "type": "object",
+  "required": ["game"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "$comment": { "type": "string" },
+    "version": { "description": "Blueprint format version.", "const": 1, "default": 1 },
+    "game": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "id": {
+          "description": "Reverse-DNS id. Lobbies only match players of the same game.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
+        "netVersion": {
+          "description": "Bump whenever command bytes or rules change; mismatched versions cannot join each other.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "default": "1"
+        },
+        "title": { "description": "Shown in the generated UI; defaults to the folder name.", "type": "string", "maxLength": 64 }
+      }
+    },
+    "engine": {
+      "description": "Picks the recipe, package and transport. Shapes the defaults of hosting.direct, hosting.server, lobby.joinLink and ui.kind.",
+      "enum": ["web", "node-browser", "godot-csharp", "unity", "dotnet"]
+    },
+    "hosting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "direct": {
+          "description": "Players host from their own machine with a join code: keeps working after any server is gone. Default: true unless engine is web (a browser cannot listen on a port).",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Lobbies through a lobby server (codes, public list, TURN relay). Default: true for engine web, false otherwise.",
+          "type": "boolean"
+        },
+        "lobbyServer": {
+          "description": "Default lobby server URL (ws:// or wss://). A setting, never a constant: players can override it.",
+          "type": "string",
+          "default": ""
+        },
+        "directPort": { "description": "Port a direct host listens on (falls back up to +9 when taken).", "type": "integer", "minimum": 1024, "maximum": 65535, "default": 47810 },
+        "openPort": { "description": "Ask the router to open the direct port (UPnP / NAT-PMP / PCP).", "type": "boolean", "default": true },
+        "relayOnly": { "description": "Server lobbies only: force TURN so players never see each other's IP.", "type": "boolean", "default": false },
+        "allowedOrigins": {
+          "description": "Extra page origins a direct host accepts browser joiners from.",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "lobby": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "maxPlayers": { "description": "Seats, host included.", "type": "integer", "minimum": 2, "maximum": 64, "default": 4 },
+        "listed": { "description": "Show hosted lobbies in a public Browse list. Off: join by code or link only.", "type": "boolean", "default": false },
+        "approveJoins": { "description": "The host approves each joiner. Cannot be combined with listed.", "type": "boolean", "default": false },
+        "password": { "description": "The game asks the host for a lobby password.", "type": "boolean", "default": false },
+        "lateJoin": { "description": "Players may join a game already in progress.", "type": "boolean", "default": true },
+        "rejoin": { "description": "A player who drops or reloads takes their old seat back.", "type": "boolean", "default": true },
+        "joinLink": { "description": "Offer a shareable join link. Default: true for engine web and node-browser.", "type": "boolean" },
+        "meta": {
+          "description": "Lobby key/value strings: at most 16 keys, keys and values at most 64 characters.",
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "maxLength": 64 },
+          "additionalProperties": { "type": "string", "maxLength": 64 },
+          "default": {}
+        }
+      }
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "mode": {
+          "description": "lockstep: deterministic sim, host orders commands. raw: you send bytes. replication: host-authoritative snapshots (C# only).",
+          "enum": ["raw", "lockstep", "replication"],
+          "default": "raw"
+        },
+        "tickRate": { "description": "Simulation ticks per second.", "type": "integer", "minimum": 1, "maximum": 120, "default": 20 },
+        "hashEveryTicks": { "description": "Lockstep: compare state hashes this often. Default: tickRate (once a second).", "type": "integer", "minimum": 1, "maximum": 100000 }
+      }
+    },
+    "players": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "identity": {
+          "description": "name: players type a name. anonymous: no names, everyone is Player N. platform: the platform name (Steam), else name.",
+          "enum": ["name", "anonymous", "platform"],
+          "default": "name"
+        },
+        "maxNameLength": { "description": "Longest display name accepted.", "type": "integer", "minimum": 1, "maximum": 24, "default": 24 }
+      }
+    },
+    "chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "text": { "description": "Text chat. Players can talk to strangers: a rating disclosure.", "type": "boolean", "default": true },
+        "voice": { "description": "Voice chat (asks for the microphone). Off unless the game has a reason for it.", "type": "boolean", "default": false },
+        "voiceMode": { "description": "How voice transmits.", "enum": ["pushToTalk", "voiceActivity"], "default": "pushToTalk" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "hostLeaves": {
+          "description": "end: the session ends for everyone. migrate: another player becomes host (server lobbies only).",
+          "enum": ["end", "migrate"],
+          "default": "end"
+        },
+        "pause": {
+          "description": "off: no network pause. host: only the host pauses and resumes. anyone: any player can (planned, blueprint s.10).",
+          "enum": ["off", "host", "anyone"],
+          "default": "off"
+        },
+        "readyTimeoutMs": { "description": "A joiner that cannot reach the host gives up after this long. 0 waits forever.", "type": "integer", "minimum": 0, "maximum": 600000, "default": 15000 },
+        "peerTimeoutMs": {
+          "description": "Drop a silent peer after this long. 0 uses the built-in ~30 s; otherwise at least 6000.",
+          "type": "integer",
+          "anyOf": [{ "const": 0 }, { "minimum": 6000, "maximum": 600000 }],
+          "default": 0
+        },
+        "rateLimit": {
+          "description": "Cap each joiner's incoming raw messages; the excess is dropped.",
+          "type": "object",
+          "required": ["messages", "perMs"],
+          "additionalProperties": false,
+          "properties": {
+            "messages": { "type": "integer", "minimum": 1 },
+            "perMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "runInBackground": { "description": "Keep networking while the window is unfocused.", "type": "boolean", "default": true }
+      }
+    },
+    "platforms": {
+      "description": "Platform adapters (blueprint s.9). Accepted today, not built yet.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "steam": {
+          "default": false,
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "object", "properties": { "appId": { "type": "integer", "minimum": 1 } }, "additionalProperties": false }
+          ]
+        },
+        "epic": {
+          "default": false,
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "object", "properties": { "productId": { "type": "string" } }, "additionalProperties": { "type": "string" } }
+          ]
+        },
+        "discord": { "type": "boolean", "default": false }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "kind": {
+          "description": "drop-in: the <one-lobby> element (web). generated: menus written into the game. none: you build it. Default: drop-in for engine web, generated otherwise.",
+          "enum": ["drop-in", "generated", "none"]
+        },
+        "entry": { "description": "Where multiplayer lives in the game's menus, e.g. \"Main menu: Play together\".", "type": "string" },
+        "theme": { "description": "Drop-in only.", "enum": ["light", "dark", "auto"], "default": "auto" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "rule hosting_none (path hosting): at least one of direct, server",
+      "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct", "server"], "properties": { "direct": { "const": false }, "server": { "const": false } } } } }
+    },
+    {
+      "$comment": "rule listed_and_approve (path lobby): listed and approveJoins cannot both be true",
+      "not": { "required": ["lobby"], "properties": { "lobby": { "required": ["listed", "approveJoins"], "properties": { "listed": { "const": true }, "approveJoins": { "const": true } } } } }
+    },
+    {
+      "$comment": "rule direct_needs_listener (path hosting.direct): engine web cannot host direct",
+      "if": { "required": ["engine"], "properties": { "engine": { "const": "web" } } },
+      "then": { "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct"], "properties": { "direct": { "const": true } } } } } }
+    },
+    {
+      "$comment": "rule replication_needs_csharp (path sync.mode): replication needs a C# engine (godot-csharp, unity, dotnet) and an explicit engine",
+      "if": { "required": ["sync"], "properties": { "sync": { "required": ["mode"], "properties": { "mode": { "const": "replication" } } } } },
+      "then": { "required": ["engine"], "properties": { "engine": { "enum": ["godot-csharp", "unity", "dotnet"] } } }
+    },
+    {
+      "$comment": "rule migrate_with_replication (path session.hostLeaves): replication has no host migration",
+      "not": {
+        "required": ["sync", "session"],
+        "properties": {
+          "sync": { "required": ["mode"], "properties": { "mode": { "const": "replication" } } },
+          "session": { "required": ["hostLeaves"], "properties": { "hostLeaves": { "const": "migrate" } } }
+        }
+      }
+    }
+  ],
+  "x-rules": {
+    "$comment": "Rules that depend on engine-dependent defaults cannot be written in plain JSON Schema; the loaders apply them after filling defaults.",
+    "hosting_none": { "path": "hosting", "message": "at least one of direct, server must be true" },
+    "listed_and_approve": { "path": "lobby", "message": "listed and approveJoins cannot both be true" },
+    "direct_needs_listener": { "path": "hosting.direct", "message": "engine web cannot host direct (a browser cannot listen on a port)" },
+    "replication_needs_csharp": { "path": "sync.mode", "message": "replication needs engine godot-csharp, unity or dotnet" },
+    "migrate_with_replication": { "path": "session.hostLeaves", "message": "replication has no host migration; use end" },
+    "migrate_needs_server": { "path": "session.hostLeaves", "message": "migrate needs hosting.server (direct lobbies always end)" }
+  }
+}
