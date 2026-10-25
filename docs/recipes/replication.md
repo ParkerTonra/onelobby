@@ -257,6 +257,7 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - `rep.Clients` (host) lists peers whose link is up (`lobby.PeerReady`), not every peer the server announced; a peer
   is added with its first snapshot a full one, and `rep.ClientReady` fires then (spawn its avatar there).
   `rep.IsClientReady(peer)` asks for one peer.
+- Lobby facts (`HostPeerId`, `LocalPeerId`, `IsHost`, `Peers`) live on `rep.Lobby`; the session does not copy them.
 
 ## Done when
 

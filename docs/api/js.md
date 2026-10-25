@@ -53,7 +53,7 @@ import { type LobbySummary } from "./signaling.js";
 import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 export declare const LIB_NAME = "onelobby";
-export declare const LIB_VERSION = "0.2.1";
+export declare const LIB_VERSION = "0.2.2";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
     getItem(key: string): string | null;
@@ -857,6 +857,11 @@ export declare class WebRtcLink implements PeerLink {
     onPath: PeerLink["onPath"];
     /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
     constructor(opts: LinkOptions, rtc?: typeof RTCPeerConnection);
+    /**
+     * The offerer creates the channels just before its offer, the answerer once the remote offer is set. Creating them
+     * any earlier makes libdatachannel (node-datachannel) start an offer of its own on the answering side, which then
+     * collides with the real one (both ICE agents controlling, the link never opens).
+     */
     startOffer(): void;
     handleSignal(s: SignalPayload): Promise<void>;
     /** Selected candidate pair has a relay candidate -> "relayed", else "direct". Retries while stats settle. */
@@ -940,8 +945,10 @@ export declare const PROTO_ID = "lk1";
 /** Thin JSON signaling client: one socket, request/response helpers, keep-alive pings. */
 export declare class SignalingClient {
     closed: boolean;
-    onMessage: ((m: ServerMsg) => void) | null;
     onClose: (() => void) | null;
+    get onMessage(): ((m: ServerMsg) => void) | null;
+    /** Setting a handler first delivers, in order, what arrived while there was none. */
+    set onMessage(h: ((m: ServerMsg) => void) | null);
     constructor(url: string, factory: SocketFactory, clock: Clock);
     connect(): Promise<void>;
     get isOpen(): boolean;

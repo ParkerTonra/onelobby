@@ -47,7 +47,7 @@ If you'd rather add a lobby to a page you already have, paste these three pieces
 **1. In the `<head>` part of the page** (this loads OneLobby):
 
 ```html
-<script src="https://unpkg.com/onelobby@0.2.0/dist/onelobby.global.min.js"></script>
+<script src="https://unpkg.com/onelobby@0.2.2/dist/onelobby.global.min.js"></script>
 ```
 
 **2. Where you want the lobby box to appear.** The sentence inside only shows if the line above didn't work, so you
