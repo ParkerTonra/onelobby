@@ -1,8 +1,8 @@
 {
   "name": "com.onelobby.unity",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "displayName": "OneLobby",
-  "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice. Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) over the engine-agnostic OneLobby.Core and OneLobby.DataChannel (libdatachannel).",
+  "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice, and hosting by IP with a join code (no server). Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) over the engine-agnostic OneLobby.Core, OneLobby.DataChannel (libdatachannel) and OneLobby.Direct.",
   "unity": "6000.0",
   "license": "MIT",
   "author": { "name": "OneLobby contributors" },

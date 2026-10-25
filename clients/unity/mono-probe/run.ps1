@@ -3,7 +3,8 @@
 # over real WebRTC data channels through a real server. Run build-unity-package.ps1 first, and a server:
 #   dotnet run --project server/OneLobby.Server -- --listen :8080
 #   powershell -File clients/unity/mono-probe/run.ps1 -Unity "C:\Program Files\Unity\Hub\Editor\6000.2.7f2" -Server ws://127.0.0.1:8080/ws
-param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws')
+# -Direct needs no server: host by IP (OneLobby.Direct + the embedded hub) on loopback port 47831, join by address.
+param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws', [switch]$Direct)
 $ErrorActionPreference = 'Stop'
 $lib = Join-Path $Unity 'Editor/Data/MonoBleedingEdge/lib/mono/unityjit-win32'
 $pkg = Join-Path $PSScriptRoot '../com.onelobby.unity'
@@ -15,7 +16,7 @@ $csc = Join-Path $sdk 'Roslyn/bincore/csc.dll'
 $refs = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'Facades/netstandard.dll', 'Facades/System.Runtime.dll', 'Facades/System.Memory.dll') |
     ForEach-Object { "-r:$(Join-Path $lib $_)" }
 dotnet $csc -nologo -nostdlib -noconfig -langversion:9 -nullable:enable "-out:$out/Probe.exe" @refs `
-    "-r:$out/OneLobby.Core.dll" "-r:$out/OneLobby.DataChannel.dll" "-r:$out/System.Text.Json.dll" "-r:$out/Microsoft.Bcl.AsyncInterfaces.dll" `
+    "-r:$out/OneLobby.Core.dll" "-r:$out/OneLobby.DataChannel.dll" "-r:$out/OneLobby.Direct.dll" "-r:$out/OneLobby.Hub.dll" "-r:$out/System.Text.Json.dll" "-r:$out/Microsoft.Bcl.AsyncInterfaces.dll" `
     (Join-Path $PSScriptRoot 'Probe.cs')
 if ($LASTEXITCODE -ne 0) { throw 'compile failed' }
 # Unity's bin/mono.exe is 32-bit and cannot load the x64 native plugin; host the editor's own 64-bit runtime instead.
@@ -25,7 +26,7 @@ if (-not $vs) { throw 'MSVC (C++ x64 tools) is needed to build monohost.exe' }
 $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvars64.bat'
 cmd /c "`"$vcvars`" >nul 2>nul && cl /nologo /O2 `"$(Join-Path $PSScriptRoot 'host/monohost.c')`" /Fe:`"$out/monohost.exe`" /Fo:`"$out/monohost.obj`" >nul"
 if ($LASTEXITCODE -ne 0) { throw 'monohost build failed' }
-& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $Server
+& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $(if ($Direct) { 'direct' } else { $Server })
 $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $out
 exit $code

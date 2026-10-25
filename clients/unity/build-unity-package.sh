@@ -10,10 +10,16 @@ pkg="$here/com.onelobby.unity"
 dotnetdir="$(dirname "$here")/dotnet"
 plugins="$pkg/Runtime/Plugins"
 deps="$plugins/Dependencies"
-projects="OneLobby.Core OneLobby.DataChannel OneLobby.Opus OneLobby.Replication ${EXTRA:-}"
+projects="OneLobby.Core OneLobby.DataChannel OneLobby.Opus OneLobby.Replication OneLobby.Direct ${EXTRA:-}"
+# Built as project references of the above (OneLobby.Direct embeds the signaling hub from server/) and shipped too.
+also_ours="OneLobby.Hub"
 # Not copied (built into Unity's .NET Standard 2.1 profile): System.Memory, System.Buffers, System.Numerics.Vectors,
 # System.Threading.Tasks.Extensions.
-ship_deps="System.Text.Json System.Text.Encodings.Web Microsoft.Bcl.AsyncInterfaces System.Runtime.CompilerServices.Unsafe Concentus"
+ship_deps="System.Text.Json System.Text.Encodings.Web Microsoft.Bcl.AsyncInterfaces System.Runtime.CompilerServices.Unsafe Concentus
+  Microsoft.Extensions.Logging.Abstractions Microsoft.Extensions.DependencyInjection.Abstractions"
+# The hub only uses NullLogger, which never loads System.Diagnostics.DiagnosticSource (Unity has its own copy in the
+# editor only), so it is not shipped and Unity's import-time reference check is off for the DLL that names it.
+no_validate="Microsoft.Extensions.Logging.Abstractions.dll"
 
 out="$(mktemp -d)"
 ours=""
@@ -33,12 +39,14 @@ meta() { # path kind
   local rel="${1#"$pkg"/}" g; g="$(guid "$rel")"
   case "$2" in
     folder) printf 'fileFormatVersion: 2\nguid: %s\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n' "$g" ;;
-    dll) printf 'fileFormatVersion: 2\nguid: %s\nPluginImporter:\n  externalObjects: {}\n  serializedVersion: 2\n  iconMap: {}\n  executionOrder: {}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 0\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n  - first:\n      Any: \n    second:\n      enabled: 1\n      settings: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n' "$g" ;;
+    dll) local v=1; case " $no_validate " in *" $(basename "$1") "*) v=0 ;; esac
+      printf 'fileFormatVersion: 2\nguid: %s\nPluginImporter:\n  externalObjects: {}\n  serializedVersion: 2\n  iconMap: {}\n  executionOrder: {}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 0\n  isExplicitlyReferenced: 0\n  validateReferences: %s\n  platformData:\n  - first:\n      Any: \n    second:\n      enabled: 1\n      settings: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n' "$g" "$v" ;;
     native) sed "s/{{GUID}}/$g/" "$here/plugin-meta/$3.meta.template" ;;
     *) printf 'fileFormatVersion: 2\nguid: %s\nTextScriptImporter:\n  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n' "$g" ;;
   esac > "$1.meta"
 }
 
+for p in $also_ours; do [ -f "$out/$p.dll" ] && ours="$ours $p"; done
 for p in $ours; do
   cp "$out/$p.dll" "$plugins/"
   [ -f "$out/$p.xml" ] && cp "$out/$p.xml" "$plugins/"

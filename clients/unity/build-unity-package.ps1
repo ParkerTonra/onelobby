@@ -14,12 +14,18 @@ $plugins = Join-Path $pkg 'Runtime/Plugins'
 $deps = Join-Path $plugins 'Dependencies'
 
 # Engine-agnostic projects shipped as DLLs. OneLobby.Replication (and any -Extra project) is picked up when present.
-$projects = @('OneLobby.Core', 'OneLobby.DataChannel', 'OneLobby.Opus', 'OneLobby.Replication') + $Extra
+$projects = @('OneLobby.Core', 'OneLobby.DataChannel', 'OneLobby.Opus', 'OneLobby.Replication', 'OneLobby.Direct') + $Extra
+# Built as project references of the above (OneLobby.Direct embeds the signaling hub from server/) and shipped too.
+$alsoOurs = @('OneLobby.Hub')
 # NuGet dependencies Unity's .NET Standard 2.1 profile does NOT provide (checked against Unity 6000.2:
 # System.Memory, System.Buffers, System.Numerics.Vectors and System.Threading.Tasks.Extensions are built in, so they
 # are not copied; copying them would give duplicate-assembly errors).
 $shipDeps = @('System.Text.Json', 'System.Text.Encodings.Web', 'Microsoft.Bcl.AsyncInterfaces',
-              'System.Runtime.CompilerServices.Unsafe', 'Concentus')
+              'System.Runtime.CompilerServices.Unsafe', 'Concentus',
+              'Microsoft.Extensions.Logging.Abstractions', 'Microsoft.Extensions.DependencyInjection.Abstractions')
+# The hub only uses NullLogger, which never loads System.Diagnostics.DiagnosticSource (Unity has its own copy in the
+# editor only), so it is not shipped and Unity's import-time reference check is off for the DLL that names it.
+$noValidate = @('Microsoft.Extensions.Logging.Abstractions.dll')
 
 $out = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-unity-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -42,13 +48,15 @@ function Write-Meta([string]$path, [string]$kind, [string]$template = '') {
     $guid = -join ($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes("com.onelobby.unity/$rel")) | ForEach-Object { $_.ToString('x2') })
     $body = switch ($kind) {
         'folder' { "fileFormatVersion: 2`nguid: $guid`nfolderAsset: yes`nDefaultImporter:`n  externalObjects: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
-        'dll' { "fileFormatVersion: 2`nguid: $guid`nPluginImporter:`n  externalObjects: {}`n  serializedVersion: 2`n  iconMap: {}`n  executionOrder: {}`n  defineConstraints: []`n  isPreloaded: 0`n  isOverridable: 0`n  isExplicitlyReferenced: 0`n  validateReferences: 1`n  platformData:`n  - first:`n      Any: `n    second:`n      enabled: 1`n      settings: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
+        'dll' { $validate = if ($noValidate -contains (Split-Path $path -Leaf)) { 0 } else { 1 }
+                "fileFormatVersion: 2`nguid: $guid`nPluginImporter:`n  externalObjects: {}`n  serializedVersion: 2`n  iconMap: {}`n  executionOrder: {}`n  defineConstraints: []`n  isPreloaded: 0`n  isOverridable: 0`n  isExplicitlyReferenced: 0`n  validateReferences: $validate`n  platformData:`n  - first:`n      Any: `n    second:`n      enabled: 1`n      settings: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
         'native' { (Get-Content -Raw (Join-Path $here "plugin-meta/$template.meta.template")).Replace('{{GUID}}', $guid) }
         default { "fileFormatVersion: 2`nguid: $guid`nTextScriptImporter:`n  externalObjects: {}`n  userData: `n  assetBundleName: `n  assetBundleVariant: `n" }
     }
     [IO.File]::WriteAllText("$path.meta", $body)
 }
 
+foreach ($p in $alsoOurs) { if (Test-Path (Join-Path $out "$p.dll")) { $ours += $p } }
 foreach ($p in $ours) {
     Copy-Item (Join-Path $out "$p.dll") $plugins
     if (Test-Path (Join-Path $out "$p.xml")) { Copy-Item (Join-Path $out "$p.xml") $plugins }

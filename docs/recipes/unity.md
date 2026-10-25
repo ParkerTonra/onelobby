@@ -199,6 +199,45 @@ A native library cannot load in WebGL, and `ClientWebSocket` does not work there
 exact channel setup) behind the same `ITransport`. Not built yet. (libdatachannel's datachannel-wasm wrapper is the other
 route.)
 
+## Play over the internet with no server (host by IP)
+
+`OneLobbyRunner.HostDirectAsync` makes the host's game the server: it runs the signaling hub in-process on TCP + UDP
+**47810**, asks the home router to open that port (UPnP, then NAT-PMP) and gives a **join code** like `6B01-RGFE-P2B`
+that friends paste into `JoinDirectAsync`. No lobby server is involved, so `LobbyServer` is ignored. Everything after
+host/join is the same `Lobby` (and `ReplicationSession`) API. Design and router details: `docs/recipes/direct-ip.md`.
+
+```csharp
+// in Net.cs, next to HostAsync / JoinAsync (add `using OneLobby.Direct;`)
+public async Task<string?> HostByIpAsync(string? password = null)
+{
+    try
+    {
+        var l = await Runner.HostDirectAsync(new DirectHostOptions { Password = password, MaxPlayers = 4 });
+        // Internet: works from anywhere. SameNetwork: the router said no (l.PortMapping says why); LAN only.
+        Status?.Invoke(l.JoinCodeKind == JoinCodeKind.Internet ? "Share " + l.JoinCode : "Same network only: " + l.JoinCode);
+        return l.JoinCode;
+    }
+    catch (OneLobbyException e) when (e.Code == "port_in_use") { Status?.Invoke("Another copy is already hosting"); return null; }
+    catch (Exception e) { Status?.Invoke("Multiplayer unavailable: " + e.Message); return null; }
+}
+
+public async Task<bool> JoinByIpAsync(string codeOrAddress, string? password = null)
+{
+    try { var l = await Runner.JoinDirectAsync(codeOrAddress, password); await l.ReadyAsync; return true; }
+    catch (Exception e) { Status?.Invoke("Multiplayer unavailable: " + e.Message); return false; }   // bad_code, direct_unreachable, bad_password
+}
+```
+
+- Show the code grouped as it comes (`6B01-RGFE-P2B`); `JoinDirectAsync` also takes `192.168.1.20` or `ip:port`.
+- The first host on Windows gets the firewall prompt for the game's exe ("allow on private networks" is enough on a LAN;
+  tick public too for internet play). Pass `DirectHostOptions.Port` to use another port, `OpenPort = false` to skip the
+  router request.
+- No host migration: when the host leaves, joiners get `SessionEnded("host_left")` (with `OneLobby.Replication`, end the
+  match as on `HostLost`).
+- A runner that hosted or joined by IP gets a fresh client on the next `HostAsync` / `JoinAsync`, so a game can offer both.
+- Desktop only for hosting (Windows tested; Linux and macOS should work, not yet run). Any platform with the native plugin can
+  join.
+
 ## Testing two players headless (batchmode)
 
 Test multiplayer with two **batchmode** players, not two windows: they need no screen, no focus and no audio device, they
@@ -283,10 +322,12 @@ this runs on CI machines. The same flags drive a windowed run when a test needs 
 - The package test passes: add `"testables": ["com.onelobby.unity"]` to the manifest and run
   `Unity.exe -batchmode -projectPath <project> -runTests -testPlatform EditMode` with the server running
   (`ONELOBBY_TEST_SERVER` overrides the URL). It connects two `UnityTransport` peers and checks reliable, fast and broadcast.
+  `DirectLoopbackTests` needs no server: it hosts by IP on port 47832, joins by address and checks `host_left`.
+- Host by IP: one machine presses "Host by IP" and shows a join code; a friend on another network pastes it and joins.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".
 - No Unity licence at hand (CI)? `clients/unity/mono-probe/run.ps1` runs the package's DLLs and `datachannel.dll` on the
   editor's own 64-bit Mono runtime (unityjit profile): two peers host, list, join and exchange reliable + fast messages over
-  real WebRTC through a server.
+  real WebRTC through a server. `-Direct` does the same by IP with no server (OneLobby.Direct and the embedded hub).
 
 Licences: the native library bundles libdatachannel and libjuice (MPL-2.0), usrsctp (BSD-3-Clause), plog (MIT) and
 Mbed TLS (Apache-2.0). A shipped game must credit them and say where the MPL source is; texts in

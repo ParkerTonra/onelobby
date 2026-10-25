@@ -6,7 +6,7 @@
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
-    "precompiledReferences": ["nunit.framework.dll", "OneLobby.Core.dll", "OneLobby.DataChannel.dll"],
+    "precompiledReferences": ["nunit.framework.dll", "OneLobby.Core.dll", "OneLobby.DataChannel.dll", "OneLobby.Direct.dll"],
     "autoReferenced": false,
     "defineConstraints": ["UNITY_INCLUDE_TESTS"],
     "versionDefines": [],

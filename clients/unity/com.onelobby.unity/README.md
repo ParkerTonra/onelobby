@@ -9,7 +9,7 @@ package only adds:
 |---|---|
 | `UnityTransport : ITransport` | `OneLobby.DataChannel.DataChannelTransport` (three negotiated data channels, DESIGN s.8, + `ClientWebSocket` signaling), native log to the console |
 | `UnityVoiceAudio : IVoiceAudio` | `Microphone` capture to 48 kHz mono 20 ms frames, one `AudioSource` per speaker (`OnAudioFilterRead`) |
-| `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread) |
+| `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread); `HostDirectAsync` / `JoinDirectAsync` host by IP with a join code and no server (`OneLobby.Direct`, `docs/recipes/direct-ip.md`) |
 
 Platforms: whatever natives `Runtime/Plugins` holds. Built and tested here: Windows x64 and Linux x64. The CI workflow
 also builds macOS (universal) and Android arm64 (not yet run). Not yet: iOS (needs a static `__Internal` build) and WebGL;
@@ -30,12 +30,13 @@ The full walkthrough, with the game loop and the "Done when" checks, is `docs/re
 ## Tests
 
 `Tests/Editor/UnityTransportLoopbackTests.cs` runs two `UnityTransport` peers in one editor through a real server
-(`ONELOBBY_TEST_SERVER`, default `ws://127.0.0.1:8080/ws`; ignored when no server answers). Add
+(`ONELOBBY_TEST_SERVER`, default `ws://127.0.0.1:8080/ws`; ignored when no server answers).
+`Tests/Editor/DirectLoopbackTests.cs` hosts by IP on loopback port 47832 and joins by address (no server needed). Add
 `"testables": ["com.onelobby.unity"]` to the manifest, then run it from the Test Runner window or
 `Unity.exe -batchmode -projectPath <p> -runTests -testPlatform EditMode`.
 
 ## Licences
 
 MIT (this package). Bundled: libdatachannel and libjuice (MPL-2.0), usrsctp (BSD-3-Clause), plog (MIT), Mbed TLS
-(Apache-2.0) inside the native library; `System.Text.Json` and friends (MIT); Concentus (BSD-3-Clause). A shipped game
+(Apache-2.0) inside the native library; `System.Text.Json`, `Microsoft.Extensions.Logging.Abstractions` and friends (MIT); Concentus (BSD-3-Clause). A shipped game
 must credit them and say where the MPL source is; see `THIRD_PARTY.md`.

@@ -6,10 +6,13 @@ using System.Text;
 using System.Threading;
 using OneLobby;
 using OneLobby.DataChannel;
+using OneLobby.Direct;
 
 // Runs the managed + native half of com.onelobby.unity on Unity's own Mono (unityjit profile), with no Unity licence:
 // OneLobby.Core, OneLobby.DataChannel, the shipped System.Text.Json DLLs and the libdatachannel native plugin. Two peers
 // host/join through a real onelobby-server and exchange reliable + fast messages over real WebRTC data channels.
+// With the argument "direct" there is no server: OneLobby.Direct + the embedded hub (OneLobby.Hub) host by IP on
+// loopback (no router request) and the joiner joins by address, the path Unity's HostDirectAsync / JoinDirectAsync take.
 static class Probe
 {
     static void PumpUntil(Func<bool> done, Action pump, string what)
@@ -33,7 +36,9 @@ static class Probe
             Console.WriteLine($"peer link self-check: failed={link.IsFailed} {reason}");
             link.Dispose();
         }
-        var url = new Uri(args.Length > 0 ? args[0] : "ws://127.0.0.1:8080/ws");
+        var direct = args.Length > 0 && args[0] == "direct";
+        const int directPort = 47831;
+        var url = new Uri(args.Length > 0 && !direct ? args[0] : "ws://127.0.0.1:8080/ws");
         var cfg = new OneLobbyConfig("com.onelobby.monoprobe", "1", url, SyncMode.Raw);
         var a = new LobbyClient(cfg with { DisplayName = "MonoHost" }, new DataChannelTransport());
         var b = new LobbyClient(cfg with { DisplayName = "MonoJoiner" }, new DataChannelTransport());
@@ -41,20 +46,25 @@ static class Probe
         void Pump() { if (host != null) host.Pump(); else a.Pump(); if (joiner != null) joiner.Pump(); else b.Pump(); }
         var sw = Stopwatch.StartNew();
 
-        var ht = a.HostAsync(new LobbyOptions("mono probe", 2, Visibility.Public));
+        var ht = direct
+            ? a.HostDirectAsync(new DirectHostOptions { Port = directPort, MaxPlayers = 2, OpenPort = false })
+            : a.HostAsync(new LobbyOptions("mono probe", 2, Visibility.Public));
         PumpUntil(() => ht.IsCompleted, Pump, "host");
         host = ht.GetAwaiter().GetResult();
         var got = new List<(Channel, string)>();
         host.MessageReceived += (f, p, c) => got.Add((c, Encoding.UTF8.GetString(p.ToArray())));
-        Console.WriteLine($"hosted {host.Code}");
+        Console.WriteLine(direct ? $"hosted direct, join code {host.JoinCode} ({host.JoinCodeKind})" : $"hosted {host.Code}");
 
-        var lt = b.ListAsync();
-        PumpUntil(() => lt.IsCompleted, Pump, "list");
-        var listed = false;
-        foreach (var s in lt.GetAwaiter().GetResult()) if (s.Code == host.Code && s.HostName == "MonoHost") listed = true;
-        Console.WriteLine("listed: " + listed);
+        var listed = direct; // direct lobbies are never listed
+        if (!direct)
+        {
+            var lt = b.ListAsync();
+            PumpUntil(() => lt.IsCompleted, Pump, "list");
+            foreach (var s in lt.GetAwaiter().GetResult()) if (s.Code == host.Code && s.HostName == "MonoHost") listed = true;
+            Console.WriteLine("listed: " + listed);
+        }
 
-        var jt = b.JoinAsync(host.Code);
+        var jt = direct ? b.JoinDirectAsync("127.0.0.1:" + directPort) : b.JoinAsync(host.Code);
         PumpUntil(() => jt.IsCompleted, Pump, "join");
         joiner = jt.GetAwaiter().GetResult();
         PumpUntil(() => joiner.ReadyAsync.IsCompleted, Pump, "WebRTC link");

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using OneLobby.Direct;
 using UnityEngine;
 
 namespace OneLobby.Unity
@@ -10,12 +11,15 @@ namespace OneLobby.Unity
     /// Owns one <see cref="LobbyClient"/> on a <see cref="UnityTransport"/> and pumps it every frame from <c>Update</c>, so
     /// every OneLobby event fires on the main thread. Add it to a GameObject (it survives scene loads), set the fields
     /// (the lobby server is a setting, AGENTS.md rule 5) and call <see cref="HostAsync"/> / <see cref="JoinAsync"/>.
-    /// All game logic stays in OneLobby.Core: this class is plumbing only.
+    /// For play over the internet with no lobby server, <see cref="HostDirectAsync"/> / <see cref="JoinDirectAsync"/> make
+    /// the host's game the server (join code, port 47810; docs/recipes/direct-ip.md). All game logic stays in
+    /// OneLobby.Core: this class is plumbing only.
     /// </summary>
     [DefaultExecutionOrder(-100)] // pump before game scripts read this frame's messages
     public sealed class OneLobbyRunner : MonoBehaviour
     {
-        [Tooltip("WebSocket endpoint of the lobby server, ending in /ws. Command line: --lobby-server=ws://127.0.0.1:8080/ws")]
+        [Tooltip("WebSocket endpoint of the lobby server, ending in /ws (unused by HostDirectAsync / JoinDirectAsync). " +
+                 "Command line: --lobby-server=ws://127.0.0.1:8080/ws")]
         public string LobbyServer = "ws://127.0.0.1:8080/ws";
         public string GameId = "com.you.yourgame";
         [Tooltip("Bump whenever your message bytes or rules change; peers with a different NetVersion cannot meet.")]
@@ -28,6 +32,7 @@ namespace OneLobby.Unity
         public bool KeepRunningInBackground = true;
 
         private LobbyClient? _client;
+        private bool _clientIsDirect;
         private bool _holdingBackground;
         private bool _previousRunInBackground;
         private static bool _loggedBackground;
@@ -66,10 +71,44 @@ namespace OneLobby.Unity
             else _client?.Pump();
         }
 
-        public Task<Lobby> HostAsync(LobbyOptions options) => Enter(() => Client.HostAsync(options));
-        public Task<Lobby> JoinAsync(string code) => Enter(() => Client.JoinAsync(code));
-        public Task<Lobby> RejoinAsync(string resumeToken) => Enter(() => Client.RejoinAsync(resumeToken));
-        public Task<IReadOnlyList<LobbySummary>> ListAsync() => Client.ListAsync();
+        public Task<Lobby> HostAsync(LobbyOptions options) => Enter(() => ServerClient().HostAsync(options));
+        public Task<Lobby> JoinAsync(string code) => Enter(() => ServerClient().JoinAsync(code));
+        public Task<Lobby> RejoinAsync(string resumeToken) => Enter(() => ServerClient().RejoinAsync(resumeToken));
+        public Task<IReadOnlyList<LobbySummary>> ListAsync() => ServerClient().ListAsync();
+
+        /// <summary>
+        /// Host with no lobby server: this game runs the signaling hub and listens on TCP + UDP 47810 (or
+        /// <see cref="DirectHostOptions.Port"/>), asks the router to open that port, and the lobby's
+        /// <see cref="Lobby.JoinCode"/> (e.g. <c>6B01-RGFE-P2B</c>) is what friends paste. Check <see cref="Lobby.JoinCodeKind"/>:
+        /// <c>SameNetwork</c> means the router said no and the code only works on this network. Leaving ends the session for
+        /// everyone (no host migration). Windows desktop asks the player to allow the game through the firewall once.
+        /// </summary>
+        public Task<Lobby> HostDirectAsync(DirectHostOptions? options = null) => Enter(() => DirectClient().HostDirectAsync(options));
+
+        /// <summary>Join a direct host by its join code (<c>6B01-RGFE-P2B</c>) or address (<c>192.168.1.20</c>, <c>ip:port</c>).</summary>
+        public Task<Lobby> JoinDirectAsync(string codeOrAddress, string? password = null) =>
+            Enter(() => DirectClient().JoinDirectAsync(codeOrAddress, password));
+
+        /// <summary>A direct session leaves the client pointed at a direct hub, so going back to a lobby server gets a fresh one.</summary>
+        private LobbyClient ServerClient()
+        {
+            if (_clientIsDirect) DropClient();
+            return Client;
+        }
+
+        private LobbyClient DirectClient()
+        {
+            _clientIsDirect = true;
+            return Client;
+        }
+
+        private void DropClient()
+        {
+            var c = _client;
+            _client = null;
+            _clientIsDirect = false;
+            if (c != null) _ = c.DisposeAsync().AsTask();
+        }
 
         /// <summary>Runs a Host/Join call with the background hold on from the start; drops the hold if the call fails.</summary>
         private async Task<Lobby> Enter(Func<Task<Lobby>> start)
@@ -141,11 +180,9 @@ namespace OneLobby.Unity
 
         private void OnDestroy()
         {
-            var c = _client;
-            _client = null;
             Lobby = null;
             ReleaseBackground();
-            if (c != null) _ = c.DisposeAsync().AsTask();
+            DropClient();
         }
     }
 }

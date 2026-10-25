@@ -6,7 +6,8 @@ port (UPnP, then NAT-PMP) and shows a **join code** such as `6B01-RGFE-P2B`. Fri
 host's address in disguise, decoded by the joiner's game, so nobody runs a lobby server and nothing can go offline.
 Design and sources: [docs/direct-ip.md](../direct-ip.md) (s.2a for codes and the router).
 
-Hosts: .NET desktop through `OneLobby.DataChannel` (any .NET app, Unity desktop), and **Node** through `onelobby/direct`
+Hosts: .NET desktop through `OneLobby.DataChannel` (any .NET app), **Unity** desktop (`com.onelobby.unity` 0.2.0+:
+`OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync`, see the [Unity recipe](unity.md)), and **Node** through `onelobby/direct`
 (a Node game server). Joiners: .NET (`JoinDirectAsync`), Node or a browser page (`kit.joinDirect`). All of them speak the
 same protocol, so they mix. Godot hosts come later. Snippets tagged `csharp compile` are compiled by
 `docs/check-snippets.mjs`.

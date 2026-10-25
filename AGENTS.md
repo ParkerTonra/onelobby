@@ -168,7 +168,7 @@ Full reference (generated): `docs/api/`.
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
-  / `JoinDirectAsync` from `OneLobby.Direct`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
+  / `JoinDirectAsync` from `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
   `kit.joinDirect(code)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP;
   host leaving ends the session)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
