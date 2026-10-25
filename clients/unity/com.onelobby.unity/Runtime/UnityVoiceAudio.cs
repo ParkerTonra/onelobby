@@ -27,8 +27,24 @@ namespace OneLobby.Unity
         private int _readPos;
         private float[] _tmp = new float[4096];
 
-        /// <summary>Microphone device name; null = the system default.</summary>
-        public string? Device { get; set; }
+        /// <summary>
+        /// Microphone device name (one of <see cref="Devices"/>); null = the system default. Changing it while capturing
+        /// switches microphones at once (no Dispose, no re-enabling voice).
+        /// </summary>
+        public string? Device
+        {
+            get => _deviceSetting;
+            set
+            {
+                if (_deviceSetting == value) return;
+                _deviceSetting = value;
+                if (_mic != null) { StopCapture(); StartCapture(); }
+            }
+        }
+        private string? _deviceSetting;
+
+        /// <summary>Microphone names Unity can see (for a device picker).</summary>
+        public static string[] Devices => Microphone.devices;
         /// <summary>Raised once per new remote speaker, with its AudioSource (2D by default).</summary>
         public event Action<int, AudioSource>? SpeakerCreated;
 
@@ -47,7 +63,7 @@ namespace OneLobby.Unity
         {
             if (_mic != null) return true;
             if (Microphone.devices.Length == 0) return false;
-            _device = Device;
+            _device = _deviceSetting;
             Microphone.GetDeviceCaps(_device, out var min, out var max);
             _micRate = (min == 0 && max == 0) ? Rate : Mathf.Clamp(Rate, min, max);
             _mic = Microphone.Start(_device, true, 1, _micRate);

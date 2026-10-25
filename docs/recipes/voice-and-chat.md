@@ -83,12 +83,25 @@ public static class VoiceWiring
     {
         lobby.Voice.Mode = VoiceMode.PushToTalk;
         lobby.Voice.Enabled = true;                            // after the player opts in
-        lobby.Voice.Speaking += (peerId, talking) => show(talking ? $"peer {peerId} is talking" : "");
+        lobby.Voice.ReleaseHangMs = 150;                       // keep sending briefly after the key comes up
+        lobby.Voice.Speaking += (peerId, talking) => show(talking ? $"peer {peerId} is talking" : "");   // false after 300 ms quiet
         lobby.Voice.VoiceError += msg => show("Voice off: " + msg);
     }
     public static void Talk(Lobby lobby, bool down) => lobby.Voice.PushToTalk(down);   // bind to a key
+    public static float Meter(Lobby lobby) => lobby.Voice.InputLevel;                   // 0..1, also while not talking
+    public static bool Me(Lobby lobby) => lobby.Voice.IsTransmitting;                   // my own speaker icon
+    public static void MuteEveryone(Lobby lobby, bool on) => lobby.Voice.MuteAll(on);  // includes later joiners
+    public static bool IsMuted(Lobby lobby, int peerId) => lobby.Voice.IsMuted(peerId);
 }
 ```
+
+C# voice options: `ReleaseHangMs` (push-to-talk tail, default 0), `SpeakingHoldMs` (how long a speaker must be quiet
+before `Speaking` goes false, default 300), `MuteAll(bool)` / `AllMuted` / `IsMuted(peer)`, `IsTransmitting`.
+`InputLevel` updates on every captured frame while `Enabled`, so it doubles as a mic-test meter.
+
+In Unity, `UnityVoiceAudio.Attach(transform, lobby.Voice)` supplies the codec and audio. `UnityVoiceAudio.Devices` lists
+microphones and setting `Device` switches while capturing. The package's **Mic Check** sample (Package Manager, Samples)
+runs the same capture and Opus path with no lobby: a device picker, a level meter and loopback.
 
 In Godot, `OneLobby.Godot` supplies `Voice.Codec` and `Voice.Audio` (mic bus and playback); set project setting
 `audio/driver/enable_input` to on and keep an `AudioEffectCapture` bus named as in the demo. The host can silence a chatty
@@ -101,3 +114,5 @@ peer for everyone with `Chat.HostMute(peerId, true)` (C#) / `lobby.chat.hostMute
 - A 300-byte message is refused with `length`; six quick messages trigger `rate`.
 - Holding the talk key in one client makes `speaking(peerId, true)` fire in the other and audio plays; releasing fires
   `false`. Chat and voice work while the game is `InGame`.
+- Real hardware (Unity): the Mic Check sample's meter moves with your voice on each listed microphone, switching
+  devices takes effect at once, and loopback sounds clean through headphones.

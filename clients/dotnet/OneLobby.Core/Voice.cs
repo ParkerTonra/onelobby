@@ -43,6 +43,8 @@ namespace OneLobby
         private readonly Lobby _lobby;
         private bool _enabled;
         private bool _ptt;
+        private long _pttReleasedMs = long.MinValue / 2;
+        private bool _allMuted;
         private bool _capturing;
         private bool _talking;
         private long _vadUntilMs;
@@ -59,7 +61,7 @@ namespace OneLobby
             public readonly Queue<byte[]?> Queue = new();
             public int ExpectSeq = -1;
             public bool Playing, Ended, Speaking;
-            public long PlayStartMs, LastPacketMs;
+            public long PlayStartMs, LastPacketMs, QuietSinceMs = -1;
             public int Played;
             public int LastPacketFrames = FramesPerPacket;
         }
@@ -85,20 +87,56 @@ namespace OneLobby
         }
 
         public VoiceMode Mode { get; set; } = VoiceMode.PushToTalk;
+        /// <summary>Mute my own microphone (nothing is sent; <see cref="InputLevel"/> keeps updating).</summary>
         public bool Muted { get; set; }
+        /// <summary>
+        /// Microphone level 0-1 of the last captured frame. Updates whenever <see cref="Enabled"/> is on and capture runs,
+        /// whether or not this peer is transmitting (push-to-talk up, or <see cref="Muted"/>): usable as a mic-test meter.
+        /// </summary>
         public float InputLevel { get; private set; }
+        /// <summary>True while this peer is sending voice (push-to-talk held, release hang, or voice activity).</summary>
+        public bool IsTransmitting => _talking;
+        /// <summary>Push-to-talk: keep sending this long after the key is released so the last syllable is not cut (default 0).</summary>
+        public int ReleaseHangMs { get; set; }
+        /// <summary>
+        /// A remote speaker's <see cref="Speaking"/> goes false only after its voice has been quiet this long (default 300,
+        /// the voice-activity hangover), so speaker icons do not flicker between words. Muting or leaving ends it at once.
+        /// </summary>
+        public int SpeakingHoldMs { get; set; } = HangoverMs;
         public IVoiceCodec? Codec { get; set; }
         public IVoiceAudio? Audio { get; set; }
         public event Action<int, bool>? Speaking;
         public event Action<string>? VoiceError;
 
-        public void PushToTalk(bool down) => _ptt = down;
+        public void PushToTalk(bool down)
+        {
+            if (_ptt && !down) _pttReleasedMs = _lobby.NowMs;
+            _ptt = down;
+        }
 
+        /// <summary>Stop (or resume) playing one peer's voice on this machine only.</summary>
         public void SetMuted(int peerId, bool muted)
         {
             if (muted) _locallyMuted[peerId] = true; else _locallyMuted.Remove(peerId);
             if (muted && _rx.TryGetValue(peerId, out var rx)) { rx.Queue.Clear(); EndSpeaking(peerId, rx); }
         }
+
+        /// <summary>
+        /// Mute every remote voice on this machine, including peers who join later (<c>false</c> restores them). Per-peer
+        /// <see cref="SetMuted"/> choices are kept underneath and apply again after <c>MuteAll(false)</c>.
+        /// </summary>
+        public void MuteAll(bool muted)
+        {
+            _allMuted = muted;
+            if (!muted) return;
+            foreach (var kv in _rx) { kv.Value.Queue.Clear(); EndSpeaking(kv.Key, kv.Value); }
+        }
+
+        /// <summary>True while <see cref="MuteAll"/> is on.</summary>
+        public bool AllMuted => _allMuted;
+
+        /// <summary>True when this peer's voice is not played here (<see cref="SetMuted"/> or <see cref="MuteAll"/>).</summary>
+        public bool IsMuted(int peerId) => _allMuted || _locallyMuted.ContainsKey(peerId);
 
         public void SetVolume(int peerId, float gain) => _volume[peerId] = Math.Max(0f, Math.Min(2f, gain));
 
@@ -108,8 +146,6 @@ namespace OneLobby
         /// <summary>Test hook: send one packet with ready-made frames, bypassing capture and codec.</summary>
         internal void SendEncoded(List<byte[]> frames, bool end) =>
             _lobby.SendVoiceFromLocal(Wire.BuildVoice(_lobby.LocalPeerId, _seq++ & 0xFFFF, (byte)(end ? 1 : 0), frames));
-
-        internal bool IsMuted(int peerId) => _locallyMuted.ContainsKey(peerId);
 
         // ---- capture / send -------------------------------------------------------------------------------------
 
@@ -150,7 +186,7 @@ namespace OneLobby
                 InputLevel = (float)Math.Min(1.0, rms * 4);
                 bool want;
                 if (Muted) want = false;
-                else if (Mode == VoiceMode.PushToTalk) want = _ptt;
+                else if (Mode == VoiceMode.PushToTalk) want = _ptt || (_talking && nowMs - _pttReleasedMs < ReleaseHangMs);
                 else
                 {
                     if (rms > VadThreshold) _vadUntilMs = nowMs + HangoverMs;
@@ -170,6 +206,11 @@ namespace OneLobby
                     _talking = false;
                     FlushPackets(true);
                 }
+            }
+            if (_talking && !_ptt && Mode == VoiceMode.PushToTalk && nowMs - _pttReleasedMs >= ReleaseHangMs)
+            {
+                _talking = false; // the hang ran out with no new frame to notice it
+                FlushPackets(true);
             }
             if (!_talking && !_ptt && Mode == VoiceMode.PushToTalk) InputLevel = guard > 1 ? InputLevel : InputLevel * 0.9f;
         }
@@ -238,6 +279,7 @@ namespace OneLobby
             foreach (var f in frames) rx.Queue.Enqueue(f);
             rx.LastPacketMs = nowMs;
             rx.Ended = (flags & 1) != 0;
+            if (frames.Count > 0) rx.QuietSinceMs = -1;
             if (frames.Count > 0 && !rx.Speaking) { rx.Speaking = true; Speaking?.Invoke(from, true); }
         }
 
@@ -272,7 +314,11 @@ namespace OneLobby
                     }
                     if (rx.Queue.Count == 0 && rx.Played < target) rx.Playing = false; // underrun: rebuffer
                 }
-                if (rx.Speaking && rx.Queue.Count == 0 && (rx.Ended || nowMs - rx.LastPacketMs > 500)) EndSpeaking(kv.Key, rx);
+                if (rx.Speaking && rx.Queue.Count == 0 && (rx.Ended || nowMs - rx.LastPacketMs > 500))
+                {
+                    if (rx.QuietSinceMs < 0) rx.QuietSinceMs = nowMs;
+                    if (nowMs - rx.QuietSinceMs >= SpeakingHoldMs) EndSpeaking(kv.Key, rx);
+                }
                 if (!rx.Speaking && rx.Queue.Count == 0 && nowMs - rx.LastPacketMs > 5000) (gone ??= new List<int>()).Add(kv.Key);
             }
             if (gone != null) foreach (var id in gone) { _rx.Remove(id); codec.ReleaseStream(id); }
@@ -281,6 +327,7 @@ namespace OneLobby
         private void EndSpeaking(int peerId, Rx rx)
         {
             rx.Playing = false;
+            rx.QuietSinceMs = -1;
             rx.ExpectSeq = -1;
             if (rx.Speaking) { rx.Speaking = false; Speaking?.Invoke(peerId, false); }
         }

@@ -327,14 +327,29 @@ public sealed class VoiceChannel
     public const double VadThreshold;
     public bool Enabled { get => _enabled; set; }
     public VoiceMode Mode { get; set; }
+    /// Mute my own microphone (nothing is sent; InputLevel keeps updating).
     public bool Muted { get; set; }
+    /// Microphone level 0-1 of the last captured frame. Updates whenever Enabled is on and capture runs, whether or not this peer is transmitting (push-to-talk up, or Muted): usable as a mic-test meter.
     public float InputLevel { get; private set; }
+    /// True while this peer is sending voice (push-to-talk held, release hang, or voice activity).
+    public bool IsTransmitting;
+    /// Push-to-talk: keep sending this long after the key is released so the last syllable is not cut (default 0).
+    public int ReleaseHangMs { get; set; }
+    /// A remote speaker's Speaking goes false only after its voice has been quiet this long (default 300, the voice-activity hangover), so speaker icons do not flicker between words. Muting or leaving ends it at once.
+    public int SpeakingHoldMs { get; set; }
     public IVoiceCodec? Codec { get; set; }
     public IVoiceAudio? Audio { get; set; }
     public event Action<int, bool>? Speaking;
     public event Action<string>? VoiceError;
     public void PushToTalk(bool down);
+    /// Stop (or resume) playing one peer's voice on this machine only.
     public void SetMuted(int peerId, bool muted);
+    /// Mute every remote voice on this machine, including peers who join later (false restores them). Per-peer SetMuted choices are kept underneath and apply again after MuteAll(false).
+    public void MuteAll(bool muted);
+    /// True while MuteAll is on.
+    public bool AllMuted;
+    /// True when this peer's voice is not played here (SetMuted or MuteAll).
+    public bool IsMuted(int peerId);
     public void SetVolume(int peerId, float gain);
 ```
 

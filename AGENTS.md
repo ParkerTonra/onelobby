@@ -27,6 +27,7 @@ lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to ho
 await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();   // KickAsync bans; DisconnectAsync(id, code?, reason?) does not
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
+lobby.Voice.ReleaseHangMs = 150; lobby.Voice.MuteAll(true); lobby.Voice.IsMuted(id); lobby.Voice.InputLevel; lobby.Voice.IsTransmitting;
 lobby.Lockstep!.Submit(cmd); while (lobby.Lockstep.TryNextFrame(out var f)) { /* f.Tick, f.Commands */ }
 lobby.Lockstep.ReportHash(tick, hash); lobby.Lockstep.Snapshot = () => bytes; lobby.Lockstep.Restore = (tick, b) => { };
 ```

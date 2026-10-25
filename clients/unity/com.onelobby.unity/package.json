@@ -12,6 +12,11 @@
       "displayName": "Host / Join",
       "description": "One script with an IMGUI menu: Host, Join by code, send a reliable message, hold V to talk.",
       "path": "Samples~/HostJoin"
+    },
+    {
+      "displayName": "Mic Check",
+      "description": "No lobby needed: pick a microphone (switches live), watch the level meter, and hear yourself through Opus loopback.",
+      "path": "Samples~/MicCheck"
     }
   ]
 }
