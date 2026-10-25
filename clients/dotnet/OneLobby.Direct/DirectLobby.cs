@@ -64,16 +64,19 @@ namespace OneLobby.Direct
             var port = o.Port > 0 ? o.Port : client.Config.DirectPort;
             var last = port + Math.Max(0, o.FallbackPorts ?? (o.Port > 0 ? 0 : DefaultFallbackPorts));
             DirectHubHost? hub = null;
+            bool anyBusy = false, anyReserved = false;
             for (var p = port; hub == null; p++)
             {
                 try { hub = new DirectHubHost(p, HubOptions.ForDirect(o.MaxPlayers, o.Password)); }
-                // AccessDenied: Windows reserved the port (Hyper-V, WSL, Docker exclusion ranges); try the next one too
-                catch (SocketException e) when (p < last && e.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AccessDenied) { }
                 catch (SocketException e)
                 {
+                    // AccessDenied: Windows reserved the port (Hyper-V, WSL, Docker exclusion ranges); try the next one too
+                    var reserved = e.SocketErrorCode == SocketError.AccessDenied;
+                    if (reserved) anyReserved = true; else anyBusy = true;
+                    if (p < last && (reserved || e.SocketErrorCode == SocketError.AddressAlreadyInUse)) continue;
                     var range = last > port ? "ports " + port + "-" + last : "port " + port;
                     return Task.FromException<Lobby>(new OneLobbyException("port_in_use",
-                        "cannot listen on " + range + " (" + e.SocketErrorCode + "): is another copy of the game hosting?"));
+                        "cannot listen on " + range + " (" + e.SocketErrorCode + "): " + PortFailureHint(anyBusy, anyReserved)));
                 }
             }
             DirectHostTransport transport = null!;
@@ -98,6 +101,12 @@ namespace OneLobby.Direct
         /// Empty for any other lobby. The Unity runner logs it; other hosts can log it themselves.
         /// </summary>
         internal static string HostLogLine(Lobby lobby) => lobby.DirectHostLog;
+
+        /// <summary>The end of a <c>port_in_use</c> message: busy (another program) and reserved (Windows) need different fixes.</summary>
+        internal static string PortFailureHint(bool anyBusy, bool anyReserved) =>
+            !anyReserved ? "is another copy of the game hosting?"
+            : !anyBusy ? "Windows has reserved it (an excluded port range, often from Hyper-V, WSL or Docker); pick another port"
+            : "each one is busy or reserved by Windows (an excluded port range); is another copy of the game hosting?";
 
         internal static string FormatHostLog(int requested, int bound, string code, JoinCodeKind kind, string mapping)
         {

@@ -168,6 +168,7 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      * or the server no longer holds it (the seat is forgotten then).
      */
     resume(): Promise<Lobby | null>;
+    /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
     host(h: HostOptions): Promise<Lobby>;
     join(code: string): Promise<Lobby>;
     /**
@@ -177,6 +178,12 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
      */
     joinDirect(codeOrAddress: string, opts?: JoinDirectOptions): Promise<Lobby>;
+    /**
+     * Take a direct-IP seat back after a drop or a restart: the code (or address) joined before and that lobby's
+     * `resumeToken` (save it after every join; it changes on each resume). The host keeps a dropped seat for 60 s and the
+     * same peer id comes back. Rejects with `invalid_token` when the seat is gone: offer `joinDirect` then.
+     */
+    rejoinDirect(codeOrAddress: string, resumeToken: string, opts?: JoinDirectOptions): Promise<Lobby>;
     /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
     hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby>;
     rejoin(resumeToken: string): Promise<Lobby>;

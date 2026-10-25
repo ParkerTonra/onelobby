@@ -124,11 +124,11 @@ namespace OneLobby.Replication
         /// <summary>Every event, like <see cref="EventReceived"/>, with its stream and sequence number. Subscribe to one of the two.</summary>
         public event Action<ReplicatedEvent>? EventDelivered;
         /// <summary>
-        /// A numbered stream skipped sequence numbers: (from, stream, first missing, next delivered), raised after the hole
-        /// stayed open for <see cref="StreamGapTimeoutMs"/>. Reliable links never lose events, so this means the transport
-        /// broke its contract; resync that stream's state (host: <see cref="SendFullSnapshot"/> plus your own facts).
+        /// A numbered stream skipped sequence numbers (see <see cref="StreamGap"/>), raised after the hole stayed open for
+        /// <see cref="StreamGapTimeoutMs"/>. Reliable links never lose events, so this means the transport broke its
+        /// contract; resync that stream's state (host: <see cref="SendFullSnapshot"/> plus your own facts).
         /// </summary>
-        public event Action<int, byte, uint, uint>? EventGap;
+        public event Action<StreamGap>? EventGap;
         /// <summary>Client: an entity became visible at <see cref="RenderTick"/> (create the game object here).</summary>
         public event Action<EntityInfo>? EntitySpawned;
         /// <summary>Client: an entity is gone as of <see cref="RenderTick"/> (destroy the game object here).</summary>
@@ -650,7 +650,7 @@ namespace OneLobby.Replication
                 _recvSeq.TryGetValue(key, out var last);
                 var first = buf.Events.Keys.First();
                 Stats.EventsGap++;
-                EventGap?.Invoke(key.Peer, key.Stream, last + 1, first);
+                EventGap?.Invoke(new StreamGap(key.Peer, key.Stream, last + 1, first));
                 _recvSeq[key] = first - 1;
                 DrainEarly(key);
             }

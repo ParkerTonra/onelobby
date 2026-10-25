@@ -88,7 +88,7 @@ public sealed class DirectNet
         "direct_unreachable" => "No answer from the host. Same-network codes only work at the host's place; for an internet code the host's router must allow it.",
         "bad_password" => "Wrong password.",
         "bad_address" => "That is not a join code or an address.",
-        "port_in_use" => "Ports 47810-47819 are busy: is another copy of the game hosting?",
+        "port_in_use" => "Ports 47810-47819 are busy or reserved by Windows: is another copy of the game hosting?",
         "version_mismatch" => "You and the host run different versions of the game.",
         "lobby_full" => "The game is full.",
         _ => "Multiplayer unavailable: " + e.Message,

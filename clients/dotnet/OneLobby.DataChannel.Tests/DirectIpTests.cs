@@ -289,6 +289,14 @@ public sealed class DirectIpTests
     }
 
     [Fact]
+    public void ReservedPortSaysWindowsReservedIt()
+    {
+        Assert.Contains("another copy of the game", DirectLobby.PortFailureHint(anyBusy: true, anyReserved: false));
+        Assert.Contains("Windows has reserved it", DirectLobby.PortFailureHint(anyBusy: false, anyReserved: true));
+        Assert.Contains("busy or reserved", DirectLobby.PortFailureHint(anyBusy: true, anyReserved: true));
+    }
+
+    [Fact]
     public void BusyDefaultPortFallsBackToTheNextOneAndTheJoinerKeepsTheCode()
     {
         var port = FreePort(span: 2); // the fallback needs at least port + 1 free too

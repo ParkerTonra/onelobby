@@ -90,6 +90,9 @@ public interface IPeerLink : IDisposable
     /// Queue one frame. Contract every transport keeps: PeerChannel.Reliable frames arrive complete, in send order, exactly once, for as long as the link is open (WebRTC: an ordered reliable SCTP channel). Fast and Voice frames may be lost or reordered, never corrupted or duplicated.
     void Send(PeerChannel channel, ReadOnlySpan<byte> frame);
     bool TryReceive(out PeerChannel channel, out byte[] frame);
+/// Optional on an IPeerLink: how many bytes of PeerChannel.Reliable frames are queued and not yet handed to the network stack (WebRTC bufferedAmount). Lobby.FlushAsync waits for 0; a link without it counts as always flushed.
+public interface IBufferedPeerLink
+    long ReliableBufferedBytes { get; }
 /// What a transport needs to build one peer link.
 public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly, int PortRangeBegin = 0, int PortRangeEnd = 0, IReadOnlyList<string>? ExtraRemoteCandidates = null, bool NoIceServers = false);
 /// Engine-specific plumbing. OneLobby.Godot and InMemoryNetwork implement it.
@@ -176,6 +179,8 @@ public sealed class Lobby : IAsyncDisposable
     public const int PingEveryMs;
     public const int ClaimWaitMs;
     public const int MigrationGraceMs;
+    /// A departure the server announces (peer left, direct host gone) waits up to this long for the peer's open link to close, reading it meanwhile, so the last messages it flushed before leaving still arrive.
+    public const int LeaveGraceMs;
     /// How long a kicked / disconnected peer's link stays open, so the hub's notice reaches it first.
     public const int KickLingerMs;
     public string Code { get; }
@@ -230,6 +235,10 @@ public sealed class Lobby : IAsyncDisposable
     /// Leaves the lobby: tells the server, closes every peer link and turns voice off. Completes at once, never throws, and a second call does nothing. SessionEnded does not fire for your own leave; the other peers see PeerLeft. A direct-IP host leaving stops its listener, which ends the session for every joiner (SessionEnded("host_left")). Do not use the lobby afterwards: host or join again from the LobbyClient.
     public Task LeaveAsync();
     public ValueTask DisposeAsync();
+    /// Waits until every reliable message sent so far has left this machine (each link's send queue is empty), so a last message (match over, final score) is not cut off by LeaveAsync. True when flushed, false on timeout (System.Threading.Timeout.InfiniteTimeSpan = wait forever) or when the lobby ends first. Completes inside Pump, so keep pumping while you await it.
+    public Task<bool> FlushAsync(TimeSpan timeout);
+    /// Reliable bytes queued on all links and not yet handed to the network (0 for transports that do not say).
+    public long ReliableBufferedBytes { get; }
     public void Send(int peerId, ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
     public void Broadcast(ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
     /// The ONE per-frame call for a game in a lobby: pumps the owning LobbyClient and transport (signaling, peer links), delivers events on the calling thread, advances lockstep, voice and timeouts.
@@ -287,6 +296,8 @@ public static class LobbyErrorCodes
     public const string IceFailed;
     /// A request got no answer in time.
     public const string Timeout;
+    /// RejoinAsync: the seat behind the resume token is gone (resume window over, or the lobby ended).
+    public const string InvalidToken;
     /// Direct IP: nothing answered on the host's TCP port.
     public const string DirectUnreachable;
     /// Direct IP: the join code or address could not be read.
@@ -315,6 +326,23 @@ public sealed class LockstepSession
     public bool TryNextFrame(out Frame frame);
     /// Report the game's state hash for a tick (call every HashEveryTicks).
     public void ReportHash(long tick, ulong hash);
+```
+
+## OneLobby.Core/NetSimTransport.cs
+
+```csharp
+/// Bad-network settings for NetSimTransport.
+public sealed record NetSimOptions(double LatencyMs = 0, double JitterMs = 0, double LossPercent = 0, int Seed = 1);
+/// Wraps any transport and makes its peer links worse on purpose: --fakelag / --fakejitter / --fakeloss for dev builds. Only data channel frames are affected (signaling is not). Reliable frames are delayed but stay in order and are never lost (the IPeerLink contract); Fast and Voice frames can also be lost or reordered by jitter. Settings can change while running (Options). Delayed frames go out on Poll, which every Pump calls.
+public sealed class NetSimTransport : ITransport
+    public NetSimTransport(ITransport inner, NetSimOptions options);
+    /// Current settings; assign to change them on the fly (the seed is only read at construction).
+    public NetSimOptions Options { get; set; }
+    public ITransport Inner;
+    public long NowMs;
+    public ISignalingSocket ConnectSignaling(Uri url);
+    public IPeerLink CreatePeerLink(PeerLinkOptions options);
+    public void Poll();
 ```
 
 ## OneLobby.Core/TextChat.cs
@@ -524,6 +552,27 @@ public sealed class Reconciler<TInput, TState>
     public TState Predict(uint seq, TInput input);
     /// Host says: after input lastProcessedSeq you were at authoritative. Replay the rest.
     public TState Reconcile(TState authoritative, uint lastProcessedSeq);
+/// Hides small prediction corrections (Unreal/Overwatch practice). The sim adopts the corrected state at once; draw the local player at sim position + Offset, which starts at minus the correction and decays linearly to zero over DecayMs, so the player sees a short glide instead of a pop. Corrections past the snap thresholds, or with a changed teleport sequence, snap (offset cleared): a teleport or a desync must be visible. Y is up. Engine-free: plain floats, call Update once per rendered frame.
+public sealed class PredictionSmoother
+    public PredictionSmoother(float decayMs = 100, float snapHorizontal = 2f, float snapVertical = 0.5f);
+    /// Time for an offset to reach zero (default 100 ms, the interpolation window).
+    public float DecayMs { get; set; }
+    /// A correction longer than this on the X/Z plane snaps (default 2.0).
+    public float SnapHorizontal { get; set; }
+    /// A correction longer than this on Y snaps (default 0.5).
+    public float SnapVertical { get; set; }
+    /// Add this to the sim position when drawing.
+    public (float X, float Y, float Z) Offset;
+    /// Length of Offset (for a debug overlay).
+    public float OffsetRemaining;
+    /// Corrections that snapped instead of gliding.
+    public int SnapCount { get; private set; }
+    /// Report a correction: errorX..Z is the corrected sim position minus the position before it (zero is fine: nothing changes). Pass the state's teleport sequence as sequence to snap whenever it differs from the last one seen. Returns true when it snapped.
+    public bool Correct(float errorX, float errorY, float errorZ, int? sequence = null);
+    /// Advance the decay by one frame's time.
+    public void Update(float deltaMs);
+    /// Clear the offset now (respawn, teleport handled elsewhere).
+    public void Snap();
 ```
 
 ## OneLobby.Replication/NetBits.cs
@@ -587,6 +636,9 @@ public static class Quantize
 /// Small interpolation helpers for IReplicatedState{T}.Interpolate implementations.
 public static class NetMath
     public static float Lerp(float a, float b, float t);
+    /// Lerp, but return b when the two samples are more than maxDistance apart: a teleport or blink between two snapshots is drawn as a jump, not a one-tick streak. Pick a distance longer than anything moves legally in one tick.
+    public static float LerpOrSnap(float a, float b, float t, float maxDistance);
+    public static (float X, float Y, float Z) LerpOrSnap((float X, float Y, float Z) a, (float X, float Y, float Z) b, float t, float maxDistance);
     /// Lerp between two angles in degrees along the shorter arc; result in [0, 360).
     public static float LerpAngle(float a, float b, float t);
     /// Normalized lerp of two unit quaternions (takes the short way round).
@@ -602,6 +654,8 @@ public sealed class ReplicationSession : IDisposable
     public ReplicationConfig Config { get; }
     public bool IsHost { get; }
     public Lobby Lobby;
+    /// OneLobby.Lobby.FlushAsync: before leaving, wait until reliable events and snapshots sent so far have left this machine (true), or the timeout passes (false). Keep calling Pump meanwhile.
+    public Task<bool> FlushAsync(TimeSpan timeout);
     public int LocalPeerId;
     /// The host's peer id (same as Lobby.HostPeerId).
     public int HostPeerId;
@@ -616,8 +670,8 @@ public sealed class ReplicationSession : IDisposable
     public event Action<int, uint, ReadOnlyMemory<byte>>? EventReceived;
     /// Every event, like EventReceived, with its stream and sequence number. Subscribe to one of the two.
     public event Action<ReplicatedEvent>? EventDelivered;
-    /// A numbered stream skipped sequence numbers: (from, stream, first missing, next delivered), raised after the hole stayed open for StreamGapTimeoutMs. Reliable links never lose events, so this means the transport broke its contract; resync that stream's state (host: SendFullSnapshot plus your own facts).
-    public event Action<int, byte, uint, uint>? EventGap;
+    /// A numbered stream skipped sequence numbers (see StreamGap), raised after the hole stayed open for StreamGapTimeoutMs. Reliable links never lose events, so this means the transport broke its contract; resync that stream's state (host: SendFullSnapshot plus your own facts).
+    public event Action<StreamGap>? EventGap;
     /// Client: an entity became visible at RenderTick (create the game object here).
     public event Action<EntityInfo>? EntitySpawned;
     /// Client: an entity is gone as of RenderTick (destroy the game object here).
@@ -720,6 +774,10 @@ public readonly struct InputFrame
 /// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
 public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0)
     public double TickMs;
+/// A hole in a numbered stream that was given up on: events FirstMissing up to (not including) NextDelivered from From on Stream never arrived; delivery goes on at NextDelivered.
+public readonly record struct StreamGap(int From, byte Stream, uint FirstMissing, uint NextDelivered)
+    /// How many sequence numbers were skipped.
+    public uint Missing;
 /// One received event (ReplicationSession.EventDelivered).
 public readonly record struct ReplicatedEvent(int From, uint Tick, byte Stream, uint Seq, ReadOnlyMemory<byte> Payload, Channel Channel);
 /// Host: one client's input counters (ReplicationSession.InputStatsFor).

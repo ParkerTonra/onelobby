@@ -18,7 +18,7 @@ namespace OneLobby.Replication.Tests
             var got = new List<ReplicatedEvent>();
             var gaps = new List<(byte, uint, uint)>();
             a.Session.EventDelivered += e => got.Add(e);
-            a.Session.EventGap += (_, s, exp, next) => gaps.Add((s, exp, next));
+            a.Session.EventGap += g => gaps.Add((g.Stream, g.FirstMissing, g.NextDelivered));
             return (rig, host, a, got, gaps);
         }
 

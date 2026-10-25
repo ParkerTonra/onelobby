@@ -34,9 +34,20 @@ async function probeIPv4(port: number): Promise<void> {
 
 export class PortInUseError extends Error {
   readonly code = "port_in_use";
+  /** Windows reserved the port (EACCES: an excluded port range, often from Hyper-V, WSL or Docker); not another program. */
+  readonly reserved: boolean;
   constructor(port: number, detail: string) {
-    super(`port_in_use: cannot listen on port ${port} (${detail}): is another copy of the game hosting?`);
+    const reserved = detail === "EACCES";
+    super(`port_in_use: cannot listen on port ${port} (${detail}): ${portFailureHint(!reserved, reserved)}`);
+    this.reserved = reserved;
   }
+}
+
+/** The end of a `port_in_use` message: busy (another program) and reserved (Windows) need different fixes. */
+export function portFailureHint(anyBusy: boolean, anyReserved: boolean): string {
+  if (!anyReserved) return "is another copy of the game hosting?";
+  if (!anyBusy) return "Windows has reserved it (an excluded port range, often from Hyper-V, WSL or Docker); pick another port";
+  return "each one is busy or reserved by Windows (an excluded port range); is another copy of the game hosting?";
 }
 
 /**

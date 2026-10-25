@@ -82,7 +82,12 @@ namespace OneLobby.Unity
             var config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
             if (ConfigureConfig != null) config = ConfigureConfig(config);
             ITransport transport = Transport;
-            if (NetSim != null) transport = Sim = new NetSimTransport(Transport, NetSim);
+            if (NetSim != null)
+            {
+                transport = Sim = new NetSimTransport(Transport, NetSim);
+                // one line so a --fakelag run can be confirmed from the player log
+                Debug.Log(FormattableString.Invariant($"OneLobby: NetSim on: latency {NetSim.LatencyMs} ms, jitter {NetSim.JitterMs} ms, Fast loss {NetSim.LossPercent}%"));
+            }
             var c = new LobbyClient(config, transport);
             c.Error += e => Error?.Invoke(e);
             return c;

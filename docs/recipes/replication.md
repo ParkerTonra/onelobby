@@ -285,8 +285,8 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - Reliable events are ordered and exactly once per link on every transport (the `IPeerLink` contract). For per-topic
   sequence numbers, pass a stream: `rep.SendEvent(bytes, peer, Channel.Reliable, stream: 3)`; subscribe to
   `rep.EventDelivered` (a `ReplicatedEvent` with `From`, `Tick`, `Stream`, `Seq`, `Payload`) instead of `EventReceived`.
-  The session drops duplicates, reorders, and raises `rep.EventGap(from, stream, expected, next)` if a number never
-  comes; counters `Stats.EventsDuplicate` / `EventsOutOfOrder` / `EventsGap` stay 0 on a healthy link.
+  The session drops duplicates, reorders, and raises `rep.EventGap` with a `StreamGap` (`From`, `Stream`,
+  `FirstMissing`, `NextDelivered`, `Missing`) if a number never comes; counters `Stats.EventsDuplicate` / `EventsOutOfOrder` / `EventsGap` stay 0 on a healthy link.
   `rep.ReliableEventBytesSentTo(peer)` counts reliable event bytes per peer.
 - Event size: up to about 15 KiB goes in one frame; larger payloads are split and reassembled on the reliable channel
   (also when `Channel.Fast` was asked for), up to 64 MiB. Keep frequent events small (a few hundred bytes).

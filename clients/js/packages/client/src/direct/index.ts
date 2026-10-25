@@ -14,7 +14,7 @@ import type { Lobby, RateLimit } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
 import { encodeJoinCode } from "../joincode.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
-import { DirectHubHost, PortInUseError, type HttpHandler } from "./hub-host.js";
+import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from "./hub-host.js";
 import { directHubOptions } from "./hub.js";
 import { isPublicIPv4, lanIPv4, localAddresses, type PortMapResult, type PortMapperOptions } from "./portmap.js";
 import { OneLobbyError } from "../signaling.js";
@@ -78,14 +78,18 @@ export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Prom
   const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));
   const maxPlayers = o.maxPlayers ?? 4;
   let hub: DirectHubHost | undefined;
+  let anyBusy = false;
+  let anyReserved = false;
   for (let p = port; !hub; p++) {
     try {
       hub = await DirectHubHost.listen(p, directHubOptions(maxPlayers, o.password));
     } catch (e) {
       if (!(e instanceof PortInUseError)) throw e;
+      if (e.reserved) anyReserved = true;
+      else anyBusy = true;
       if (p < last) continue;
       const range = last > port ? `ports ${port}-${last}` : `port ${port}`;
-      throw new OneLobbyError("port_in_use", `cannot listen on ${range}: is another copy of the game hosting?`);
+      throw new OneLobbyError("port_in_use", `cannot listen on ${range}: ${portFailureHint(anyBusy, anyReserved)}`);
     }
   }
   hub.http = o.http ?? null;

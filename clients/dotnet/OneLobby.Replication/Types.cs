@@ -63,6 +63,17 @@ namespace OneLobby.Replication
         public double TickMs => 1000.0 / TickRate;
     }
 
+    /// <summary>
+    /// A hole in a numbered stream that was given up on: events <see cref="FirstMissing"/> up to (not including)
+    /// <see cref="NextDelivered"/> from <see cref="From"/> on <see cref="Stream"/> never arrived; delivery goes on at
+    /// <see cref="NextDelivered"/>.
+    /// </summary>
+    public readonly record struct StreamGap(int From, byte Stream, uint FirstMissing, uint NextDelivered)
+    {
+        /// <summary>How many sequence numbers were skipped.</summary>
+        public uint Missing => NextDelivered - FirstMissing;
+    }
+
     /// <summary>One received event (<see cref="ReplicationSession.EventDelivered"/>).</summary>
     /// <param name="From">Sender's peer id.</param>
     /// <param name="Tick">Sender's tick when sent (host: <c>Clock.Tick</c>; client: its <c>floor(ServerTick)</c>).</param>

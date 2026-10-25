@@ -9,6 +9,7 @@ import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, directHubOptions, hostDirect } from "../src/direct/index.js";
+import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
 
 /**
  * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
@@ -117,6 +118,14 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     await new Promise<void>((r) => udp.bind(0, "0.0.0.0", () => r()));
     cleanup.push(() => void udp.close());
     await expect(DirectHubHost.listen(udp.address().port)).rejects.toMatchObject({ code: "port_in_use" });
+  });
+
+  it("a port Windows reserved (EACCES) says so instead of blaming another copy of the game", () => {
+    const e = new PortInUseError(47810, "EACCES");
+    expect(e.reserved).toBe(true);
+    expect(e.message).toContain("Windows has reserved it");
+    expect(new PortInUseError(47810, "EADDRINUSE").message).toContain("another copy of the game");
+    expect(portFailureHint(true, true)).toContain("busy or reserved");
   });
 
   it("GET /healthz answers ok and plain HTTP gets 426", async () => {
