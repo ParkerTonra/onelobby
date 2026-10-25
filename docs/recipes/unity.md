@@ -98,6 +98,15 @@ public sealed class Net : MonoBehaviour
 `await` from a MonoBehaviour resumes on the main thread. Never block on a OneLobby task (`.Result`, `.Wait()`): it
 completes inside `Pump`, which runs in `Update`, so blocking the main thread deadlocks.
 
+`ReadyAsync` does not hang: a joiner whose link to the host does not open within `OneLobbyConfig.ReadyTimeout`
+(default 15 s; `TimeSpan.Zero` waits forever) gets `OneLobbyException` code `ice_failed`, the lobby is left and
+`SessionEnded("ice_failed")` fires. Change it with `Runner.ConfigureConfig = c => c with { ReadyTimeout = TimeSpan.FromSeconds(30) };`.
+
+While it holds a lobby (from the moment Host/Join starts until the lobby ends or is left) `OneLobbyRunner` sets
+`Application.runInBackground = true` and restores the old value afterwards, logging once when it flips it. Without that,
+an unfocused player (two windows on one PC, or alt-tabbed) stops running `Update`, stops pumping, and the handshake
+stalls. Set `Runner.KeepRunningInBackground = false` to manage it yourself.
+
 ## 3. Game traffic
 
 Raw mode, host-authoritative (a co-op shooter): joiners send inputs, the host simulates and broadcasts state.

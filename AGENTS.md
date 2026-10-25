@@ -113,6 +113,17 @@ Full reference (generated): `docs/api/`.
 - An empty `displayName` (the default) shows to everyone as `"Player N"`, N being the seat (peer id).
 - Test and runtime seams (`socketFactory`, `linkFactory`, `clock`, `wallClock`, `voiceCodec`, `createMic`,
   `createSink`, `storage`) go under `options.advanced`; the old top-level keys still work but are deprecated.
+
+## Friendly defaults (C#)
+
+- `OneLobbyConfig.ReadyTimeout` (default 15 s, `TimeSpan.Zero` = wait forever; set with `config with { ReadyTimeout = ... }`):
+  same rules as JS `readyTimeoutMs`. `ReadyAsync` faults with `OneLobbyException` code `ice_failed`, `client.Error`
+  fires, the lobby is left and `SessionEnded("ice_failed")` fires; the relay-only retry runs when the server offers
+  TURN. Direct-IP joiners get the same timeout (no relay retry: direct IP has no TURN).
+- Unity `OneLobbyRunner` sets `Application.runInBackground = true` from Host/Join until the lobby ends (then restores
+  it), so an unfocused window keeps pumping; opt out with `KeepRunningInBackground = false`.
+- `ReplicationSession.Clients` (host) holds only peers whose link is up (`PeerReady`); `ClientReady` fires when one
+  joins it and its first snapshot is a full one.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 

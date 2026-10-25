@@ -63,6 +63,11 @@ public sealed class Net
 
 Never block the game loop on these: `await` them from a UI handler and keep ticking while they run.
 
+A joiner's `await lobby.ReadyAsync` (link to the host open) gives up after `OneLobbyConfig.ReadyTimeout` (default 15 s,
+`TimeSpan.Zero` = forever): it throws `OneLobbyException` code `ice_failed`, `client.Error` fires, the lobby is left and
+`SessionEnded("ice_failed")` fires. When the server offers TURN, the second half of the budget is one relay-only retry.
+The timer runs on the lobby's clock inside `Pump`. Change it with `config with { ReadyTimeout = TimeSpan.FromSeconds(30) }`.
+
 ## 3. Pump and send bytes
 
 ```csharp compile file=Loop.cs
