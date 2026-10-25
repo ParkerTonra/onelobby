@@ -117,6 +117,14 @@ namespace OneLobby.Unity
         public Task<Lobby> JoinDirectAsync(string codeOrAddress, string? password = null) =>
             Enter(() => DirectClient().JoinDirectAsync(codeOrAddress, password));
 
+        /// <summary>
+        /// Take a direct seat back after a drop or a restart (the host keeps it 60 s): the code joined before and the
+        /// lobby's <see cref="Lobby.ResumeToken"/> (save it after every join; it changes on each resume). Fails with
+        /// <see cref="LobbyErrorCodes.InvalidToken"/> when the seat is gone: offer <see cref="JoinDirectAsync"/> then.
+        /// </summary>
+        public Task<Lobby> RejoinDirectAsync(string codeOrAddress, string resumeToken) =>
+            Enter(() => DirectClient().RejoinDirectAsync(codeOrAddress, resumeToken));
+
         /// <summary>A direct session leaves the client pointed at a direct hub, so going back to a lobby server gets a fresh one.</summary>
         private LobbyClient ServerClient()
         {

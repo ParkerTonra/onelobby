@@ -194,6 +194,58 @@ public sealed class DirectIpTests
     }
 
     [Fact]
+    public void JoinerRestartsAndTakesItsSeatBackWithTheResumeToken() => RunRejoin();
+
+    private void RunRejoin()
+    {
+        var port = FreePort();
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
+        var oldClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
+        var newClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
+        Lobby? host = null, old = null, back = null;
+        void Pump()
+        {
+            if (host != null) host.Pump(); else hostClient.Pump();
+            if (back != null) back.Pump(); else newClient.Pump();   // the old client stopped pumping: it "crashed"
+        }
+        void PumpAll() { Pump(); if (old != null) old.Pump(); else oldClient.Pump(); }
+
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { OpenPort = false }), PumpAll, "host");
+        var address = "127.0.0.1:" + port;
+        old = Await(oldClient.JoinDirectAsync(address), PumpAll, "join");
+        PumpUntil(() => old.ReadyAsync.IsCompleted, PumpAll, "old ready");
+        var seat = old.LocalPeerId;
+        var token = old.ResumeToken;
+        Assert.False(string.IsNullOrEmpty(token));
+
+        var bad = newClient.RejoinDirectAsync(address, "not-a-token");
+        PumpUntil(() => bad.IsCompleted, Pump, "bad token answered");
+        var err = Assert.Throws<OneLobbyException>(() => bad.GetAwaiter().GetResult());
+        Assert.Equal(LobbyErrorCodes.InvalidToken, err.Code);
+
+        var joined = new List<int>();
+        host.PeerJoined += p => joined.Add(p.PeerId);
+        back = Await(newClient.RejoinDirectAsync(address, token!), Pump, "rejoin");
+        Assert.Equal(seat, back.LocalPeerId);
+        Assert.Equal(JoinCode.Encode("127.0.0.1", port), back.JoinCode);
+        Assert.NotEqual(token, back.ResumeToken);                  // a new token for the next drop
+        PumpUntil(() => back.ReadyAsync.IsCompleted, Pump, "rejoined link ready");
+        Assert.True(back.ReadyAsync.IsCompletedSuccessfully, back.ReadyAsync.Exception?.GetBaseException().Message);
+        Assert.Contains(seat, joined);
+
+        var atHost = new List<(int From, string Text)>();
+        host.MessageReceived += (f, p, c) => atHost.Add((f, Encoding.UTF8.GetString(p.Span)));
+        back.Send(host.LocalPeerId, Encoding.UTF8.GetBytes("back again"));
+        PumpUntil(() => atHost.Count > 0, Pump, "message after rejoin");
+        Assert.Equal((seat, "back again"), atHost[0]);
+        Assert.Equal(2, host.Peers.Count);
+
+        newClient.DisposeAsync().AsTask().Wait();
+        oldClient.DisposeAsync().AsTask().Wait();
+        hostClient.DisposeAsync().AsTask().Wait();
+    }
+
+    [Fact]
     public void WrongPasswordIsBadPassword()
     {
         var port = FreePort();

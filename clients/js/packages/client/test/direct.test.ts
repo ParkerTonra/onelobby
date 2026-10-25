@@ -240,6 +240,35 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     expect(seen).toContain("ice");
   }, 30000);
 
+  it("rejoinDirect takes a seat back with the resume token (same peer id); a dead token is invalid_token", async () => {
+    const port = await freePort();
+    const host = await hostDirect(kit("Host"), { port, openPort: false });
+    cleanup.push(() => host.leave());
+    const old = await kit("Ann").joinDirect(`127.0.0.1:${port}`);
+    await old.ready;
+    const seat = old.localPeerId;
+    const token = old.resumeToken;
+    expect(token).toBeTruthy();
+
+    await expect(kit("Ann").rejoinDirect(`127.0.0.1:${port}`, "not-a-token")).rejects.toMatchObject({ code: "invalid_token" });
+
+    // a restart: a new kit takes the seat over while the old socket is still open
+    const joined: number[] = [];
+    host.on("peerJoined", (p) => joined.push(p.peerId));
+    const back = await kit("Ann").rejoinDirect(encodeJoinCode("127.0.0.1", port), token);
+    cleanup.push(() => back.leave(), () => old.leave());
+    expect(back.localPeerId).toBe(seat);
+    expect(back.joinCode).toBe(encodeJoinCode("127.0.0.1", port));
+    expect(back.resumeToken).not.toBe(token);
+    await back.ready;
+    await until(() => joined.includes(seat), "host sees the seat come back");
+    const got: string[] = [];
+    host.on("message", (from, bytes) => got.push(`${from}:${new TextDecoder().decode(bytes)}`));
+    back.send(host.localPeerId, new TextEncoder().encode("back again"));
+    await until(() => got.length > 0, "message after rejoin");
+    expect(got[0]).toBe(`${seat}:back again`);
+  }, 30000);
+
   it("two joiners share the host's one UDP port", async () => {
     const port = await freePort();
     // capture the host's peer connections to read their local candidates

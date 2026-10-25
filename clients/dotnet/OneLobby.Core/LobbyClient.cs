@@ -236,6 +236,13 @@ namespace OneLobby
                     case "welcome":
                         Ice = Signaling.ParseIce(e);
                         _welcomed = true;
+                        // a resume answered without a seat: the token is unknown or expired (no lobby message follows)
+                        if (_op != null && !_op.Sent && _op.Request == null && _helloResume != null && !e.TryGetProperty("peerId", out _))
+                        {
+                            _helloResume = null;
+                            FailOp(new OneLobbyException("invalid_token", "resume token unknown or expired"));
+                            return;
+                        }
                         if (_op != null && !_op.Sent) Send(_op);
                         return;
                     case "ping":

@@ -105,6 +105,10 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
 - A joiner whose peer link does not open within `OneLobbyConfig.ReadyTimeout` (15 s) gives up like on the hosted
   server: `ReadyAsync` throws code `ice_failed` and `SessionEnded("ice_failed")` fires (no relay retry: no TURN here).
 - No STUN or TURN: the game only ever talks to the other players and the player's own router.
+- A joiner that drops or restarts takes its seat back within 60 s with `client.RejoinDirectAsync(code, resumeToken)`
+  (Unity: `runner.RejoinDirectAsync`; JS: `kit.rejoinDirect(code, resumeToken)`): same peer id, the host sees
+  `PeerJoined` for it again. Save `lobby.ResumeToken` after every join (it changes on each resume). A seat that is gone
+  fails with `invalid_token` (`LobbyErrorCodes.InvalidToken`): offer a plain join then.
 - Unity's `OneLobbyRunner.HostDirectAsync` (0.2.2+) logs one line with the port it bound (after any busy-port fallback), the
   code and the router mapping: `OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code ... (SameNetwork); port mapping off`.
   Other .NET hosts can build the same from `JoinCode.TryDecode(lobby.JoinCode, ...)` and `lobby.PortMapping`.

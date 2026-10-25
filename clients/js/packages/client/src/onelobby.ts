@@ -285,6 +285,18 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   }
 
   private async connect(url = this.options.lobbyServer, factory = this.socketFactory, timeoutMs = 0): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
+    const sig = await this.open(url, factory, timeoutMs);
+    try {
+      const welcome = await sig.request<WelcomeMsg & { t: string }>(this.helloMsg(), "welcome");
+      return { sig, welcome };
+    } catch (e) {
+      sig.close();
+      throw e;
+    }
+  }
+
+  /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
+  private async open(url: string, factory: SocketFactory, timeoutMs: number): Promise<SignalingClient> {
     const sig = new SignalingClient(url, factory, this.clock);
     if (timeoutMs > 0) {
       let cancel = () => {};
@@ -301,13 +313,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
         cancel();
       }
     } else await sig.connect();
-    try {
-      const welcome = await sig.request<WelcomeMsg & { t: string }>(this.helloMsg(), "welcome");
-      return { sig, welcome };
-    } catch (e) {
-      sig.close();
-      throw e;
-    }
+    return sig;
   }
 
   private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit): Lobby {
@@ -394,17 +400,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
    * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
    */
   async joinDirect(codeOrAddress: string, opts: JoinDirectOptions = {}): Promise<Lobby> {
-    let input = codeOrAddress.trim();
-    if (looksLikeJoinCode(input)) {
-      const d = decodeJoinCode(input);
-      if ("error" in d)
-        throw new OneLobbyError(d.error, d.error === "unknown_version" ? `"${input}" is a join code from a newer version of the game` : `"${input}" is not a valid join code: check for a typo`);
-      input = `${d.ip}:${d.port}`;
-    }
-    const addr = parseDirectAddress(input, opts.defaultPort ?? DEFAULT_DIRECT_PORT);
-    if (!addr) throw new OneLobbyError("bad_address", `"${codeOrAddress}" is not a join code or an address (try 6B01-RGFE-P2B or 192.168.1.20:47810)`);
-    const inner = this.linkFactory;
-    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: [], extraRemoteCandidates: [addr.candidate] }) };
+    const { addr, links } = this.directTarget(codeOrAddress, opts);
     const { sig, welcome } = await this.connect(addr.url, this.socketFactory, opts.connectTimeoutMs ?? 5000);
     try {
       const state = await sig.request<LobbyState>({ t: "join", ...(opts.password ? { password: opts.password } : {}) }, "lobby");
@@ -416,6 +412,33 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       sig.close();
       throw e;
     }
+  }
+
+  /**
+   * Take a direct-IP seat back after a drop or a restart: the code (or address) joined before and that lobby's
+   * `resumeToken` (save it after every join; it changes on each resume). The host keeps a dropped seat for 60 s and the
+   * same peer id comes back. Rejects with `invalid_token` when the seat is gone: offer `joinDirect` then.
+   */
+  async rejoinDirect(codeOrAddress: string, resumeToken: string, opts: JoinDirectOptions = {}): Promise<Lobby> {
+    const { addr, links } = this.directTarget(codeOrAddress, opts);
+    const lobby = await this.resumeAt(resumeToken, addr.url, opts.connectTimeoutMs ?? 5000, { links });
+    lobby.joinCode = joinedWith(addr);
+    return lobby;
+  }
+
+  private directTarget(codeOrAddress: string, opts: JoinDirectOptions): { addr: NonNullable<ReturnType<typeof parseDirectAddress>>; links: LinkFactory } {
+    let input = codeOrAddress.trim();
+    if (looksLikeJoinCode(input)) {
+      const d = decodeJoinCode(input);
+      if ("error" in d)
+        throw new OneLobbyError(d.error, d.error === "unknown_version" ? `"${input}" is a join code from a newer version of the game` : `"${input}" is not a valid join code: check for a typo`);
+      input = `${d.ip}:${d.port}`;
+    }
+    const addr = parseDirectAddress(input, opts.defaultPort ?? DEFAULT_DIRECT_PORT);
+    if (!addr) throw new OneLobbyError("bad_address", `"${codeOrAddress}" is not a join code or an address (try 6B01-RGFE-P2B or 192.168.1.20:47810)`);
+    const inner = this.linkFactory;
+    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: [], extraRemoteCandidates: [addr.candidate] }) };
+    return { addr, links };
   }
 
   /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
@@ -435,8 +458,11 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   }
 
   async rejoin(resumeToken: string): Promise<Lobby> {
-    const sig = new SignalingClient(this.options.lobbyServer, this.socketFactory, this.clock);
-    await sig.connect();
+    return this.resumeAt(resumeToken, this.options.lobbyServer, 0);
+  }
+
+  private async resumeAt(resumeToken: string, url: string, timeoutMs: number, direct?: { links: LinkFactory }): Promise<Lobby> {
+    const sig = await this.open(url, this.socketFactory, timeoutMs);
     try {
       // The server answers hello(resumeToken) with welcome then the full lobby state; listen for both up front.
       const lobbyP = sig.expect<LobbyState>("lobby");
@@ -446,7 +472,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       // spec: an unknown or expired token is ignored -> plain welcome (no peerId), and no lobby follows
       if (welcome.peerId === undefined) throw new OneLobbyError("invalid_token", "resume token unknown or expired");
       const state = await lobbyP;
-      return this.makeLobby(sig, welcome, state);
+      return this.makeLobby(sig, welcome, state, direct);
     } catch (e) {
       sig.close();
       throw e;

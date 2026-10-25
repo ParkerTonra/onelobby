@@ -151,20 +151,49 @@ namespace OneLobby.Direct
         public static Task<Lobby> JoinDirectAsync(this LobbyClient client, string address, string? password = null, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
+            if (!TryUseDirect(client, address, out var a, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), a!);
+        }
+
+        /// <summary>
+        /// Takes a seat back after a drop or a restart: <paramref name="address"/> is the code or address joined before,
+        /// <paramref name="resumeToken"/> that lobby's <see cref="Lobby.ResumeToken"/> (save it after joining: it changes
+        /// on every resume). The host keeps a dropped seat for 60 s; the same peer id comes back and the host sees
+        /// <c>PeerJoined</c> for it again. When the seat is gone (too late, or the host left) this fails: offer a plain join.
+        /// </summary>
+        public static Task<Lobby> RejoinDirectAsync(this LobbyClient client, string address, string resumeToken, CancellationToken ct = default)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (string.IsNullOrEmpty(resumeToken)) throw new ArgumentException("resume token required", nameof(resumeToken));
+            if (!TryUseDirect(client, address, out var a, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.RejoinAsync(resumeToken, ct), a!);
+        }
+
+        private static bool TryUseDirect(LobbyClient client, string address, out DirectAddress? result, out Exception? fail)
+        {
+            result = null;
+            fail = null;
             if (OneLobby.JoinCode.LooksLikeCode(address))
             {
                 if (!OneLobby.JoinCode.TryDecode(address, out var ip, out var port, out var err))
-                    return Task.FromException<Lobby>(new OneLobbyException(err!, err == "unknown_version"
+                {
+                    fail = new OneLobbyException(err!, err == "unknown_version"
                         ? "'" + address + "' is a join code from a newer version of the game"
-                        : "'" + address + "' is not a valid join code: check for a typo"));
+                        : "'" + address + "' is not a valid join code: check for a typo");
+                    return false;
+                }
                 address = ip + ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             if (!DirectAddress.TryParse(address, client.Config.DirectPort, out var a))
-                return Task.FromException<Lobby>(new OneLobbyException("bad_address",
-                    "'" + address + "' is not an address: use 192.168.1.20, 192.168.1.20:47810 or [2001:db8::1]:47810"));
+            {
+                fail = new OneLobbyException("bad_address",
+                    "'" + address + "' is not an address: use 192.168.1.20, 192.168.1.20:47810 or [2001:db8::1]:47810");
+                return false;
+            }
             try { client.UseDirect(inner => new DirectJoinTransport(inner, new[] { a.Candidate }), a.WebSocketUri, null); }
-            catch (Exception e) { return Task.FromException<Lobby>(e); }
-            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), a);
+            catch (Exception e) { fail = e; return false; }
+            result = a;
+            return true;
         }
 
         /// <summary>A joiner's <see cref="Lobby.JoinCode"/> is what it joined with (the code, normalized), so a HUD can show it on both sides.</summary>

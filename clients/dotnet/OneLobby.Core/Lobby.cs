@@ -860,7 +860,9 @@ namespace OneLobby
                 {
                     if (!e.TryGetProperty("peer", out var p)) return;
                     var id = Signaling.Int(p, "peerId");
-                    if (id == _you || _peers.ContainsKey(id)) return;
+                    // a resume that beat the departure grace: the old seat goes now, the new one connects fresh
+                    if (_peers.TryGetValue(id, out var leaving) && leaving.Departure != null) FinishDeparture(leaving);
+                    if (_closed || id == _you || _peers.ContainsKey(id)) return;
                     var rec = new PeerRec { Id = id, Name = Signaling.Str(p, "name") };
                     _peers[id] = rec;
                     if (IsHost) ConnectPeer(rec, true);
