@@ -47,7 +47,7 @@ class FakePc {
   async setRemoteDescription(d: unknown) {
     this.remoteDescription = d;
   }
-  async addIceCandidate() {}
+  async addIceCandidate(_c?: unknown) {}
   async getStats() {
     return new Map();
   }
@@ -114,7 +114,7 @@ describe("WebRtcLink", () => {
       }
     }
     const link = new WebRtcLink({ remoteId: 1, iceServers: [], relayOnly: false }, NdcLikePc as unknown as typeof RTCPeerConnection);
-    const pc = FakePc.last as NdcLikePc;
+    const pc = FakePc.last as unknown as NdcLikePc;
     const closed: string[] = [];
     link.onClose = (r) => closed.push(r);
     link.startOffer();
