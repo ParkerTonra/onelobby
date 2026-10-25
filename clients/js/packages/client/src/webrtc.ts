@@ -28,6 +28,7 @@ export class WebRtcLink implements PeerLink {
   private pendingIce: RTCIceCandidateInit[] = [];
   private closed = false;
   private opened = 0;
+  private early: [ChannelName, Uint8Array][] = [];
   private extra: string[];
 
   /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
@@ -72,6 +73,7 @@ export class WebRtcLink implements PeerLink {
         if (++this.opened === 3 && !this.closed) {
           this.isOpen = true;
           this.onOpen?.();
+          for (const [n, data] of this.early.splice(0)) if (!this.closed) this.onMessage?.(n, data);
           void this.reportPath();
         }
       };
@@ -79,6 +81,12 @@ export class WebRtcLink implements PeerLink {
       ch.onmessage = (e) => {
         const d = e.data as unknown;
         const data = d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d as never);
+        // The far side can open first and speak at once; hold its data until this side is open too, so whoever
+        // reads it can already answer (otherwise the host queues or drops its replies to a link it thinks is down).
+        if (!this.isOpen) {
+          if (this.early.length < 1000) this.early.push([name, data]);
+          return;
+        }
         this.onMessage?.(name, data);
       };
       this.channels[name] = ch;

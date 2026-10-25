@@ -85,8 +85,21 @@ export class SignalingClient {
   private pingN = 0;
   closed = false;
 
-  onMessage: ((m: ServerMsg) => void) | null = null;
+  private handler: ((m: ServerMsg) => void) | null = null;
+  // Messages with no waiter and no handler yet. The reply that resolves join/create can arrive in the same socket
+  // read as the host's first offer; both are dispatched before the awaiting code builds its Lobby and sets a handler.
+  private backlog: ServerMsg[] = [];
   onClose: (() => void) | null = null;
+
+  get onMessage(): ((m: ServerMsg) => void) | null {
+    return this.handler;
+  }
+
+  /** Setting a handler first delivers, in order, what arrived while there was none. */
+  set onMessage(h: ((m: ServerMsg) => void) | null) {
+    this.handler = h;
+    while (h && this.handler === h && this.backlog.length) h(this.backlog.shift()!);
+  }
 
   constructor(private url: string, private factory: SocketFactory, private clock: Clock) {}
 
@@ -129,7 +142,8 @@ export class SignalingClient {
           else w.resolve(m);
           return;
         }
-        this.onMessage?.(m);
+        if (this.handler) this.handler(m);
+        else if (this.backlog.length < 256) this.backlog.push(m);
       };
       s.onclose = () => {
         if (!this.lastRx) reject(new OneLobbyError("connect_failed", `cannot reach ${this.url}`));
