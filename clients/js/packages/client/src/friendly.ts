@@ -46,6 +46,12 @@ export const ErrorCodes = {
   ServerLost: "server_lost",
   InvalidToken: "invalid_token",
   NoServer: "no_server",
+  // from a blueprint (onelobby.json)
+  BadConfig: "bad_config",
+  VoiceDisabled: "voice_disabled",
+  ChatDisabled: "chat_disabled",
+  ListingDisabled: "listing_disabled",
+  IdentityAnonymous: "identity_anonymous",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
@@ -71,6 +77,11 @@ const TEXT: Record<string, Entry> = {
   invalid_token: { message: "Your old seat in that lobby is no longer available.", hint: "Join again with the lobby code." },
   ice_failed: { message: "Couldn't connect to the other players.", hint: "Some networks (school, work, public Wi-Fi) block game connections. Try another network or a phone hotspot." },
   timeout: { message: "The connection took too long.", hint: "Check your internet connection, then try again." },
+  voice_disabled: { message: "Voice chat is turned off in this game." },
+  chat_disabled: { message: "Text chat is turned off in this game." },
+  listing_disabled: { message: "This game has no public lobby list.", hint: "Join with a code or a link from the host." },
+  identity_anonymous: { message: "This game doesn't use player names.", hint: "Everyone shows up as Player 1, Player 2, and so on." },
+  bad_config: { message: "The game's multiplayer settings file is not valid.", hint: "Let the game's owner know; the details are in the error message." },
   left: { message: "You left the lobby." },
   unknown: { message: "Something went wrong.", hint: "Try again. If it keeps happening, reload the page." },
 };

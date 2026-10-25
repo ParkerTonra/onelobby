@@ -20,6 +20,7 @@ import { WebAudioSink, WorkletMic, webCodecsOpus, webCodecsOpusAvailable } from 
 import { webRtcLinkFactory } from "./webrtc.js";
 import { decodeJoinCode, encodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
+import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 
 export const LIB_NAME = "onelobby";
 export const LIB_VERSION = "0.4.1";
@@ -93,6 +94,17 @@ export interface OneLobbyOptions {
   createMic?: (() => FrameSource) | null;
   /** @deprecated use `advanced.createSink` */
   createSink?: (() => AudioSink) | null;
+}
+
+/** Per-launch settings for `OneLobby.fromConfig`; everything else comes from the blueprint. */
+export interface FromConfigOverrides {
+  /** The player's name. Checked against `players.identity` and `players.maxNameLength`. */
+  displayName?: string;
+  /** Wins over `hosting.lobbyServer` (the file is the bottom layer: put `?lobby=` / storage / `<meta>` lookups here). */
+  lobbyServer?: string;
+  /** Default: `lobby.rejoin` from the file. */
+  rememberSeat?: boolean;
+  advanced?: AdvancedOptions;
 }
 
 export interface HostOptions {
@@ -175,6 +187,54 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   private createMic: (() => FrameSource) | null;
   private createSink: (() => AudioSink) | null;
   private storage: SeatStorage | null;
+  /** The validated, frozen onelobby.json this kit was built from (`OneLobby.fromConfig`); undefined for `new OneLobby`. */
+  readonly blueprint?: Blueprint;
+
+  /**
+   * Build a kit from an onelobby.json (already parsed; docs/design/blueprint.md s.7). Throws `bad_config` for an
+   * invalid file or name, `identity_anonymous` for a name when `players.identity` is "anonymous". Then `host()` and
+   * `hostDirect()` default their options from the file and the file's chat/listing switches are enforced.
+   */
+  static fromConfig(json: unknown, overrides: FromConfigOverrides = {}): OneLobby {
+    const bp = parseBlueprint(json);
+    const name = (overrides.displayName ?? "").trim();
+    if (name) {
+      if (bp.players.identity === "anonymous") throw new OneLobbyError("identity_anonymous", "this game uses anonymous players: no display names");
+      if (name.length > bp.players.maxNameLength)
+        throw new BlueprintError("displayName", "length", `must be at most ${bp.players.maxNameLength} characters`);
+    }
+    const kit = new OneLobby({
+      gameId: bp.game.id,
+      netVersion: bp.game.netVersion,
+      lobbyServer: overrides.lobbyServer ?? bp.hosting.lobbyServer,
+      mode: bp.sync.mode === "lockstep" ? "lockstep" : "raw", // replication is C# only; JS speaks raw
+      tickRate: bp.sync.tickRate,
+      hashEveryTicks: bp.sync.hashEveryTicks,
+      displayName: name,
+      relayOnly: bp.hosting.relayOnly,
+      readyTimeoutMs: bp.session.readyTimeoutMs,
+      peerTimeoutMs: bp.session.peerTimeoutMs,
+      rememberSeat: overrides.rememberSeat ?? bp.lobby.rejoin,
+      advanced: overrides.advanced,
+    });
+    (kit as { blueprint?: Blueprint }).blueprint = bp;
+    return kit;
+  }
+
+  /** @internal Host options the blueprint implies (empty without one). */
+  blueprintHostDefaults(): Partial<HostOptions> {
+    const bp = this.blueprint;
+    if (!bp) return {};
+    const name = this.options.displayName;
+    return {
+      name: name ? `${name}'s game` : "Game",
+      maxPlayers: bp.lobby.maxPlayers,
+      visibility: bp.lobby.listed ? "public" : bp.lobby.approveJoins ? "private" : "unlisted",
+      lateJoin: bp.lobby.lateJoin,
+      meta: { ...bp.lobby.meta },
+      ...(bp.session.rateLimit ? { rateLimit: { ...bp.session.rateLimit } } : {}),
+    };
+  }
 
   constructor(o: OneLobbyOptions) {
     super();
@@ -334,6 +394,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       rateLimit,
     });
     lobby.errorSink = (e) => this.emit("error", e);
+    if (this.blueprint) guardLobby(lobby, this.blueprint);
     if (this.storage && !direct) {
       liveSeats.add(lobby);
       this.saveSeat(lobby.code, lobby.resumeToken);
@@ -346,7 +407,9 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     return lobby;
   }
 
-  async host(h: HostOptions): Promise<Lobby> {
+  /** With a blueprint (`fromConfig`) every option defaults from `lobby.*`; explicit options win. */
+  async host(opts?: Partial<HostOptions>): Promise<Lobby> {
+    const h = { name: "Game", maxPlayers: 4, ...this.blueprintHostDefaults(), ...definedOnly(opts) } as HostOptions;
     const { sig, welcome } = await this.connect();
     try {
       const state = await sig.request<LobbyState>(
@@ -480,6 +543,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   }
 
   async list(opts: ListOptions = {}): Promise<LobbySummary[]> {
+    if (this.blueprint && !this.blueprint.hosting.server) throw new OneLobbyError("listing_disabled", "this game has no lobby server (hosting.server is false)");
     const { sig } = await this.connect();
     try {
       const res = await sig.request<{ t: string; items: LobbySummary[] }>(
@@ -500,5 +564,34 @@ function joinedWith(addr: { host: string; port: number; isIPv6: boolean; display
     return encodeJoinCode(addr.host, addr.port);
   } catch {
     return addr.display;
+  }
+}
+
+function definedOnly<T extends object>(o: T | undefined): Partial<T> {
+  const out: Partial<T> = {};
+  if (o) for (const [k, v] of Object.entries(o)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  return out;
+}
+
+/** Blueprint switches that gate features on the lobby: voice and text chat. */
+function guardLobby(lobby: Lobby, bp: Blueprint): void {
+  if (!bp.chat.voice) {
+    const voice = lobby.voice;
+    const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(voice), "enabled");
+    if (d?.get && d.set) {
+      Object.defineProperty(voice, "enabled", {
+        configurable: true,
+        get: () => d.get!.call(voice) as boolean,
+        set: (v: boolean) => {
+          if (v) throw new OneLobbyError("voice_disabled", "this game has voice chat turned off (chat.voice is false)");
+          d.set!.call(voice, v);
+        },
+      });
+    }
+  }
+  if (!bp.chat.text) {
+    lobby.chat.send = () => {
+      throw new OneLobbyError("chat_disabled", "this game has text chat turned off (chat.text is false)");
+    };
   }
 }

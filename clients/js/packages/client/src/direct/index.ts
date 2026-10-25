@@ -78,7 +78,22 @@ export type DirectLobby = Lobby & {
 /** With `port` left out, how many ports after the default `hostDirect` tries when it is busy. */
 export const DEFAULT_FALLBACK_PORTS = 9;
 
-export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Promise<DirectLobby> {
+export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): Promise<DirectLobby> {
+  const bp = kit.blueprint;
+  const defined = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) as DirectHostOptions;
+  // a blueprint supplies hosting.* and lobby.* (explicit options win)
+  const o: DirectHostOptions = bp
+    ? {
+        port: bp.hosting.directPort,
+        openPort: bp.hosting.openPort,
+        allowedOrigins: [...bp.hosting.allowedOrigins],
+        maxPlayers: bp.lobby.maxPlayers,
+        lateJoin: bp.lobby.lateJoin,
+        meta: { ...bp.lobby.meta },
+        ...(bp.session.rateLimit ? { rateLimit: { ...bp.session.rateLimit } } : {}),
+        ...defined,
+      }
+    : defined;
   const port = o.port ?? DEFAULT_DIRECT_PORT;
   // busy (another program holds it): try the next fallbackPorts; the join code carries the port
   const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));

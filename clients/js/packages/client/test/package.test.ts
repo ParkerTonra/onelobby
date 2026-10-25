@@ -27,14 +27,14 @@ describe("npm pack", () => {
     const out = execSync("npm pack --dry-run --json --ignore-scripts", { cwd: pkgDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     const files: string[] = JSON.parse(out)[0].files.map((f: { path: string }) => f.path.replace(/\\/g, "/"));
     for (const f of [
-      "package.json", "README.md", "LICENSE",
+      "package.json", "README.md", "LICENSE", "blueprint.schema.json",
       "dist/index.js", "dist/index.d.ts", "dist/internals.js", "dist/internals.d.ts", "dist/testing.js", "dist/testing.d.ts",
       "dist/onelobby.global.js", "dist/onelobby.global.js.map", "dist/onelobby.global.min.js", "dist/onelobby.global.min.js.map",
       "dist/onelobby.bundle.mjs", "dist/onelobby.bundle.mjs.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
     ]) expect(files, f).toContain(f);
     const bad = files.filter((f) => /node_modules|(^|\/)test\/|\.test\.|^src\/|^scripts\/|tsconfig|\.tsbuildinfo$|\.tgz$/.test(f));
     expect(bad).toEqual([]);
-    for (const f of files) expect(f, f).toMatch(/^(package\.json|README\.md|LICENSE|dist\/)/);
+    for (const f of files) expect(f, f).toMatch(/^(package\.json|README\.md|LICENSE|blueprint\.schema\.json|dist\/)/);
   }, 60_000);
 
   it("every exports target exists", () => {
@@ -77,7 +77,7 @@ describe("export surface", () => {
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
       "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
-      "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
+      "parseBlueprint", "defineBlueprint", "BlueprintError", "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
     ].sort());
   });
 

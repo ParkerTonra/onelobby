@@ -63,10 +63,12 @@
       "types": "./dist/global.d.ts",
       "default": "./dist/onelobby.bundle.mjs"
     },
+    "./blueprint.schema.json": "./blueprint.schema.json",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "blueprint.schema.json",
     "README.md",
     "LICENSE"
   ],
@@ -83,7 +85,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/bundle.mjs",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/bundle.mjs && node scripts/copy-schema.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prepublishOnly": "npm run typecheck && npm run build && npm test && node scripts/prepublish-check.mjs"

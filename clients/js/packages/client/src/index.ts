@@ -4,9 +4,12 @@
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { OneLobbyOptions, FromConfigOverrides, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
+// Blueprint v1: onelobby.json (docs/design/blueprint.md). OneLobby.fromConfig(json) builds a kit from it.
+export { parseBlueprint, defineBlueprint, BlueprintError } from "./blueprint.js";
+export type { Blueprint, BlueprintInput, BlueprintEngine } from "./blueprint.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
 export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
