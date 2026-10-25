@@ -132,7 +132,8 @@ Full reference (generated): `docs/api/`.
   as given. The library version is `LIB_VERSION`.
 - `lobby.kick(id)` bans that player's address from the lobby for as long as it lasts (a reload or new tab included).
   To end one connection without the ban (a seat taken over by another tab), use `lobby.disconnect(id, code?, reason?)`:
-  the joiner's lobby ends with `sessionEnded("disconnected")` and it may join again.
+  the joiner's lobby ends with `sessionEnded("disconnected")` and it may join again. A ban is per address, so a player
+  on a new address (another network, a VPN, a phone hotspot) can return; use a lobby password to keep strangers out.
 - `asWebSocket()` fires `onopen` on a later task, like a real WebSocket, so a handler assigned after any number of
   `await`s still runs (once). `readyState === 1` also tells you it is open.
 - `host()` defaults to `visibility: "unlisted"`: joinable by code or link, not shown by `list()`. Pass `"public"` to list it.
