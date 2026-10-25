@@ -12,6 +12,9 @@ namespace OneLobby
     {
         public const int MaxCommandBytes = 12 * 1024;
 
+        /// <summary>Commands one remote peer may have waiting for the host's next frame; the excess is dropped.</summary>
+        public const int MaxPendingPerPeer = 256;
+
         private readonly Lobby _lobby;
         private readonly SortedDictionary<long, Frame> _buf = new();
         private readonly SortedDictionary<long, Frame> _log = new();
@@ -37,6 +40,9 @@ namespace OneLobby
 
         /// <summary>Highest tick for which this peer holds every frame (consumed or buffered).</summary>
         public long LastReceivedTick => _head;
+
+        /// <summary>Remote commands the host dropped because that peer already had <see cref="MaxPendingPerPeer"/> waiting.</summary>
+        public long DroppedCommands { get; private set; }
 
         public Func<byte[]>? Snapshot { get; set; }
         public Action<long, ReadOnlyMemory<byte>>? Restore { get; set; }
@@ -141,7 +147,11 @@ namespace OneLobby
 
         internal void QueueRemote(int peer, byte[] cmd)
         {
-            if (cmd.Length <= MaxCommandBytes) _pending.Add((peer, cmd));
+            if (cmd.Length > MaxCommandBytes) return;
+            var waiting = 0;
+            foreach (var p in _pending) if (p.Peer == peer) waiting++;
+            if (waiting >= MaxPendingPerPeer) { DroppedCommands++; return; }
+            _pending.Add((peer, cmd));
         }
 
         internal void DropPending(int peer) => _pending.RemoveAll(p => p.Peer == peer);

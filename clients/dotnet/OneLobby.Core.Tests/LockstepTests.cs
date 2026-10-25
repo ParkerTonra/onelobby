@@ -317,6 +317,24 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void AFloodingPeerIsCappedAt256PendingCommandsAndOthersAreUnaffected()
+        {
+            var (rig, host, a, b) = Trio();
+            var ls = host.Lobby.Lockstep!;
+            for (var i = 0; i < 300; i++) ls.QueueRemote(a.Lobby.LocalPeerId, new byte[] { 1, (byte)i });
+            Assert.Equal(300 - LockstepSession.MaxPendingPerPeer, ls.DroppedCommands);
+            ls.QueueRemote(b.Lobby.LocalPeerId, new byte[] { 2, 0 });   // another peer still gets in
+            Assert.Equal(300 - LockstepSession.MaxPendingPerPeer, ls.DroppedCommands);
+            host.Paused = true;
+            _ = host.Lobby.StartAsync();
+            rig.Step(10);
+            var got = new List<(int PeerId, ReadOnlyMemory<byte> Command)>();
+            while (ls.TryNextFrame(out var f)) got.AddRange(f.Commands);
+            Assert.Equal(LockstepSession.MaxPendingPerPeer, got.Count(c => c.PeerId == a.Lobby.LocalPeerId));
+            Assert.Equal(1, got.Count(c => c.PeerId == b.Lobby.LocalPeerId));
+        }
+
+        [Fact]
         public void SubmitRejectsOversizedCommands()
         {
             var (_, host, _, _) = Trio();

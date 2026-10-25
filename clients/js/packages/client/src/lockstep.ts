@@ -28,6 +28,8 @@ export const MAX_DESYNCS = 3;
 export const MAX_RESTORE_RETRIES = 3;
 export const HOST_SILENCE_MS = 3000;
 export const PEER_HASH_SILENCE_MS = 10_000;
+/** Commands one remote peer may have waiting for the host's next frame; the excess is dropped. */
+export const MAX_PENDING_PER_PEER = 256;
 const SNAPSHOT_COMPRESS_MIN = 1024;
 
 export interface LockstepOptions {
@@ -70,6 +72,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
   private hosting = false;
   private _started = false;
   private pending: FrameCommand[] = [];
+  private _droppedCommands = 0;
   private ready = new Set<number>();
   private snapshotting = new Set<number>();
   private cancelTicker: (() => void) | null = null;
@@ -94,6 +97,10 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   // ---- public game-facing surface -------------------------------------------------------------------------------
 
+  /** Remote commands the host dropped because that peer already had MAX_PENDING_PER_PEER waiting. */
+  get droppedCommands(): number {
+    return this._droppedCommands;
+  }
   get started(): boolean {
     return this._started;
   }
@@ -259,7 +266,12 @@ export class Lockstep extends Emitter<LockstepEvents> {
   handle(from: number, msg: Message): void {
     switch (msg.type) {
       case "cmd":
-        if (this.hosting) this.pending.push({ peerId: from, bytes: msg.bytes });
+        if (this.hosting) {
+          let waiting = 0;
+          for (const c of this.pending) if (c.peerId === from) waiting++;
+          if (waiting >= MAX_PENDING_PER_PEER) this._droppedCommands++;
+          else this.pending.push({ peerId: from, bytes: msg.bytes });
+        }
         break;
       case "frame":
         if (!this.hosting) this.onFrame(msg.tick, msg.commands);

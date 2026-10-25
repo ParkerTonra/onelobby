@@ -54,6 +54,21 @@ describe("lockstep scheduler (unit, fake hub)", () => {
     expect(f.commands.map((c) => [c.peerId, c.bytes[1]])).toEqual([[1, 1], [2, 1], [2, 2], [3, 1]]);
   });
 
+  it("a flooding peer is capped at 256 pending commands, others are unaffected, drops are counted", () => {
+    const clock = new ManualClock();
+    const { hub, sent } = fakeHub(true, clock);
+    const ls = new Lockstep(hub, { hashEveryTicks: 20 });
+    ls.onPeerHi(2, -1);
+    ls.hostStart();
+    for (let i = 0; i < 300; i++) ls.handle(2, { type: "cmd", seq: i, bytes: Uint8Array.of(2, i & 255) });
+    ls.handle(3, { type: "cmd", seq: 1, bytes: Uint8Array.of(3, 0) });
+    expect(ls.droppedCommands).toBe(300 - 256);
+    clock.advance(50);
+    const f = sent.find((s) => s.msg.type === "frame")!.msg as Extract<Message, { type: "frame" }>;
+    expect(f.commands.filter((c) => c.peerId === 2).length).toBe(256);
+    expect(f.commands.filter((c) => c.peerId === 3).length).toBe(1);
+  });
+
   it("joiner queues frames, ignores duplicates, asks for a snapshot on a gap", () => {
     const clock = new ManualClock();
     const { hub, sent } = fakeHub(false, clock);
