@@ -1,0 +1,45 @@
+# Runs the JS client tests on Linux the way the publish job does (without publishing anything), plus the managed
+# .NET unit tests.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        working-directory: clients/js
+        run: npm ci
+      - name: Typecheck, build, test (prepublishOnly)
+        working-directory: clients/js/packages/client
+        run: npm run prepublishOnly
+
+  dotnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Core tests
+        run: dotnet test clients/dotnet/OneLobby.Core.Tests
+      - name: Replication tests
+        run: dotnet test clients/dotnet/OneLobby.Replication.Tests
