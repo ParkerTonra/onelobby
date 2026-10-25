@@ -108,6 +108,10 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
 - Unity's `OneLobbyRunner.HostDirectAsync` (0.2.2+) logs one line with the port it bound (after any busy-port fallback), the
   code and the router mapping: `OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code ... (SameNetwork); port mapping off`.
   Other .NET hosts can build the same from `JoinCode.TryDecode(lobby.JoinCode, ...)` and `lobby.PortMapping`.
+- To see the router mapping removed when the host quits (0.3.0+), pass a log hook:
+  `new DirectHostOptions { PortMapping = new PortMapperOptions { Log = Debug.Log } }` (JS/Node:
+  `hostDirect(kit, { portMapping: { log: console.log } })`). It gets one line per mapping kind:
+  `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`. Left out, nothing is logged.
 
 ## 3. Node: host from a game server
 
