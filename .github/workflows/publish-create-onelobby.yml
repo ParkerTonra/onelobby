@@ -1,0 +1,45 @@
+# Publishes the scaffolder (clients/js/packages/create-onelobby) to npm when a tag create-onelobby-vX.Y.Z is pushed.
+# Same setup as publish-npm.yml: npm trusted publishing through GitHub OIDC (no token, provenance attached). One-time
+# setup on npmjs.com: create-onelobby settings > Trusted Publisher > GitHub Actions, repository ParkerTonra/onelobby,
+# workflow publish-create-onelobby.yml, environment "npm".
+# Release: bump clients/js/packages/create-onelobby/package.json, merge to main, then
+#   git tag create-onelobby-v0.1.1 origin/main && git push origin create-onelobby-v0.1.1
+# The job then WAITS for the owner to approve the "npm" environment deployment on GitHub. Agents never approve it.
+name: Publish create-onelobby to npm
+
+on:
+  push:
+    tags: ["create-onelobby-v*"]
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm # protected: the owner approves each publish on GitHub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or newer (trusted publishing)
+        run: npm install -g npm@11
+      - name: Tag matches the package version
+        working-directory: clients/js/packages/create-onelobby
+        run: |
+          want="create-onelobby-v$(node -p "require('./package.json').version")"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then echo "tag $GITHUB_REF_NAME but package.json says $want"; exit 1; fi
+      - name: Install
+        working-directory: clients/js
+        run: npm ci
+      # create-onelobby vendors the blueprint loader from the client's dist
+      - name: Build the onelobby client
+        working-directory: clients/js
+        run: npm run build -w onelobby
+      # prepublishOnly runs the vendoring build and the tests before anything is uploaded
+      - name: Publish
+        working-directory: clients/js/packages/create-onelobby
+        run: npm publish
