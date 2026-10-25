@@ -25,19 +25,65 @@ public sealed class DirectIpTests
 
     private static readonly OneLobbyConfig Cfg = new("com.onelobby.directtest", "1", new Uri("ws://unused.invalid/"), SyncMode.Raw);
 
-    private static int FreePort()
+    private static readonly Random PortRng = new();
+
+    /// <summary>
+    /// A port that is free right now for both TCP and UDP on all IPv4 interfaces, plus the next <paramref name="span"/>-1
+    /// ports after it. Candidates come from the OS (bind port 0, TCP-first and UDP-first in turn) and then from a random
+    /// scan of 20000-45000, so a machine short of ephemeral ports or with excluded ranges (Hyper-V, WSL) still finds one.
+    /// </summary>
+    private static int FreePort(int span = 1)
     {
-        // a port free for both TCP and UDP right now
-        for (var i = 0; i < 50; i++)
+        for (var i = 0; i < 400; i++)
         {
-            var t = new TcpListener(IPAddress.Loopback, 0);
-            t.Start();
-            var p = ((IPEndPoint)t.LocalEndpoint).Port;
-            t.Stop();
-            try { using var u = new UdpClient(new IPEndPoint(IPAddress.Any, p)); return p; }
-            catch (SocketException) { }
+            int p;
+            if (i < 100) { var os = OsPort(udpFirst: i % 2 == 1); if (os <= 0) continue; p = os; }
+            else lock (PortRng) p = PortRng.Next(20000, 45000);
+            if (p + span - 1 > 65535) continue;
+            if (RangeFree(p, span)) return p;
         }
-        throw new InvalidOperationException("no free port");
+        throw new InvalidOperationException($"no free TCP+UDP port run of {span} found");
+    }
+
+    private static int OsPort(bool udpFirst)
+    {
+        try
+        {
+            if (udpFirst)
+            {
+                using var u = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+                return ((IPEndPoint)u.Client.LocalEndPoint!).Port;
+            }
+            var t = new TcpListener(IPAddress.Any, 0);
+            t.Start();
+            try { return ((IPEndPoint)t.LocalEndpoint).Port; } finally { t.Stop(); }
+        }
+        catch (SocketException) { return -1; }
+    }
+
+    private static bool RangeFree(int first, int span)
+    {
+        var held = new List<IDisposable>();
+        try
+        {
+            for (var p = first; p < first + span; p++)
+            {
+                var t = new TcpListener(IPAddress.Any, p);
+                t.Start();
+                held.Add(new Stopper(t));
+                held.Add(new UdpClient(new IPEndPoint(IPAddress.Any, p)));
+            }
+            return true;
+        }
+        catch (SocketException) { return false; }
+        finally { foreach (var h in held) h.Dispose(); }
+    }
+
+    private sealed class Stopper : IDisposable
+    {
+        private readonly TcpListener _t;
+        public Stopper(TcpListener t) { _t = t; }
+        public void Dispose() => _t.Stop();
     }
 
     private static void PumpUntil(Func<bool> done, Action pump, string what, int timeoutMs = 20000)
@@ -193,7 +239,7 @@ public sealed class DirectIpTests
     [Fact]
     public void BusyDefaultPortFallsBackToTheNextOneAndTheJoinerKeepsTheCode()
     {
-        var port = FreePort();
+        var port = FreePort(span: 2); // the fallback needs at least port + 1 free too
         var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var j = new LobbyClient(Cfg, new DataChannelTransport());
