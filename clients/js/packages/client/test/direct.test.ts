@@ -7,6 +7,7 @@ import type { Lobby } from "../src/lobby.js";
 import { OneLobbyError } from "../src/signaling.js";
 import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
+import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, directHubOptions, hostDirect } from "../src/direct/index.js";
 
 /**
@@ -181,7 +182,62 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     await host.leave();
     await until(() => ended !== "", "joiner session end");
     expect(ended).toBe("host_left");
-    expect(host.directHub.connectionCount).toBe(0);
+    // the joiner can see host_left before the host's end of its TCP socket has closed
+    await until(() => host.directHub.connectionCount === 0, "hub sockets closed");
+  }, 30000);
+
+  it("host candidates that overtake the host's offer are kept for the joiner's link (not dropped)", async () => {
+    // node-datachannel's native callbacks are unordered: a candidate can be signaled before the offer it belongs to
+    const port = await freePort();
+    const reorder: LinkFactory = {
+      create(o) {
+        const link = links.create(o);
+        let out: PeerLink["onSignal"] = null;
+        let held: SignalPayload | null = null;
+        let sentIce = false;
+        const release = () => {
+          if (held) out?.(held);
+          held = null;
+        };
+        Object.defineProperty(link, "onSignal", {
+          get: () => (s: SignalPayload) => {
+            if (s.sdp && !sentIce) {
+              held = s;
+              setTimeout(release, 1000);
+              return;
+            }
+            out?.(s);
+            if (s.ice && !sentIce) {
+              sentIce = true;
+              setTimeout(release, 0);
+            }
+          },
+          set: (cb: PeerLink["onSignal"]) => (out = cb),
+        });
+        return link;
+      },
+    };
+    const seen: string[] = [];
+    const recording: LinkFactory = {
+      create(o) {
+        const link = links.create(o);
+        const inner = link.handleSignal.bind(link);
+        link.handleSignal = (s) => {
+          seen.push(s.sdp ? s.sdp.type : "ice");
+          return inner(s);
+        };
+        return link;
+      },
+    };
+    const mk = (name: string, linkFactory: LinkFactory) =>
+      new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", displayName: name, rememberSeat: false, advanced: { linkFactory } });
+    const host = await hostDirect(mk("Host", reorder), { port, openPort: false });
+    cleanup.push(() => host.leave());
+    const ann = await mk("Ann", recording).joinDirect(`127.0.0.1:${port}`);
+    cleanup.push(() => ann.leave());
+    await ann.ready;
+    expect(seen[0]).toBe("offer");
+    expect(seen).toContain("ice");
   }, 30000);
 
   it("two joiners share the host's one UDP port", async () => {

@@ -26,6 +26,11 @@ export class WebRtcLink implements PeerLink {
   private pc: RTCPeerConnection;
   private channels = {} as Record<ChannelName, RTCDataChannel>;
   private pendingIce: RTCIceCandidateInit[] = [];
+  /**
+   * Set once setRemoteDescription resolves. Not `pc.remoteDescription`: node-datachannel's polyfill returns an object
+   * there before any is set, and its addIceCandidate throws until one is.
+   */
+  private haveRemote = false;
   private closed = false;
   private opened = 0;
   private early: [ChannelName, Uint8Array][] = [];
@@ -110,6 +115,7 @@ export class WebRtcLink implements PeerLink {
     try {
       if (s.sdp) {
         await this.pc.setRemoteDescription({ type: s.sdp.type, sdp: s.sdp.sdp });
+        this.haveRemote = true;
         for (const c of this.pendingIce.splice(0)) await this.pc.addIceCandidate(c);
         if (this.extra.length) {
           // docs/direct-ip.md s.2: the address the joiner typed is the host's reachable candidate
@@ -124,7 +130,8 @@ export class WebRtcLink implements PeerLink {
         }
       }
       if (s.ice) {
-        if (this.pc.remoteDescription) await this.pc.addIceCandidate(s.ice as RTCIceCandidateInit);
+        // a candidate can come before the description it belongs to (the far side's native callbacks are unordered)
+        if (this.haveRemote) await this.pc.addIceCandidate(s.ice as RTCIceCandidateInit);
         else this.pendingIce.push(s.ice as RTCIceCandidateInit);
       }
     } catch (e) {
