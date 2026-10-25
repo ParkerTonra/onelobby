@@ -56,6 +56,15 @@ export class WebRtcLink implements PeerLink {
         else this.fail(s);
       }
     };
+  }
+
+  /**
+   * The offerer creates the channels just before its offer, the answerer once the remote offer is set. Creating them
+   * any earlier makes libdatachannel (node-datachannel) start an offer of its own on the answering side, which then
+   * collides with the real one (both ICE agents controlling, the link never opens).
+   */
+  private openChannels(): void {
+    if (this.channels.reliable) return;
     for (const name of ["reliable", "fast", "voice"] as ChannelName[]) {
       const ch = this.pc.createDataChannel(name, CHANNEL_INIT[name]);
       ch.binaryType = "arraybuffer";
@@ -79,6 +88,7 @@ export class WebRtcLink implements PeerLink {
   startOffer(): void {
     void (async () => {
       try {
+        this.openChannels();
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
         this.onSignal?.({ sdp: { type: "offer", sdp: offer.sdp ?? "" } });
@@ -99,6 +109,7 @@ export class WebRtcLink implements PeerLink {
           for (const candidate of this.extra.splice(0)) await this.pc.addIceCandidate({ candidate, sdpMid: mid, sdpMLineIndex: 0 });
         }
         if (s.sdp.type === "offer") {
+          this.openChannels();
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
           this.onSignal?.({ sdp: { type: "answer", sdp: answer.sdp ?? "" } });
