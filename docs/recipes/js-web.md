@@ -13,9 +13,9 @@ npm install onelobby
 Right after a release, npm's local cache can still list only the old versions, so asking for the new one fails with
 `ETARGET` even though `npm view` shows it; add `--prefer-online` to the install.
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.3.1/dist/onelobby.global.min.js">` sets
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.4.0/dist/onelobby.global.min.js">` sets
 `window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/onelobby@0.3.1/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+`https://cdn.jsdelivr.net/npm/onelobby@0.4.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
 migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
