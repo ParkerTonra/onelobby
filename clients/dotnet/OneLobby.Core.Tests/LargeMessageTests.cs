@@ -102,6 +102,33 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void AnAssemblerKeepsAtMostEightIncompleteSetsAndEvictsTheOldest()
+        {
+            var asm = new ChunkAssembler();
+            for (uint id = 1; id <= 20; id++)
+                Assert.False(asm.TryAdd(Wire.Body(Wire.BuildChunk(id, 0, 2, new byte[10])), out _, out _));
+            Assert.Equal(ChunkAssembler.MaxPartialSets, asm.PendingSets);
+            // set 1 was evicted: its second chunk starts a fresh set instead of completing it
+            Assert.False(asm.TryAdd(Wire.Body(Wire.BuildChunk(1, 1, 2, new byte[10])), out _, out _));
+            // set 20 is still there and completes
+            Assert.True(asm.TryAdd(Wire.Body(Wire.BuildChunk(20, 1, 2, new byte[10])), out _, out var all));
+            Assert.Equal(20, all.Length);
+        }
+
+        [Fact]
+        public void PendingBytesAcrossSetsAreCappedAt64MiB()
+        {
+            var asm = new ChunkAssembler();
+            var big = new byte[Wire.MaxReassembled / 2 - 1];
+            for (uint id = 1; id <= 4; id++)
+                Assert.False(asm.TryAdd(Wire.Body(Wire.BuildChunk(id, 0, 2, big)), out _, out _));
+            Assert.True(asm.PendingBytes <= Wire.MaxReassembled);
+            Assert.Equal(2, asm.PendingSets);   // the two oldest were evicted
+            Assert.True(asm.TryAdd(Wire.Body(Wire.BuildChunk(4, 1, 2, new byte[1])), out _, out var all));
+            Assert.Equal(big.Length + 1, all.Length);
+        }
+
+        [Fact]
         public void ReassembledFramesUseTheBiggerCap()
         {
             var big = Wire.BuildRaw(0, new byte[Wire.MaxFrame]);

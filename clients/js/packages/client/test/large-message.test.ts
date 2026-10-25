@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CodecError, MAX_REASSEMBLED_BYTES } from "../src/codec.js";
-import { Reassembler } from "../src/chunking.js";
+import { MAX_PARTIAL_SETS, Reassembler } from "../src/chunking.js";
 import { settle } from "../src/testing.js";
 import { rig } from "./helpers.js";
 
@@ -79,5 +79,23 @@ describe("large raw messages", () => {
     expect(r.push({ id: 1, index: 0, count: 2, bytes: half })).toBeNull();
     expect(() => r.push({ id: 1, index: 1, count: 2, bytes: half })).toThrow(CodecError);
     expect(r.pending).toBe(0);
+  });
+
+  it("a reassembler keeps at most 8 incomplete sets and evicts the oldest", () => {
+    const r = new Reassembler();
+    for (let id = 1; id <= 20; id++) expect(r.push({ id, index: 0, count: 2, bytes: new Uint8Array(10) })).toBeNull();
+    expect(r.pending).toBe(MAX_PARTIAL_SETS);
+    // set 1 was evicted: its second chunk starts a fresh set instead of completing it
+    expect(r.push({ id: 1, index: 1, count: 2, bytes: new Uint8Array(10) })).toBeNull();
+    expect(r.push({ id: 20, index: 1, count: 2, bytes: new Uint8Array(10) })?.length).toBe(20);
+  });
+
+  it("pending bytes across incomplete sets are capped at 64 MiB", () => {
+    const r = new Reassembler();
+    const big = new Uint8Array(MAX_REASSEMBLED_BYTES / 2 - 1);
+    for (let id = 1; id <= 4; id++) expect(r.push({ id, index: 0, count: 2, bytes: big })).toBeNull();
+    expect(r.pendingBytes).toBeLessThanOrEqual(MAX_REASSEMBLED_BYTES);
+    expect(r.pending).toBe(2); // the two oldest were evicted
+    expect(r.push({ id: 4, index: 1, count: 2, bytes: new Uint8Array(1) })?.length).toBe(big.length + 1);
   });
 });
