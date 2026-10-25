@@ -3,7 +3,7 @@
 | Project | What |
 |---|---|
 | `OneLobby.Core` | Engine-agnostic client (netstandard2.1 + net8.0): `LobbyClient`, `Lobby`, `LockstepSession`, `VoiceChannel`, `TextChat`, `ITransport`/`IPeerLink`/`ISignalingSocket`, `IVoiceCodec`, `IVoiceAudio`, and `InMemoryNetwork` (a fake lobby server + loopback links + manual clock, for offline tests) |
-| `OneLobby.Replication` | Host-authoritative state replication on a raw lobby (netstandard2.1 + net8.0, no engine types, no third-party deps): `ReplicationSession`, `NetworkClock`, `NetWriter`/`NetReader`/`Quantize`, `Reconciler`, `HistoryRing` (DESIGN s.19, `spec/replication.md`) |
+| `OneLobby.Replication` | Host-authoritative state replication on a raw lobby (netstandard2.1 + net8.0, no engine types, no third-party deps): `ReplicationSession`, `NetworkClock`, `NetWriter`/`NetReader`/`Quantize`, `Reconciler`, `HistoryRing` (DESIGN s.18, `spec/replication.md`) |
 | `OneLobby.Opus` | `OpusVoiceCodec` (Concentus, BSD-3-Clause; see `THIRD_PARTY.md`) |
 | `OneLobby.Godot` | `GodotTransport` (WebSocketPeer + WebRtcPeerConnection), `GodotVoiceAudio` (mic capture, per-speaker playback) |
 | `OneLobby.DataChannel` | Engine-agnostic `DataChannelTransport : ITransport` (libdatachannel WebRTC data channels via P/Invoke + `WebSocketSignalingSocket`); natives from `native/build-windows.ps1`, `build-linux.sh`, `build-posix.sh`. Tests: `OneLobby.DataChannel.Tests` (live two-peer WebRTC through an in-process server); `OneLobby.DataChannel.Smoke` (command-line peer for cross-play) |

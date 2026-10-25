@@ -5,7 +5,7 @@ using System.Linq;
 namespace OneLobby.Replication
 {
     /// <summary>
-    /// Host-authoritative state replication over a raw-mode <see cref="Lobby"/> (DESIGN s.19, spec/replication.md).
+    /// Host-authoritative state replication over a raw-mode <see cref="Lobby"/> (DESIGN s.18, spec/replication.md).
     /// <para>Host: <see cref="Spawn"/> entities, run one sim step per <see cref="NetworkClock.TryAdvance"/>, read each client's
     /// input with <see cref="TryGetInput"/>, then <see cref="SendSnapshot"/>. Each client gets a delta against the last
     /// snapshot it acknowledged, on the fast channel.</para>
@@ -103,7 +103,7 @@ namespace OneLobby.Replication
         public event Action<EntityInfo>? EntityDespawned;
         /// <summary>Raw-mode payloads that are not replication messages (first byte other than 0x52), for the game's own use.</summary>
         public event Action<int, ReadOnlyMemory<byte>, Channel>? OtherMessage;
-        /// <summary>Client: the host left. Host migration is not supported for replicated sessions (DESIGN s.19): end the match.</summary>
+        /// <summary>Client: the host left. Host migration is not supported for replicated sessions (DESIGN s.18): end the match.</summary>
         public event Action? HostLost;
 
         /// <summary>True for payloads this session owns (first byte 0x52). Keep your own raw messages off that first byte.</summary>

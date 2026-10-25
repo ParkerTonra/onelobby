@@ -5,7 +5,7 @@ Game-agnostic multiplayer lobbies, transport, voice and text chat for indie game
 everything needed to keep playing after the author is gone ships in this repo.
 
 Status: design, 2026-10-23. No code yet. The protocol in sections 7-9 is frozen for the first build so the work streams
-in section 15 can run in parallel. Working name during drafting: lobbykit.
+in section 14 can run in parallel. Working name during drafting: lobbykit.
 
 **Name.** `OneLobby` (Parker, 2026-10-24; first drafted as Keepalive). Packages: `onelobby` (npm, unscoped),
 `OneLobby.Core` + `OneLobby.Godot` (.NET, namespace `OneLobby`), server binary and image `onelobby-server`. Env vars
@@ -48,7 +48,7 @@ codes are shown in a large monospace font; nothing in the lobby flow is on a tim
 | [1500 Archers on a 28.8](https://www.gamedeveloper.com/programming/1500-archers-on-a-28-8-network-programming-in-age-of-empires-and-beyond) | Commands "issued during turn 1000 would be scheduled for execution during turn 1002"; 200 ms turns; desyncs caught with checksums; turn length "weighted so it would quickly rise" with latency; RNG call-count bugs | s.3, s.8 lockstep |
 | [GGPO](https://www.ggpo.net/) | Rollback "predict[s] what it expects the remote players to do based on previously seen inputs"; needs "a fully deterministic peer-to-peer engine" with save/restore | s.3 why no rollback in MVP |
 | [Factorio wiki: Multiplayer](https://wiki.factorio.com/Multiplayer) | "All instances of the game run full simulations of the entire world"; "only player actions are transferred"; "Players automatically quit game after 3 desyncs"; "Server doesn't stop/slow down the game when some client is too slow"; mod checksums compared on join | s.8 frames, s.9 desync |
-| [Gaffer: deterministic lockstep](https://gafferongames.com/post/deterministic_lockstep/) | "Floating point determinism is a complicated subject"; may differ "between debug and release builds" | s.14 Lowkey notes |
+| [Gaffer: deterministic lockstep](https://gafferongames.com/post/deterministic_lockstep/) | "Floating point determinism is a complicated subject"; may differ "between debug and release builds" | s.3 lockstep determinism |
 | [Crockford Base32](https://www.crockford.com/base32.html) | "10 digits and 22 letters", excluding "I L O U"; decoding maps i/l to 1 and o to 0 | s.6 codes |
 | [Stop Killing Games](https://www.stopkillinggames.com/), [Wikipedia](https://en.wikipedia.org/wiki/Stop_Killing_Games) | "If you purchase a good, it shouldn't self-destruct"; acceptable outcomes: "an offline mode or the ability to host private servers"; games left "in a reasonably functional state after discontinuation" | s.2 goals, s.13 |
 | [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) | Pure C# WebRTC exists, under a BSD-3 licence with an added use restriction. Reason the .NET client uses Godot's engine classes instead (s.4) | s.4 |
@@ -77,7 +77,7 @@ mentioned as colour, never as a rule.
 | Voice chat (Opus over its own data channel: push-to-talk, voice activity, mute, per-player volume) and text chat (lobby and in-game) as first-class channels, never seen by the server | Voice mixing servers (SFU/MCU), recording, moderation services |
 | Agent-friendly docs: `AGENTS.md`, `llms.txt`, one recipe per engine, copy-paste examples, so an AI coding agent integrates a game in one session | A hosted docs site with search |
 | Stop Killing Games by construction: default server is a setting, server + relay are open source, one binary or `docker compose up`, games run offline | Matchmaking by skill, ranked, anti-cheat |
-| No vendor dependency: Steam / Epic / Discord are optional adapters that plug into the same lobby API | Engine scene-graph replication (Godot's `MultiplayerSynchronizer` and friends stay the game's business). Engine-agnostic state replication over `raw` exists since 2026-10-24 (s.19) |
+| No vendor dependency: Steam / Epic / Discord are optional adapters that plug into the same lobby API | Engine scene-graph replication (Godot's `MultiplayerSynchronizer` and friends stay the game's business). Engine-agnostic state replication over `raw` exists since 2026-10-24 (s.18) |
 | Small: a game integrates in one afternoon; the server runs on a Raspberry Pi | Persistence of lobbies across server restarts |
 
 ---
@@ -109,15 +109,15 @@ mentioned as colour, never as a rule.
 **Topology: star through the host.** Each joiner holds one WebRTC connection to the host; peer-to-peer messages route
 through the host (one `route` byte, s.8). Reasons: one ICE negotiation per joiner (a 4-player lobby is 3, a mesh is 6);
 the host is already the authority for frame ordering; browser hosts stay cheap. Godot's `WebRTCMultiplayerPeer` offers the
-same server/client shape (id 1 = server). Mesh is a later option for games that want it (s.16).
+same server/client shape (id 1 = server). Mesh is a later option for games that want it (s.15).
 
 **Sync modes** (one per lobby, set by the host's config):
 
 | Mode | Who orders | What the library does | Fits |
 |---|---|---|---|
-| `lockstep` | Host assigns every command to a tick and broadcasts a frame per tick | Frame scheduling, catch-up, state-hash comparison, snapshot-based late join, host migration with no state transfer (every peer has the state) | Deterministic sims (Lowkey: 20 TPS, every action a Command) |
+| `lockstep` | Host assigns every command to a tick and broadcasts a frame per tick | Frame scheduling, catch-up, state-hash comparison, snapshot-based late join, host migration with no state transfer (every peer has the state) | Deterministic sims (e.g. a 20 TPS sim where every action is a command) |
 | `raw` | The game | Reliable/fast send, broadcast, routing, events, lobby | Games with their own netcode (host-authoritative arcade games, turn-based) |
-| `raw` + `OneLobby.Replication` | The host (authoritative sim) | Everything `raw` does, plus tick clock, delta snapshots, interpolation, input stream, events, prediction and lag-compensation helpers (s.19) | Real-time host-authoritative games with non-deterministic physics (Eons Later) |
+| `raw` + `OneLobby.Replication` | The host (authoritative sim) | Everything `raw` does, plus tick clock, delta snapshots, interpolation, input stream, events, prediction and lag-compensation helpers (s.18) | Real-time host-authoritative games with non-deterministic physics (e.g. a co-op shooter with AI and physics) |
 
 Rollback is out (GGPO: needs save/restore each frame and a fully deterministic engine; a management sim at 20 TPS gains
 nothing from it). Rune shows the server-decides model works for small web games; `raw` mode covers it.
@@ -171,10 +171,10 @@ invariant-globalization-only; the engine forum shows no shipped release through 
 
 | Consequence | Decision |
 |---|---|
-| Lowkey cannot run in a browser today | Lowkey's first multiplayer is desktop ⇄ desktop over WebRTC through `onelobby-server` + coturn. Browser cross-play for Lowkey waits on Godot; nothing in this design changes when it arrives (the browser supplies the WebRTC classes Godot already uses) |
-| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.15, stream E's `spec/demo-game.md`) |
+| A Godot C# game cannot run in a browser today | The first target game's multiplayer is desktop ⇄ desktop over WebRTC through `onelobby-server` + coturn. Browser cross-play for Godot C# games waits on Godot; nothing in this design changes when it arrives (the browser supplies the WebRTC classes Godot already uses) |
+| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.14, stream E's `spec/demo-game.md`) |
 | Godot web exports need COOP/COEP headers for threads | `deploy/` ships a Caddy snippet that sets them for any game page it serves |
-| Lowkey's sim uses `InvariantGlobalization` already | Matches the prototype's invariant-only constraint; keep it |
+| A game sim built with `InvariantGlobalization` | Matches the prototype's invariant-only constraint; keep it |
 
 ---
 
@@ -204,8 +204,8 @@ message has `t` (type). Unknown types and unknown fields are ignored (additive e
 to `lk2` and the server speaks both for one release.
 
 **Version gate.** `hello` carries `gameId` and `netVersion`. Lobbies are partitioned by both (Photon: same AppId and
-AppVersion in all clients). `netVersion` is the game's *compatibility* version, set by the game (Lowkey: its sim/save
-version, e.g. `"3"`), independent of build numbers, so a cosmetic patch keeps lobbies compatible. A join with another
+AppVersion in all clients). `netVersion` is the game's *compatibility* version, set by the game (e.g. its sim/save
+version, `"3"`), independent of build numbers, so a cosmetic patch keeps lobbies compatible. A join with another
 `netVersion` fails with `version_mismatch` and the host's value, so the UI can say "host is on 4, you are on 3".
 
 Client → server:
@@ -292,7 +292,7 @@ to the host, the source `peerId` when received from it: the host rewrites it whe
 | Frame cadence | Host emits `frame(T)` every `1000/tickRate` ms on its own clock; it never waits for a slow peer | Factorio: the server "doesn't stop/slow down the game when some client is too slow" |
 | Command placement | A `cmd` goes into the next frame the host has not yet emitted. Nothing is dropped, only delayed | 1500 Archers: inputs scheduled for a later turn (N+2); here the host picks N from arrival |
 | Effective input delay | host: 1 tick; joiner: RTT + ≤ 1 tick (≈ 2-4 ticks at 20 TPS on a 60 ms RTT) | 200 ms turns were playable for an RTS (1500 Archers) |
-| Local feel | The game may predict its own cosmetic effects (Lowkey already moves the avatar locally and reports `Moved`); state changes wait for the frame | Factorio latency hiding |
+| Local feel | The game may predict its own cosmetic effects (e.g. it moves the avatar locally and reports a `Moved` command); state changes wait for the frame | Factorio latency hiding |
 | Peer behind | `TryNextFrame` returns frames as fast as the game asks; a peer > 2 frames behind runs ticks without rendering until caught up (cap 10× real time) | Factorio catch-up |
 | Peer far behind | > `tickRate × 3` frames behind, or 3 s of no frames from the host (host-side: no `hash` from a peer for 10 s): `snapshot_req` | |
 | Hash check | `hash(tick)` every `hashEvery` (default `tickRate`, i.e. once a second). Host compares to its own hash for that tick | 1500 Archers checksums; Factorio desync detection |
@@ -300,8 +300,8 @@ to the host, the source `peerId` when received from it: the host rewrites it whe
 | Late join | Host sends `snapshot(tick S)` and buffers frames ≥ S for the joiner; joiner restores, then catches up | Factorio map download + catch-up |
 | Snapshot size | Chunked, optional deflate; a 5 MB snapshot on a 10 Mbit/s link joins in ~5 s | |
 
-The game owns command encoding: the library carries bytes. Recommended: the game's existing serializer (Lowkey: JSON with
-the `$cmd` discriminator, later MessagePack if size matters).
+The game owns command encoding: the library carries bytes. Recommended: the game's existing serializer (e.g. JSON with
+a type discriminator, later MessagePack if size matters).
 
 ---
 
@@ -386,7 +386,7 @@ public enum Visibility { Public, Unlisted, Private }
 public enum LobbyPhase { Lobby, InGame }
 
 public sealed record OneLobbyConfig(
-    string GameId,                    // "com.lowkeyindustries.lowkey"
+    string GameId,                    // "com.example.mygame"
     string NetVersion,                // "3": compatibility version (s.7)
     Uri LobbyServer,                  // from game data; default wss://lobby.onelobby.example
     SyncMode Mode = SyncMode.Lockstep,
@@ -563,7 +563,7 @@ conformance harness read alike.
 | Server abuse | Per IP: 10 `create`/min, 60 `join`/min, 20 `signal`/s per peer, 8 open lobbies; per socket 4 KiB max signaling message, 30 s idle timeout; global `maxLobbies`/`maxPeers` from config → `server_full` |
 | Relay freeloading | TURN credentials are HMAC-signed with 1 h TTL (draft-uberti); coturn `total-quota` and `user-quota`; bandwidth cap per allocation (`max-bps`) |
 | Code guessing | 1.07e9 codes, 60 joins/min/IP, `unlisted`/`private` never listed; `private` needs host approval |
-| Hostile peers | The host validates everything a game cares about; the library validates framing only. The sim's own command validation is the anti-cheat for lockstep (Lowkey: `Command.Apply` returns a rejection). The library never executes client data |
+| Hostile peers | The host validates everything a game cares about; the library validates framing only. The sim's own command validation is the anti-cheat for lockstep (e.g. the command's apply step returns a rejection). The library never executes client data |
 | Impersonation | `peerId` is assigned by `onelobby-server` and stamped by the host on relay; a client cannot pick its id or forge `route` |
 | Eavesdropping | WebRTC is DTLS-encrypted by spec; signaling is `wss://`; the shipped compose has Caddy with automatic TLS |
 | Unwanted games on a public instance | Optional `allowedGameIds` list + per-`gameId` quotas in `onelobby-server` config (taste call 2 decides the default for Parker's instance) |
@@ -582,44 +582,19 @@ conformance harness read alike.
 | Relay | Stock `coturn/coturn` image + the shipped `turnserver.conf` (REST auth, narrowed port range, quotas) |
 | TLS | Caddy with automatic certificates in front of both (`compose.yaml`); COOP/COEP snippet for serving a Godot web build |
 | One command | `git clone … && cp .env.example .env && docker compose up -d` on a 1 vCPU VM or a Raspberry Pi 4 |
-| In the game | `lobby_server` is a setting shown under Multiplayer → Advanced with the default pre-filled; Lowkey also takes `--lobby-server=`. Games ship fully playable offline; multiplayer is the only part that touches the network |
+| In the game | `lobby_server` is a setting shown under Multiplayer → Advanced with the default pre-filled; a game can also take a `--lobby-server=` flag. Games ship fully playable offline; multiplayer is the only part that touches the network |
 | Default instance | Parker hosts `wss://lobby.onelobby.example` (name TBD) with the same images; the domain is the only thing a self-hoster changes |
 | Docs | `deploy/RUN_YOUR_OWN.md`: five steps, a port table (8080, 3478 udp/tcp, 443, relay range), a smoke test |
 | Agent docs | Root `AGENTS.md` (what the repo is, the API surface in one screen, the rules) and `llms.txt` (links to every recipe and the API reference in plain text); `docs/recipes/{godot-csharp,js-web,dotnet-generic,raw-mode,voice-and-chat,self-host}.md`, each a copy-paste integration under 150 lines with a "done when" check. Plain files, nothing in the protocol |
 | Release | Every tag publishes `onelobby-server` binaries + images; the game's "About → Multiplayer" screen links this repo. Satisfies "an offline mode or the ability to host private servers" (SKG) |
 
 Why C# for `onelobby-server` (taste call 1, decided 2026-10-23 by the desk under Parker's go-ahead): .NET 10 is already on
-Parker's machine and Go is not; one language across server, `OneLobby.Core` and Lowkey; ASP.NET Core WebSockets +
+the dev machine and Go is not; one language across server, `OneLobby.Core` and the first target game; ASP.NET Core WebSockets +
 single-file/AOT publish still give one file to run, and the Docker image is the self-host default.
 
 ---
 
-## 14. Lowkey Industries integration notes
-
-What exists today (read 2026-10-23): `Simulation.Enqueue(Command, CommandSource)` queues; `Tick()` applies the pending
-batch in order then runs the fixed 20 TPS step; `Save()`/`Load()` round-trip `WorldState` as JSON; `StateHash()` is
-FNV-1a over `Save()`; `Command` is `[JsonPolymorphic("$cmd")]`; `Main.Send(Command)` is the one place UI input enters;
-the Godot loop accumulates `delta × TicksPerSecond` and calls `Sim.Tick()` per whole tick.
-
-| Change | Where | Why |
-|---|---|---|
-| `Main.Send` → `lobby.Lockstep.Submit(Codec.Encode(c))` when in a lobby; the tick loop becomes the s.11.1 loop (`TryNextFrame` drives `Sim.Tick()`), so the local player's command also arrives through a frame | `game/Scripts/Main.cs` | Identical order on every peer |
-| `Codec`: `System.Text.Json` with the existing `$cmd` polymorphism, UTF-8 bytes; add `PeerId` to the frame-applied command's `CommandSource` context | `game/Scripts/Net/` (new) | Zero new serialization; commands are plain data by design |
-| Hash cost: `StateHash()` serializes the whole world; measure at a day-30 save. If > 2 ms, add an incremental FNV over the ordered collections, or hash every 5 s | `src/LowkeyIndustries.Sim` | 20 TPS budget; `BenchmarkTests` already measure sim cost |
-| Per-peer players: `WorldState.Player` is one `PlayerState` (cash, location, avatar tile). Co-op needs `Players: List<PlayerState>` keyed by peer, shared business state, `Moved{Peer}` | `src/.../State/WorldState.cs`, `Commands.cs`, every `sim.State.Player` call site | The sim has no notion of "who" yet; this is the real integration work (taste call 3 picks the shape) |
-| Determinism audit: the sim already keeps RNG in state and uses ordered collections; add a two-process replay test: same seed, same command log, `StateHash` equal every 20 ticks (desktop ⇄ desktop first) | `tests/` | Gaffer: floating point differs by build; the sim must be checked across machines, Release vs Debug |
-| `No fast-forward` rule and `FastForwardUntil`: in a lobby the host's frame clock is the only clock; a sleep is just more frames at 10× | design | Lockstep makes it the natural rule |
-| Save/load in co-op: the host's `Save()` is the snapshot; a joiner's `Load()` is `Restore`. Scenario/content mismatch (`PeekScenario`) maps to `netVersion` = `SaveVersion` + scenario id, e.g. `"3-unplug"` | `Simulation.cs` | Reuses what exists |
-| Menu: Multiplayer → Host lobby / Join lobby / Browse; join code field with the Crockford decode; settings → `lobby_server` | `game/` UI | Section 6 |
-| Voice and chat: push-to-talk key in the input map, a mic meter in the lobby, a chat line in the HUD (code-only UI); voice output on its own audio bus so music ducks | `game/` UI | s.9a, s.9b |
-| Web: none until Godot ships C# web export (s.5) | | |
-
-A `netVersion` bump every time `SaveVersion` or the command set changes keeps a patched client from meeting an unpatched
-host in a lobby (Photon AppVersion practice).
-
----
-
-## 15. Work split
+## 14. Work split
 
 Seven streams for Sonnet agents, in parallel, against the frozen protocol (s.7-s.9b). No two streams edit the same files;
 root files `README.md`, `LICENSE` (MIT), `.github/` belong to the desk; `AGENTS.md` and `llms.txt` belong to stream G.
@@ -630,19 +605,19 @@ chat are protocol (E), JS implementation (C) and .NET implementation (D); they a
 |---|---|---|---|---|---|
 | A | Signaling / lobby server | `server/` (.NET 10 ASP.NET Core minimal app `OneLobby.Server` + `OneLobby.Server.Tests`) | `spec/signaling.schema.json`, `spec/codes.json`, `spec/turn-rest.md` | A `onelobby-server` binary + `ghcr` image; `/healthz`; TURN REST creds | `dotnet test server/` green; `conformance/server` suite (stream E) passes 100%; two `wscat` sessions can create/list/join and exchange a `signal`; 1,000 lobbies / 5,000 sockets on one core in the load script |
 | B | Relay + self-host packaging | `deploy/` (`compose.yaml`, `Caddyfile`, `turnserver.conf`, `.env.example`, `RUN_YOUR_OWN.md`, `scripts/smoke.sh`, systemd unit) | Stream A's image name and flags (from DESIGN s.13) | A working `docker compose up` stack | `docker compose config` validates; `scripts/smoke.sh` written for a clean Ubuntu VM (`/healthz` 200 over TLS, `turnutils_uclient` allocation with REST creds minted by `onelobby-server`, TCP 443 TURN with UDP blocked) and run locally when Docker is up; a `scripts/turn-creds-check` proves the server's HMAC creds match coturn's `use-auth-secret` algorithm |
-| C | JS client + browser demo | `clients/js/` (`packages/client`, `demo/`) | `spec/*`, `spec/demo-game.md` | `onelobby` ESM + `.d.ts` including `voice` (WebCodecs/WASM Opus, AudioWorklet) and `chat`; `demo/` = gridpaint (s.15.1) with a chat line and push-to-talk | `vitest` with the in-memory transport covers the lockstep scheduler, chunking, Crockford decode, migration rule, chat limits, voice packetization; two tabs on `localhost` host/join via a local `onelobby-server` and play gridpaint 60 s with equal hashes; a third tab late-joins via snapshot and receives `chat_history`; closing the host tab migrates within 5 s; a tone played into tab A's mic input is heard in tab B |
+| C | JS client + browser demo | `clients/js/` (`packages/client`, `demo/`) | `spec/*`, `spec/demo-game.md` | `onelobby` ESM + `.d.ts` including `voice` (WebCodecs/WASM Opus, AudioWorklet) and `chat`; `demo/` = gridpaint (s.14.1) with a chat line and push-to-talk | `vitest` with the in-memory transport covers the lockstep scheduler, chunking, Crockford decode, migration rule, chat limits, voice packetization; two tabs on `localhost` host/join via a local `onelobby-server` and play gridpaint 60 s with equal hashes; a third tab late-joins via snapshot and receives `chat_history`; closing the host tab migrates within 5 s; a tone played into tab A's mic input is heard in tab B |
 | D | .NET core + Godot client + demo | `clients/dotnet/` (`OneLobby.Core`, `OneLobby.Core.Tests`, `OneLobby.Godot`, `demo-godot/` with webrtc-native addon) | `spec/*`, `spec/demo-game.md` | NuGet-shaped `OneLobby.Core` (incl. `TextChat`, `VoiceChannel`, `IVoiceCodec`), `OneLobby.Godot` (transport, Godot audio capture/playback, Opus codec with a verified-licence managed port) + demo scene | `dotnet test` green (same cases as C against the in-memory transport); two headless Godot instances host/join through a local `onelobby-server` and play gridpaint 60 s with equal hashes; **cross-play**: the Godot demo hosts, stream C's browser demo joins, hashes equal for 60 s, a chat line crosses both ways, a voice test tone from Godot decodes in the browser |
 | E | Protocol spec + conformance harness | `spec/` (JSON schemas, binary test vectors incl. `voice`/`chat` frames, `codes.json`, `demo-game.md`), `conformance/` (Node) | DESIGN.md s.6-s.9b only | The frozen spec as files; `conformance/server` (drives any `onelobby-server` over WebSocket: every message, every error code, rate limits); `conformance/peer` (a scripted fake host/joiner that drives any client lib: frames, desync, snapshot, migration, chat limits, voice forwarding) | Vectors round-trip in both C and D's codecs; `conformance/server` red against an empty server, green against stream A; `conformance/peer` runs against C and D |
-| F | Lowkey integration notes + spike | `integrations/lowkey/` (notes, `hash-cost.md`, `codec/` sample + test) | `OneLobby.Core` API (s.11.1), Lowkey repo read-only | Exact change list for the Lowkey repo (s.14 expanded to file + line), measured `StateHash()` cost at day 1/15/30 saves, a `Codec` round-trip test over every Lowkey `Command` type | `dotnet test` in `integrations/lowkey/codec` green against a Lowkey build; notes reviewed by the desk (the desk, not stream F, adds any pointer in the Lowkey repo) |
+| F | Game integration notes (kept with the game) | Nothing in this repo: notes, measurements and codec tests live in the game's own repo | `OneLobby.Core` API (s.11.1) | A per-game change list, a measured state-hash cost, a command codec round-trip test | Notes reviewed by the desk |
 | G | Agent-friendly docs | `AGENTS.md`, `llms.txt`, `examples/tictactoe/` (single-player JS skeleton, no networking), `docs/` (`recipes/`, `api/` generated from C's `.d.ts` and D's XML docs by `docs/build.mjs`) | The public API of C and D (s.11), `deploy/RUN_YOUR_OWN.md` | Plain-file docs an agent reads first: one-screen API surface, the rules (ids not names, bytes not objects, host is truth), six recipes ≤ 150 lines each with a "done when", copy-paste snippets that compile | `docs/build.mjs` regenerates `docs/api/` with no diff on a clean tree; the **agent test**: a fresh Sonnet agent given only `AGENTS.md` and the sentence "add OneLobby raw-mode multiplayer with chat to `examples/tictactoe`" ships a passing `conformance/peer` run in one session without opening `clients/`; every snippet in `docs/recipes/` is extracted and compiled by `docs/check-snippets.mjs` in CI |
 
-### 15.1 Shared demo game: gridpaint (`spec/demo-game.md`, owned by E)
+### 14.1 Shared demo game: gridpaint (`spec/demo-game.md`, owned by E)
 
 A 16×16 grid; each peer owns a colour; command = `paint x y` (3 bytes); tick 20 TPS; every tick, each painted cell
 spreads to one neighbour chosen by an xorshift32 RNG seeded from the lobby code; hash = FNV-1a 64 over the grid bytes.
 Small enough to port in an hour in JS and C#, random enough to catch ordering bugs, and the only game the harness needs.
 
-### 15.2 Order
+### 14.2 Order
 
 A, B, C, D, E start together against this document; E's files land within the first day so C and D swap their hand-typed
 vectors for the real ones; F and G start when D has `OneLobby.Core` compiling and C has its `.d.ts` (G drafts the recipes
@@ -650,7 +625,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 
 ---
 
-## 16. MVP scope vs later
+## 15. MVP scope vs later
 
 | MVP (this build) | Later |
 |---|---|
@@ -663,12 +638,12 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | Text chat with history, local and host mute | Persistent block lists through platform adapters |
 | Voice: `voice` channel, Opus 20 ms, PTT + VAD, mute, per-peer volume, JS and Godot codecs | Mesh voice for lobbies > 8 speakers, noise suppression, spatial audio hooks |
 | `AGENTS.md`, `llms.txt`, six recipes, generated API reference, snippet CI | Hosted docs site |
-| Cross-play demo (browser ⇄ Godot desktop) with chat and a voice tone | Lowkey browser play (waits on Godot C# web export) |
-| Replicated state on raw mode (`OneLobby.Replication`, s.19): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers | Replication JS port, priority/interest management, host migration for replicated sessions |
+| Cross-play demo (browser ⇄ Godot desktop) with chat and a voice tone | Godot C# browser play (waits on Godot C# web export) |
+| Replicated state on raw mode (`OneLobby.Replication`, s.18): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers | Replication JS port, priority/interest management, host migration for replicated sessions |
 
 ---
 
-## 17. Open questions settled by practice
+## 16. Open questions settled by practice
 
 | Question | Answer | Basis |
 |---|---|---|
@@ -692,7 +667,7 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 
 ---
 
-## 18. Taste calls for Parker (3)
+## 17. Taste calls for Parker (2)
 
 **1. Write the lobby server in Go?**
 Today: nothing exists. Yes: `onelobby-server` is a Go static binary (one file, cross-compiles to a Raspberry Pi, matches the coturn/Nakama
@@ -702,42 +677,36 @@ across the repo; ~70 MB binary, slower start, ARM builds still fine).
 
 **2. Should your public lobby server accept any game?**
 Today: the design supports both. Yes: any developer can point their game at `lobby.onelobby.example` with no sign-up; per-game quotas
-(say 200 lobbies / 2,000 peers each) cap the damage, and the relay bill is yours. No: your instance serves an allowlist (Lowkey +
+(say 200 lobbies / 2,000 peers each) cap the damage, and the relay bill is yours. No: your instance serves an allowlist (only
 games you add by hand); others self-host or ask.
 `Default:` yes, open with per-game quotas, and the relay set to `relayOnly: false` so most traffic never touches your coturn.
 
-**3. Is Lowkey multiplayer co-op on one business?**
-Today: the sim has one `PlayerState`. Yes: every player walks their own avatar around the same business (shared cash, machines, heat,
-quests), any player can issue any command; the sim grows a `Players` list and `Moved{Peer}`. No: rival businesses on one map
-(separate cash and heat, shared town and Turf), a much larger sim change and a different game.
-`Default:` yes, shared-business co-op, 2-4 players.
-
 ---
 
-## 19. Replicated state: `OneLobby.Replication` (host-authoritative, on raw mode)
+## 18. Replicated state: `OneLobby.Replication` (host-authoritative, on raw mode)
 
-Status: built 2026-10-24 (`clients/dotnet/OneLobby.Replication`, wire format `spec/replication.md`). Driving game: Eons
-Later (Unity 6, 1-4 player co-op horde shooter, host = listen server, 24-50 AI aliens alive, hitscan guns, doors,
+Status: built 2026-10-24 (`clients/dotnet/OneLobby.Replication`, wire format `spec/replication.md`). Driving use case: a
+real-time co-op game with non-deterministic physics (Unity 6, 1-4 players, host = listen server, 24-50 AI enemies alive, hitscan guns, doors,
 power-ups, downs/revive). Unity physics and NavMesh are not deterministic, so `lockstep` (s.8) is out; `raw` (s.3) gives
 bytes and no netcode. This layer is that netcode, written once and engine-agnostic: one more DLL next to
 `OneLobby.Core`, no engine types, so Unity, Godot C# and plain .NET share it; a JS port follows the spec later.
 
-### 19.1 Prior art
+### 18.1 Prior art
 
 | Source | Establishes | Backs |
 |---|---|---|
-| [Gaffer: snapshot interpolation](https://gafferongames.com/post/snapshot_interpolation/) | "Snapshots are time critical but unlike inputs in deterministic lockstep snapshots don't need to be reliable"; "the amount of delay that works best at 2-5% packet loss is 3X the packet send rate"; "If we send 30 snapshots per-second we can get the same amount of packet loss protection with a delay of 150ms"; "extrapolation doesn't work very well for rigid bodies" | 19.2 send rate, interpolation delay, no extrapolation |
-| [Gaffer: snapshot compression](https://gafferongames.com/post/snapshot_compression/) | Delta "relative to a baseline that is roughly RTT (round trip time) in the past"; "Each cube that isn't sent costs 1 bit (not changed)"; smallest-three "2 + 9 + 9 + 9 = 29 bits per-orientation (down from 128 bits)"; "18 bits for x, 18 bits for y and 14 bits for z"; "Our target bandwidth is 256 kilobits per-second" | 19.2 delta, quantization, budget |
-| [Gaffer: state synchronization](https://gafferongames.com/post/state_synchronization/) | Priority accumulator: "one value per-object, that is remembered from frame to frame"; "Like deterministic lockstep we send multiple redundant inputs"; "you need to implement a jitter buffer"; "The solution is to quantize the state on both sides" | 19.2 inputs, jitter buffer; 19.4 priority |
-| [Fabien Sanglard: Quake 3 network model](https://fabiensanglard.net/quake3/network.php) | "There is no trace of TCP/IP anywhere since the "Reliable transmission" aspect introduced intolerable latency"; "For each Client the server keeps the 32 last gamestate sent over the network in a cycling array"; delta against "the last valid acknowledged snapshot"; "Resend OLD information that were not received and NEW information in a single message" | 19.2 per-client acked baseline, spawn/despawn through deltas |
-| Valve: Source Multiplayer Networking and Lag Compensation (**excerpt-only**: the wiki answers 403 to fetches; quotes come from search excerpts of `developer.valvesoftware.com/wiki/Source_Multiplayer_Networking` and `/wiki/Lag_Compensation`) | "Source defaults to an interpolation period ('lerp') of 100-milliseconds (cl_interp 0.1); this way, even if one snapshot is lost, there are always two valid snapshots to interpolate between"; interpolation is artificial latency to keep to a minimum; the server keeps about one second of player history and rewinds by the shooter's latency and interpolation | 19.2 100 ms, lag compensation |
-| [Gambetta: prediction and reconciliation](https://www.gabrielgambetta.com/client-side-prediction-server-reconciliation.html), [lag compensation](https://www.gabrielgambetta.com/lag-compensation.html) | "the client adds a sequence number to each request"; the server reply "includes the sequence number of the last input it processed"; the client "applies all the input still not seen by the server"; the server "can reconstruct the world exactly as it looked like to any client at any point in time"; cost: a target "may still be shot up to a few milliseconds after they took cover" | 19.2 local-player prediction, rewind cap |
-| [Mirror: lag compensation](https://mirror-networking.gitbook.io/docs/manual/general/lag-compensation) | "Lag Compensation (aka Rollback) is needed for fast pace / first person shooter games"; a component that "records a history of Collider snapshots"; it "rewinds 'target's history by that time" | 19.2 `HistoryRing` as a library helper |
-| [Photon Fusion 2: NetworkObject](https://doc.photonengine.com/fusion/v2/manual/network-object) | "The Server assigns a `NetworkId` value to the `NetworkObject` component"; "Runner.Spawn() can only be called on the Server in Host Mode"; "The Input Authority indicates which Player's inputs should be returned for this Object" | 19.2 NetId, host-only spawn, owner |
-| [Unity NGO: NetworkTime and ticks](https://mp-docs.dl.it.unity3d.com/netcode/1.9.1/advanced-topics/networktime-ticks) | "`LocalTime` on a client is ahead of the server"; "`ServerTime` on clients is behind the server"; "If a server RPC is sent at `LocalTime` from a client it will roughly arrive at `ServerTime` on the server" | 19.2 two client clocks |
-| Overwatch Gameplay Architecture and Netcode, GDC 2017 (**excerpt-only**: GDC Vault redirects to a maintenance page; the session listing via search) | The talk covers how the networked simulation "leverages determinism to achieve responsiveness and precision" in a server-authoritative game with prediction | 19.4 client time dilation (later) |
+| [Gaffer: snapshot interpolation](https://gafferongames.com/post/snapshot_interpolation/) | "Snapshots are time critical but unlike inputs in deterministic lockstep snapshots don't need to be reliable"; "the amount of delay that works best at 2-5% packet loss is 3X the packet send rate"; "If we send 30 snapshots per-second we can get the same amount of packet loss protection with a delay of 150ms"; "extrapolation doesn't work very well for rigid bodies" | 18.2 send rate, interpolation delay, no extrapolation |
+| [Gaffer: snapshot compression](https://gafferongames.com/post/snapshot_compression/) | Delta "relative to a baseline that is roughly RTT (round trip time) in the past"; "Each cube that isn't sent costs 1 bit (not changed)"; smallest-three "2 + 9 + 9 + 9 = 29 bits per-orientation (down from 128 bits)"; "18 bits for x, 18 bits for y and 14 bits for z"; "Our target bandwidth is 256 kilobits per-second" | 18.2 delta, quantization, budget |
+| [Gaffer: state synchronization](https://gafferongames.com/post/state_synchronization/) | Priority accumulator: "one value per-object, that is remembered from frame to frame"; "Like deterministic lockstep we send multiple redundant inputs"; "you need to implement a jitter buffer"; "The solution is to quantize the state on both sides" | 18.2 inputs, jitter buffer; 18.4 priority |
+| [Fabien Sanglard: Quake 3 network model](https://fabiensanglard.net/quake3/network.php) | "There is no trace of TCP/IP anywhere since the "Reliable transmission" aspect introduced intolerable latency"; "For each Client the server keeps the 32 last gamestate sent over the network in a cycling array"; delta against "the last valid acknowledged snapshot"; "Resend OLD information that were not received and NEW information in a single message" | 18.2 per-client acked baseline, spawn/despawn through deltas |
+| Valve: Source Multiplayer Networking and Lag Compensation (**excerpt-only**: the wiki answers 403 to fetches; quotes come from search excerpts of `developer.valvesoftware.com/wiki/Source_Multiplayer_Networking` and `/wiki/Lag_Compensation`) | "Source defaults to an interpolation period ('lerp') of 100-milliseconds (cl_interp 0.1); this way, even if one snapshot is lost, there are always two valid snapshots to interpolate between"; interpolation is artificial latency to keep to a minimum; the server keeps about one second of player history and rewinds by the shooter's latency and interpolation | 18.2 100 ms, lag compensation |
+| [Gambetta: prediction and reconciliation](https://www.gabrielgambetta.com/client-side-prediction-server-reconciliation.html), [lag compensation](https://www.gabrielgambetta.com/lag-compensation.html) | "the client adds a sequence number to each request"; the server reply "includes the sequence number of the last input it processed"; the client "applies all the input still not seen by the server"; the server "can reconstruct the world exactly as it looked like to any client at any point in time"; cost: a target "may still be shot up to a few milliseconds after they took cover" | 18.2 local-player prediction, rewind cap |
+| [Mirror: lag compensation](https://mirror-networking.gitbook.io/docs/manual/general/lag-compensation) | "Lag Compensation (aka Rollback) is needed for fast pace / first person shooter games"; a component that "records a history of Collider snapshots"; it "rewinds 'target's history by that time" | 18.2 `HistoryRing` as a library helper |
+| [Photon Fusion 2: NetworkObject](https://doc.photonengine.com/fusion/v2/manual/network-object) | "The Server assigns a `NetworkId` value to the `NetworkObject` component"; "Runner.Spawn() can only be called on the Server in Host Mode"; "The Input Authority indicates which Player's inputs should be returned for this Object" | 18.2 NetId, host-only spawn, owner |
+| [Unity NGO: NetworkTime and ticks](https://mp-docs.dl.it.unity3d.com/netcode/1.9.1/advanced-topics/networktime-ticks) | "`LocalTime` on a client is ahead of the server"; "`ServerTime` on clients is behind the server"; "If a server RPC is sent at `LocalTime` from a client it will roughly arrive at `ServerTime` on the server" | 18.2 two client clocks |
+| Overwatch Gameplay Architecture and Netcode, GDC 2017 (**excerpt-only**: GDC Vault redirects to a maintenance page; the session listing via search) | The talk covers how the networked simulation "leverages determinism to achieve responsiveness and precision" in a server-authoritative game with prediction | 18.4 client time dilation (later) |
 
-### 19.2 Decisions
+### 18.2 Decisions
 
 | Question | Decision | Basis |
 |---|---|---|
@@ -767,7 +736,7 @@ bytes and no netcode. This layer is that netcode, written once and engine-agnost
 largest 655 (the join-time full snapshot); **93.2 kbit/s per client, 279.5 kbit/s host upstream, 12.5 kbit/s client
 upstream** (inputs x4 plus lobby pings).
 
-### 19.3 API (C#, `OneLobby.Replication`)
+### 18.3 API (C#, `OneLobby.Replication`)
 
 ```csharp
 var rep = new ReplicationSession(lobby, new ReplicationConfig(TickRate: 30));  // lobby in SyncMode.Raw
@@ -792,7 +761,7 @@ rep.EventReceived += (from, tick, payload) => { };
 Engine adapters (a Unity `MonoBehaviour`, a Godot `Node3D`) only copy transforms in (`Write`) and out (`TrySample`); see
 `docs/recipes/replication.md`.
 
-### 19.4 MVP vs later
+### 18.4 MVP vs later
 
 | MVP (built) | Later |
 |---|---|

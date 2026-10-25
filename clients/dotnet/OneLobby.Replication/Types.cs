@@ -45,7 +45,7 @@ namespace OneLobby.Replication
         public bool Repeated { get; }
     }
 
-    /// <summary>Tunables. Defaults are the DESIGN s.19 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).</summary>
+    /// <summary>Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).</summary>
     public sealed record ReplicationConfig(
         int TickRate = 30,
         int SnapshotEveryTicks = 1,

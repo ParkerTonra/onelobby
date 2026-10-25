@@ -523,7 +523,7 @@ public static class NetMath
 ## OneLobby.Replication/ReplicationSession.cs
 
 ```csharp
-/// Host-authoritative state replication over a raw-mode Lobby (DESIGN s.19, spec/replication.md). Host: Spawn entities, run one sim step per NetworkClock.TryAdvance, read each client's input with TryGetInput, then SendSnapshot. Each client gets a delta against the last snapshot it acknowledged, on the fast channel. Client: SubmitInput once per Clock tick, render remote entities with TrySample{T} at RenderTick (100 ms behind the host), and reconcile the local player with TryGetLatest{T} + LastProcessedInput. Call Pump once per frame instead of lobby.Pump(); events fire inside it.
+/// Host-authoritative state replication over a raw-mode Lobby (DESIGN s.18, spec/replication.md). Host: Spawn entities, run one sim step per NetworkClock.TryAdvance, read each client's input with TryGetInput, then SendSnapshot. Each client gets a delta against the last snapshot it acknowledged, on the fast channel. Client: SubmitInput once per Clock tick, render remote entities with TrySample{T} at RenderTick (100 ms behind the host), and reconcile the local player with TryGetLatest{T} + LastProcessedInput. Call Pump once per frame instead of lobby.Pump(); events fire inside it.
 public sealed class ReplicationSession : IDisposable
     public ReplicationSession(Lobby lobby, ReplicationConfig? config = null);
     public ReplicationConfig Config { get; }
@@ -541,7 +541,7 @@ public sealed class ReplicationSession : IDisposable
     public event Action<EntityInfo>? EntityDespawned;
     /// Raw-mode payloads that are not replication messages (first byte other than 0x52), for the game's own use.
     public event Action<int, ReadOnlyMemory<byte>, Channel>? OtherMessage;
-    /// Client: the host left. Host migration is not supported for replicated sessions (DESIGN s.19): end the match.
+    /// Client: the host left. Host migration is not supported for replicated sessions (DESIGN s.18): end the match.
     public event Action? HostLost;
     /// True for payloads this session owns (first byte 0x52). Keep your own raw messages off that first byte.
     public static bool IsReplicationPayload(ReadOnlySpan<byte> payload);
@@ -624,7 +624,7 @@ public readonly struct InputFrame
     public ReadOnlyMemory<byte> Bytes { get; }
     /// True when no new input had arrived for this tick and the previous one is handed out again.
     public bool Repeated { get; }
-/// Tunables. Defaults are the DESIGN s.19 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
+/// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
 public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200)
     public double TickMs;
 /// Counters for tests and debug overlays. Byte counts are replication payloads, before the 3-byte lobby header.
