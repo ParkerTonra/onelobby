@@ -86,7 +86,7 @@ namespace OneLobby.Replication
     {
         public const byte Magic = 0x52;
         public const byte Version = 1;
-        public const byte KindSnapshot = 1, KindInput = 2, KindEvent = 3;
+        public const byte KindSnapshot = 1, KindInput = 2, KindEvent = 3, KindStreamEvent = 4;
         public const int OpDelta = 0, OpFull = 1, OpDespawn = 2;
         public const int MaxStateBytes = 255;
 
@@ -277,6 +277,25 @@ namespace OneLobby.Replication
             var r = new ByteReader(p.Slice(3));
             var tick = r.Var32();
             return (tick, r.Rest().ToArray());
+        }
+
+        public static byte[] EncodeStreamEvent(uint tick, byte stream, uint seq, ReadOnlySpan<byte> payload, ByteWriter w)
+        {
+            w.Clear();
+            Header(w, KindStreamEvent);
+            w.Var(tick); w.U8(stream); w.Var(seq); w.Bytes(payload);
+            return w.ToArray();
+        }
+
+        public static (uint Tick, byte Stream, uint Seq, byte[] Payload) DecodeStreamEvent(ReadOnlySpan<byte> p)
+        {
+            var r = new ByteReader(p.Slice(3));
+            var tick = r.Var32();
+            var stream = r.U8();
+            if (stream == 0) throw new MalformedException("stream_0");
+            var seq = r.Var32();
+            if (seq == 0) throw new MalformedException("seq_0");
+            return (tick, stream, seq, r.Rest().ToArray());
         }
     }
 }

@@ -106,14 +106,22 @@ namespace OneLobby
                 if (!IsOpen || Other == null || Other.Failed) return;
                 Owner.Traffic.Count(channel, frame.Length);
                 if (channel != PeerChannel.Reliable && Net.DropUnreliable != null && Net.DropUnreliable()) return;
+                if (channel == PeerChannel.Reliable && Net.DropReliable != null && Net.DropReliable()) return;
                 var at = Net.NowMs + (long)Net.LatencyMs + (long)Math.Max(0, Net.ExtraDelayMs?.Invoke(channel) ?? 0);
                 if (channel == PeerChannel.Reliable)
                 {
-                    // ordered channel: jitter delays, never reorders
-                    if (at < _lastReliableAt) at = _lastReliableAt;
-                    _lastReliableAt = at;
+                    if (Net.ReorderReliable != null && Net.ReorderReliable())
+                        at += (long)Math.Max(50, Net.LatencyMs); // later frames overtake this one
+                    else
+                    {
+                        // ordered channel: jitter delays, never reorders
+                        if (at < _lastReliableAt) at = _lastReliableAt;
+                        _lastReliableAt = at;
+                    }
                 }
                 Other.Inbox.Add((at, channel, frame.ToArray()));
+                if (channel == PeerChannel.Reliable && Net.DuplicateReliable != null && Net.DuplicateReliable())
+                    Other.Inbox.Add((at + 1, channel, frame.ToArray()));
             }
             public bool TryReceive(out PeerChannel channel, out byte[] frame)
             {
@@ -181,6 +189,16 @@ namespace OneLobby
         public Func<bool>? DropUnreliable { get; set; }
         /// <summary>When set, extra one-way delay in ms per frame (jitter). Reliable frames stay in order.</summary>
         public Func<PeerChannel, double>? ExtraDelayMs { get; set; }
+
+        // Test hooks that break the reliable channel's contract (ordered, exactly once) on purpose, to exercise a game's or
+        // the replication layer's own dedupe and gap handling. Each is called per reliable frame; true applies it. Raw
+        // reliable frames only: a chunked message (over 15 KiB) or lobby control frame hit by one can fail to reassemble.
+        /// <summary>Test hook: return true to lose this reliable frame.</summary>
+        public Func<bool>? DropReliable { get; set; }
+        /// <summary>Test hook: return true to delay this reliable frame so later ones overtake it.</summary>
+        public Func<bool>? ReorderReliable { get; set; }
+        /// <summary>Test hook: return true to deliver this reliable frame twice.</summary>
+        public Func<bool>? DuplicateReliable { get; set; }
 
         /// <summary>Bytes and frames this transport has sent on its peer links (whole frames, lobby header included), counted before loss.</summary>
         public TrafficCounter Traffic(ITransport transport) => ((InMemoryTransport)transport).Traffic;

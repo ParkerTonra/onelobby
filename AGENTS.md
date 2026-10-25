@@ -39,6 +39,7 @@ NetId id = rep.Spawn(typeId, ownerPeerId, entity);         // host; entity : IRe
 while (rep.Clock.TryAdvance()) { rep.TryGetInput(peer, out InputFrame f); /* sim step */ rep.SendSnapshot(); }   // host
 while (rep.Clock.TryAdvance()) rep.SubmitInput(inputBytes);                                                   // client
 rep.EntitySpawned / EntityDespawned / EventReceived / HostLost; rep.SendEvent(bytes);
+rep.SendEvent(bytes, peer, Channel.Reliable, stream: 3); rep.EventDelivered += e => { /* e.Stream, e.Seq */ }; rep.EventGap += ...;
 rep.TrySample<TState>(id, out var s);                      // client: TState : IReplicatedState<TState>, at rep.RenderTick
 rep.RttMs; rep.PeerRttMs(peer); rep.SnapshotAgeMs; rep.InputStatsFor(peer); rep.SendFullSnapshot(peer);   // overlay, resync
 new Reconciler<TInput, TState>(start, step); new HistoryRing<T>(ticks, lerp); rep.RewindTick(f);   // prediction, hitscan

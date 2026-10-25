@@ -87,6 +87,7 @@ public interface IPeerLink : IDisposable
     void StartOffer();
     void ApplySignal(PeerSignal signal);
     bool TryTakeSignal(out PeerSignal signal);
+    /// Queue one frame. Contract every transport keeps: PeerChannel.Reliable frames arrive complete, in send order, exactly once, for as long as the link is open (WebRTC: an ordered reliable SCTP channel). Fast and Voice frames may be lost or reordered, never corrupted or duplicated.
     void Send(PeerChannel channel, ReadOnlySpan<byte> frame);
     bool TryReceive(out PeerChannel channel, out byte[] frame);
 /// What a transport needs to build one peer link.
@@ -119,6 +120,12 @@ public sealed class InMemoryNetwork
     public Func<bool>? DropUnreliable { get; set; }
     /// When set, extra one-way delay in ms per frame (jitter). Reliable frames stay in order.
     public Func<PeerChannel, double>? ExtraDelayMs { get; set; }
+    /// Test hook: return true to lose this reliable frame.
+    public Func<bool>? DropReliable { get; set; }
+    /// Test hook: return true to delay this reliable frame so later ones overtake it.
+    public Func<bool>? ReorderReliable { get; set; }
+    /// Test hook: return true to deliver this reliable frame twice.
+    public Func<bool>? DuplicateReliable { get; set; }
     /// Bytes and frames this transport has sent on its peer links (whole frames, lobby header included), counted before loss.
     public TrafficCounter Traffic(ITransport transport);
     /// When set, called with (offerer, answerer) link options for each connection attempt; return false and that link never opens (ICE that cannot complete: a firewall or strict NAT). E.g. (a, b) =&gt; a.RelayOnly || b.RelayOnly models a network where only the TURN relay gets through.
@@ -549,6 +556,10 @@ public sealed class ReplicationSession : IDisposable
     public ReplicationStats Stats { get; }
     /// Client: a reliable or fast event from the host; host: from a client. (from peerId, tick, payload).
     public event Action<int, uint, ReadOnlyMemory<byte>>? EventReceived;
+    /// Every event, like EventReceived, with its stream and sequence number. Subscribe to one of the two.
+    public event Action<ReplicatedEvent>? EventDelivered;
+    /// A numbered stream skipped sequence numbers: (from, stream, first missing, next delivered), raised after the hole stayed open for StreamGapTimeoutMs. Reliable links never lose events, so this means the transport broke its contract; resync that stream's state (host: SendFullSnapshot plus your own facts).
+    public event Action<int, byte, uint, uint>? EventGap;
     /// Client: an entity became visible at RenderTick (create the game object here).
     public event Action<EntityInfo>? EntitySpawned;
     /// Client: an entity is gone as of RenderTick (destroy the game object here).
@@ -588,8 +599,10 @@ public sealed class ReplicationSession : IDisposable
     public double RewindTick(in InputFrame input);
     /// Host: capture every entity's state at NetworkClock.Tick and send each client its delta. Call once at the end of each sim tick; ticks not on ReplicationConfig.SnapshotEveryTicks are skipped.
     public void SendSnapshot();
-    /// Host: event to one client (toPeer) or all (0). Client: event to the host (toPeer ignored). Reliable by default (ordered, never lost); Fast for cosmetic one-offs. Stamped with the current tick.
-    public void SendEvent(ReadOnlySpan<byte> payload, int toPeer = 0, Channel channel = Channel.Reliable);
+    /// Host: event to one client (toPeer) or all (0). Client: event to the host (toPeer ignored). Reliable by default (ordered, exactly once per link); Fast for cosmetic one-offs. Stamped with the current tick. stream 1-255 (reliable only) numbers the event per (stream, recipient) so the receiver sees ReplicatedEvent.Seq, drops duplicates and reports a skipped number with EventGap. Stream 0 (the default) is unnumbered.
+    public void SendEvent(ReadOnlySpan<byte> payload, int toPeer = 0, Channel channel = Channel.Reliable, byte stream = 0);
+    /// Reliable event bytes sent to one peer (payloads, no lobby header). Client: to the host.
+    public long ReliableEventBytesSentTo(int peerId);
     /// Client: estimated current host tick (fractional).
     public double ServerTick;
     /// Client: the host tick being rendered: ServerTick minus the interpolation delay, smoothed.
@@ -613,6 +626,8 @@ public sealed class ReplicationSession : IDisposable
     public bool TryGetLatest<T>(NetId id, out T state, out uint tick) where T : IReplicatedState<T>, new();
     /// Client: info for an entity in the newest snapshot (owner, type), even before it is visible.
     public EntityInfo? Find(NetId id);
+    /// How long a numbered stream waits for a missing sequence number before EventGap skips it.
+    public const int StreamGapTimeoutMs;
     public void Dispose();
 ```
 
@@ -645,8 +660,10 @@ public readonly struct InputFrame
     /// True when no new input had arrived for this tick and the previous one is handed out again.
     public bool Repeated { get; }
 /// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
-public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200)
+public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0)
     public double TickMs;
+/// One received event (ReplicationSession.EventDelivered).
+public readonly record struct ReplicatedEvent(int From, uint Tick, byte Stream, uint Seq, ReadOnlyMemory<byte> Payload, Channel Channel);
 /// Host: one client's input counters (ReplicationSession.InputStatsFor).
 public readonly record struct ClientInputStats(long Repeated, long Skipped, long Lost, int BufferDepth);
 /// Counters for tests and debug overlays. Byte counts are replication payloads, before the 3-byte lobby header.
@@ -668,5 +685,11 @@ public sealed class ReplicationStats
     public long InputsLost { get; internal set; }
     public long EventsSent { get; internal set; }
     public long EventsReceived { get; internal set; }
+    /// Numbered stream events dropped because that sequence number was already delivered.
+    public long EventsDuplicate { get; internal set; }
+    /// Holes in a numbered stream given up on (see ReplicationSession.EventGap).
+    public long EventsGap { get; internal set; }
+    /// Numbered stream events that arrived ahead of a missing one and waited for it.
+    public long EventsOutOfOrder { get; internal set; }
     public long Malformed { get; internal set; }
 ```

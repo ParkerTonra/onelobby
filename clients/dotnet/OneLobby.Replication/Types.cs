@@ -54,10 +54,23 @@ namespace OneLobby.Replication
         int HistoryTicks = 64,
         int MaxInputBuffer = 4,
         double MaxRewindMs = 250,
-        int SnapshotWarnBytes = 1200)
+        int SnapshotWarnBytes = 1200,
+        int HoldEventsForTicks = 0)
     {
+        // HoldEventsForTicks (client, 0 = off): an event whose tick is newer than the newest snapshot waits (arrival order
+        // kept) until that snapshot is in, or for at most this many ticks, so the event and the state it refers to line up.
+
         public double TickMs => 1000.0 / TickRate;
     }
+
+    /// <summary>One received event (<see cref="ReplicationSession.EventDelivered"/>).</summary>
+    /// <param name="From">Sender's peer id.</param>
+    /// <param name="Tick">Sender's tick when sent (host: <c>Clock.Tick</c>; client: its <c>floor(ServerTick)</c>).</param>
+    /// <param name="Stream">1-255 for a numbered stream, 0 for an unnumbered event.</param>
+    /// <param name="Seq">Sequence number within (Stream, sender to me), from 1; 0 when unnumbered.</param>
+    /// <param name="Payload">The game's event bytes.</param>
+    /// <param name="Channel">The channel it came on.</param>
+    public readonly record struct ReplicatedEvent(int From, uint Tick, byte Stream, uint Seq, ReadOnlyMemory<byte> Payload, Channel Channel);
 
     /// <summary>Host: one client's input counters (<see cref="ReplicationSession.InputStatsFor"/>).</summary>
     /// <param name="Repeated">Ticks this client had no new input and the previous one was handed out again.</param>
@@ -86,6 +99,12 @@ namespace OneLobby.Replication
         public long InputsLost { get; internal set; }
         public long EventsSent { get; internal set; }
         public long EventsReceived { get; internal set; }
+        /// <summary>Numbered stream events dropped because that sequence number was already delivered.</summary>
+        public long EventsDuplicate { get; internal set; }
+        /// <summary>Holes in a numbered stream given up on (see <see cref="ReplicationSession.EventGap"/>).</summary>
+        public long EventsGap { get; internal set; }
+        /// <summary>Numbered stream events that arrived ahead of a missing one and waited for it.</summary>
+        public long EventsOutOfOrder { get; internal set; }
         public long Malformed { get; internal set; }
     }
 }

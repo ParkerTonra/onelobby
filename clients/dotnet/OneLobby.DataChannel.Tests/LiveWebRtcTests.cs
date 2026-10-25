@@ -106,13 +106,19 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
             return atHost.Any(m => m.Ch == Channel.Fast);
         }, Pump, "fast at host");
 
-        // a small broadcast and a 15 KiB one (many SCTP fragments, still one OneLobby frame) arrive intact.
-        // (Payloads above 16 KiB are not used here: OneLobby.Core currently drops reassembled oversized raw frames,
-        // see Lobby.cs "case Wire.Chunk" -> Wire.Validate too_long; a Core issue, not a transport one.)
+        // a small broadcast and a 15 KiB one (many SCTP fragments, still one OneLobby frame) arrive intact
+        // (larger payloads are chunked by Core: LargeMessageTests).
         var big = new string('x', 15 * 1024);
         host.Broadcast(Encoding.UTF8.GetBytes("welcome"));
         host.Broadcast(Encoding.UTF8.GetBytes(big));
         PumpUntil(() => atJoiner.Contains("welcome") && atJoiner.Contains(big), Pump, "broadcasts at joiner");
+
+        // the IPeerLink contract: reliable frames arrive in send order, exactly once
+        atJoiner.Clear();
+        for (var i = 0; i < 2000; i++) host.Send(joiner.LocalPeerId, Encoding.UTF8.GetBytes("n" + i));
+        PumpUntil(() => atJoiner.Count >= 2000, Pump, "2000 reliable frames at joiner");
+        Pump();
+        Assert.Equal(Enumerable.Range(0, 2000).Select(i => "n" + i), atJoiner);
 
         var roster = string.Join(", ", host.Peers.Select(p => $"{p.PeerId}:{p.Name} relayed={p.Relayed}"));
         _log.WriteLine($"PASS in {sw.ElapsedMilliseconds} ms; host roster: {roster}");

@@ -39,6 +39,11 @@ namespace OneLobby
         void StartOffer();
         void ApplySignal(PeerSignal signal);
         bool TryTakeSignal(out PeerSignal signal);
+        /// <summary>
+        /// Queue one frame. Contract every transport keeps: <see cref="PeerChannel.Reliable"/> frames arrive complete, in
+        /// send order, exactly once, for as long as the link is open (WebRTC: an ordered reliable SCTP channel). Fast and
+        /// Voice frames may be lost or reordered, never corrupted or duplicated.
+        /// </summary>
         void Send(PeerChannel channel, ReadOnlySpan<byte> frame);
         bool TryReceive(out PeerChannel channel, out byte[] frame);
     }

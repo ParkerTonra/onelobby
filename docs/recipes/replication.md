@@ -264,7 +264,14 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - An event is stamped with the sender's tick when sent: the host's `Clock.Tick`, or a client's `floor(ServerTick)`, which
   is ahead of what that client sees on screen. A client event that refers to what the player saw (a hit claim) must
   carry its own view tick in the payload (`rep.RenderTick`), or go through input so the host can use `RewindTick(frame)`.
-- An event may arrive before the snapshot of the same tick; to act on it in sync, hold it until `rep.RenderTick >= tick`.
+- An event may arrive before the snapshot of the same tick. `new ReplicationConfig(HoldEventsForTicks: 8)` makes a client
+  hold each event (in arrival order) until the snapshot of its tick is in, or 8 ticks at most.
+- Reliable events are ordered and exactly once per link on every transport (the `IPeerLink` contract). For per-topic
+  sequence numbers, pass a stream: `rep.SendEvent(bytes, peer, Channel.Reliable, stream: 3)`; subscribe to
+  `rep.EventDelivered` (a `ReplicatedEvent` with `From`, `Tick`, `Stream`, `Seq`, `Payload`) instead of `EventReceived`.
+  The session drops duplicates, reorders, and raises `rep.EventGap(from, stream, expected, next)` if a number never
+  comes; counters `Stats.EventsDuplicate` / `EventsOutOfOrder` / `EventsGap` stay 0 on a healthy link.
+  `rep.ReliableEventBytesSentTo(peer)` counts reliable event bytes per peer.
 - Event size: up to about 15 KiB goes in one frame; larger payloads are split and reassembled on the reliable channel
   (also when `Channel.Fast` was asked for), up to 64 MiB. Keep frequent events small (a few hundred bytes).
 - Diagnostics for an overlay: `rep.RttMs` (client, to the host), `rep.PeerRttMs(peer)` (host, per client),
@@ -280,3 +287,5 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
   shot that hits an alien on the joiner's screen kills it on the host.
 - `rep.Stats` on the host shows `FullSnapshotsSent` growing only when someone joins.
 - Under a test with `InMemoryNetwork` (`DropUnreliable`, `ExtraDelayMs`), the same checks hold at 5% loss.
+  `DropReliable`, `ReorderReliable` and `DuplicateReliable` break the reliable contract on purpose, to test your own
+  handling of `EventGap` and resync.

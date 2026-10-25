@@ -20,7 +20,7 @@ frames (`binary.md`): each message below is the body of one `raw` frame (type 0x
 |---|---|---|
 | 0 | `magic:u8` | `0x52` (`'R'`). A raw payload with any other first byte is not replication: pass it to the game |
 | 1 | `version:u8` | `1` |
-| 2 | `kind:u8` | `1` snapshot, `2` input, `3` event |
+| 2 | `kind:u8` | `1` snapshot, `2` input, `3` event, `4` stream event |
 
 ## kind 1: `snapshot` (host -> one client, `fast`)
 
@@ -88,6 +88,20 @@ rest                    the game's event bytes
 Host to one client or each client (never relayed by clients); client to host only. On `reliable` events are ordered
 and never lost; they may arrive before the snapshot of the same tick (a client that wants to show them in sync delays
 them until its render tick reaches `tick`).
+
+## kind 4: `stream event` (either direction, `reliable` only)
+
+```
+tick:varuint            as kind 3
+stream:u8               1-255 (0 is malformed)
+seq:varuint             1, 2, 3, ... per (stream, sender, receiver); 0 is malformed
+rest                    the game's event bytes
+```
+
+Same routing as kind 3. The receiver delivers each `(sender, stream)` in `seq` order exactly once: a `seq` already
+delivered or already waiting is dropped (a duplicate); one past a missing number waits for it; a hole still open after
+1000 ms is reported as a gap and skipped. Reliable links never trigger either, so both are counted as anomalies. A
+sender restarts a peer's numbering at 1 when that peer (re)joins; receivers forget a peer's streams when it leaves.
 
 ## State bits (inside a state, the game's schema)
 

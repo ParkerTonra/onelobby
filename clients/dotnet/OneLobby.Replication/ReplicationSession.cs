@@ -37,6 +37,12 @@ namespace OneLobby.Replication
             public long Repeated, Skipped, Lost;
         }
 
+        // reliable streams: last seq sent / delivered, per (peer, stream); a peer's entries go when it leaves or rejoins
+        private readonly Dictionary<(int Peer, byte Stream), uint> _sendSeq = new(), _recvSeq = new();
+        private readonly Dictionary<int, long> _eventBytes = new();
+        private readonly Queue<(ReplicatedEvent Ev, long ArrivedMs)> _held = new();
+        private readonly Dictionary<(int Peer, byte Stream), (SortedDictionary<uint, ReplicatedEvent> Events, long Since)> _early = new();
+
         private readonly Lobby _lobby;
         private readonly ByteWriter _w = new(), _recs = new();
         private readonly NetWriter _nw = new();
@@ -108,6 +114,14 @@ namespace OneLobby.Replication
 
         /// <summary>Client: a reliable or fast event from the host; host: from a client. (from peerId, tick, payload).</summary>
         public event Action<int, uint, ReadOnlyMemory<byte>>? EventReceived;
+        /// <summary>Every event, like <see cref="EventReceived"/>, with its stream and sequence number. Subscribe to one of the two.</summary>
+        public event Action<ReplicatedEvent>? EventDelivered;
+        /// <summary>
+        /// A numbered stream skipped sequence numbers: (from, stream, first missing, next delivered), raised after the hole
+        /// stayed open for <see cref="StreamGapTimeoutMs"/>. Reliable links never lose events, so this means the transport
+        /// broke its contract; resync that stream's state (host: <see cref="SendFullSnapshot"/> plus your own facts).
+        /// </summary>
+        public event Action<int, byte, uint, uint>? EventGap;
         /// <summary>Client: an entity became visible at <see cref="RenderTick"/> (create the game object here).</summary>
         public event Action<EntityInfo>? EntitySpawned;
         /// <summary>Client: an entity is gone as of <see cref="RenderTick"/> (destroy the game object here).</summary>
@@ -128,7 +142,9 @@ namespace OneLobby.Replication
             var now = _lobby.NowMs;
             var elapsed = now - _lastPumpMs;
             _lastPumpMs = now;
+            ExpireGaps(now);
             if (IsHost) return;
+            ReleaseHeld(now);
             UpdateRenderTick(elapsed);
             ReportVisibility();
             if (_newestTick > 0 && now - _lastInputSendMs >= Config.TickMs) SendInputMessage(0); // ack-only keepalive
@@ -288,17 +304,46 @@ namespace OneLobby.Replication
 
         /// <summary>
         /// Host: event to one client (<paramref name="toPeer"/>) or all (0). Client: event to the host (toPeer ignored).
-        /// Reliable by default (ordered, never lost); Fast for cosmetic one-offs. Stamped with the current tick.
+        /// Reliable by default (ordered, exactly once per link); Fast for cosmetic one-offs. Stamped with the current tick.
+        /// <para><paramref name="stream"/> 1-255 (reliable only) numbers the event per (stream, recipient) so the receiver
+        /// sees <see cref="ReplicatedEvent.Seq"/>, drops duplicates and reports a skipped number with <see cref="EventGap"/>.
+        /// Stream 0 (the default) is unnumbered.</para>
         /// </summary>
-        public void SendEvent(ReadOnlySpan<byte> payload, int toPeer = 0, Channel channel = Channel.Reliable)
+        public void SendEvent(ReadOnlySpan<byte> payload, int toPeer = 0, Channel channel = Channel.Reliable, byte stream = 0)
         {
+            if (stream != 0 && channel != Channel.Reliable) throw new ArgumentException("numbered streams are reliable only", nameof(stream));
             var tick = IsHost ? Clock.Tick : (uint)Math.Max(0, Math.Floor(ServerTick));
-            var bytes = Proto.EncodeEvent(tick, payload, _w);
             Stats.EventsSent++;
-            if (!IsHost) { _lobby.Send(_lobby.HostPeerId, bytes, channel); return; }
-            if (toPeer != 0) { _lobby.Send(toPeer, bytes, channel); return; }
-            foreach (var c in _clients.Keys) _lobby.Send(c, bytes, channel);
-            foreach (var c in _joining) _lobby.Send(c, bytes, channel); // reliable ones are queued until the link opens
+            var body = payload.ToArray();
+            var plain = stream == 0 ? Proto.EncodeEvent(tick, body, _w) : null;
+            if (!IsHost) { SendEventTo(_lobby.HostPeerId, tick, stream, body, plain, channel); return; }
+            if (toPeer != 0) { SendEventTo(toPeer, tick, stream, body, plain, channel); return; }
+            foreach (var c in _clients.Keys) SendEventTo(c, tick, stream, body, plain, channel);
+            foreach (var c in _joining) SendEventTo(c, tick, stream, body, plain, channel); // reliable ones are queued until the link opens
+        }
+
+        private void SendEventTo(int peer, uint tick, byte stream, byte[] body, byte[]? plain, Channel channel)
+        {
+            var bytes = plain;
+            if (bytes == null)
+            {
+                _sendSeq.TryGetValue((peer, stream), out var last);
+                _sendSeq[(peer, stream)] = last + 1;
+                bytes = Proto.EncodeStreamEvent(tick, stream, last + 1, body, _w);
+            }
+            _lobby.Send(peer, bytes, channel);
+            if (channel == Channel.Reliable) { _eventBytes.TryGetValue(peer, out var n); _eventBytes[peer] = n + bytes.Length; }
+        }
+
+        /// <summary>Reliable event bytes sent to one peer (payloads, no lobby header). Client: to the host.</summary>
+        public long ReliableEventBytesSentTo(int peerId) => _eventBytes.TryGetValue(peerId, out var n) ? n : 0;
+
+        private void ForgetPeer(int peer)
+        {
+            _eventBytes.Remove(peer);
+            foreach (var k in _sendSeq.Keys.Where(k => k.Peer == peer).ToList()) _sendSeq.Remove(k);
+            foreach (var k in _recvSeq.Keys.Where(k => k.Peer == peer).ToList()) _recvSeq.Remove(k);
+            foreach (var k in _early.Keys.Where(k => k.Peer == peer).ToList()) _early.Remove(k);
         }
 
         private void AddClient(int peer)
@@ -309,9 +354,14 @@ namespace OneLobby.Replication
             ClientReady?.Invoke(peer);
         }
 
-        private void OnPeerJoined(Peer p) { if (IsHost && p.PeerId != LocalPeerId && !_clients.ContainsKey(p.PeerId)) _joining.Add(p.PeerId); }
+        private void OnPeerJoined(Peer p)
+        {
+            if (!IsHost || p.PeerId == LocalPeerId || _clients.ContainsKey(p.PeerId)) return;
+            ForgetPeer(p.PeerId); // a rejoin under the same id starts its streams again at 1
+            _joining.Add(p.PeerId);
+        }
         private void OnPeerReady(Peer p) { if (IsHost && p.PeerId != LocalPeerId) AddClient(p.PeerId); }
-        private void OnPeerLeft(Peer p, string reason) { _clients.Remove(p.PeerId); _joining.Remove(p.PeerId); }
+        private void OnPeerLeft(Peer p, string reason) { _clients.Remove(p.PeerId); _joining.Remove(p.PeerId); ForgetPeer(p.PeerId); }
 
         private void HostReceiveInput(int from, ReadOnlySpan<byte> payload)
         {
@@ -533,13 +583,103 @@ namespace OneLobby.Replication
                     {
                         if (!IsHost && from != _lobby.HostPeerId) return;
                         var (tick, body) = Proto.DecodeEvent(span);
-                        Stats.EventsReceived++;
-                        EventReceived?.Invoke(from, tick, body);
+                        Arrive(new ReplicatedEvent(from, tick, 0, 0, body, channel));
+                        break;
+                    }
+                    case Proto.KindStreamEvent:
+                    {
+                        if (!IsHost && from != _lobby.HostPeerId) return;
+                        var (tick, stream, seq, body) = Proto.DecodeStreamEvent(span);
+                        ReceiveStreamEvent(new ReplicatedEvent(from, tick, stream, seq, body, channel));
                         break;
                     }
                 }
             }
             catch (MalformedException) { Stats.Malformed++; }
+        }
+
+        // Numbered streams: deliver in sequence order, once. Reliable links already do that, so the buffer below only fills
+        // on a transport that breaks the contract (or a test that does); a hole still open after StreamGapTimeoutMs is
+        // reported as a gap and skipped.
+        private void ReceiveStreamEvent(ReplicatedEvent e)
+        {
+            var key = (e.From, e.Stream);
+            _recvSeq.TryGetValue(key, out var last);
+            if (e.Seq <= last) { Stats.EventsDuplicate++; return; }
+            if (e.Seq == last + 1)
+            {
+                _recvSeq[key] = e.Seq;
+                Arrive(e);
+                DrainEarly(key);
+                return;
+            }
+            if (!_early.TryGetValue(key, out var buf)) _early[key] = buf = (new SortedDictionary<uint, ReplicatedEvent>(), _lobby.NowMs);
+            if (buf.Events.ContainsKey(e.Seq)) { Stats.EventsDuplicate++; return; }
+            buf.Events[e.Seq] = e;
+            Stats.EventsOutOfOrder++;
+        }
+
+        private void DrainEarly((int Peer, byte Stream) key)
+        {
+            if (!_early.TryGetValue(key, out var buf)) return;
+            var last = _recvSeq[key];
+            while (buf.Events.TryGetValue(last + 1, out var next))
+            {
+                buf.Events.Remove(++last);
+                _recvSeq[key] = last;
+                Arrive(next);
+            }
+            if (buf.Events.Count == 0) _early.Remove(key);
+            else _early[key] = (buf.Events, _lobby.NowMs); // the hole moved: its timer starts again
+        }
+
+        private void ExpireGaps(long now)
+        {
+            if (_early.Count == 0) return;
+            foreach (var key in _early.Keys.ToList())
+            {
+                var buf = _early[key];
+                if (now - buf.Since < StreamGapTimeoutMs) continue;
+                _recvSeq.TryGetValue(key, out var last);
+                var first = buf.Events.Keys.First();
+                Stats.EventsGap++;
+                EventGap?.Invoke(key.Peer, key.Stream, last + 1, first);
+                _recvSeq[key] = first - 1;
+                DrainEarly(key);
+            }
+        }
+
+        /// <summary>How long a numbered stream waits for a missing sequence number before <see cref="EventGap"/> skips it.</summary>
+        public const int StreamGapTimeoutMs = 1000;
+
+        private void Arrive(in ReplicatedEvent e)
+        {
+            // HoldEventsForTicks: keep arrival order; an event waits until its tick's snapshot is in, or the cap runs out
+            if (!IsHost && Config.HoldEventsForTicks > 0 && (_held.Count > 0 || e.Tick > _newestTick))
+            {
+                _held.Enqueue((e, _lobby.NowMs));
+                return;
+            }
+            Deliver(e);
+        }
+
+        private void ReleaseHeld(long now)
+        {
+            var capMs = Config.HoldEventsForTicks * Config.TickMs;
+            while (_held.Count > 0)
+            {
+                var (e, at) = _held.Peek();
+                if (e.Tick > _newestTick && now - at < capMs) return;
+                _held.Dequeue();
+                Deliver(e);
+            }
+        }
+
+        private void Deliver(in ReplicatedEvent e)
+        {
+            Stats.EventsReceived++;
+            EventReceived?.Invoke(e.From, e.Tick, e.Payload);
+            EventDelivered?.Invoke(e);
         }
 
         private void OnHostChanged(int newHost)
