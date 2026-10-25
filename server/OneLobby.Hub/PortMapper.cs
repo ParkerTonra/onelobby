@@ -36,6 +36,11 @@ public sealed class PortMapperOptions
     public string Description { get; set; } = "OneLobby";
     public bool TryUpnp { get; set; } = true;
     public bool TryNatPmp { get; set; } = true;
+    /// <summary>
+    /// Optional log hook; null (default) stays quiet. Gets one line when the host quits and its mappings are deleted:
+    /// <c>direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP</c>.
+    /// </summary>
+    public Action<string>? Log { get; set; }
 }
 
 /// <summary>
@@ -526,8 +531,21 @@ public sealed class PortMapper : IDisposable
                     .Wait(TimeSpan.FromMilliseconds(1500));
             }
             catch (Exception) { /* the lease expires on its own */ }
+            LogDeleted(undo);
         }
         _http.Dispose();
+    }
+
+    /// <summary>One line per mapping kind, e.g. <c>direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP</c>.</summary>
+    private void LogDeleted(IEnumerable<string> keys)
+    {
+        if (_o.Log == null) return;
+        foreach (var kind in keys.GroupBy(k => k.StartsWith("upnp ", StringComparison.Ordinal)))
+        {
+            var protos = kind.Select(k => kind.Key ? k.Substring(5) : k == "pmp 2" ? "TCP" : "UDP").Distinct().OrderBy(x => x, StringComparer.Ordinal);
+            try { _o.Log("direct host mapping deleted port=" + P() + " protocols=" + string.Join(",", protos) + " mapping=" + (kind.Key ? "UPnP" : "NAT-PMP")); }
+            catch (Exception) { /* a game's logger must not stop the quit */ }
+        }
     }
 
     private async Task NatPmpOnce(byte[] req)

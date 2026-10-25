@@ -178,9 +178,13 @@ public class PortMapperTests
     public async Task UpnpMapsTcpAndUdpAndDeletesOnDispose()
     {
         using var gw = new FakeUpnp();
-        var m = new PortMapper(47810, Opts(gw));
+        var log = new List<string>();
+        var o = Opts(gw);
+        o.Log = log.Add;
+        var m = new PortMapper(47810, o);
         var r = await m.OpenAsync();
         Assert.True(r.Mapped, r.Detail);
+        Assert.Empty(log);
         Assert.Equal(PortMapMethod.Upnp, r.Method);
         Assert.Equal("203.0.113.7", r.ExternalIPv4);
         Assert.Equal("127.0.0.1", r.LocalIPv4);
@@ -188,6 +192,7 @@ public class PortMapperTests
         Assert.Equal("127.0.0.1 lease 7200", gw.Mappings["UDP 47810"]);
         m.Dispose();
         Assert.Empty(gw.Mappings);
+        Assert.Equal(new[] { "direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP" }, log);
     }
 
     [Theory]
@@ -246,10 +251,14 @@ public class PortMapperTests
     {
         using var gw = new FakeUpnp { AddError = 718 };
         gw.Mappings["TCP 47810"] = "192.168.1.50 lease 0"; // another device on the network holds the port
-        var m = new PortMapper(47810, Opts(gw));
+        var log = new List<string>();
+        var o = Opts(gw);
+        o.Log = log.Add;
+        var m = new PortMapper(47810, o);
         Assert.False((await m.OpenAsync()).Mapped);
         m.Dispose();
         Assert.DoesNotContain("DeletePortMapping", gw.Actions);
+        Assert.Empty(log); // nothing of ours was deleted
         Assert.Equal("192.168.1.50 lease 0", gw.Mappings["TCP 47810"]);
     }
 
@@ -257,7 +266,10 @@ public class PortMapperTests
     public async Task NatPmpMapsBothAndReportsTheExternalAddress()
     {
         using var gw = new FakeNatPmp();
-        var m = new PortMapper(47810, Opts(n: gw));
+        var log = new List<string>();
+        var o = Opts(n: gw);
+        o.Log = log.Add;
+        var m = new PortMapper(47810, o);
         var r = await m.OpenAsync();
         Assert.True(r.Mapped, r.Detail);
         Assert.Equal(PortMapMethod.NatPmp, r.Method);
@@ -267,6 +279,7 @@ public class PortMapperTests
         m.Dispose();
         await Task.Delay(200);
         Assert.Empty(gw.Mappings);
+        Assert.Equal(new[] { "direct host mapping deleted port=47810 protocols=TCP,UDP mapping=NAT-PMP" }, log);
     }
 
     [Fact]

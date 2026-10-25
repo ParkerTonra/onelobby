@@ -31,6 +31,11 @@ export interface PortMapperOptions {
   description?: string;
   tryUpnp?: boolean;
   tryNatPmp?: boolean;
+  /**
+   * Optional log hook; left out (default) stays quiet. Gets one line when the host quits and its mappings are deleted:
+   * `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`.
+   */
+  log?: (line: string) => void;
 }
 
 const SEARCH_TARGETS = [
@@ -58,7 +63,7 @@ class UpnpError extends Error {
  */
 export class PortMapper {
   result: PortMapResult | null = null;
-  private readonly o: Required<Omit<PortMapperOptions, "natPmp">> & { natPmp?: { address: string; port: number } };
+  private readonly o: Required<Omit<PortMapperOptions, "natPmp" | "log">> & Pick<PortMapperOptions, "natPmp" | "log">;
   private control: URL | null = null;
   private service = "";
   private lease = 0;
@@ -376,6 +381,22 @@ export class PortMapper {
       }),
     );
     await Promise.race([work.catch(() => {}), delay(1500)]);
+    this.logDeleted(keys);
+  }
+
+  /** One line per mapping kind, e.g. `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`. */
+  private logDeleted(keys: string[]): void {
+    if (!this.o.log) return;
+    for (const upnp of [true, false]) {
+      const mine = keys.filter((k) => k.startsWith("upnp ") === upnp);
+      if (mine.length === 0) continue;
+      const protos = [...new Set(mine.map((k) => (upnp ? k.slice(5) : k === "pmp 2" ? "TCP" : "UDP")))].sort();
+      try {
+        this.o.log(`direct host mapping deleted port=${this.port} protocols=${protos.join(",")} mapping=${upnp ? "UPnP" : "NAT-PMP"}`);
+      } catch {
+        // a game's logger must not stop the quit
+      }
+    }
   }
 
   private natPmpOnce(req: Buffer): Promise<void> {

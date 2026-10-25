@@ -116,13 +116,16 @@ describe("PortMapper", () => {
   it("UPnP maps TCP and UDP and deletes on close", async () => {
     const gw = await new FakeUpnp().start();
     stops.push(() => gw.stop());
-    const m = new PortMapper(47810, opts(gw));
+    const log: string[] = [];
+    const m = new PortMapper(47810, { ...opts(gw), log: (l) => log.push(l) });
     const r = await m.open();
     expect(r).toMatchObject({ mapped: true, method: "upnp", externalIPv4: "203.0.113.7", localIPv4: "127.0.0.1" });
     expect(gw.mappings.get("TCP 47810")).toBe("127.0.0.1 lease 7200");
     expect(gw.mappings.get("UDP 47810")).toBe("127.0.0.1 lease 7200");
+    expect(log).toEqual([]);
     await m.close();
     expect(gw.mappings.size).toBe(0);
+    expect(log).toEqual(["direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP"]);
   });
 
   it("UPnP falls back to a permanent lease on 725", async () => {
@@ -169,17 +172,20 @@ describe("PortMapper", () => {
     gw.addError = 718;
     gw.mappings.set("TCP 47810", "192.168.1.50 lease 0"); // another device on the network holds the port
     stops.push(() => gw.stop());
-    const m = new PortMapper(47810, opts(gw));
+    const log: string[] = [];
+    const m = new PortMapper(47810, { ...opts(gw), log: (l) => log.push(l) });
     expect((await m.open()).mapped).toBe(false);
     await m.close();
     expect(gw.actions).not.toContain("DeletePortMapping");
+    expect(log).toEqual([]); // nothing of ours was deleted
     expect(gw.mappings.get("TCP 47810")).toBe("192.168.1.50 lease 0");
   });
 
   it("NAT-PMP maps both and reports the external address", async () => {
     const gw = await new FakeNatPmp().start();
     stops.push(() => gw.stop());
-    const m = new PortMapper(47810, opts(undefined, gw));
+    const log: string[] = [];
+    const m = new PortMapper(47810, { ...opts(undefined, gw), log: (l) => log.push(l) });
     const r = await m.open();
     expect(r).toMatchObject({ mapped: true, method: "natpmp", externalIPv4: "198.51.100.9" });
     expect(gw.mappings.get("1 47810")).toBe(7200);
@@ -187,6 +193,7 @@ describe("PortMapper", () => {
     await m.close();
     await new Promise((r2) => setTimeout(r2, 100));
     expect(gw.mappings.size).toBe(0);
+    expect(log).toEqual(["direct host mapping deleted port=47810 protocols=TCP,UDP mapping=NAT-PMP"]);
   });
 
   it("NAT-PMP with a different external port is a failure (and undone)", async () => {
