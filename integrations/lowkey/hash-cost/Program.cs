@@ -9,7 +9,7 @@ using LowkeyIndustries.Sim.Core;
 
 ulong seed = args.Length > 0 ? ulong.Parse(args[0]) : 20261011UL;
 int samples = args.Length > 1 ? int.Parse(args[1]) : 101;
-string repo = Environment.GetEnvironmentVariable("LOWKEY_REPO") ?? "C:/Users/parke/ClaudeCode/Lowkey";
+string repo = Environment.GetEnvironmentVariable("LOWKEY_REPO") ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../../Lowkey"));
 var content = ContentDb.LoadDirectory(Path.Combine(repo, "game", "data"), "unplug");
 var sim = Simulation.NewGame(content, seed);
 var bot = new UnplugBot();

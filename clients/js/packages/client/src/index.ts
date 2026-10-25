@@ -31,6 +31,6 @@ export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, Chann
 export type { Clock } from "./clock.js";
 export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
 export type { FriendlyError } from "./friendly.js";
-// Pre-rename names, kept for one version so existing games (Ant Arena) keep working.
+// Pre-rename names, kept for one version so existing games keep working.
 export { Keepalive, KeepaliveError } from "./deprecated.js";
 export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";

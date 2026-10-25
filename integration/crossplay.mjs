@@ -19,7 +19,7 @@ const arg = (n, d) => {
   const i = process.argv.indexOf("--" + n);
   return i >= 0 ? process.argv[i + 1] : d;
 };
-const GODOT = arg("godot", process.env.GODOT ?? "C:/Users/parke/Downloads/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe");
+const GODOT = arg("godot", process.env.GODOT ?? "godot");
 const EDGE = arg("browser", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe");
 const SECONDS = Number(arg("seconds", 60));
 const only = (arg("only", "1,2,3,4,5")).split(",").map(Number);
