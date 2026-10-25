@@ -89,6 +89,16 @@ function world() {
 }
 
 describe("OneLobby.fromConfig", () => {
+  it("an empty lobby server fails with no_server and plain words", async () => {
+    const w = world();
+    const { socketFactory: _memory, ...rest } = w.advanced("ann"); // the real socket factory, which needs an address
+    const kit = OneLobby.fromConfig({ game: { id: "com.example.ttt" } }, { advanced: rest });
+    const err = await kit.host().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OneLobbyError);
+    expect((err as OneLobbyError).code).toBe(ErrorCodes.NoServer);
+    expect(describeError(err).message).toMatch(/no lobby server/i);
+  });
+
   it("maps the file onto the kit", () => {
     const w = world();
     const kit = OneLobby.fromConfig(

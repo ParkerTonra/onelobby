@@ -357,6 +357,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
 
   /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
   private async open(url: string, factory: SocketFactory, timeoutMs: number): Promise<SignalingClient> {
+    if (!url.trim() && factory === defaultSocketFactory) throw new OneLobbyError("no_server", "no lobby server address (set hosting.lobbyServer or pass lobbyServer)");
     const sig = new SignalingClient(url, factory, this.clock);
     if (timeoutMs > 0) {
       let cancel = () => {};

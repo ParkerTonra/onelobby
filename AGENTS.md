@@ -183,8 +183,11 @@ var client = LobbyClient.FromBlueprint(bp, new DataChannelTransport(), displayNa
 Lobby lobby = await client.HostAsync();                    // or HostDirectAsync() from OneLobby.Direct
 ```
 
-A bad file throws `bad_config` with the key's path. Switched-off features throw `voice_disabled`, `chat_disabled`,
-`listing_disabled` (`list()` with `hosting.server` false) and `identity_anonymous`. To integrate an existing game,
+A bad file throws `bad_config` with the key's path. Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
+with `chat.voice` false), `chat_disabled` (`lobby.chat.send` with `chat.text` false), `listing_disabled` (`list()` with
+`hosting.server` false) and `identity_anonymous`. No lobby server address at all (empty `hosting.lobbyServer`, no
+`lobbyServer` override) makes `host()` / `join()` fail with `no_server`. Browser wiring with the player's server
+setting: `docs/recipes/js-web.md` "With onelobby.json"; two players with no server: `docs/recipes/testing.md` section 3. To integrate an existing game,
 follow `.claude/skills/onelobby/SKILL.md` (Claude Code skill `onelobby`; other agents read it as plain steps): survey
 the game, propose the file with a `$comment` reason per non-default key, plan the menu entry, build with the engine's
 recipe, verify two players headless, report. Design and the reasons behind each key: `docs/design/blueprint.md`.

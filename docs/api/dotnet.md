@@ -24,9 +24,56 @@ public sealed record LobbyError(string Code, string Message);
 public sealed record ChatLine(int PeerId, uint Id, long Ts, string Text);
 public enum VoiceMode { PushToTalk, VoiceActivity }
 /// Thrown by the async lobby calls when the server answers with an error.
-public sealed class OneLobbyException : Exception
+public class OneLobbyException : Exception
     public string Code { get; }
     public OneLobbyException(string code, string message) : base(code + ": " + message);
+```
+
+## OneLobby.Core/Blueprint.cs
+
+```csharp
+/// Thrown by Blueprint.Parse(string) / Blueprint.Load(string) for a bad onelobby.json (and by the blueprint display-name check). OneLobbyException.Code is bad_config.
+public sealed class BlueprintException : OneLobbyException
+    /// Dotted path of the offending key ("" = the file itself, array indexes are numbers).
+    public string Path { get; }
+    /// Rule id: type, required, unknown_key, enum, const, range, length, pattern, json, or a spec/blueprint.schema.json x-rule (hosting_none, ...).
+    public string Rule { get; }
+    public BlueprintException(string path, string rule, string message) : base(LobbyErrorCodes.BadConfig, (path.Length == 0 ? "onelobby.json" : path) + ": " + message);
+public sealed record GameSection(string Id, string NetVersion, string? Title);
+public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly, IReadOnlyList<string> AllowedOrigins);
+public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin, bool JoinLink, IReadOnlyDictionary<string, string> Meta);
+/// Mode is "raw", "lockstep" or "replication".
+public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
+/// Identity is "name", "anonymous" or "platform".
+public sealed record PlayersSection(string Identity, int MaxNameLength);
+/// VoiceMode is "pushToTalk" or "voiceActivity".
+public sealed record ChatSection(bool Text, bool Voice, string VoiceMode);
+public sealed record RateLimitSetting(int Messages, int PerMs);
+/// HostLeaves: "end" or "migrate". Pause: "off", "host" or "anyone".
+public sealed record SessionSection(string HostLeaves, string Pause, int ReadyTimeoutMs, int PeerTimeoutMs, RateLimitSetting? RateLimit, bool RunInBackground);
+public sealed record SteamSetting(bool Enabled, int? AppId);
+public sealed record EpicSetting(bool Enabled, IReadOnlyDictionary<string, string> Ids);
+public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
+/// Kind: "drop-in", "generated" or "none". Theme: "light", "dark" or "auto".
+public sealed record UiSection(string Kind, string? Entry, string Theme);
+/// The settings file onelobby.json (spec/blueprint.schema.json, docs/design/blueprint.md), validated and with every default filled in. Immutable. Use LobbyClient.FromBlueprint to run a client from it, or the To... adapters to adopt it one call at a time.
+public sealed record Blueprint(int Version, GameSection Game, string? Engine, HostingSection Hosting, LobbySection Lobby, SyncSection Sync, PlayersSection Players, ChatSection Chat, SessionSection Session, PlatformsSection Platforms, UiSection Ui)
+    /// Stand-in server URL used by ToConfig when the file names no lobby server (direct-only games).
+    public static readonly Uri NoServer;
+    /// The JSON Schema (spec/blueprint.schema.json), embedded in this assembly.
+    public static string SchemaJson { get; }
+    /// Reads and validates a file. Throws BlueprintException (code bad_config).
+    public static Blueprint Load(string path);
+    /// Validates json against the schema, fills defaults, applies the cross-key rules.
+    public static Blueprint Parse(string json);
+    /// Today's OneLobbyConfig. LobbyServer is hosting.lobbyServer; when the file has none (a direct-only game) it is NoServer, which never connects, so HostAsync() on a blueprint client fails with bad_config instead of dialing nothing. Replication maps to Raw. Peer timeout and rate limit have no config field yet and are not applied.
+    public OneLobbyConfig ToConfig(string? displayName = null);
+    /// LobbyOptions for a server lobby: listed gives Public, approveJoins Private, else Unlisted. name defaults to "&lt;displayName&gt;'s game" ("Player's game" for no name). Password is not a LobbyOptions field and is not applied.
+    public LobbyOptions ToLobbyOptions(string? name = null, string? displayName = null);
+    /// Throws identity_anonymous / bad_config (path displayName) when the name breaks players.*.
+    public void CheckDisplayName(string? displayName);
+    /// The validated file with defaults filled in (null values omitted). Round-trips through Parse.
+    public string ToJson();
 ```
 
 ## OneLobby.Core/Chunker.cs
@@ -36,6 +83,12 @@ public sealed class OneLobbyException : Exception
 public static class Chunker
     public static IEnumerable<byte[]> Split(uint id, ReadOnlyMemory<byte> data, int maxPayload = Wire.ChunkPayload);
 public sealed class ChunkAssembler
+    /// Most incomplete chunk sets one assembler (one peer) holds at once; a new id past this evicts the oldest.
+    public const int MaxPartialSets;
+    /// Incomplete chunk sets held right now.
+    public int PendingSets;
+    /// Bytes held across incomplete chunk sets right now.
+    public long PendingBytes { get; }
     /// Feeds one chunk body (after the 3-byte header). True with the whole payload when the last piece arrives.
     public bool TryAdd(ReadOnlySpan<byte> body, out uint id, out byte[] complete);
     public void Clear();
@@ -252,6 +305,12 @@ public sealed class Lobby : IAsyncDisposable
 public sealed class LobbyClient : IAsyncDisposable
     public event Action<LobbyError>? Error;
     public LobbyClient(OneLobbyConfig config, ITransport transport);
+    /// The blueprint this client was built from (FromBlueprint), or null. A blueprint client enforces it.
+    public Blueprint? Blueprint { get; private set; }
+    /// A client that runs from onelobby.json. lobbyServerOverride (when not empty) replaces hosting.lobbyServer, the per-player layer above the file; configure may adjust the final config. Throws OneLobbyException identity_anonymous / bad_config (path displayName) when the name breaks players.*.
+    public static LobbyClient FromBlueprint(Blueprint blueprint, ITransport transport, string? displayName = null, string? lobbyServerOverride = null, Func<OneLobbyConfig, OneLobbyConfig>? configure = null);
+    /// Creates a lobby from the blueprint (Blueprint.ToLobbyOptions). Needs a blueprint client with a lobby server.
+    public Task<Lobby> HostAsync(CancellationToken ct = default);
     public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default);
     public Task<Lobby> JoinAsync(string code, CancellationToken ct = default);
     public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default);
@@ -304,6 +363,16 @@ public static class LobbyErrorCodes
     public const string BadAddress;
     /// Direct IP host: no port in 47810-47819 could be bound.
     public const string PortInUse;
+    /// onelobby.json is invalid, or a value breaks it (BlueprintException carries the path and rule).
+    public const string BadConfig;
+    /// Voice was switched on but the blueprint says chat.voice is false.
+    public const string VoiceDisabled;
+    /// Text chat was used but the blueprint says chat.text is false.
+    public const string ChatDisabled;
+    /// ListAsync on a blueprint client whose hosting.server is false.
+    public const string ListingDisabled;
+    /// A display name was given but the blueprint says players.identity is anonymous.
+    public const string IdentityAnonymous;
 ```
 
 ## OneLobby.Core/LockstepSession.cs
@@ -312,12 +381,16 @@ public static class LobbyErrorCodes
 /// Host-ordered lockstep (DESIGN s.8). Joiners submit commands; the host places them in the next frame it has not yet emitted and broadcasts one frame per tick. Every peer (host included) consumes frames through TryNextFrame.
 public sealed class LockstepSession
     public const int MaxCommandBytes;
+    /// Commands one remote peer may have waiting for the host's next frame; the excess is dropped.
+    public const int MaxPendingPerPeer;
     /// Last tick handed out by TryNextFrame.
     public long Tick { get; private set; }
     /// Frames received and not yet consumed. More than 2 means "run without rendering" (catch-up).
     public int FramesBuffered;
     /// Highest tick for which this peer holds every frame (consumed or buffered).
     public long LastReceivedTick;
+    /// Remote commands the host dropped because that peer already had MaxPendingPerPeer waiting.
+    public long DroppedCommands { get; private set; }
     public Func<byte[]>? Snapshot { get; set; }
     public Action<long, ReadOnlyMemory<byte>>? Restore { get; set; }
     public event Action<DesyncInfo>? Desync;
@@ -740,6 +813,12 @@ public sealed class ReplicationSession : IDisposable
     public EntityInfo? Find(NetId id);
     /// How long a numbered stream waits for a missing sequence number before EventGap skips it.
     public const int StreamGapTimeoutMs;
+    /// Most events one numbered stream holds while it waits for a missing one; past this (or MaxStreamBufferedBytes) the hole is reported as a gap at once.
+    public const int MaxStreamBuffered;
+    /// Most payload bytes one numbered stream holds while it waits for a missing one.
+    public const int MaxStreamBufferedBytes;
+    /// A sequence number further than this past the last delivered one is malformed and dropped.
+    public const uint MaxStreamAhead;
     public void Dispose();
 ```
 

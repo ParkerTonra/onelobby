@@ -12,9 +12,11 @@ sections are the modules it re-exports.
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { OneLobbyOptions, FromConfigOverrides, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
+export { parseBlueprint, defineBlueprint, BlueprintError } from "./blueprint.js";
+export type { Blueprint, BlueprintInput, BlueprintEngine } from "./blueprint.js";
 export { Lobby } from "./lobby.js";
 export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
 export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
@@ -52,6 +54,7 @@ import { Lobby, type RateLimit } from "./lobby.js";
 import { type LobbySummary } from "./signaling.js";
 import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
+import { type Blueprint } from "./blueprint.js";
 export declare const LIB_NAME = "onelobby";
 export declare const LIB_VERSION = "0.4.1";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
@@ -121,6 +124,16 @@ export interface OneLobbyOptions {
     /** @deprecated use `advanced.createSink` */
     createSink?: (() => AudioSink) | null;
 }
+/** Per-launch settings for `OneLobby.fromConfig`; everything else comes from the blueprint. */
+export interface FromConfigOverrides {
+    /** The player's name. Checked against `players.identity` and `players.maxNameLength`. */
+    displayName?: string;
+    /** Wins over `hosting.lobbyServer` (the file is the bottom layer: put `?lobby=` / storage / `<meta>` lookups here). */
+    lobbyServer?: string;
+    /** Default: `lobby.rejoin` from the file. */
+    rememberSeat?: boolean;
+    advanced?: AdvancedOptions;
+}
 export interface HostOptions {
     name: string;
     maxPlayers: number;
@@ -160,6 +173,16 @@ export declare const DEFAULT_READY_TIMEOUT_MS = 15000;
 /** Entry point (DESIGN s.11.2). */
 export declare class OneLobby extends Emitter<OneLobbyEvents> {
     readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs" | "peerTimeoutMs">>;
+    /** The validated, frozen onelobby.json this kit was built from (`OneLobby.fromConfig`); undefined for `new OneLobby`. */
+    readonly blueprint?: Blueprint;
+    /**
+     * Build a kit from an onelobby.json (already parsed; docs/design/blueprint.md s.7). Throws `bad_config` for an
+     * invalid file or name, `identity_anonymous` for a name when `players.identity` is "anonymous". Then `host()` and
+     * `hostDirect()` default their options from the file and the file's chat/listing switches are enforced.
+     */
+    static fromConfig(json: unknown, overrides?: FromConfigOverrides): OneLobby;
+    /** @internal Host options the blueprint implies (empty without one). */
+    blueprintHostDefaults(): Partial<HostOptions>;
     constructor(o: OneLobbyOptions);
     /** The lobby code of the seat this tab can take back (rememberSeat), or null. */
     get rememberedCode(): string | null;
@@ -169,7 +192,8 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      */
     resume(): Promise<Lobby | null>;
     /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
-    host(h: HostOptions): Promise<Lobby>;
+    /** With a blueprint (`fromConfig`) every option defaults from `lobby.*`; explicit options win. */
+    host(opts?: Partial<HostOptions>): Promise<Lobby>;
     join(code: string): Promise<Lobby>;
     /**
      * Join a direct-IP host (docs/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
@@ -189,6 +213,177 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     rejoin(resumeToken: string): Promise<Lobby>;
     list(opts?: ListOptions): Promise<LobbySummary[]>;
 }
+```
+
+## blueprint
+
+```ts
+/**
+ * Blueprint v1: the `onelobby.json` settings file (docs/design/blueprint.md s.4, spec/blueprint.schema.json).
+ * `parseBlueprint` validates by hand (the package has no dependencies), fills the defaults and returns a frozen
+ * object. Errors carry the dotted `path` and the `rule` id the shared vectors (spec/vectors/blueprint.json) expect.
+ */
+import { OneLobbyError } from "./signaling.js";
+export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
+export interface Blueprint {
+    readonly version: 1;
+    readonly game: {
+        readonly id: string;
+        readonly netVersion: string;
+        readonly title?: string;
+    };
+    readonly engine?: BlueprintEngine;
+    readonly hosting: {
+        readonly direct: boolean;
+        readonly server: boolean;
+        readonly lobbyServer: string;
+        readonly directPort: number;
+        readonly openPort: boolean;
+        readonly relayOnly: boolean;
+        readonly allowedOrigins: readonly string[];
+    };
+    readonly lobby: {
+        readonly maxPlayers: number;
+        readonly listed: boolean;
+        readonly approveJoins: boolean;
+        readonly password: boolean;
+        readonly lateJoin: boolean;
+        readonly rejoin: boolean;
+        readonly joinLink: boolean;
+        readonly meta: Readonly<Record<string, string>>;
+    };
+    readonly sync: {
+        readonly mode: "raw" | "lockstep" | "replication";
+        readonly tickRate: number;
+        readonly hashEveryTicks: number;
+    };
+    readonly players: {
+        readonly identity: "name" | "anonymous" | "platform";
+        readonly maxNameLength: number;
+    };
+    readonly chat: {
+        readonly text: boolean;
+        readonly voice: boolean;
+        readonly voiceMode: "pushToTalk" | "voiceActivity";
+    };
+    readonly session: {
+        readonly hostLeaves: "end" | "migrate";
+        readonly pause: "off" | "host" | "anyone";
+        readonly readyTimeoutMs: number;
+        readonly peerTimeoutMs: number;
+        readonly rateLimit?: {
+            readonly messages: number;
+            readonly perMs: number;
+        };
+        readonly runInBackground: boolean;
+    };
+    readonly platforms: {
+        readonly steam: boolean | {
+            readonly appId?: number;
+        };
+        readonly epic: boolean | {
+            readonly [k: string]: string;
+        };
+        readonly discord: boolean;
+    };
+    readonly ui: {
+        readonly kind: "drop-in" | "generated" | "none";
+        readonly entry?: string;
+        readonly theme: "light" | "dark" | "auto";
+    };
+}
+/** What you may write: only `game.id` is required. */
+export interface BlueprintInput {
+    $schema?: string;
+    $comment?: string;
+    version?: 1;
+    game: {
+        $comment?: string;
+        id: string;
+        netVersion?: string;
+        title?: string;
+    };
+    engine?: BlueprintEngine;
+    hosting?: {
+        $comment?: string;
+        direct?: boolean;
+        server?: boolean;
+        lobbyServer?: string;
+        directPort?: number;
+        openPort?: boolean;
+        relayOnly?: boolean;
+        allowedOrigins?: string[];
+    };
+    lobby?: {
+        $comment?: string;
+        maxPlayers?: number;
+        listed?: boolean;
+        approveJoins?: boolean;
+        password?: boolean;
+        lateJoin?: boolean;
+        rejoin?: boolean;
+        joinLink?: boolean;
+        meta?: Record<string, string>;
+    };
+    sync?: {
+        $comment?: string;
+        mode?: "raw" | "lockstep" | "replication";
+        tickRate?: number;
+        hashEveryTicks?: number;
+    };
+    players?: {
+        $comment?: string;
+        identity?: "name" | "anonymous" | "platform";
+        maxNameLength?: number;
+    };
+    chat?: {
+        $comment?: string;
+        text?: boolean;
+        voice?: boolean;
+        voiceMode?: "pushToTalk" | "voiceActivity";
+    };
+    session?: {
+        $comment?: string;
+        hostLeaves?: "end" | "migrate";
+        pause?: "off" | "host" | "anyone";
+        readyTimeoutMs?: number;
+        peerTimeoutMs?: number;
+        rateLimit?: {
+            messages: number;
+            perMs: number;
+        };
+        runInBackground?: boolean;
+    };
+    platforms?: {
+        $comment?: string;
+        steam?: boolean | {
+            appId?: number;
+        };
+        epic?: boolean | {
+            [k: string]: string;
+        };
+        discord?: boolean;
+    };
+    ui?: {
+        $comment?: string;
+        kind?: "drop-in" | "generated" | "none";
+        entry?: string;
+        theme?: "light" | "dark" | "auto";
+    };
+}
+/** Identity function for TypeScript completion in a `.ts` config (like Vite's `defineConfig`). */
+export declare function defineBlueprint<T extends BlueprintInput>(x: T): T;
+/** `bad_config`: the file is not a valid blueprint. `path` is dotted ("" = root), `rule` a vector rule id. */
+export declare class BlueprintError extends OneLobbyError {
+    path: string;
+    rule: string;
+    constructor(path: string, rule: string, detail: string);
+}
+/**
+ * Validate `json` (an already-parsed onelobby.json), fill every default and return the frozen result.
+ * Throws a `BlueprintError` (`OneLobbyError` code `bad_config`, with `path` and `rule`) on the first problem.
+ */
+export declare function parseBlueprint(json: unknown): Blueprint;
 ```
 
 ## lobby
@@ -483,6 +678,8 @@ export declare const MAX_DESYNCS = 3;
 export declare const MAX_RESTORE_RETRIES = 3;
 export declare const HOST_SILENCE_MS = 3000;
 export declare const PEER_HASH_SILENCE_MS = 10000;
+/** Commands one remote peer may have waiting for the host's next frame; the excess is dropped. */
+export declare const MAX_PENDING_PER_PEER = 256;
 export interface LockstepOptions {
     hashEveryTicks: number;
     /** Frames kept for replays (late join, migration). Default 30 s of ticks. */
@@ -507,6 +704,8 @@ export declare class Lockstep extends Emitter<LockstepEvents> {
     /** Tick of the state the game holds (last frame returned by nextFrame, or a restored snapshot). */
     /** Hashes a peer sent for ticks up to this were computed before it restored a snapshot: stale, not evidence. */
     constructor(hub: Hub, opts: LockstepOptions);
+    /** Remote commands the host dropped because that peer already had MAX_PENDING_PER_PEER waiting. */
+    get droppedCommands(): number;
     get started(): boolean;
     get framesBuffered(): number;
     /** True when the game should run ticks without rendering (> 2 frames behind). */
@@ -1114,6 +1313,11 @@ export declare const ErrorCodes: {
     readonly ServerLost: "server_lost";
     readonly InvalidToken: "invalid_token";
     readonly NoServer: "no_server";
+    readonly BadConfig: "bad_config";
+    readonly VoiceDisabled: "voice_disabled";
+    readonly ChatDisabled: "chat_disabled";
+    readonly ListingDisabled: "listing_disabled";
+    readonly IdentityAnonymous: "identity_anonymous";
 };
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 /**

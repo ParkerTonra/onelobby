@@ -34,7 +34,9 @@ Find and note, with the file and line that told you:
 
 Write the full file (every key, defaults included: a file you can read beats a default you have to look up), with a
 `"$comment"` beside each non-default key giving the one-line reason from the survey. `"$schema"` points at the
-schema, pinned to the onelobby version you install.
+schema of the onelobby version you install: `"./node_modules/onelobby/blueprint.schema.json"` in a JS project; in a C#
+project, the `spec/blueprint.schema.json` of the OneLobby release you use (a relative path into a clone, or its raw
+GitHub URL at that release tag).
 
 | Key | Choose |
 |---|---|
@@ -47,9 +49,10 @@ schema, pinned to the onelobby version you install.
 | `chat.text` | `true` |
 | `chat.voice` | `false` unless you can name a reason the game needs it (co-op that needs callouts). Say the reason in `$comment`. |
 | `session.hostLeaves` | `end`; `migrate` only with `hosting.server` and a lockstep game that has snapshot/restore |
-| `session.pause` | `off` for real-time action (a pause there is griefing); `anyone` for RTS, strategy and long co-op ("life happens"); `host` when one player runs the world |
+| `session.hostLeaves` handling | `end` means the game must handle the session ending: JS `sessionEnded` with reason `host_left` (a server lobby whose host leaves, or any direct lobby), C# `SessionEnded`. Show it, return to the menu, keep the board playable offline. |
+| `session.pause` | `off` for real-time action (a pause there is griefing) and for short turn-based games (a turn is already a pause); `anyone` for RTS, strategy and long co-op ("life happens"); `host` when one player runs the world |
 | `players.identity` | `name`; `anonymous` for games aimed at young players or with no chat |
-| `ui.kind`, `ui.entry` | `drop-in` for `web` unless the game has its own menus; else `generated`, with the entry from the survey |
+| `ui.kind`, `ui.entry` | `generated`, with the entry from the survey (a "Play together" panel or menu item). Not `drop-in`: the `<one-lobby>` element does not read onelobby.json yet and carries its own JSON message format (`el.send`, `el.shared`), so it cannot sit beside the game's own bytes. |
 
 Not built yet, but recorded so the game is ready when they are: `session.pause` (the file keeps the choice; nothing
 pauses over the network yet), `platforms.*` (Steam, Epic, Discord). Say so in the report.
@@ -62,25 +65,30 @@ lobby settings appear in the menus, and the checks you will run in Verify.
 ## 4. Approve
 
 If every key in the file is its default (no `$comment` reasons), build without stopping. Otherwise show the proposal
-table (key, value, why) and the plan, and stop for the user to say go or edit the file.
+(the Settings table from the Report format below: key, value, why) and the plan, and stop for the user to say go or
+edit the file.
 
 ## 5. Build
 
 Follow the engine's recipe. Rules:
 
 - **Read the file at runtime, never copy its values into code.** JS: `OneLobby.fromConfig(blueprint, { displayName })`
-  (load the JSON with `fetch("./onelobby.json")` in the browser so a hand edit applies on reload). C#:
+  (load the JSON with `fetch("./onelobby.json")` in the browser so a hand edit applies on reload; the full browser
+  version, with the lobby server setting, is `docs/recipes/js-web.md` section 3). C#:
   `Blueprint.Load("onelobby.json")` then `LobbyClient.FromBlueprint(bp, transport, displayName)`; Unity: the
   `OneLobbyRunner` Blueprint field. Show the voice button only when `blueprint.chat.voice`, the chat panel only when
   `chat.text`, Browse only when `hosting.server && lobby.listed`.
 - Generate only what structural keys ask for: the menu entry (`ui.entry`), the Node host script when `hosting.direct`
   on `node-browser`, `Snapshot` / `Restore` when `lockstep` with `lateJoin` or `migrate`.
 - The game stays fully playable offline: every lobby call can fail; show the error (`describeError`) and keep running.
-- The lobby server URL stays a player setting with the file's value as the default (AGENTS.md rule 5).
+- The lobby server URL stays a player setting with the file's value as the default (AGENTS.md rule 5): pass the
+  player's value as `fromConfig(bp, { lobbyServer })`; with no address at all, `host()` / `join()` fail with
+  `no_server`, which `describeError` turns into words.
 
 ## 6. Verify
 
-Run the recipe's "Done when" checks and the testing recipe (`docs/recipes/testing.md`): two headless players, a
+Run the recipe's "Done when" checks and the testing recipe (`docs/recipes/testing.md`; with no lobby server running,
+its in-memory section runs two players in Node with no network): two headless players, a
 message each way (lockstep: frames advance and hashes match), the join link if `lobby.joinLink`, and the offline check
 (no server: the game still plays and the menu says multiplayer is unavailable). Run direct hosting when
 `hosting.direct`. Fix and re-run until each passes or you can name why it cannot run here.

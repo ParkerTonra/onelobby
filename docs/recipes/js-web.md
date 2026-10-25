@@ -37,7 +37,14 @@ npm install file:/path/to/onelobby/clients/js/packages/client
 ```
 
 Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
-`<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
+`<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first, or (no bundler)
+map the name with an import map placed before your module script:
+
+```html
+<script type="importmap">{ "imports": { "onelobby": "./node_modules/onelobby/dist/index.js" } }</script>
+```
+
+A `file:` install writes that machine's path into `package.json`; switch it to the npm version before sharing the game.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
 ## Codes and peers
@@ -97,6 +104,43 @@ export function currentLobby(): Lobby | null { return lobby; }
 ```
 
 Never make the game's start wait on these. Wrap each call in try/catch, show the error, keep playing offline.
+
+### With onelobby.json (the blueprint)
+
+When the game has an `onelobby.json` (the `onelobby` skill writes one), build the kit from the file instead: game id,
+net version, mode, max players, visibility and the chat and voice switches all come from it, read at runtime so a hand
+edit applies on reload. The player's lobby server setting still wins over the file's `hosting.lobbyServer`.
+
+```ts compile file=net-blueprint.ts
+import { OneLobby } from "onelobby";
+import type { Lobby } from "onelobby";
+
+/** The player's lobby server (?lobby=, then saved, then <meta>), or undefined to use hosting.lobbyServer. */
+function playerLobbyServer(): string | undefined {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="lobby-server"]')?.content;
+  return new URLSearchParams(location.search).get("lobby") ?? localStorage.getItem("lobby_server") ?? meta ?? undefined;
+}
+
+let kit: OneLobby | null = null;
+let lobby: Lobby | null = null;
+
+export async function loadKit(displayName: string): Promise<OneLobby> {
+  const file: unknown = await (await fetch("./onelobby.json")).json();   // a bad file throws bad_config
+  kit = OneLobby.fromConfig(file, { displayName, lobbyServer: playerLobbyServer() });
+  return kit;
+}
+
+export async function hostLobby(): Promise<string> {
+  lobby = await kit!.host();   // maxPlayers, visibility, lateJoin and meta from the file; no address at all is no_server
+  return lobby.code;
+}
+
+export function showsVoice(): boolean { return kit?.blueprint?.chat.voice ?? false; }   // voice button only when on
+```
+
+With `chat.voice` false, `lobby.voice.enabled = true` throws `voice_disabled`; with `chat.text` false, `lobby.chat.send`
+throws `chat_disabled`. Hide those controls rather than catching the errors. `session.hostLeaves: "end"` means
+`lobby.on("sessionEnded", (reason) => ...)` fires with `"host_left"` when the host goes: show it and go back to the menu.
 
 ## 4. Buttons
 
