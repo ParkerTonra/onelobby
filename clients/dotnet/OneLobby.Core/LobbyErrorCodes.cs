@@ -41,6 +41,8 @@ namespace OneLobby
         public const string Timeout = "timeout";
         /// <summary>RejoinAsync: the seat behind the resume token is gone (resume window over, or the lobby ended).</summary>
         public const string InvalidToken = "invalid_token";
+        /// <summary>The config has no lobby server address (empty hosting.lobbyServer and no override); host, join and list need one.</summary>
+        public const string NoServer = "no_server";
         /// <summary>Direct IP: nothing answered on the host's TCP port.</summary>
         public const string DirectUnreachable = "direct_unreachable";
         /// <summary>Direct IP: the join code or address could not be read.</summary>

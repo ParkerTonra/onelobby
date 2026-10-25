@@ -170,11 +170,12 @@ namespace OneLobby.Tests
         }
 
         [Fact]
-        public void HostAsyncWithoutAServerIsBadConfig()
+        public void HostAndJoinWithoutAServerAreNoServer()
         {
             var (rig, c) = BlueprintClient(@"{""game"":{""id"":""a""}}");
-            var ex = Assert.Throws<BlueprintException>(() => rig.Await(c.HostAsync()));
-            Assert.Equal("bad_config", ex.Code);
+            Assert.Equal(LobbyErrorCodes.NoServer, Assert.Throws<OneLobbyException>(() => rig.Await(c.HostAsync())).Code);
+            Assert.Equal(LobbyErrorCodes.NoServer, Assert.Throws<OneLobbyException>(() => rig.Await(c.JoinAsync("C5AFX8"))).Code);
+            Assert.Equal(LobbyErrorCodes.ListingDisabled, Assert.Throws<OneLobbyException>(() => rig.Await(c.ListAsync())).Code);   // hosting.server defaults off
         }
 
         [Fact]

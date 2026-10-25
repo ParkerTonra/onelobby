@@ -110,9 +110,6 @@ namespace OneLobby
         public Task<Lobby> HostAsync(CancellationToken ct = default)
         {
             if (Blueprint == null) return Task.FromException<Lobby>(new InvalidOperationException("HostAsync() needs a client made with FromBlueprint; pass LobbyOptions"));
-            if (ReferenceEquals(Config.LobbyServer, OneLobby.Blueprint.NoServer))
-                return Task.FromException<Lobby>(new BlueprintException("hosting.lobbyServer", "required",
-                    "no lobby server: set hosting.lobbyServer in onelobby.json or pass lobbyServerOverride (direct-only games use HostDirectAsync)"));
             return HostAsync(Blueprint.ToLobbyOptions(null, Config.DisplayName), ct);
         }
 
@@ -153,6 +150,9 @@ namespace OneLobby
         private Task<T> Run<T>(string? resume, string? request, string[] expect, Func<JsonElement, T> finish, CancellationToken ct)
         {
             if (_op != null) return Task.FromException<T>(new InvalidOperationException("another request is in flight"));
+            if (!Direct && ReferenceEquals(Config.LobbyServer, OneLobby.Blueprint.NoServer))
+                return Task.FromException<T>(new OneLobbyException(LobbyErrorCodes.NoServer,
+                    "no lobby server address (set hosting.lobbyServer in onelobby.json or pass lobbyServerOverride; direct-only games use HostDirectAsync)"));
             if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
             var tcs = new TaskCompletionSource<T>();
             var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };

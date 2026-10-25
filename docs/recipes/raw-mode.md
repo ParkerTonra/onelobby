@@ -12,6 +12,7 @@ One tag byte, then payload. The game owns this layout; OneLobby never looks insi
 |---|---|---|---|
 | 1 `MOVE` | joiner to host | `cell` (1 byte) | "I want to play this cell" |
 | 2 `STATE` | host to one or all | 9 cells, `turn`, `winner` (1 byte each) | authoritative state |
+| 3 `RESET` | joiner to host | none | "start a new game" (the host decides, then sends `STATE`) |
 
 **Mapping your state to bytes.** OneLobby moves bytes; your state is strings and objects. Keep a small table from each
 value to a number and back, and never send names or JSON text for something that has an id. Here the example game's
@@ -26,7 +27,7 @@ A joiner's own `ready` event (or `await lobby.ready`) means its link to the host
 ```ts compile file=sync.ts
 import type { Lobby } from "onelobby";
 
-export const MOVE = 1, STATE = 2;
+export const MOVE = 1, STATE = 2, RESET = 3;
 
 // The game's own state (strings), as in examples/tictactoe/src/game.js.
 export interface Game {
@@ -35,6 +36,7 @@ export interface Game {
   winner: string;    // "" | "X" | "O" | "draw"
 }
 type Apply = (g: Game, cell: number) => boolean;
+type Reset = (g: Game) => void;   // the game's own "new game" (examples/tictactoe: g => Object.assign(g, newGame()))
 
 const SYMBOLS = ["", "X", "O", "draw"];            // index = the byte on the wire
 const toByte = (v: string) => Math.max(0, SYMBOLS.indexOf(v));
@@ -47,7 +49,7 @@ export function decodeState(b: Uint8Array): Game {
   return { cells: Array.from(b.subarray(1, 10), fromByte), turn: fromByte(b[10]), winner: fromByte(b[11]) };
 }
 
-export function wire(lobby: Lobby, game: Game, apply: Apply, render: () => void): void {
+export function wire(lobby: Lobby, game: Game, apply: Apply, reset: Reset, render: () => void): void {
   const markOf = (peerId: number) => (peerId === lobby.hostPeerId ? "X" : "O");   // host plays X
 
   lobby.on("message", (from: number, bytes: Uint8Array) => {
@@ -58,6 +60,8 @@ export function wire(lobby: Lobby, game: Game, apply: Apply, render: () => void)
       }
     } else if (bytes[0] === STATE) {    // joiner: the host is truth
       if (!lobby.isHost && bytes.length === 12) { Object.assign(game, decodeState(bytes)); render(); }
+    } else if (bytes[0] === RESET) {    // host only: a joiner may restart a finished game
+      if (lobby.isHost && game.winner !== "") { reset(game); lobby.broadcast(encodeState(game)); render(); }
     }
   });
   // Host: give each newcomer the current state as soon as their channel is open.
@@ -70,6 +74,12 @@ export function playCell(lobby: Lobby, game: Game, cell: number, apply: Apply, r
   } else {
     lobby.send(lobby.hostPeerId, Uint8Array.of(MOVE, cell));   // do not apply locally; wait for STATE
   }
+}
+
+// "New game" button. Same rule as moves: the joiner asks, the host resets and everyone gets the new STATE.
+export function newGame(lobby: Lobby, game: Game, reset: Reset, render: () => void): void {
+  if (lobby.isHost) { reset(game); lobby.broadcast(encodeState(game)); render(); }
+  else lobby.send(lobby.hostPeerId, Uint8Array.of(RESET));
 }
 ```
 
@@ -90,4 +100,5 @@ C# has the same shape (`lobby.PeerReady += peer => ...` for the initial state): 
 - The snippet type-checks and two tabs show identical boards after every move, with the joiner's moves accepted only on
   its turn.
 - A joiner who connects mid-game shows the current board straight away (the `peerReady` path).
+- "New game" from either tab clears both boards (the joiner's request only once a game has ended).
 - `conformance/peer` passes against your build (see `conformance/peer/README.md`).
