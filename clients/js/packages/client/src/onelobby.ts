@@ -22,7 +22,7 @@ import { decodeJoinCode, encodeJoinCode, looksLikeJoinCode } from "./joincode.js
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.3.0";
+export const LIB_VERSION = "0.3.1";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {

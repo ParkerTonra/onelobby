@@ -1,6 +1,6 @@
 {
   "name": "onelobby",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Multiplayer for browser games: host/join lobbies by short code, peer-to-peer WebRTC, lockstep sync, text and voice chat. Zero runtime dependencies; works from a plain <script> tag.",
   "keywords": [
     "multiplayer",
