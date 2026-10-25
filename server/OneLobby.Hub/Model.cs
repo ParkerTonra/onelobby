@@ -56,6 +56,8 @@ public sealed class Lobby
     public HashSet<string> Kicked = new(StringComparer.Ordinal);
     public int HostId;
     public int Epoch;
+    /// <summary>Highest valid host_changed claim a member made while the host was still connected; applied when the host goes.</summary>
+    public int PendingClaimPeer, PendingClaimEpoch;
     public int NextPeerId = 1;
 
     public Member? Find(int peerId)

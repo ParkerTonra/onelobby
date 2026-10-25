@@ -576,8 +576,16 @@ public sealed class Hub
         if (s.Lobby is not { } lobby || s.Member is not { } me) return;
         int? host = Int(m, "hostId"); int? epoch = Int(m, "epoch");
         if (host != me.PeerId || epoch is null || epoch <= lobby.Epoch) return;
+        if (_o.SingleLobby) return; // direct lobbies have no migration: the host leaving ends the session
+        if (lobby.HostId != me.PeerId && lobby.Find(lobby.HostId)?.Session is not null)
+        {
+            // The host is still here, so a member cannot take over. Remember the best claim for when the host goes.
+            if (epoch.Value > lobby.PendingClaimEpoch) { lobby.PendingClaimPeer = me.PeerId; lobby.PendingClaimEpoch = epoch.Value; }
+            return;
+        }
         lobby.HostId = me.PeerId;
         lobby.Epoch = epoch.Value;
+        lobby.PendingClaimPeer = lobby.PendingClaimEpoch = 0;
         Broadcast(lobby, new JsonObject { ["t"] = "host_changed", ["hostId"] = lobby.HostId, ["epoch"] = lobby.Epoch });
         Metrics.Inc("onelobby_host_changes_total");
         Log("host_claim", lobby, s);
@@ -618,7 +626,12 @@ public sealed class Hub
     /// <summary>Server mirror of the peer-side rule (s.9): new host is the lowest peerId still connected; epoch +1.</summary>
     private void PromoteHost(Lobby lobby, int leavingId)
     {
-        Member? next = lobby.Members.Where(x => x.Session is not null && x.PeerId != leavingId).OrderBy(x => x.PeerId).FirstOrDefault();
+        // A claim made while the old host was alive wins if its claimant is still connected.
+        Member? claimant = lobby.PendingClaimEpoch > lobby.Epoch && lobby.PendingClaimPeer != leavingId
+            ? lobby.Members.FirstOrDefault(x => x.PeerId == lobby.PendingClaimPeer && x.Session is not null) : null;
+        int claimEpoch = lobby.PendingClaimEpoch;
+        lobby.PendingClaimPeer = lobby.PendingClaimEpoch = 0;
+        Member? next = claimant ?? lobby.Members.Where(x => x.Session is not null && x.PeerId != leavingId).OrderBy(x => x.PeerId).FirstOrDefault();
         if (next is null)
         {
             // Nobody connected. Keep a reserved host slot (it may resume); otherwise fall back to the lowest slot.
@@ -627,7 +640,7 @@ public sealed class Hub
             if (next is null) return;
         }
         lobby.HostId = next.PeerId;
-        lobby.Epoch++;
+        if (claimant is not null) lobby.Epoch = claimEpoch; else lobby.Epoch++;
         Broadcast(lobby, new JsonObject { ["t"] = "host_changed", ["hostId"] = next.PeerId, ["epoch"] = lobby.Epoch });
         Metrics.Inc("onelobby_host_changes_total");
         if (next.Session is { } hs)

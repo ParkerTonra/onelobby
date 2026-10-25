@@ -34,6 +34,18 @@ public class DirectHubTests
     }
 
     [Fact]
+    public void Client_host_changed_claims_are_rejected_outright_in_a_direct_lobby()
+    {
+        var (hub, _) = Direct();
+        var h = T.Ready(hub, "local", "Host").Create("unlisted");
+        var j = JoinNoCode(T.Ready(hub, "10.0.0.2", "Joe"));
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":7}");
+        Assert.False(h.Has("host_changed"));
+        h.Disconnect();
+        Assert.Equal(1, (int)j.Last("host_changed")["epoch"]!);   // the server's own promotion, not the parked claim
+    }
+
+    [Fact]
     public void Join_without_code_before_any_lobby_is_unknown_code()
     {
         var (hub, _) = Direct();

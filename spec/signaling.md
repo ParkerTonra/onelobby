@@ -71,8 +71,11 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
   `closeCode` or `closeReason` is `bad_request` **(decision)**.
 - `c_host_changed{hostId, epoch}` (client -> server): the peer-side migration (s.9) tells the server. Accepted if the
   sender's own peerId equals `hostId`, `epoch` is greater than the lobby epoch (0 at creation), the sender is a member.
-  The server updates the host and broadcasts `host_changed{hostId, epoch}` to all members (sender included).
-  Otherwise ignored, no reply. **(decision)**
+  While the current host still has a live connection the claim is not applied: the server remembers the highest such
+  claim and applies it when the host's connection ends (left, kicked or dropped), provided the claimant is still
+  connected; otherwise the lowest-peerId rule above applies. Once the host is gone the server updates the host and
+  broadcasts `host_changed{hostId, epoch}` to all members (sender included). A single-lobby (direct) host ignores the
+  message outright: there is no migration. Otherwise ignored, no reply. **(decision)**
 
 ## Path telemetry
 

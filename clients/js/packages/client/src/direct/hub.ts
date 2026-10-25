@@ -178,6 +178,9 @@ class HubLobby {
   kicked = new Set<string>();
   hostId = 0;
   epoch = 0;
+  /** Highest valid host_changed claim a member made while the host was still connected; applied when the host goes. */
+  pendingClaimPeer = 0;
+  pendingClaimEpoch = 0;
   nextPeerId = 1;
   find(peerId: number): Member | undefined {
     return this.members.find((m) => m.peerId === peerId);
@@ -718,8 +721,18 @@ export class SignalingHub {
     const host = int(m, "hostId");
     const epoch = int(m, "epoch");
     if (host !== me.peerId || epoch === null || epoch <= lobby.epoch) return;
+    if (this.o.singleLobby) return; // direct lobbies have no migration: the host leaving ends the session
+    if (lobby.hostId !== me.peerId && lobby.find(lobby.hostId)?.session) {
+      // The host is still here, so a member cannot take over. Remember the best claim for when the host goes.
+      if (epoch > lobby.pendingClaimEpoch) {
+        lobby.pendingClaimPeer = me.peerId;
+        lobby.pendingClaimEpoch = epoch;
+      }
+      return;
+    }
     lobby.hostId = me.peerId;
     lobby.epoch = epoch;
+    lobby.pendingClaimPeer = lobby.pendingClaimEpoch = 0;
     this.broadcast(lobby, { t: "host_changed", hostId: lobby.hostId, epoch: lobby.epoch });
     this.logEvent("host_claim", lobby, s);
   }
@@ -756,7 +769,14 @@ export class SignalingHub {
 
   /** Server mirror of the peer-side rule (s.9): new host is the lowest peerId still connected; epoch +1. */
   private promoteHost(lobby: HubLobby, leavingId: number): void {
-    let next = lobby.members.filter((x) => x.session && x.peerId !== leavingId).sort((a, b) => a.peerId - b.peerId)[0];
+    // A claim made while the old host was alive wins if its claimant is still connected.
+    const claimant =
+      lobby.pendingClaimEpoch > lobby.epoch && lobby.pendingClaimPeer !== leavingId
+        ? lobby.members.find((x) => x.peerId === lobby.pendingClaimPeer && x.session)
+        : undefined;
+    const claimEpoch = lobby.pendingClaimEpoch;
+    lobby.pendingClaimPeer = lobby.pendingClaimEpoch = 0;
+    let next = claimant ?? lobby.members.filter((x) => x.session && x.peerId !== leavingId).sort((a, b) => a.peerId - b.peerId)[0];
     if (!next) {
       // Nobody connected. Keep a reserved host slot (it may resume); otherwise fall back to the lowest slot.
       if (lobby.find(leavingId)) return;
@@ -764,7 +784,8 @@ export class SignalingHub {
       if (!next) return;
     }
     lobby.hostId = next.peerId;
-    lobby.epoch++;
+    if (claimant) lobby.epoch = claimEpoch;
+    else lobby.epoch++;
     this.broadcast(lobby, { t: "host_changed", hostId: next.peerId, epoch: lobby.epoch });
     const hs = next.session;
     if (hs) for (const pm of lobby.pending) this.send(hs, { t: "join_request", peer: this.peerObj(pm) }); // the new host inherits the pending requests

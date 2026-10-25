@@ -51,8 +51,9 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
     } else if (p.token) tokens.delete(p.token);
     everyone(l, { t: 'peer_left', peerId: p.peerId, reason });
     if (p.peerId === l.hostId) {
-      const next = connected(l).map((q) => q.peerId).sort((a, b) => a - b)[0];
-      if (next) { l.hostId = next; l.epoch++; everyone(l, { t: 'host_changed', hostId: next, epoch: l.epoch }); }
+      const claim = l.claimEpoch > l.epoch && connected(l).some((q) => q.peerId === l.claimPeer) ? l.claimPeer : 0;
+      const next = claim || connected(l).map((q) => q.peerId).sort((a, b) => a - b)[0];
+      if (next) { l.hostId = next; l.epoch = claim ? l.claimEpoch : l.epoch + 1; l.claimPeer = l.claimEpoch = 0; everyone(l, { t: 'host_changed', hostId: next, epoch: l.epoch }); }
     }
     maybeClose(l);
   }
@@ -205,7 +206,8 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
       case 'path': if (!['relayed', 'direct'].includes(m.path)) return bad('path', 'path'); return;
       case 'host_changed': {
         if (!l) return; if (m.hostId !== me.peerId || !isInt(m.epoch, 1, 65535) || m.epoch <= l.epoch) return;
-        l.hostId = m.hostId; l.epoch = m.epoch; return everyone(l, { t: 'host_changed', hostId: l.hostId, epoch: l.epoch });
+        if (l.peers.get(l.hostId)?.conn && l.hostId !== me.peerId) { if (m.epoch > (l.claimEpoch ?? 0)) { l.claimPeer = me.peerId; l.claimEpoch = m.epoch; } return; }
+        l.hostId = m.hostId; l.epoch = m.epoch; l.claimPeer = l.claimEpoch = 0; return everyone(l, { t: 'host_changed', hostId: l.hostId, epoch: l.epoch });
       }
       default: // unknown type: ignored
     }

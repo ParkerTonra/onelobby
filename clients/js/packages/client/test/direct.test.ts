@@ -8,7 +8,7 @@ import { OneLobbyError } from "../src/signaling.js";
 import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
-import { DirectHubHost, directHubOptions, hostDirect } from "../src/direct/index.js";
+import { DirectHubHost, defaultHubOptions, directHubOptions, hostDirect } from "../src/direct/index.js";
 import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
 
 /**
@@ -77,6 +77,41 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     expect((await j.next("lobby")).you).toBe(2);
     h.send({ t: "list", visibility: "public" });
     expect((await h.next("lobbies")).items).toEqual([]);
+  });
+
+  it("a member's host_changed claim changes nothing while the host is connected, and takes effect when it goes", async () => {
+    const host = await DirectHubHost.listen(0, { ...defaultHubOptions(), rateScale: 20 }, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    const h = await raw(host.port);
+    await h.hello();
+    h.send({ t: "create", name: "L", maxPlayers: 4, mode: "raw", visibility: "unlisted" });
+    const code = (await h.next("lobby")).code;
+    const j = await raw(host.port);
+    await j.hello();
+    j.send({ t: "join", code });
+    await j.next("lobby");
+    j.send({ t: "host_changed", hostId: 2, epoch: 3 });
+    j.send({ t: "phase", phase: "in_game" });
+    expect((await j.next("error")).code).toBe("not_host");
+    h.ws.close();
+    const hc = await j.next("host_changed");
+    expect([hc.hostId, hc.epoch]).toEqual([2, 3]);
+  });
+
+  it("host_changed claims are rejected outright in a direct lobby", async () => {
+    const host = await DirectHubHost.listen(0, directHubOptions(4, null), { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    const h = await raw(host.port);
+    await h.hello();
+    h.send({ t: "create", name: "L", maxPlayers: 4, mode: "raw" });
+    await h.next("lobby");
+    const j = await raw(host.port);
+    await j.hello();
+    j.send({ t: "join" });
+    await j.next("lobby");
+    j.send({ t: "host_changed", hostId: 2, epoch: 7 });
+    h.ws.close();
+    expect((await j.next("host_changed")).epoch).toBe(1);   // the hub's own promotion, not the claim
   });
 
   it("wrong password is bad_password; second create is server_full", async () => {

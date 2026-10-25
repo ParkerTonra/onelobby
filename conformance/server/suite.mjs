@@ -397,20 +397,26 @@ export function buildSuite(opts) {
     assert.equal(e.data?.reason, 'denied');
     await h.expectSilence(150);
   });
-  T('host', 'host_changed from a member: epoch rule, only for yourself', async (t) => {
+  T('host', 'host_changed from a member while the host is connected changes nothing; it takes effect when the host goes', async (t) => {
     const h = await t.host();
     const a = await t.join(h.lobby.code, {}, h);
     const b = await t.join(h.lobby.code, {}, h); await a.next('peer_joined');
     b.send({ t: 'host_changed', hostId: 2, epoch: 1 });  // not the claimant: ignored
     a.send({ t: 'host_changed', hostId: 2, epoch: 0 });  // epoch not greater: ignored
+    a.send({ t: 'host_changed', hostId: 2, epoch: 1 });  // host still connected: parked, not applied
+    b.send({ t: 'host_changed', hostId: 3, epoch: 5 });  // the highest parked claim wins when the host goes
     await sleep(150);
     for (const c of [h, a, b]) await c.expectSilence(10);
-    a.send({ t: 'host_changed', hostId: 2, epoch: 1 });
-    for (const c of [h, a, b]) assert.deepEqual({ hostId: (await c.next('host_changed')).hostId }, { hostId: 2 });
-    h.send({ t: 'kick', peerId: 3 });
-    await h.nextError('not_host');
     a.send({ t: 'kick', peerId: 3 });
-    await b.nextError('kicked');
+    await a.nextError('not_host');
+    h.send({ t: 'leave' }); h.inLobby = false;
+    for (const c of [a, b]) {
+      await c.next('peer_left', { peerId: 1, reason: 'left' });
+      const hc = await c.next('host_changed');
+      assert.deepEqual({ hostId: hc.hostId, epoch: hc.epoch }, { hostId: 3, epoch: 5 });
+    }
+    b.send({ t: 'kick', peerId: 2 });
+    await a.nextError('kicked');
   });
 
   // ------------------------------------------------------------------ list

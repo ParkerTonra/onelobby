@@ -575,15 +575,41 @@ public class HubTests
         j.Send("{\"t\":\"host_changed\",\"hostId\":1,\"epoch\":1}");   // not own id: ignored
         j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":0}");   // epoch not greater: ignored
         Assert.False(h.Has("host_changed"));
-        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");
-        Assert.Equal(2, (int)h.Last("host_changed")["hostId"]!);
-        Assert.Equal(3, (int)j.Last("host_changed")["epoch"]!);
+        h.Disconnect();   // the host is gone: a claim from a member who is the (only) one left is applied
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":9}");
+        Assert.Equal(2, (int)j.Last("host_changed")["hostId"]!);
         j.Send("{\"t\":\"phase\",\"phase\":\"in_game\"}");
         Assert.False(j.Has("error"));
-        h.Send("{\"t\":\"phase\",\"phase\":\"lobby\"}");
-        Assert.Equal("not_host", h.LastError);
-        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");     // stale epoch
-        Assert.Equal(1, h.Inbox.Count(m => (string?)m["t"] == "host_changed"));
+    }
+
+    [Fact]
+    public void Client_host_changed_claim_is_ignored_while_the_host_is_connected_and_applies_when_it_goes()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j, _) = T.Pair(hub);
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");
+        Assert.False(h.Has("host_changed"));
+        Assert.False(j.Has("host_changed"));
+        j.Send("{\"t\":\"phase\",\"phase\":\"in_game\"}");
+        Assert.Equal("not_host", j.LastError);
+        h.Disconnect();
+        Assert.Equal(2, (int)j.Last("host_changed")["hostId"]!);
+        Assert.Equal(3, (int)j.Last("host_changed")["epoch"]!);   // the claimed epoch, not epoch + 1
+        j.Send("{\"t\":\"phase\",\"phase\":\"in_game\"}");
+        Assert.Equal("in_game", (string)j.Last("lobby")["phase"]!);
+    }
+
+    [Fact]
+    public void Client_host_changed_claim_dies_with_its_claimant()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j, code) = T.Pair(hub);
+        var k = T.Ready(hub, "10.0.0.2"); k.Join(code);
+        j.Send("{\"t\":\"host_changed\",\"hostId\":2,\"epoch\":3}");
+        j.Disconnect();   // claimant gone before the host
+        h.Disconnect();
+        Assert.Equal(3, (int)k.Last("host_changed")["hostId"]!);
+        Assert.Equal(1, (int)k.Last("host_changed")["epoch"]!);
     }
 
     [Fact]
