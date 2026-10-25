@@ -55,6 +55,8 @@ lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "se
 lobby.on("ready", () => {}); await lobby.ready;            // joiner: link to host open (host: at once)
 await lobby.start(); await lobby.kick(id); await lobby.leave();
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
+const ws = lobby.asWebSocket();                            // joiner: WebSocket-shaped link to the host (text; { binary: true })
+lobby.onConnection((conn) => { conn.onmessage = (e) => conn.send(e.data); });   // host: one WebSocket-shaped conn per joiner
 lobby.voice.enabled = true; lobby.voice.pushToTalk(down);
 lobby.lockstep.submit(cmd); for (let f; (f = lobby.lockstep.nextFrame()); ) { /* f.tick, f.commands */ }
 lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lobby.lockstep.restore = (tick, b) => {};
@@ -66,9 +68,9 @@ lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lo
 npm install onelobby
 ```
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js">` sets
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js">` sets
 `window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+`https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
 migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
@@ -89,7 +91,8 @@ npm install file:/path/to/onelobby/clients/js/packages/client
 /path/to/onelobby/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:onelobby=/path/to/onelobby/clients/js/packages/client/dist/index.js
 ```
 
-Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
+Installing a folder only links it (npm runs no build), so build before every `npm install <folder>` that should pick
+up new changes. Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
 `<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
@@ -109,6 +112,14 @@ Full reference (generated): `docs/api/`.
 - `rememberSeat` (default on where `sessionStorage` exists): after a page reload `kit.join(sameCode)` takes the old
   seat back instead of joining as a new player; `await kit.resume()` does it without a code (null when there is no seat
   or the server dropped it) and `kit.rememberedCode` tells you whether there is one. Forgotten when the session ends.
+- Liveness: a silently dead peer surfaces on its own within about 30 s (host: `peerLeft`; joiner: `hostChanged` after
+  a migration, or `sessionEnded("host_left")` on a direct lobby). `peerTimeoutMs` (default 0 = that) shortens it using
+  OneLobby's own 2 s pings (minimum 6000), so games need no heartbeat of their own.
+- `rateLimit: { messages, perMs }` on `host()` / `hostDirect()` caps each joiner's incoming raw messages; the excess is
+  dropped before `message` fires or is relayed.
+- Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
+- Sockets close with 1000 (you closed), 1001 (the other end left, `host_left`, `host_changed`), 4000 (kicked) or 1006
+  (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. The library version is `LIB_VERSION`.
 - `host()` defaults to `visibility: "unlisted"`: joinable by code or link, not shown by `list()`. Pass `"public"` to list it.
 - An empty `displayName` (the default) shows to everyone as `"Player N"`, N being the seat (peer id).
 - Test and runtime seams (`socketFactory`, `linkFactory`, `clock`, `wallClock`, `voiceCodec`, `createMic`,

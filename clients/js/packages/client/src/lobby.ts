@@ -18,6 +18,7 @@ import { claimWinsWrapped, pickNewHost } from "./migration.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink, SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
+import { hostConnections, joinerSocket, type LobbySocket, type LobbySocketOptions } from "./socket.js";
 
 export type Phase = "lobby" | "in_game";
 export type Peer = PeerInfo;
@@ -61,7 +62,25 @@ export interface LobbyConfig {
    * (link, peer_left, a host_changed from the hub as it shuts down, or the signaling socket) ends with "host_left".
    */
   direct?: boolean;
+  /**
+   * Treat a peer as gone after this many ms without hearing anything from it (0 or absent: off, and a silent peer
+   * surfaces only when its link or signaling socket times out, about 30 s). Joiners ping the host every 2 s and the
+   * host answers, so the host drops a silent joiner (`peerLeft`, "timeout") and a joiner handles a silent host as
+   * lost (a direct lobby ends with "host_left"). Values under 6000 are raised to 6000.
+   */
+  peerTimeoutMs?: number;
+  /** Host: per-peer cap on incoming raw messages; the excess is dropped before `message` fires or is relayed. */
+  rateLimit?: RateLimit;
 }
+
+/** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
+export interface RateLimit {
+  messages: number;
+  perMs: number;
+}
+
+/** The smallest `peerTimeoutMs` honoured: three missed pings. */
+export const MIN_PEER_TIMEOUT_MS = 6000;
 
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export function seatName(p: PeerInfo): PeerInfo {
@@ -127,6 +146,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   private isReady = false;
   private cancelReadyTimer: (() => void) | null = null;
   private relayRetry = false;
+  /** clock.now() of the last frame from each peer (peerTimeoutMs). */
+  private lastHeard = new Map<number, number>();
+  /** Host: per-peer fixed window for rateLimit. */
+  private rate = new Map<number, { start: number; n: number }>();
   /**
    * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
    * joiner. Rejects with OneLobbyError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
@@ -205,6 +228,23 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
   peer(peerId: number): Peer | undefined {
     return this.roster.get(peerId);
+  }
+  /** Peers whose link is open and handshake done (host: the ready joiners; joiner: the host once ready). */
+  get connectedPeers(): number[] {
+    return this.connectedPeerIds();
+  }
+
+  /**
+   * Joiner: the link to the host as a WebSocket-shaped object (text by default), so WebSocket client code runs
+   * unchanged. It opens when `ready` resolves and closes when the session ends (`host_left` gives code 1001).
+   */
+  asWebSocket(opts?: LobbySocketOptions): LobbySocket {
+    return joinerSocket(this, opts);
+  }
+
+  /** Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket(). */
+  onConnection(handler: (conn: LobbySocket) => void, opts?: LobbySocketOptions): () => void {
+    return hostConnections(this, handler, opts);
   }
 
   set snapshotChunkSize(n: number) {
@@ -452,6 +492,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       return;
     }
     if (!d) return;
+    if (!reassembled) this.lastHeard.set(from, this.cfg.clock.now());
     const { msg, route } = d;
     switch (msg.type) {
       case "hi":
@@ -533,6 +574,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       this.emit("message", route, bytes, channel);
       return;
     }
+    if (!this.allowRaw(from)) return;
     if (route === 0 || route === this.localPeerId) {
       this.emit("message", from, bytes, channel);
     }
@@ -541,6 +583,15 @@ export class Lobby extends Emitter<LobbyEvents> {
     } else if (route !== this.localPeerId) {
       this.sendTo(route, { type: "raw", bytes }, from, channel);
     }
+  }
+
+  private allowRaw(from: number): boolean {
+    const lim = this.cfg.rateLimit;
+    if (!lim || !(lim.messages > 0) || !(lim.perMs > 0)) return true;
+    const now = this.cfg.clock.now();
+    let w = this.rate.get(from);
+    if (!w || now - w.start >= lim.perMs) this.rate.set(from, (w = { start: now, n: 0 }));
+    return ++w.n <= lim.messages;
   }
 
   // ---- migration -------------------------------------------------------------------------------------------------
@@ -583,6 +634,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.markReady();
     this.connected.clear();
     this.hiSentTo.clear();
+    this.lastHeard.clear(); // joiners spoke to the old host; their clocks start when they say hi to us
     this.lockstep.becomeHost();
     this.emit("hostChanged", this.localPeerId);
     if (this.serverUp) this.signaling.send({ t: "host_changed", hostId: this.localPeerId, epoch: this.epoch });
@@ -714,6 +766,8 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     this.connected.delete(peerId);
     this.outbox.delete(peerId);
+    this.lastHeard.delete(peerId);
+    this.rate.delete(peerId);
     this.lockstep.onPeerLeft(peerId);
     this.chat.onPeerLeft(peerId);
     this.voice.onPeerLeft(peerId);
@@ -751,11 +805,31 @@ export class Lobby extends Emitter<LobbyEvents> {
   // ---- housekeeping ----------------------------------------------------------------------------------------------
 
   private watchdog(): void {
+    if (this.ended) return;
+    const timeout = this.cfg.peerTimeoutMs ?? 0;
+    if (timeout > 0) this.dropSilent(Math.max(timeout, MIN_PEER_TIMEOUT_MS));
     if (this.ended || this.isHost) return;
     if (this.mode === "lockstep" && this.lockstep.hostSilent()) {
       this.lockstep.touch();
       this.lockstep.pokeHost(); // a live-but-stalled host answers with a snapshot; a dead one is replaced below
       this.handleHostLost("timeout");
+    }
+  }
+
+  /** peerTimeoutMs: the host drops joiners it has not heard from; a joiner handles a silent host as lost. */
+  private dropSilent(timeout: number): void {
+    const now = this.cfg.clock.now();
+    if (this.isHost) {
+      for (const id of [...this.connected]) {
+        const last = this.lastHeard.get(id);
+        if (last !== undefined && now - last > timeout) this.removePeer(id, "timeout");
+      }
+    } else if (this.isReady) {
+      const last = this.lastHeard.get(this.hostPeerId);
+      if (last !== undefined && now - last > timeout) {
+        this.lastHeard.delete(this.hostPeerId);
+        this.handleHostLost("timeout");
+      }
     }
   }
 

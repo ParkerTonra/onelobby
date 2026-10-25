@@ -206,6 +206,32 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     expect(Date.now() - t0).toBeLessThan(4000);
   });
 
+  it("sockets over a direct lobby: onConnection + asWebSocket, rateLimit, host leaving is 1001 host_left, never hostChanged", async () => {
+    const port = await freePort();
+    const host = await hostDirect(kit("Host"), { port, openPort: false, rateLimit: { messages: 5, perMs: 60_000 } });
+    cleanup.push(() => host.leave());
+    const got: string[] = [];
+    host.onConnection((c) => (c.onmessage = (e) => { got.push(String(e.data)); c.send(`ok ${e.data}`); }));
+    const a = await kit("A").joinDirect(`127.0.0.1:${port}`);
+    cleanup.push(() => a.leave());
+    const ws = a.asWebSocket();
+    const replies: string[] = [];
+    const closes: [number, string][] = [];
+    let hostChanged = 0;
+    a.on("hostChanged", () => hostChanged++);
+    ws.onmessage = (e) => replies.push(String(e.data));
+    ws.onclose = (e) => closes.push([e.code, e.reason]);
+    await new Promise<void>((r) => (ws.onopen = () => r()));
+    for (let i = 0; i < 8; i++) ws.send(`m${i}`);
+    await until(() => replies.length === 5, "five replies");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(got).toEqual(["m0", "m1", "m2", "m3", "m4"]); // the rest are over the cap
+    await host.leave();
+    await until(() => closes.length === 1, "joiner socket closes");
+    expect(closes).toEqual([[1001, "host_left"]]);
+    expect(hostChanged).toBe(0);
+  }, 30000);
+
   it("second host on the same port is port_in_use", async () => {
     const port = await freePort();
     const a = await hostDirect(kit("A"), { port, openPort: false });

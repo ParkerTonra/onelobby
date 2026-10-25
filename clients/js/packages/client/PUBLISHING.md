@@ -26,7 +26,7 @@ npm publish                # access is public via publishConfig
 ```
 
 Then check: https://www.npmjs.com/package/onelobby and
-https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js (CDNs pick it up within minutes).
+https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js (CDNs pick it up within minutes).
 
 ## Fallback: name taken -> `one-lobby`
 
@@ -43,6 +43,6 @@ https://cdn.jsdelivr.net/npm/onelobby@0.1.0/dist/onelobby.global.min.js (CDNs pi
 
 Bump `version` in `package.json` **and** `LIB_VERSION` in `src/onelobby.ts` (prepublish-check fails if they differ),
 update the pinned version in every CDN URL in the docs and examples (`git grep -n "onelobby@"`), commit, then
-`npm publish`. CDN URLs are pinned (`onelobby@0.1.0`) so a page never silently picks up a different release. The
+`npm publish`. CDN URLs are pinned (`onelobby@0.2.0`) so a page never silently picks up a different release. The
 deprecated `Keepalive` / `KeepaliveError` aliases can be dropped in the next minor release once existing games import
 `OneLobby`.
