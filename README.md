@@ -1,23 +1,41 @@
 # OneLobby
 
-OneLobby adds **Host a game** and **Join a game** buttons to your web game: players share a short code and play
-together, with voice and text chat built in. Anyone can run the small server that introduces players, so your game
-keeps working even if you stop running one yourself.
+**Multiplayer that outlives its servers.** Players host and join with a short code, peer to peer. There is no backend
+you have to keep paying for, so when you stop running servers (or never start), your game's multiplayer keeps working.
+Free, open source (MIT), with voice and text chat built in.
 
-## I don't code
+- **No server at all:** a .NET, Unity or Node game hosts straight from the player's PC and shows a join code
+  (`6B01-RGFE-P2B`); friends paste it and play, like Terraria's "Host & Play".
+- **Or a server anyone can run:** web games use a tiny lobby server that only introduces players. Its address is a
+  setting, so players or a community can run their own long after you've moved on.
+- **The game data never touches a server:** peers talk over WebRTC data channels.
 
-Put multiplayer on your web game by pasting a snippet: [docs/no-code.md](docs/no-code.md).
-You also need a lobby server; [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md) gets you a free one in a few clicks.
+Engines: browser JS, Godot 4 (C#), Unity 6 (desktop and mobile), any .NET app, Node.
 
-## No server at all: host by IP
+## Using an AI coding agent?
 
-A .NET game (desktop, Unity) or a Node game server can host straight from the player's PC: it opens its port on the
-router and shows a join code (`6B01-RGFE-P2B`, the host's address in disguise), friends paste it, nobody runs a server. See [docs/recipes/direct-ip.md](docs/recipes/direct-ip.md). This is the first backend that ships; the hosted
-lobby server below (join codes, public list, relay) comes later.
+Tell it:
 
-## Quickstart for developers
+> Read https://github.com/ParkerTonra/onelobby/blob/main/AGENTS.md and add host/join multiplayer to my game.
 
-Install `onelobby` (see [its README](clients/js/packages/client/README.md)), then in a browser module:
+[AGENTS.md](AGENTS.md) is the whole API on one page plus a copy-paste recipe for each engine, and every recipe ends with
+a "Done when" check the agent can run. Doc tools can read [llms.txt](llms.txt).
+
+## Pick your path
+
+| You have | Start here |
+| --- | --- |
+| A Unity game | [Unity recipe](docs/recipes/unity.md) (host by IP: [direct-ip.md](docs/recipes/direct-ip.md)) |
+| A Godot 4 C# game | [Godot recipe](docs/recipes/godot-csharp.md) (Godot hosting by IP comes later) |
+| A browser game | [JS recipe](docs/recipes/js-web.md), or the quickstart below |
+| A browser game with a Node server on the host's PC | [browser-game.md](docs/recipes/browser-game.md) |
+| Any other .NET app (MonoGame, console, bots) | [.NET recipe](docs/recipes/dotnet-generic.md) |
+| A real-time action game (shooter, physics) | [Replication recipe](docs/recipes/replication.md): snapshots, interpolation, prediction |
+| No code, just a web game | Paste a snippet: [no-code.md](docs/no-code.md) |
+
+## Quickstart (browser)
+
+`npm install onelobby` (or a `<script>` tag, see [its README](clients/js/packages/client/README.md)), then in a module:
 
 ```js
 import { OneLobby } from "onelobby";
@@ -29,18 +47,17 @@ lobby.on("message", (from, bytes) => console.log(`peer ${from}:`, new TextDecode
 lobby.on("peerReady", (peer) => lobby.send(peer.peerId, new TextEncoder().encode("hello!")));
 ```
 
-Open it in two tabs (the second with `?join=` plus the code) and each logs the other's `hello!`.
-For a local server use `ws://127.0.0.1:8080/ws` ([docs/recipes/self-host.md](docs/recipes/self-host.md)).
-Next: [docs/recipes/js-web.md](docs/recipes/js-web.md), [raw-mode.md](docs/recipes/raw-mode.md), or C# with Godot, Unity or any .NET engine in
-[AGENTS.md](AGENTS.md) ([Unity recipe](docs/recipes/unity.md), [.NET recipe](docs/recipes/dotnet-generic.md)). AI coding agents: start at [AGENTS.md](AGENTS.md) or [llms.txt](llms.txt).
+Open it in two tabs (the second with `?join=` plus the code) and each logs the other's `hello!`. `YOUR-SERVER` is a
+lobby server: run one locally and use `ws://127.0.0.1:8080/ws` ([self-host.md](docs/recipes/self-host.md)), or get a
+free one in a few clicks ([deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)).
 
-## Run a server
+## Run a lobby server
 
 - Easy: a free lobby server in a few clicks: [deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)
 - Advanced: lobby server plus TURN relay on your own machine: [deploy/RUN_YOUR_OWN.md](deploy/RUN_YOUR_OWN.md)
 
-## For developers: project notes
+## Project notes
 
-Players' browsers connect directly (WebRTC); the lobby server only introduces them. Design and wire protocol:
-[DESIGN.md](DESIGN.md). Status: early (version 0.1). Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError`
-and the server's `KEEPALIVE_*` environment variables still work for one version (deprecated).
+Status: early (0.4). Design and wire protocol: [DESIGN.md](DESIGN.md) and [spec/](spec/). Generated API reference:
+[docs/api/](docs/api/). Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError` and the server's `KEEPALIVE_*`
+environment variables still work but are deprecated.
