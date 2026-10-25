@@ -4,7 +4,8 @@
 #   dotnet run --project server/OneLobby.Server -- --listen :8080
 #   powershell -File clients/unity/mono-probe/run.ps1 -Unity "C:\Program Files\Unity\Hub\Editor\6000.2.7f2" -Server ws://127.0.0.1:8080/ws
 # -Direct needs no server: host by IP (OneLobby.Direct + the embedded hub) on loopback port 47831, join by address.
-param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws', [switch]$Direct)
+# -Upnp needs no server: the router port-mapping request against a fake gateway on loopback (quoted charset replies).
+param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws', [switch]$Direct, [switch]$Upnp)
 $ErrorActionPreference = 'Stop'
 $lib = Join-Path $Unity 'Editor/Data/MonoBleedingEdge/lib/mono/unityjit-win32'
 $pkg = Join-Path $PSScriptRoot '../com.onelobby.unity'
@@ -26,7 +27,7 @@ if (-not $vs) { throw 'MSVC (C++ x64 tools) is needed to build monohost.exe' }
 $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvars64.bat'
 cmd /c "`"$vcvars`" >nul 2>nul && cl /nologo /O2 `"$(Join-Path $PSScriptRoot 'host/monohost.c')`" /Fe:`"$out/monohost.exe`" /Fo:`"$out/monohost.obj`" >nul"
 if ($LASTEXITCODE -ne 0) { throw 'monohost build failed' }
-& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $(if ($Direct) { 'direct' } else { $Server })
+& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $(if ($Upnp) { 'upnp' } elseif ($Direct) { 'direct' } else { $Server })
 $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $out
 exit $code

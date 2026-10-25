@@ -144,7 +144,7 @@ public sealed class PortMapper : IDisposable
     {
         var location = await DiscoverAsync(ct).ConfigureAwait(false);
         if (location == null) return null;
-        var desc = XDocument.Parse(await _http.GetStringAsync(location).ConfigureAwait(false));
+        var desc = ParseXml(await _http.GetByteArrayAsync(location).ConfigureAwait(false));
         XNamespace ns = desc.Root?.Name.Namespace ?? XNamespace.None;
         var baseText = desc.Root?.Element(ns + "URLBase")?.Value;
         var baseUri = !string.IsNullOrWhiteSpace(baseText) && Uri.TryCreate(baseText, UriKind.Absolute, out var bu) ? bu : location;
@@ -317,9 +317,9 @@ public sealed class PortMapper : IDisposable
         using var req = new HttpRequestMessage(HttpMethod.Post, _control) { Content = new StringContent(body.ToString(), Encoding.UTF8, "text/xml") };
         req.Headers.TryAddWithoutValidation("SOAPAction", "\"" + _service + "#" + action + "\"");
         using var res = await _http.SendAsync(req, ct).ConfigureAwait(false);
-        var text = await res.Content.ReadAsStringAsync().ConfigureAwait(false);
+        var bytes = await res.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
         XDocument doc;
-        try { doc = XDocument.Parse(text); }
+        try { doc = ParseXml(bytes); }
         catch (System.Xml.XmlException) { throw new UpnpException(0, action + " answered HTTP " + (int)res.StatusCode); }
         if (!res.IsSuccessStatusCode)
         {
@@ -329,6 +329,17 @@ public sealed class PortMapper : IDisposable
             throw new UpnpException(n, action + " error " + (code ?? ((int)res.StatusCode).ToString(CultureInfo.InvariantCulture)) + " " + (desc ?? ""));
         }
         return doc;
+    }
+
+    /// <summary>
+    /// Parses a router's XML from raw bytes, so the encoding comes from the BOM or XML declaration (UTF-8 by default),
+    /// never from the Content-Type charset: Mono throws on a quoted <c>charset="utf-8"</c>, and some routers send
+    /// names no runtime knows.
+    /// </summary>
+    private static XDocument ParseXml(byte[] bytes)
+    {
+        using var stream = new System.IO.MemoryStream(bytes);
+        return XDocument.Load(stream);
     }
 
     /// <summary>The local IPv4 the OS would use to reach the router (UDP connect sends nothing).</summary>

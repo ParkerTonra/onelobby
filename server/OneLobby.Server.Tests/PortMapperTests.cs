@@ -20,6 +20,7 @@ public class PortMapperTests
         public readonly ConcurrentQueue<string> Actions = new();
         public string External = "203.0.113.7";
         public int AddError; // UPnP error code to answer AddPortMapping with (0 = ok); 725 is cleared after one use
+        public string ContentType = "text/xml";
         private readonly CancellationTokenSource _cts = new();
 
         public IPEndPoint SsdpEndpoint => (IPEndPoint)Ssdp.Client.LocalEndPoint!;
@@ -71,7 +72,7 @@ public class PortMapperTests
             var body = Encoding.UTF8.GetString(buf, headerEnd + 4, len);
             var (status, xml) = Handle(head, body);
             var bytes = Encoding.UTF8.GetBytes(xml);
-            var resp = $"HTTP/1.1 {status}\r\nContent-Type: text/xml\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
+            var resp = $"HTTP/1.1 {status}\r\nContent-Type: {ContentType}\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
             await s.WriteAsync(Encoding.ASCII.GetBytes(resp));
             await s.WriteAsync(bytes);
         }
@@ -185,6 +186,19 @@ public class PortMapperTests
         Assert.Equal("127.0.0.1 lease 7200", gw.Mappings["UDP 47810"]);
         m.Dispose();
         Assert.Empty(gw.Mappings);
+    }
+
+    [Theory]
+    [InlineData("text/xml; charset=\"utf-8\"")] // quoted (legal, RFC 9110): Mono's ReadAsStringAsync throws on it
+    [InlineData("text/xml; charset=not-a-real-encoding")]
+    public async Task UpnpIgnoresTheResponseCharset(string contentType)
+    {
+        using var gw = new FakeUpnp { ContentType = contentType };
+        using var m = new PortMapper(47810, Opts(gw));
+        var r = await m.OpenAsync();
+        Assert.True(r.Mapped, r.Detail);
+        Assert.Equal("203.0.113.7", r.ExternalIPv4);
+        Assert.Equal("127.0.0.1 lease 7200", gw.Mappings["TCP 47810"]);
     }
 
     [Fact]
