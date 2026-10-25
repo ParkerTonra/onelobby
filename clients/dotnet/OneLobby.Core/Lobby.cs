@@ -110,6 +110,9 @@ namespace OneLobby
         /// <summary>Direct-IP host only: how the router port-open went, for logs ("UPnP", "no UPnP gateway answered; ...").</summary>
         public string PortMapping { get; internal set; } = "";
 
+        /// <summary>Direct-IP host only: one log line with the bound port, the join code and the mapping (OneLobby.Direct sets it).</summary>
+        internal string DirectHostLog { get; set; } = "";
+
         /// <summary>Direct IP has no migration: the hub lives in the host (docs/direct-ip.md s.2).</summary>
         private bool DirectJoiner => _c.Direct && !IsHost;
 
