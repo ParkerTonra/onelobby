@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { RTCPeerConnection as NdcPeerConnection } from "node-datachannel/polyfill";
 import { WebRtcLink } from "../src/webrtc.js";
+import type { SignalPayload } from "../src/transport.js";
 
 /** WebRtcLink against a scripted RTCPeerConnection: when channels are made, and what a peer that opens late sees. */
 
@@ -91,4 +93,68 @@ describe("WebRtcLink", () => {
     reliable.receive("after");
     expect(seen).toEqual(["open", "reliable:hi", "reliable:hello", "fast:f", "reliable:after"]);
   });
+
+  it("a remote candidate that arrives before the remote description waits for it (node-datachannel's is never null)", async () => {
+    // node-datachannel's polyfill answers remoteDescription with an object even before one is set, and its
+    // addIceCandidate throws until then. A joiner's candidate can beat its answer to the host (its native callbacks are
+    // not ordered), which used to close the host's link: the joiner then timed out with ice_failed.
+    class NdcLikePc extends FakePc {
+      added: unknown[] = [];
+      private set = false;
+      constructor() {
+        super();
+        Object.defineProperty(this, "remoteDescription", { get: () => ({ type: undefined, sdp: "" }) });
+      }
+      async setRemoteDescription() {
+        this.set = true;
+      }
+      async addIceCandidate(c: unknown) {
+        if (!this.set) throw new Error("InvalidStateError: Got a remote candidate without remote description");
+        this.added.push(c);
+      }
+    }
+    const link = new WebRtcLink({ remoteId: 1, iceServers: [], relayOnly: false }, NdcLikePc as unknown as typeof RTCPeerConnection);
+    const pc = FakePc.last as NdcLikePc;
+    const closed: string[] = [];
+    link.onClose = (r) => closed.push(r);
+    link.startOffer();
+    await link.handleSignal({ ice: { candidate: "candidate:1 1 UDP 1 192.0.2.7 5000 typ host", sdpMid: "0" } as never });
+    expect(closed).toEqual([]);
+    expect(pc.added).toHaveLength(0);
+    await link.handleSignal({ sdp: { type: "answer", sdp: "v=0" } });
+    expect(closed).toEqual([]);
+    expect(pc.added).toHaveLength(1);
+  });
+
+  it("real WebRTC (node-datachannel): opens when the answerer's candidates reach the offerer before its answer", async () => {
+    const rtc = NdcPeerConnection as unknown as typeof RTCPeerConnection;
+    const a = new WebRtcLink({ remoteId: 2, iceServers: [], relayOnly: false }, rtc);
+    const b = new WebRtcLink({ remoteId: 1, iceServers: [], relayOnly: false }, rtc);
+    const closed: string[] = [];
+    a.onClose = (r) => closed.push(`a:${r}`);
+    b.onClose = (r) => closed.push(`b:${r}`);
+    let heldAnswer: SignalPayload | null = null;
+    let candidatesToA = 0;
+    a.onSignal = (s) => void b.handleSignal(s);
+    // the answerer's candidates go at once; its answer only once a candidate has gone ahead of it
+    b.onSignal = (s) => {
+      if (s.sdp) heldAnswer = s;
+      else {
+        candidatesToA++;
+        void a.handleSignal(s);
+      }
+    };
+    const opened = Promise.all([new Promise<void>((r) => (a.onOpen = () => r())), new Promise<void>((r) => (b.onOpen = () => r()))]);
+    a.startOffer();
+    const t0 = Date.now();
+    while (!(heldAnswer && candidatesToA > 0)) {
+      if (Date.now() - t0 > 5000) throw new Error("no answer or candidate");
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await a.handleSignal(heldAnswer!);
+    await Promise.race([opened, new Promise((_, j) => setTimeout(() => j(new Error(`never opened; closed: ${closed.join(", ")}`)), 8000))]);
+    expect(closed).toEqual([]);
+    a.close();
+    b.close();
+  }, 15000);
 });

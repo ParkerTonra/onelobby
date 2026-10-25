@@ -147,6 +147,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   private cfg: LobbyConfig;
   private roster = new Map<number, Peer>();
   private links = new Map<number, PeerLink>();
+  /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
+  private earlyIce = new Map<number, SignalPayload[]>();
   private connected = new Set<number>(); // host: peers that said hi
   private hiSentTo = new Set<PeerLink>();
   private epoch = 0;
@@ -787,14 +789,27 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   private async onSignal(from: number, s: SignalPayload): Promise<void> {
     let link = this.links.get(from);
-    if (s.sdp?.type === "offer") {
-      // We are the answerer; an offer always comes from the (new) host.
-      link = this.makeLink(from);
-    }
-    if (!link) return;
     const payload: SignalPayload = {};
     if (s.sdp) payload.sdp = s.sdp;
     if (s.ice) payload.ice = s.ice;
+    if (s.sdp?.type === "offer") {
+      // We are the answerer; an offer always comes from the (new) host.
+      link = this.makeLink(from);
+      const early = this.earlyIce.get(from) ?? [];
+      this.earlyIce.delete(from);
+      // the link holds candidates until the offer is set, so hand them over right behind it
+      const done = link.handleSignal(payload);
+      for (const e of early) void link.handleSignal(e);
+      await done;
+      return;
+    }
+    if (!link) {
+      if (!payload.ice || this.ended || !this.roster.has(from)) return;
+      const q = this.earlyIce.get(from) ?? [];
+      if (q.length < 64) q.push(payload);
+      this.earlyIce.set(from, q);
+      return;
+    }
     await link.handleSignal(payload);
   }
 
@@ -810,6 +825,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       return;
     }
     if (peer) this.roster.delete(peerId);
+    this.earlyIce.delete(peerId);
     const link = this.links.get(peerId);
     if (link && peerId !== this.hostPeerId) {
       link.onMessage = null;
@@ -923,6 +939,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       l.close();
     }
     this.links.clear();
+    this.earlyIce.clear();
     this.lingering.clear();
     this.signaling.onClose = null;
     this.signaling.onMessage = null;
