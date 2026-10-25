@@ -87,8 +87,7 @@ export class ManualClock implements Clock {
 export async function settle(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
   // A macrotask boundary guarantees the whole microtask queue (delivery chains) has drained.
-  await new Promise<void>((r) => ((globalThis as { setImmediate?: (f: () => void) => void }).setImmediate?.(r) ?? setTimeout(r, 0)));
-}
+  await new Promise<void>((r) => ((globalThis as { setImmediate?: (f: () => void) => void }).setImmediate?.(r) ?? setTimeout(r, 0)));}
 
 // ---- in-memory peer network ---------------------------------------------------------------------------------------
 
@@ -453,10 +452,16 @@ export class MemorySocket implements SocketLike {
         if (l.hostId !== this.peer.peerId) return this.err("not_host");
         const victim = l.peers.get(Number(m.peerId));
         if (!victim || victim === this.peer) return this.err("bad_request");
-        l.kicked.add(victim.peerId);
+        // ban:false disconnects without the ban; closeCode / closeReason go to the removed peer (spec/signaling.md)
+        const ban = m.ban !== false;
+        const data: Json = {};
+        if (!ban) data.ban = false;
+        if (typeof m.closeCode === "number") data.closeCode = m.closeCode;
+        if (typeof m.closeReason === "string") data.closeReason = m.closeReason;
+        if (ban) l.kicked.add(victim.peerId);
         l.peers.delete(victim.peerId);
-        victim.sock?.push({ t: "error", code: "kicked", msg: "kicked" });
-        this.broadcast(l, { t: "peer_left", peerId: victim.peerId, reason: "kicked" });
+        victim.sock?.push({ t: "error", code: "kicked", msg: "kicked", ...(Object.keys(data).length ? { data } : {}) });
+        this.broadcast(l, { t: "peer_left", peerId: victim.peerId, reason: ban ? "kicked" : "disconnected" });
         return;
       }
       case "host_changed": {

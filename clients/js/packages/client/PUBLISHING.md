@@ -26,7 +26,7 @@ npm publish                # access is public via publishConfig
 ```
 
 Then check: https://www.npmjs.com/package/onelobby and
-https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js (CDNs pick it up within minutes).
+https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.global.min.js (CDNs pick it up within minutes).
 
 ## Fallback: name taken -> `one-lobby`
 
@@ -43,10 +43,10 @@ https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js (CDNs pi
 
 Bump `version` in `package.json` **and** `LIB_VERSION` in `src/onelobby.ts` (prepublish-check fails if they differ),
 update the pinned version in every CDN URL in the docs and examples (`git grep -n "onelobby@"`), merge to main, then
-push a tag `js-v<version>` on main (`git tag js-v0.2.0 origin/main && git push origin js-v0.2.0`). The
+push a tag `js-v<version>` on main (`git tag js-v0.2.1 origin/main && git push origin js-v0.2.1`). The
 `publish-npm.yml` workflow checks the tag against `package.json` and runs `npm publish` with npm trusted publishing
 (GitHub OIDC: no token, no 2FA prompt, provenance attached). Its one-time setup is on npmjs.com: the package's
 Settings > Trusted Publisher > GitHub Actions, repository `ParkerTonra/onelobby`, workflow `publish-npm.yml`. A
-manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.2.0`) so a page never silently picks up a different release. The
+manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.2.1`) so a page never silently picks up a different release. The
 deprecated `Keepalive` / `KeepaliveError` aliases can be dropped in the next minor release once existing games import
 `OneLobby`.

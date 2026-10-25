@@ -21,6 +21,20 @@ import { Voice, type VoiceDeps } from "./voice.js";
 import { hostConnections, joinerSocket, type LobbySocket, type LobbySocketOptions } from "./socket.js";
 
 export type Phase = "lobby" | "in_game";
+/** The close code and reason a host chose with `kick()` / `disconnect()`, passed to the removed player's sockets. */
+export interface CloseInfo {
+  code?: number;
+  reason?: string;
+}
+/** Options for `lobby.kick()`. */
+export interface KickOptions {
+  /** Default true: the player's address cannot rejoin this lobby while it lasts. false = `disconnect()`. */
+  ban?: boolean;
+  /** Close code for the player's `asWebSocket()` onclose: 1000 or 3000-4999. */
+  code?: number;
+  /** Close reason for that onclose, at most 120 characters. */
+  reason?: string;
+}
 export type Peer = PeerInfo;
 
 export type LobbyEvents = {
@@ -29,12 +43,14 @@ export type LobbyEvents = {
   peerReady: [Peer];
   /** Joiner: the link to the host is open (the host itself is ready from the start). Also available as `lobby.ready`. */
   ready: [];
-  peerLeft: [Peer, reason: string];
+  /** reason "left", "kicked", "disconnected" (kick with ban false), "timeout", ...; `close` when the host gave one. */
+  peerLeft: [Peer, reason: string, close?: CloseInfo];
   joinRequested: [Peer];
   hostChanged: [hostId: number];
   phase: [Phase];
   message: [from: number, bytes: Uint8Array, channel: ChannelName];
-  sessionEnded: [reason: string];
+  /** `close` is the code and reason the host gave when it removed this player (`kick()` / `disconnect()`). */
+  sessionEnded: [reason: string, close?: CloseInfo];
   /** The signaling server went away. The game continues on the data channels (s.9). */
   serverLost: [];
   metaChanged: [Record<string, string>];
@@ -81,6 +97,8 @@ export interface RateLimit {
 
 /** The smallest `peerTimeoutMs` honoured: three missed pings. */
 export const MIN_PEER_TIMEOUT_MS = 6000;
+/** Host: how long a kicked / disconnected peer's link stays open for the hub's notice to reach it first. */
+export const KICK_LINGER_MS = 3000;
 
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export function seatName(p: PeerInfo): PeerInfo {
@@ -148,12 +166,14 @@ export class Lobby extends Emitter<LobbyEvents> {
   private relayRetry = false;
   /** clock.now() of the last frame from each peer (peerTimeoutMs). */
   private lastHeard = new Map<number, number>();
+  /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
+  private readonly lingering = new Set<PeerLink>();
   /** Host: per-peer fixed window for rateLimit. */
   private rate = new Map<number, { start: number; n: number }>();
   /**
    * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
    * joiner. Rejects with OneLobbyError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
-   * (or with "closed"/"kicked" when the lobby ends first).
+   * (or with "closed"/"kicked" when the lobby ends first; "closed" also when the host disconnected it).
    */
   readonly ready: Promise<void> = new Promise<void>((res, rej) => {
     this.markReady = () => {
@@ -289,10 +309,33 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.emit("metaChanged", this.meta);
   }
 
-  async kick(peerId: number): Promise<void> {
+  /**
+   * Host: removes a player. By default it is a ban: the hub refuses that player's address for the rest of this lobby
+   * (a new tab or a reload included). `{ ban: false }` is `disconnect()`. `code` / `reason` reach the player's
+   * `asWebSocket()` onclose (and `sessionEnded`'s second argument); without them its socket closes with 4000 "kicked".
+   */
+  async kick(peerId: number, opts: KickOptions = {}): Promise<void> {
     if (!this.isHost) throw new Error("only the host can kick");
-    this.signaling.send({ t: "kick", peerId });
-    this.removePeer(peerId, "kicked");
+    const { ban = true, code, reason } = opts;
+    if (code !== undefined && !(code === 1000 || (Number.isInteger(code) && code >= 3000 && code <= 4999)))
+      throw new RangeError("close code must be 1000 or 3000-4999");
+    if (reason !== undefined && reason.length > 120) throw new RangeError("close reason must be at most 120 characters");
+    const msg: Record<string, unknown> = { t: "kick", peerId };
+    if (!ban) msg.ban = false;
+    if (code !== undefined) msg.closeCode = code;
+    if (reason !== undefined) msg.closeReason = reason;
+    this.signaling.send(msg as { t: "kick"; peerId: number });
+    const close: CloseInfo | undefined = code !== undefined || reason !== undefined ? { code, reason } : undefined;
+    this.removePeer(peerId, ban ? "kicked" : "disconnected", close, true);
+  }
+
+  /**
+   * Host: ends one player's connection without a ban, like a server closing one WebSocket. The player's
+   * `asWebSocket()` gets onclose with `code` (default 1000) and `reason` (default "disconnected"), its lobby ends with
+   * `sessionEnded("disconnected")`, and it may join again (a new tab, a reload). Same as `kick(peerId, { ban: false, code, reason })`.
+   */
+  disconnect(peerId: number, code?: number, reason?: string): Promise<void> {
+    return this.kick(peerId, { ban: false, code, reason });
   }
 
   async approve(peerId: number, ok: boolean): Promise<void> {
@@ -730,7 +773,13 @@ export class Lobby extends Emitter<LobbyEvents> {
         void this.onSignal(Number(m.from), m as unknown as SignalPayload);
         break;
       case "error":
-        if (m.code === "kicked") this.teardown("kicked");
+        if (m.code === "kicked") {
+          const d = (m.data ?? {}) as { ban?: unknown; closeCode?: unknown; closeReason?: unknown };
+          const close: CloseInfo = {};
+          if (typeof d.closeCode === "number") close.code = d.closeCode;
+          if (typeof d.closeReason === "string") close.reason = d.closeReason;
+          this.teardown(d.ban === false ? "disconnected" : "kicked", close.code !== undefined || close.reason !== undefined ? close : undefined);
+        }
         else this.reportError(new OneLobbyError(String(m.code), String(m.msg ?? ""), m.data as Record<string, unknown> | undefined));
         break;
     }
@@ -749,7 +798,12 @@ export class Lobby extends Emitter<LobbyEvents> {
     await link.handleSignal(payload);
   }
 
-  private removePeer(peerId: number, reason: string): void {
+  /**
+   * `linger` (host kick / disconnect): stop using the peer's link at once but leave it open until that peer closes it
+   * or KICK_LINGER_MS pass. The hub tells the peer over its WebSocket; closing the data link first would make it look
+   * like the host vanished (a migration and a 1001 instead of the host's close code).
+   */
+  private removePeer(peerId: number, reason: string, close?: CloseInfo, linger = false): void {
     const peer = this.roster.get(peerId);
     if (peerId === this.localPeerId) {
       this.teardown(reason === "kicked" ? "kicked" : reason);
@@ -758,11 +812,23 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (peer) this.roster.delete(peerId);
     const link = this.links.get(peerId);
     if (link && peerId !== this.hostPeerId) {
-      link.onClose = null;
       link.onMessage = null;
-      link.close();
       this.links.delete(peerId);
       this.hiSentTo.delete(link);
+      if (linger) {
+        this.lingering.add(link);
+        const done = () => {
+          if (!this.lingering.delete(link)) return;
+          cancel();
+          link.onClose = null;
+          link.close();
+        };
+        const cancel = this.cfg.clock.setTimeout(done, KICK_LINGER_MS);
+        link.onClose = done;
+      } else {
+        link.onClose = null;
+        link.close();
+      }
     }
     this.connected.delete(peerId);
     this.outbox.delete(peerId);
@@ -771,15 +837,16 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.lockstep.onPeerLeft(peerId);
     this.chat.onPeerLeft(peerId);
     this.voice.onPeerLeft(peerId);
-    if (peer) this.emit("peerLeft", peer, reason);
+    if (peer) this.emit("peerLeft", peer, reason, close);
     if (peerId === this.hostPeerId && !this.isHost) {
       this.handleHostLost(reason);
     }
   }
 
+  /** Lockstep drops (stalled, desynced): removed without a ban, so the player can come back (a rejoin resyncs). */
   private dropPeer(peerId: number, reason: string): void {
-    this.signaling.send({ t: "kick", peerId });
-    this.removePeer(peerId, reason);
+    this.signaling.send({ t: "kick", peerId, ban: false, closeReason: reason } as { t: "kick"; peerId: number });
+    this.removePeer(peerId, reason, undefined, true);
   }
 
   private setPhase(p: Phase): void {
@@ -838,7 +905,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.sendTo(this.hostPeerId, { type: "ping", n: ++this.pingN, t: this.cfg.clock.now() >>> 0 }, 0, "fast");
   }
 
-  private teardown(reason: string): void {
+  private teardown(reason: string, close?: CloseInfo): void {
     if (this.ended) return;
     this.ended = true;
     this.cancelReadyTimer?.();
@@ -850,16 +917,17 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.cancelPing?.();
     this.lockstep.stop();
     this.voice.close();
-    for (const l of this.links.values()) {
+    for (const l of [...this.links.values(), ...this.lingering]) {
       l.onClose = null;
       l.onMessage = null;
       l.close();
     }
     this.links.clear();
+    this.lingering.clear();
     this.signaling.onClose = null;
     this.signaling.onMessage = null;
     this.signaling.close();
-    this.emit("sessionEnded", reason);
+    this.emit("sessionEnded", reason, close);
   }
 
   /** Total in-flight links (diagnostics and tests). */

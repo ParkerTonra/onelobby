@@ -35,6 +35,10 @@ namespace OneLobby
         private readonly LobbyClient _c;
         private readonly ITransport _t;
         private readonly SortedDictionary<int, PeerRec> _peers = new();
+        /// <summary>Host: links of disconnected peers, kept open until a deadline (see <see cref="DisconnectAsync"/>).</summary>
+        private readonly List<(IPeerLink Link, long Until)> _lingering = new();
+        /// <summary>How long a kicked / disconnected peer's link stays open, so the hub's notice reaches it first.</summary>
+        public const int KickLingerMs = 3000;
         private readonly int _you;
         private int _hostId;
         private int _epoch;
@@ -164,11 +168,33 @@ namespace OneLobby
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Host: removes a player and bans its address from this lobby for as long as the lobby lasts (a reload or a new
+        /// window included). To end a connection without the ban, use <see cref="DisconnectAsync"/>.
+        /// </summary>
         public Task KickAsync(int peerId)
         {
             if (!IsHost) throw new InvalidOperationException("only the host kicks");
             _c.SendRaw(Signaling.Kick(peerId));
-            if (_peers.TryGetValue(peerId, out var rec)) DropPeer(rec, "kicked");
+            if (_peers.TryGetValue(peerId, out var rec)) DropPeer(rec, "kicked", linger: true);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Host: ends one player's connection without a ban; it may join again. Its lobby ends with
+        /// <c>SessionEnded("disconnected")</c>; <paramref name="closeCode"/> (1000 or 3000-4999) and
+        /// <paramref name="closeReason"/> (at most 120 characters) reach a JS player's <c>asWebSocket()</c> onclose.
+        /// Others see <c>PeerLeft(peer, "disconnected")</c>.
+        /// </summary>
+        public Task DisconnectAsync(int peerId, int? closeCode = null, string? closeReason = null)
+        {
+            if (!IsHost) throw new InvalidOperationException("only the host disconnects players");
+            if (closeCode is int c && !(c == 1000 || (c >= 3000 && c <= 4999)))
+                throw new ArgumentOutOfRangeException(nameof(closeCode), "close code must be 1000 or 3000-4999");
+            if (closeReason != null && closeReason.Length > 120)
+                throw new ArgumentOutOfRangeException(nameof(closeReason), "close reason must be at most 120 characters");
+            _c.SendRaw(Signaling.Kick(peerId, ban: false, closeCode, closeReason));
+            if (_peers.TryGetValue(peerId, out var rec)) DropPeer(rec, "disconnected", linger: true);
             return Task.CompletedTask;
         }
 
@@ -344,6 +370,8 @@ namespace OneLobby
         {
             if (_closed) return;
             var now = NowMs;
+            for (var i = _lingering.Count - 1; i >= 0; i--)
+                if (now >= _lingering[i].Until) { _lingering[i].Link.Dispose(); _lingering.RemoveAt(i); }
             foreach (var rec in _peers.Values.ToList())
             {
                 if (rec.Link == null || _closed) continue;
@@ -771,7 +799,7 @@ namespace OneLobby
                 {
                     var id = Signaling.Int(e, "peerId");
                     var reason = Signaling.Str(e, "reason", "left");
-                    if (id == _you) { End(reason == "kicked" ? "kicked" : "server_closed"); return; }
+                    if (id == _you) { End(reason is "kicked" or "disconnected" ? reason : "server_closed"); return; }
                     if (!_peers.TryGetValue(id, out var rec)) return;
                     if (!IsHost && id == _hostId) { DropPeer(rec, reason); HostLost(true); }
                     else DropPeer(rec, reason);
@@ -828,9 +856,9 @@ namespace OneLobby
             }
         }
 
-        internal void OnServerError(LobbyError err)
+        internal void OnServerError(LobbyError err, bool disconnected = false)
         {
-            if (err.Code == "kicked") End("kicked");
+            if (err.Code == "kicked") End(disconnected ? "disconnected" : "kicked");
         }
 
         internal void OnSocketClosed()
@@ -843,10 +871,16 @@ namespace OneLobby
 
         private static Peer ToPeer(PeerRec r) => new(r.Id, r.Name, r.PingMs, r.Link?.Relayed ?? false);
 
-        internal void DropPeer(PeerRec rec, string reason)
+        /// <summary>
+        /// <c>linger</c> (host kick / disconnect): stop using the link now but dispose it only after
+        /// <see cref="KickLingerMs"/>. The hub tells the peer over its WebSocket; closing the data link first would look
+        /// to it like the host vanished (a migration instead of the host's close).
+        /// </summary>
+        internal void DropPeer(PeerRec rec, string reason, bool linger = false)
         {
             if (!_peers.Remove(rec.Id)) return;
-            rec.Link?.Dispose();
+            if (linger && rec.Link != null) _lingering.Add((rec.Link, NowMs + KickLingerMs));
+            else rec.Link?.Dispose();
             rec.Link = null;
             Lockstep?.DropPending(rec.Id);
             Voice.OnPeerGone(rec.Id);
@@ -966,6 +1000,8 @@ namespace OneLobby
         {
             _closed = true;
             foreach (var r in _peers.Values) { r.Link?.Dispose(); r.Link = null; }
+            foreach (var (link, _) in _lingering) link.Dispose();
+            _lingering.Clear();
             Voice.Enabled = false;
             _c.LobbyClosed(this);
         }

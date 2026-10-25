@@ -4,7 +4,7 @@ import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby } from "../src/onelobby.js";
 import type { Lobby } from "../src/lobby.js";
 import { OneLobbyError } from "../src/signaling.js";
-import { decodeJoinCode } from "../src/joincode.js";
+import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import { DirectHubHost, directHubOptions, hostDirect } from "../src/direct/index.js";
 
@@ -238,6 +238,19 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     cleanup.push(() => a.leave());
     await expect(hostDirect(kit("B"), { port, openPort: false })).rejects.toMatchObject({ code: "port_in_use" });
   });
+
+  it("a busy port falls back to a later one (the code carries it); a joiner's joinCode is what it joined with", async () => {
+    const port = await freePort();
+    const a = await hostDirect(kit("A"), { port, openPort: false });
+    cleanup.push(() => a.leave());
+    const b = await hostDirect(kit("B"), { port, openPort: false, fallbackPorts: 3 });
+    cleanup.push(() => b.leave());
+    expect(b.directHub.port).toBeGreaterThan(port);
+    expect(b.directHub.port).toBeLessThanOrEqual(port + 3);
+    const j = await kit("J").joinDirect(`127.0.0.1:${b.directHub.port}`);
+    cleanup.push(() => j.leave());
+    expect(j.joinCode).toBe(encodeJoinCode("127.0.0.1", b.directHub.port));
+  }, 30000);
 });
 
 export type { Lobby };

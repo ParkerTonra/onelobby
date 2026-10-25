@@ -12,11 +12,14 @@ sections are the modules it re-exports.
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents } from "./onelobby.js";
+export type { OneLobbyOptions, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { Lobby } from "./lobby.js";
-export type { LobbyEvents, LobbyConfig, Peer, Phase } from "./lobby.js";
+export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
+export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
+export { closeCodeFor } from "./socket.js";
+export type { LobbySocket, LobbySocketOptions } from "./socket.js";
 export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";
@@ -27,6 +30,9 @@ export type { VoiceMode } from "./voice-core.js";
 export type { VoiceCodec, VoiceEncoderHandle, VoiceDecoderHandle, FrameSource, AudioSink, VoiceError } from "./voice-types.js";
 export { webCodecsOpusAvailable } from "./voice-browser.js";
 export { normalizeCode, formatCode } from "./crockford.js";
+export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
+export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";
+export { webRtcLinkFactoryFor } from "./webrtc.js";
 export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
@@ -42,12 +48,12 @@ export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
 ```ts
 import { type Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
-import { Lobby } from "./lobby.js";
+import { Lobby, type RateLimit } from "./lobby.js";
 import { type LobbySummary } from "./signaling.js";
 import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 export declare const LIB_NAME = "onelobby";
-export declare const LIB_VERSION = "0.2.0";
+export declare const LIB_VERSION = "0.2.1";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
     getItem(key: string): string | null;
@@ -87,6 +93,13 @@ export interface OneLobbyOptions {
      */
     readyTimeoutMs?: number;
     /**
+     * Treat a peer as gone after this many ms of silence. Joiners ping the host every 2 s and the host answers, so the
+     * host drops a silent joiner (`peerLeft`, "timeout") and a joiner handles a silent host as lost (a direct lobby
+     * ends with "host_left"). Default 0 (off): a silently dead peer then surfaces when its link or signaling socket
+     * times out, within about 30 s. Values under 6000 are raised to 6000.
+     */
+    peerTimeoutMs?: number;
+    /**
      * Keep this tab's seat across a page reload (sessionStorage): `join(code)` and `resume()` take the seat back
      * instead of joining as a new player. Cleared when the session ends. Default true where sessionStorage exists.
      */
@@ -118,11 +131,27 @@ export interface HostOptions {
     visibility?: "public" | "unlisted" | "private";
     lateJoin?: boolean;
     meta?: Record<string, string>;
+    /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped before `message` fires or is relayed. */
+    rateLimit?: RateLimit;
 }
 export interface ListOptions {
     meta?: Record<string, string>;
     limit?: number;
     cursor?: string;
+}
+export interface JoinDirectOptions {
+    /** The host's password, if it set one; a wrong one fails with `bad_password`. */
+    password?: string;
+    /** Port for an address typed without one (default 47810, docs/direct-ip.md s.2). */
+    defaultPort?: number;
+    /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
+    connectTimeoutMs?: number;
+}
+/** @internal How onelobby/direct makes a host lobby: its own socket and link factory, and direct mode. */
+export interface DirectLobbyHooks {
+    socketFactory: SocketFactory;
+    /** Wraps the kit's own link factory (port pin, no ICE servers). */
+    wrapLinks: (inner: LinkFactory) => LinkFactory;
 }
 export type OneLobbyEvents = {
     error: [Error];
@@ -130,7 +159,7 @@ export type OneLobbyEvents = {
 export declare const DEFAULT_READY_TIMEOUT_MS = 15000;
 /** Entry point (DESIGN s.11.2). */
 export declare class OneLobby extends Emitter<OneLobbyEvents> {
-    readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs">>;
+    readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs" | "peerTimeoutMs">>;
     constructor(o: OneLobbyOptions);
     /** The lobby code of the seat this tab can take back (rememberSeat), or null. */
     get rememberedCode(): string | null;
@@ -141,6 +170,15 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     resume(): Promise<Lobby | null>;
     host(h: HostOptions): Promise<Lobby>;
     join(code: string): Promise<Lobby>;
+    /**
+     * Join a direct-IP host (docs/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
+     * or hyphens) or, advanced, an address (`ip`, `ip:port`, `[v6]:port`). No lobby server is involved: the code is
+     * the host's address. A mistyped code fails at once with `bad_code`; nobody listening is `direct_unreachable`.
+     * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
+     */
+    joinDirect(codeOrAddress: string, opts?: JoinDirectOptions): Promise<Lobby>;
+    /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
+    hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby>;
     rejoin(resumeToken: string): Promise<Lobby>;
     list(opts?: ListOptions): Promise<LobbySummary[]>;
 }
@@ -157,7 +195,22 @@ import { Lockstep } from "./lockstep.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
+import { type LobbySocket, type LobbySocketOptions } from "./socket.js";
 export type Phase = "lobby" | "in_game";
+/** The close code and reason a host chose with `kick()` / `disconnect()`, passed to the removed player's sockets. */
+export interface CloseInfo {
+    code?: number;
+    reason?: string;
+}
+/** Options for `lobby.kick()`. */
+export interface KickOptions {
+    /** Default true: the player's address cannot rejoin this lobby while it lasts. false = `disconnect()`. */
+    ban?: boolean;
+    /** Close code for the player's `asWebSocket()` onclose: 1000 or 3000-4999. */
+    code?: number;
+    /** Close reason for that onclose, at most 120 characters. */
+    reason?: string;
+}
 export type Peer = PeerInfo;
 export type LobbyEvents = {
     peerJoined: [Peer];
@@ -165,12 +218,14 @@ export type LobbyEvents = {
     peerReady: [Peer];
     /** Joiner: the link to the host is open (the host itself is ready from the start). Also available as `lobby.ready`. */
     ready: [];
-    peerLeft: [Peer, reason: string];
+    /** reason "left", "kicked", "disconnected" (kick with ban false), "timeout", ...; `close` when the host gave one. */
+    peerLeft: [Peer, reason: string, close?: CloseInfo];
     joinRequested: [Peer];
     hostChanged: [hostId: number];
     phase: [Phase];
     message: [from: number, bytes: Uint8Array, channel: ChannelName];
-    sessionEnded: [reason: string];
+    /** `close` is the code and reason the host gave when it removed this player (`kick()` / `disconnect()`). */
+    sessionEnded: [reason: string, close?: CloseInfo];
     /** The signaling server went away. The game continues on the data channels (s.9). */
     serverLost: [];
     metaChanged: [Record<string, string>];
@@ -192,7 +247,30 @@ export interface LobbyConfig {
      * On failure `ready` rejects with OneLobbyError("ice_failed"), the error is reported and the lobby is left.
      */
     readyTimeoutMs?: number;
+    /**
+     * Direct IP (docs/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
+     * (link, peer_left, a host_changed from the hub as it shuts down, or the signaling socket) ends with "host_left".
+     */
+    direct?: boolean;
+    /**
+     * Treat a peer as gone after this many ms without hearing anything from it (0 or absent: off, and a silent peer
+     * surfaces only when its link or signaling socket times out, about 30 s). Joiners ping the host every 2 s and the
+     * host answers, so the host drops a silent joiner (`peerLeft`, "timeout") and a joiner handles a silent host as
+     * lost (a direct lobby ends with "host_left"). Values under 6000 are raised to 6000.
+     */
+    peerTimeoutMs?: number;
+    /** Host: per-peer cap on incoming raw messages; the excess is dropped before `message` fires or is relayed. */
+    rateLimit?: RateLimit;
 }
+/** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
+export interface RateLimit {
+    messages: number;
+    perMs: number;
+}
+/** The smallest `peerTimeoutMs` honoured: three missed pings. */
+export declare const MIN_PEER_TIMEOUT_MS = 6000;
+/** Host: how long a kicked / disconnected peer's link stays open for the hub's notice to reach it first. */
+export declare const KICK_LINGER_MS = 3000;
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export declare function seatName(p: PeerInfo): PeerInfo;
 /** One joined lobby: roster, star of peer links, and the lockstep/chat/voice engines riding on them. */
@@ -211,15 +289,38 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** Last measured round trip to the host in ms (joiners), or 0. */
     rtt: number;
     /**
+     * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/direct-ip.md
+     * s.2a). Show it with joinCodeKind. Empty when the machine has no IPv4 address, and on joiners.
+     */
+    joinCode: string;
+    /** "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN address. */
+    joinCodeKind: "internet" | "same_network" | "none";
+    /** Direct-IP host only: this machine's addresses with the port, for an "Advanced" fold-out. */
+    directAddresses: string[];
+    /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
+    portMapping: string;
+    /** clock.now() of the last frame from each peer (peerTimeoutMs). */
+    /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
+    /** Host: per-peer fixed window for rateLimit. */
+    /**
      * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
      * joiner. Rejects with OneLobbyError("ice_failed") when the joiner cannot reach the host in `readyTimeoutMs`
-     * (or with "closed"/"kicked" when the lobby ends first).
+     * (or with "closed"/"kicked" when the lobby ends first; "closed" also when the host disconnected it).
      */
     readonly ready: Promise<void>;
     constructor(cfg: LobbyConfig);
     get isHost(): boolean;
     get peers(): Peer[];
     peer(peerId: number): Peer | undefined;
+    /** Peers whose link is open and handshake done (host: the ready joiners; joiner: the host once ready). */
+    get connectedPeers(): number[];
+    /**
+     * Joiner: the link to the host as a WebSocket-shaped object (text by default), so WebSocket client code runs
+     * unchanged. It opens when `ready` resolves and closes when the session ends (`host_left` gives code 1001).
+     */
+    asWebSocket(opts?: LobbySocketOptions): LobbySocket;
+    /** Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket(). */
+    onConnection(handler: (conn: LobbySocket) => void, opts?: LobbySocketOptions): () => void;
     set snapshotChunkSize(n: number);
     /** Current migration epoch (0 until the first host change). */
     get hostEpoch(): number;
@@ -231,7 +332,18 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     _begin(): void;
     start(): Promise<void>;
     setMeta(meta: Record<string, string>): Promise<void>;
-    kick(peerId: number): Promise<void>;
+    /**
+     * Host: removes a player. By default it is a ban: the hub refuses that player's address for the rest of this lobby
+     * (a new tab or a reload included). `{ ban: false }` is `disconnect()`. `code` / `reason` reach the player's
+     * `asWebSocket()` onclose (and `sessionEnded`'s second argument); without them its socket closes with 4000 "kicked".
+     */
+    kick(peerId: number, opts?: KickOptions): Promise<void>;
+    /**
+     * Host: ends one player's connection without a ban, like a server closing one WebSocket. The player's
+     * `asWebSocket()` gets onclose with `code` (default 1000) and `reason` (default "disconnected"), its lobby ends with
+     * `sessionEnded("disconnected")`, and it may join again (a new tab, a reload). Same as `kick(peerId, { ban: false, code, reason })`.
+     */
+    disconnect(peerId: number, code?: number, reason?: string): Promise<void>;
     approve(peerId: number, ok: boolean): Promise<void>;
     leave(): Promise<void>;
     /** raw mode (and any extra game data): to one peer. */
@@ -249,10 +361,91 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
     /** Host side: offer to a joiner. */
     /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
+    /**
+     * `linger` (host kick / disconnect): stop using the peer's link at once but leave it open until that peer closes it
+     * or KICK_LINGER_MS pass. The hub tells the peer over its WebSocket; closing the data link first would make it look
+     * like the host vanished (a migration and a 1001 instead of the host's close code).
+     */
+    /** Lockstep drops (stalled, desynced): removed without a ban, so the player can come back (a rejoin resyncs). */
+    /** peerTimeoutMs: the host drops joiners it has not heard from; a joiner handles a silent host as lost. */
     /** Total in-flight links (diagnostics and tests). */
     get linkCount(): number;
 }
 export { PROTO };
+```
+
+## socket
+
+```ts
+import type { Lobby } from "./lobby.js";
+/**
+ * A WebSocket-shaped view of one peer link, so code written against `WebSocket` runs on a lobby unchanged:
+ * `lobby.asWebSocket()` on a joiner (the link to the host), `lobby.onConnection(conn => ...)` on the host (one per
+ * joiner). Not a real WebSocket: no URL, no subprotocols, no `addEventListener`; `bufferedAmount` is always 0.
+ */
+export interface LobbySocket {
+    /** The peer at the other end (the host for a joiner's socket, the joiner for a host's connection). */
+    readonly peerId: number;
+    /** 0 CONNECTING (joiner, before `lobby.ready`), 1 OPEN, 3 CLOSED (there is no CLOSING). */
+    readonly readyState: 0 | 1 | 3;
+    readonly bufferedAmount: 0;
+    /** A string is sent as UTF-8; bytes as they are. Ignored unless OPEN. */
+    send(data: string | Uint8Array): void;
+    /**
+     * Closes this socket locally and fires `onclose` with `code` (default 1000). On a joiner it also leaves the lobby.
+     * On the host it only stops this connection's events: to end the player's connection too (its socket gets your code
+     * and reason), call `lobby.disconnect(conn.peerId, code, reason)`; `lobby.kick()` also bans it from the lobby.
+     */
+    close(code?: number, reason?: string): void;
+    /**
+     * Fires once, on a later task than the one that created the socket (like a real WebSocket). Assigned after it already
+     * fired (the socket came out of an `await` chain)? It runs for the new handler once; `readyState === 1` also tells.
+     */
+    onopen: ((ev: {
+        type: "open";
+    }) => void) | null;
+    /** `data` is a string (UTF-8 decoded), or the bytes with `{ binary: true }`. */
+    onmessage: ((ev: {
+        type: "message";
+        data: string | Uint8Array;
+    }) => void) | null;
+    /** `reason` is the lobby's reason ("host_left", "timeout", "kicked", "disconnected", ...) unless `close()` or the host gave one. */
+    onclose: ((ev: {
+        type: "close";
+        code: number;
+        reason: string;
+        wasClean: boolean;
+    }) => void) | null;
+    /** Never called (errors surface as `onclose` with code 1006); present so WebSocket code that assigns it works. */
+    onerror: ((ev: {
+        type: "error";
+    }) => void) | null;
+}
+export interface LobbySocketOptions {
+    /** Deliver `onmessage` data as bytes (Uint8Array) instead of UTF-8 text. Default false. */
+    binary?: boolean;
+    /** Channel for `send` (default "reliable"). "fast" is unordered and may drop, like UDP. */
+    channel?: "reliable" | "fast";
+}
+/**
+ * Close codes: 1000 a normal leave, `close()` or the host's `disconnect()`, 1001 the other end went away (`host_left`,
+ * the host closing, a player who left), 4000 kicked, 1006 anything abnormal (`timeout`, `ice_failed`, `server_lost`,
+ * ...). A code and reason the host passed to `kick()` / `disconnect()` win over these.
+ */
+export declare function closeCodeFor(reason: string): number;
+/**
+ * Joiner: the link to the host as a socket. OPEN once `lobby.ready` resolves (at once if it already has), with
+ * `onopen` on a later task;
+ * closed when the session ends, or with 1001 "host_changed" when a server-backed lobby migrates to a new host.
+ */
+export declare function joinerSocket(lobby: Lobby, o?: LobbySocketOptions): LobbySocket;
+/**
+ * Host: calls `handler(conn)` once per joiner, as soon as its link is ready (and right away for joiners already
+ * connected). A message from a joiner the handler has not seen yet creates its connection first, so nothing is lost.
+ * `conn.onclose` fires when that peer leaves (code from closeCodeFor) or the host's session ends. Returns a function
+ * that stops new connections (existing ones keep working).
+ */
+export declare function hostConnections(lobby: Lobby, handler: (conn: LobbySocket) => void, o?: LobbySocketOptions): () => void;
 ```
 
 ## lockstep
@@ -623,6 +816,58 @@ export declare function decodeCrockford(input: string): bigint;
 export declare function encodeCrockford(value: bigint, length?: number): string;
 ```
 
+## joincode
+
+```ts
+/**
+ * `dc1` join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in
+ * 11 Crockford characters, shown `6B01-RGFE-P2B`. The code is the address in disguise, so decoding asks nobody.
+ * Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5 (CRC-5, polynomial 0x05, over the 50
+ * bits before it). One mistyped character always fails the check.
+ */
+export declare const JOIN_CODE_LENGTH = 11;
+export type JoinCodeError = "bad_code" | "unknown_version";
+export type DecodedJoinCode = {
+    ip: string;
+    port: number;
+} | {
+    error: JoinCodeError;
+};
+/** Display form (`6B01-RGFE-P2B`) for an IPv4 address and port 1-65535. Throws on anything else. */
+export declare function encodeJoinCode(ipv4: string, port: number): string;
+/** Upper case, spaces and hyphens dropped, i/l -> 1, o -> 0; null unless 11 alphabet characters. */
+export declare function normalizeJoinCode(input: string): string | null;
+export declare function decodeJoinCode(input: string): DecodedJoinCode;
+/** Shaped like a join code (no dots or colons, 11 alphabet characters): a failed decode is `bad_code`, not a host name. */
+export declare function looksLikeJoinCode(input: string): boolean;
+```
+
+## webrtc
+
+```ts
+import { type ChannelName, type LinkFactory, type LinkOptions, type PeerLink, type SignalPayload } from "./transport.js";
+/** Browser (or any WebRTC-capable runtime) PeerLink over RTCPeerConnection with three negotiated channels. */
+export declare class WebRtcLink implements PeerLink {
+    readonly remoteId: number;
+    isOpen: boolean;
+    onSignal: PeerLink["onSignal"];
+    onOpen: PeerLink["onOpen"];
+    onClose: PeerLink["onClose"];
+    onMessage: PeerLink["onMessage"];
+    onPath: PeerLink["onPath"];
+    /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
+    constructor(opts: LinkOptions, rtc?: typeof RTCPeerConnection);
+    startOffer(): void;
+    handleSignal(s: SignalPayload): Promise<void>;
+    /** Selected candidate pair has a relay candidate -> "relayed", else "direct". Retries while stats settle. */
+    send(channel: ChannelName, bytes: Uint8Array): void;
+    close(): void;
+}
+export declare const webRtcLinkFactory: LinkFactory;
+/** A link factory over a given RTCPeerConnection class, e.g. `import { RTCPeerConnection } from "node-datachannel/polyfill"`. */
+export declare function webRtcLinkFactoryFor(rtc: typeof RTCPeerConnection): LinkFactory;
+```
+
 ## signaling
 
 ```ts
@@ -763,6 +1008,20 @@ export interface LinkOptions {
     remoteId: number;
     iceServers: IceServer[];
     relayOnly: boolean;
+    /**
+     * Direct-IP host (docs/direct-ip.md s.2): bind ICE to these local UDP ports. One port (begin = end) also turns on
+     * ICE UDP mux so every peer shares it. Honoured by libdatachannel-based RTCPeerConnection (node-datachannel);
+     * browsers ignore it.
+     */
+    portRange?: {
+        begin: number;
+        end: number;
+    };
+    /**
+     * Direct-IP joiner: remote ICE candidate lines (`candidate:1 1 UDP ... typ host`) added after the remote
+     * description, for the address the player typed or pasted as a code.
+     */
+    extraRemoteCandidates?: string[];
 }
 export interface LinkFactory {
     create(opts: LinkOptions): PeerLink;

@@ -88,7 +88,7 @@ public sealed class DirectNet
         "direct_unreachable" => "No answer from the host. Same-network codes only work at the host's place; for an internet code the host's router must allow it.",
         "bad_password" => "Wrong password.",
         "bad_address" => "That is not a join code or an address.",
-        "port_in_use" => "Port 47810 is busy: is another copy of the game hosting?",
+        "port_in_use" => "Ports 47810-47819 are busy: is another copy of the game hosting?",
         "version_mismatch" => "You and the host run different versions of the game.",
         "lobby_full" => "The game is full.",
         _ => "Multiplayer unavailable: " + e.Message,
@@ -121,7 +121,7 @@ const kit = new OneLobby({
   gameId: "com.you.yourgame", netVersion: "1", lobbyServer: "", mode: "raw", displayName: "Server",
   advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },
 });
-const lobby = await hostDirect(kit, { port: 47810, maxPlayers: 8, openPort: true });   // rejects with code port_in_use
+const lobby = await hostDirect(kit, { maxPlayers: 8, openPort: true });   // 47810, or the next free port up to 47819; else port_in_use
 console.log(lobby.joinCodeKind === "internet" ? "Internet code:" : "Same-network code:", lobby.joinCode);
 lobby.on("message", (from, bytes, channel) => { /* the host is truth: validate, then broadcast */ });
 // lobby.leave() closes the listener and removes the router mapping; joiners get sessionEnded("host_left")

@@ -246,9 +246,12 @@ namespace OneLobby
                     case "error":
                     {
                         var err = new LobbyError(Signaling.Str(e, "code"), Signaling.Str(e, "msg"));
+                        // kick{ban:false}: the host disconnected us, no ban (spec/signaling.md)
+                        bool disconnected = e.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object &&
+                                            d.TryGetProperty("ban", out var ban) && ban.ValueKind == JsonValueKind.False;
                         FailOp(new OneLobbyException(err.Code, err.Message));
                         Error?.Invoke(err);
-                        _lobby?.OnServerError(err);
+                        _lobby?.OnServerError(err, disconnected);
                         return;
                     }
                 }

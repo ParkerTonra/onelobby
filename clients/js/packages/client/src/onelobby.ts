@@ -18,11 +18,11 @@ import {
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 import { WebAudioSink, WorkletMic, webCodecsOpus, webCodecsOpusAvailable } from "./voice-browser.js";
 import { webRtcLinkFactory } from "./webrtc.js";
-import { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
+import { decodeJoinCode, encodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.2.0";
+export const LIB_VERSION = "0.2.1";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
@@ -408,7 +408,10 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const { sig, welcome } = await this.connect(addr.url, this.socketFactory, opts.connectTimeoutMs ?? 5000);
     try {
       const state = await sig.request<LobbyState>({ t: "join", ...(opts.password ? { password: opts.password } : {}) }, "lobby");
-      return this.makeLobby(sig, welcome, state, { links });
+      const lobby = this.makeLobby(sig, welcome, state, { links });
+      // a joiner's joinCode is what it joined with (normalized), so a HUD can show it on both sides
+      lobby.joinCode = joinedWith(addr);
+      return lobby;
     } catch (e) {
       sig.close();
       throw e;
@@ -461,5 +464,15 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     } finally {
       sig.close();
     }
+  }
+}
+
+/** The join code for an IPv4 address (a host name or IPv6 has none: its `host:port` instead). */
+function joinedWith(addr: { host: string; port: number; isIPv6: boolean; display: string }): string {
+  if (addr.isIPv6) return addr.display;
+  try {
+    return encodeJoinCode(addr.host, addr.port);
+  } catch {
+    return addr.display;
   }
 }

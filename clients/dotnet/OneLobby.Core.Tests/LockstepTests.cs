@@ -94,6 +94,20 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void DisconnectRemovesPeerWithoutBanAndEndsItsSessionAsDisconnected()
+        {
+            var rig = new Rig();
+            var host = rig.Host();
+            var guest = rig.Join(host.Lobby.Code, "g");
+            rig.Until(rig.AllReady);
+            _ = host.Lobby.DisconnectAsync(2, 4000, "replaced");
+            Assert.True(rig.Until(() => guest.Ended.Count > 0));
+            Assert.Equal("disconnected", guest.Ended[0]);
+            Assert.Contains(host.Left, l => l.Item1.PeerId == 2 && l.Item2 == "disconnected");
+            Assert.Throws<ArgumentOutOfRangeException>(() => { _ = host.Lobby.DisconnectAsync(3, 1006); });
+        }
+
+        [Fact]
         public void RawModeSendsDirectAndBroadcastWithSourceRoute()
         {
             var rig = new Rig();

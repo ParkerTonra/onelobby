@@ -1,4 +1,4 @@
-import type { Lobby, Peer } from "./lobby.js";
+import type { CloseInfo, Lobby, Peer } from "./lobby.js";
 
 /**
  * A WebSocket-shaped view of one peer link, so code written against `WebSocket` runs on a lobby unchanged:
@@ -15,13 +15,18 @@ export interface LobbySocket {
   send(data: string | Uint8Array): void;
   /**
    * Closes this socket locally and fires `onclose` with `code` (default 1000). On a joiner it also leaves the lobby.
-   * On the host it only stops this connection's events: to remove the player too, call `lobby.kick(conn.peerId)`.
+   * On the host it only stops this connection's events: to end the player's connection too (its socket gets your code
+   * and reason), call `lobby.disconnect(conn.peerId, code, reason)`; `lobby.kick()` also bans it from the lobby.
    */
   close(code?: number, reason?: string): void;
+  /**
+   * Fires once, on a later task than the one that created the socket (like a real WebSocket). Assigned after it already
+   * fired (the socket came out of an `await` chain)? It runs for the new handler once; `readyState === 1` also tells.
+   */
   onopen: ((ev: { type: "open" }) => void) | null;
   /** `data` is a string (UTF-8 decoded), or the bytes with `{ binary: true }`. */
   onmessage: ((ev: { type: "message"; data: string | Uint8Array }) => void) | null;
-  /** `reason` is the lobby's reason ("host_left", "timeout", "kicked", ...) unless `close()` gave one. */
+  /** `reason` is the lobby's reason ("host_left", "timeout", "kicked", "disconnected", ...) unless `close()` or the host gave one. */
   onclose: ((ev: { type: "close"; code: number; reason: string; wasClean: boolean }) => void) | null;
   /** Never called (errors surface as `onclose` with code 1006); present so WebSocket code that assigns it works. */
   onerror: ((ev: { type: "error" }) => void) | null;
@@ -35,15 +40,20 @@ export interface LobbySocketOptions {
 }
 
 /**
- * Close codes: 1000 a normal leave or `close()`, 1001 the other end went away (`host_left`, the host closing, a
- * player who left), 4000 kicked, 1006 anything abnormal (`timeout`, `ice_failed`, `server_lost`, ...).
+ * Close codes: 1000 a normal leave, `close()` or the host's `disconnect()`, 1001 the other end went away (`host_left`,
+ * the host closing, a player who left), 4000 kicked, 1006 anything abnormal (`timeout`, `ice_failed`, `server_lost`,
+ * ...). A code and reason the host passed to `kick()` / `disconnect()` win over these.
  */
 export function closeCodeFor(reason: string): number {
-  if (reason === "left") return 1000;
+  if (reason === "left" || reason === "disconnected") return 1000;
   if (reason === "host_left" || reason === "closed") return 1001;
   if (reason === "kicked") return 4000;
   return 1006;
 }
+
+/** A later task, like a real WebSocket's events: setImmediate in Node, setTimeout(0) in browsers. */
+const nextTask: (f: () => void) => void =
+  (globalThis as { setImmediate?: (f: () => void) => void }).setImmediate ?? ((f) => void setTimeout(f, 0));
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -51,7 +61,9 @@ const dec = new TextDecoder();
 class PeerSocket implements LobbySocket {
   readyState: 0 | 1 | 3 = 0;
   readonly bufferedAmount = 0 as const;
-  onopen: LobbySocket["onopen"] = null;
+  private openHandler: LobbySocket["onopen"] = null;
+  /** OPEN, but `onopen` has not run yet for any handler. */
+  private openPending = false;
   onmessage: LobbySocket["onmessage"] = null;
   onclose: LobbySocket["onclose"] = null;
   onerror: LobbySocket["onerror"] = null;
@@ -76,12 +88,32 @@ class PeerSocket implements LobbySocket {
     this.onLocalClose();
   }
 
-  /** @internal OPEN now; `onopen` now, or one microtask later so a handler assigned right after creation still runs. */
+  get onopen(): LobbySocket["onopen"] {
+    return this.openHandler;
+  }
+
+  set onopen(h: LobbySocket["onopen"]) {
+    this.openHandler = h;
+    // assigned after the open event went by with no handler: deliver it once, still on a later task
+    if (h && this.openPending) nextTask(() => this.fireOpen());
+  }
+
+  /**
+   * @internal OPEN now; `onopen` now, or on a later task (like a real WebSocket) so a handler assigned
+   * after any number of awaits in the same task still runs.
+   */
   open(later = false): void {
     if (this.readyState !== 0) return;
     this.readyState = 1;
-    if (!later) this.onopen?.({ type: "open" });
-    else queueMicrotask(() => this.readyState === 1 && this.onopen?.({ type: "open" }));
+    this.openPending = true;
+    if (!later) this.fireOpen();
+    else nextTask(() => this.fireOpen());
+  }
+
+  private fireOpen(): void {
+    if (this.readyState !== 1 || !this.openPending || !this.openHandler) return;
+    this.openPending = false;
+    this.openHandler({ type: "open" });
   }
 
   /** @internal */
@@ -100,7 +132,7 @@ class PeerSocket implements LobbySocket {
 
 /**
  * Joiner: the link to the host as a socket. OPEN once `lobby.ready` resolves (at once if it already has), with
- * `onopen` one microtask later;
+ * `onopen` on a later task;
  * closed when the session ends, or with 1001 "host_changed" when a server-backed lobby migrates to a new host.
  */
 export function joinerSocket(lobby: Lobby, o: LobbySocketOptions = {}): LobbySocket {
@@ -111,7 +143,7 @@ export function joinerSocket(lobby: Lobby, o: LobbySocketOptions = {}): LobbySoc
     lobby.on("message", (from, bytes) => {
       if (from === lobby.hostPeerId) s.deliver(bytes);
     }),
-    lobby.on("sessionEnded", (reason) => s.closed(closeCodeFor(reason), reason)),
+    lobby.on("sessionEnded", (reason, close?: CloseInfo) => s.closed(close?.code ?? closeCodeFor(reason), close?.reason ?? reason)),
     // The socket's far end is the host it opened to; after a migration that server is gone (direct lobbies end instead).
     lobby.on("hostChanged", () => s.closed(1001, "host_changed")),
   ];
@@ -150,7 +182,9 @@ export function hostConnections(lobby: Lobby, handler: (conn: LobbySocket) => vo
   const offs = [
     lobby.on("peerReady", (p: Peer) => void ensure(p.peerId)),
     lobby.on("message", (from, bytes) => ensure(from)?.deliver(bytes)),
-    lobby.on("peerLeft", (p: Peer, reason) => conns.get(p.peerId)?.closed(reason === "left" ? 1001 : closeCodeFor(reason), reason)),
+    lobby.on("peerLeft", (p: Peer, reason, close?: CloseInfo) =>
+      conns.get(p.peerId)?.closed(close?.code ?? (reason === "left" ? 1001 : closeCodeFor(reason)), close?.reason ?? reason),
+    ),
     lobby.on("sessionEnded", (reason) => {
       for (const c of [...conns.values()]) c.closed(reason === "left" ? 1001 : closeCodeFor(reason), reason);
       offs.forEach((f) => f());

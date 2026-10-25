@@ -24,7 +24,7 @@ lobby.Send(peerId, bytes); lobby.Broadcast(bytes);         // Channel.Reliable (
 lobby.MessageReceived += (from, payload, channel) => { };
 lobby.PeerJoined / PeerReady / PeerLeft / HostChanged / PhaseChanged / SessionEnded
 lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to host open (host: at once)
-await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();
+await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();   // KickAsync bans; DisconnectAsync(id, code?, reason?) does not
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
 lobby.Lockstep!.Submit(cmd); while (lobby.Lockstep.TryNextFrame(out var f)) { /* f.Tick, f.Commands */ }
@@ -53,7 +53,7 @@ lobby.send(peerId, bytes); lobby.broadcast(bytes);         // { channel: "fast" 
 lobby.on("message", (from, bytes, channel) => {});
 lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "sessionEnded", handler);
 lobby.on("ready", () => {}); await lobby.ready;            // joiner: link to host open (host: at once)
-await lobby.start(); await lobby.kick(id); await lobby.leave();
+await lobby.start(); await lobby.kick(id); await lobby.leave();   // kick bans the address; lobby.disconnect(id, code?, reason?) does not
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
 const ws = lobby.asWebSocket();                            // joiner: WebSocket-shaped link to the host (text; { binary: true })
 lobby.onConnection((conn) => { conn.onmessage = (e) => conn.send(e.data); });   // host: one WebSocket-shaped conn per joiner
@@ -68,9 +68,9 @@ lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lo
 npm install onelobby
 ```
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js">` sets
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.global.min.js">` sets
 `window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+`https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
 migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
@@ -118,8 +118,15 @@ Full reference (generated): `docs/api/`.
 - `rateLimit: { messages, perMs }` on `host()` / `hostDirect()` caps each joiner's incoming raw messages; the excess is
   dropped before `message` fires or is relayed.
 - Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
-- Sockets close with 1000 (you closed), 1001 (the other end left, `host_left`, `host_changed`), 4000 (kicked) or 1006
-  (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. The library version is `LIB_VERSION`.
+- Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
+  `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
+  reason the host passes to `disconnect(id, code, reason)` / `kick(id, { code, reason })` reach the joiner's `onclose`
+  as given. The library version is `LIB_VERSION`.
+- `lobby.kick(id)` bans that player's address from the lobby for as long as it lasts (a reload or new tab included).
+  To end one connection without the ban (a seat taken over by another tab), use `lobby.disconnect(id, code?, reason?)`:
+  the joiner's lobby ends with `sessionEnded("disconnected")` and it may join again.
+- `asWebSocket()` fires `onopen` on a later task, like a real WebSocket, so a handler assigned after any number of
+  `await`s still runs (once). `readyState === 1` also tells you it is open.
 - `host()` defaults to `visibility: "unlisted"`: joinable by code or link, not shown by `list()`. Pass `"public"` to list it.
 - An empty `displayName` (the default) shows to everyone as `"Player N"`, N being the seat (peer id).
 - Test and runtime seams (`socketFactory`, `linkFactory`, `clock`, `wallClock`, `voiceCodec`, `createMic`,
@@ -169,8 +176,9 @@ Full reference (generated): `docs/api/`.
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
   / `JoinDirectAsync` from `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
-  `kit.joinDirect(code)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP;
-  host leaving ends the session)
+  `kit.joinDirect(code)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP
+  (or the next free port up to 47819 when another program holds it; the code carries the port); a joiner's `joinCode`
+  is the code it joined with; host leaving ends the session)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
   adapter): `docs/recipes/browser-game.md`
 - Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)

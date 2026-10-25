@@ -295,7 +295,17 @@ namespace OneLobby
                     {
                         var l = s.Lobby;
                         if (l == null || l.HostId != s.PeerId) { Error(s, "not_host", "only the host kicks"); return; }
-                        if (l.Members.TryGetValue(Signaling.Int(e, "peerId"), out var victim)) { Remove(victim, "kicked"); Error(victim, "kicked", "kicked by host"); }
+                        bool ban = !(e.TryGetProperty("ban", out var b) && b.ValueKind == JsonValueKind.False);
+                        if (l.Members.TryGetValue(Signaling.Int(e, "peerId"), out var victim))
+                        {
+                            Remove(victim, ban ? "kicked" : "disconnected");
+                            if (ban) Error(victim, "kicked", "kicked by host");
+                            else Reply(victim, Signaling.Build(w =>
+                            {
+                                w.WriteString("t", "error"); w.WriteString("code", "kicked"); w.WriteString("msg", "disconnected by host");
+                                w.WriteStartObject("data"); w.WriteBoolean("ban", false); w.WriteEndObject();
+                            }));
+                        }
                         break;
                     }
                     case "approve":

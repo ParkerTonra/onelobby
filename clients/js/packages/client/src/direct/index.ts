@@ -28,8 +28,13 @@ export type { PortMapResult, PortMapperOptions, PortMapMethod } from "./portmap.
 export { webRtcLinkFactoryFor } from "../webrtc.js";
 
 export interface DirectHostOptions {
-  /** TCP and UDP port to listen on (default 47810). */
+  /**
+   * TCP and UDP port to listen on (default 47810). When it is busy (another program holds it) the next free one of the
+   * following `fallbackPorts` is used; the join code carries the port, so friends never type it.
+   */
   port?: number;
+  /** How many ports after `port` to try when it is busy; default 9 with `port` left out, else 0. */
+  fallbackPorts?: number;
   /** Optional; joiners must send the same one or get `bad_password`. */
   password?: string;
   maxPlayers?: number;
@@ -64,17 +69,26 @@ export type DirectLobby = Lobby & {
  * When the lobby ends (leave, or the process exits) the listener closes and the router mapping is removed; joiners
  * get `sessionEnded("host_left")`.
  */
+/** With `port` left out, how many ports after the default `hostDirect` tries when it is busy. */
+export const DEFAULT_FALLBACK_PORTS = 9;
+
 export async function hostDirect(kit: OneLobby, o: DirectHostOptions = {}): Promise<DirectLobby> {
   const port = o.port ?? DEFAULT_DIRECT_PORT;
+  // busy (another program holds it): try the next fallbackPorts; the join code carries the port
+  const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));
   const maxPlayers = o.maxPlayers ?? 4;
-  let hub: DirectHubHost;
-  try {
-    hub = await DirectHubHost.listen(port, directHubOptions(maxPlayers, o.password));
-    hub.http = o.http ?? null;
-  } catch (e) {
-    if (e instanceof PortInUseError) throw new OneLobbyError("port_in_use", e.message.replace(/^port_in_use: /, ""));
-    throw e;
+  let hub: DirectHubHost | undefined;
+  for (let p = port; !hub; p++) {
+    try {
+      hub = await DirectHubHost.listen(p, directHubOptions(maxPlayers, o.password));
+    } catch (e) {
+      if (!(e instanceof PortInUseError)) throw e;
+      if (p < last) continue;
+      const range = last > port ? `ports ${port}-${last}` : `port ${port}`;
+      throw new OneLobbyError("port_in_use", `cannot listen on ${range}: is another copy of the game hosting?`);
+    }
   }
+  hub.http = o.http ?? null;
   // The router request runs alongside lobby creation; it takes up to a few seconds when nothing answers.
   const mapping: Promise<PortMapResult | null> =
     o.openPort === false

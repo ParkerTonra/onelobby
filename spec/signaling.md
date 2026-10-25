@@ -64,6 +64,11 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
   not pending: `bad_request`.
 - `kick{peerId}`: the kicked peer gets `error{kicked}` and is removed (its socket stays open, hello state kept); all
   others (host included) get `peer_left{peerId, reason:"kicked"}`. It cannot rejoin that lobby (`join` -> `kicked`).
+- `kick{peerId, ban:false, closeCode?, closeReason?}` disconnects without the ban: same removal, but the peer gets
+  `error{kicked, data:{ban:false, closeCode?, closeReason?}}`, the others get `peer_left{peerId, reason:"disconnected"}`,
+  and it may join again. `closeCode` (1000 or 3000-4999) and `closeReason` (at most 120 characters) are only passed
+  along (a client closes its WebSocket-shaped socket with them); they are also allowed with a ban. A bad `ban`,
+  `closeCode` or `closeReason` is `bad_request` **(decision)**.
 - `c_host_changed{hostId, epoch}` (client -> server): the peer-side migration (s.9) tells the server. Accepted if the
   sender's own peerId equals `hostId`, `epoch` is greater than the lobby epoch (0 at creation), the sender is a member.
   The server updates the host and broadcasts `host_changed{hostId, epoch}` to all members (sender included).
@@ -123,5 +128,5 @@ way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; conformance f
 |---|---|
 | `version_mismatch` | `{hostNetVersion, yourNetVersion}` |
 | `rate_limited` | `{retryAfterMs, reason?}` |
-| `kicked` | `{reason?:"denied"}` |
+| `kicked` | `{reason?:"denied"}`, or `{ban:false, closeCode?, closeReason?}` (and with a ban, `closeCode?, closeReason?`) |
 | `bad_request` | `{field?}` or `{supported}` for a bad proto |

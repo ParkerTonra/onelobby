@@ -159,3 +159,74 @@ describe("peerTimeoutMs", () => {
     expect(left).toBe(0);
   });
 });
+
+describe("host disconnect and late onopen (0.2.1)", () => {
+  it("onopen assigned after several awaits still fires, once", async () => {
+    const { a } = await pair();
+    // the shape of a game's dial(): await ready, return the socket from an async function, attach handlers later
+    const dial = async () => {
+      await a.ready;
+      return a.asWebSocket();
+    };
+    const ws = await dial().then(async (w) => {
+      await Promise.resolve();
+      await Promise.resolve();
+      return w;
+    });
+    let opened = 0;
+    ws.onopen = () => opened++;
+    await settle();
+    expect(ws.readyState).toBe(1);
+    expect(opened).toBe(1);
+    ws.onopen = () => opened++; // a second handler later does not replay it
+    await settle();
+    expect(opened).toBe(1);
+  });
+
+  it("disconnect(peerId, code, reason): both sockets close with them, no ban, the player can join again", async () => {
+    const { r, h, a } = await pair();
+    const conns: LobbySocket[] = [];
+    h.onConnection((c) => conns.push(c));
+    const ws = a.asWebSocket();
+    await settle();
+    const atJoiner: [number, string][] = [];
+    const atHost: [number, string][] = [];
+    ws.onclose = (e) => atJoiner.push([e.code, e.reason]);
+    conns[0]!.onclose = (e) => atHost.push([e.code, e.reason]);
+    const ended: [string, unknown][] = [];
+    a.on("sessionEnded", (why, close) => ended.push([why, close]));
+    const left: string[] = [];
+    h.on("peerLeft", (_p, why) => left.push(why));
+
+    await h.disconnect(a.localPeerId, 4000, "replaced");
+    await settle();
+    expect(atJoiner).toEqual([[4000, "replaced"]]);
+    expect(atHost).toEqual([[4000, "replaced"]]);
+    expect(ended).toEqual([["disconnected", { code: 4000, reason: "replaced" }]]);
+    expect(left).toEqual(["disconnected"]);
+    expect(r.server.received.some((m) => m.t === "kick" && m.ban === false && m.closeCode === 4000)).toBe(true);
+
+    const again = await r.make("a2", { mode: "raw" }).join(h.code);
+    expect(again.peers.length).toBe(2);
+  });
+
+  it("disconnect without a code closes with 1000 \"disconnected\"; kick still closes with 4000 \"kicked\"", async () => {
+    const { r, h, a } = await pair();
+    const ws = a.asWebSocket();
+    await settle();
+    const seen: [number, string][] = [];
+    ws.onclose = (e) => seen.push([e.code, e.reason]);
+    await h.disconnect(a.localPeerId);
+    await settle();
+    expect(seen).toEqual([[1000, "disconnected"]]);
+
+    const b = await r.make("b", { mode: "raw" }).join(h.code);
+    const wb = b.asWebSocket();
+    await settle();
+    wb.onclose = (e) => seen.push([e.code, e.reason]);
+    await h.kick(b.localPeerId);
+    await settle();
+    expect(seen[1]).toEqual([4000, "kicked"]);
+    await expect(h.kick(99, { code: 1006 })).rejects.toThrow(RangeError);
+  });
+});

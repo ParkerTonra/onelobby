@@ -141,7 +141,17 @@
     },
     "c_meta": { "type": "object", "required": ["t", "meta"], "properties": { "t": { "const": "meta" }, "meta": { "$ref": "#/$defs/meta" } } },
     "c_phase": { "type": "object", "required": ["t", "phase"], "properties": { "t": { "const": "phase" }, "phase": { "$ref": "#/$defs/phase" } } },
-    "c_kick": { "type": "object", "required": ["t", "peerId"], "properties": { "t": { "const": "kick" }, "peerId": { "$ref": "#/$defs/peerId" } } },
+    "c_kick": {
+      "type": "object",
+      "required": ["t", "peerId"],
+      "properties": {
+        "t": { "const": "kick" },
+        "peerId": { "$ref": "#/$defs/peerId" },
+        "ban": { "type": "boolean", "description": "default true: the peer cannot rejoin this lobby. false = disconnect only." },
+        "closeCode": { "type": "integer", "description": "1000 or 3000-4999, passed to the removed peer (its WebSocket-shaped close code)" },
+        "closeReason": { "type": "string", "maxLength": 120 }
+      }
+    },
     "c_approve": {
       "type": "object",
       "required": ["t", "peerId", "ok"],
@@ -210,7 +220,7 @@
     "s_peer_left": {
       "type": "object",
       "required": ["t", "peerId", "reason"],
-      "properties": { "t": { "const": "peer_left" }, "peerId": { "$ref": "#/$defs/peerId" }, "reason": { "enum": ["left", "kicked", "timeout"] } }
+      "properties": { "t": { "const": "peer_left" }, "peerId": { "$ref": "#/$defs/peerId" }, "reason": { "enum": ["left", "kicked", "disconnected", "timeout"] } }
     },
     "s_host_changed": {
       "type": "object",
@@ -238,7 +248,7 @@
         "msg": { "type": "string" },
         "data": {
           "type": "object",
-          "description": "version_mismatch: {hostNetVersion, yourNetVersion}. rate_limited: {retryAfterMs}. kicked: {reason?:'denied'}. bad_request: {field?}."
+          "description": "version_mismatch: {hostNetVersion, yourNetVersion}. rate_limited: {retryAfterMs}. kicked: {reason?:'denied'} or, for kick{ban:false}, {ban:false, closeCode?, closeReason?}. bad_request: {field?}."
         }
       }
     }

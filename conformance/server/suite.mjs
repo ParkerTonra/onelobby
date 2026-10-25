@@ -327,6 +327,22 @@ export function buildSuite(opts) {
     a.inLobby = false;
     await a.callError({ t: 'join', code: h.lobby.code }, 'kicked');
   });
+  T('host', 'kick ban:false: peer gets kicked + close code/reason, others peer_left disconnected, can rejoin', async (t) => {
+    const h = await t.host();
+    const a = await t.join(h.lobby.code, {}, h);
+    h.send({ t: 'kick', peerId: 2, ban: false, closeCode: 4000, closeReason: 'replaced' });
+    const e = await a.nextError('kicked');
+    assert.deepEqual(e.data, { ban: false, closeCode: 4000, closeReason: 'replaced' });
+    await h.next('peer_left', { peerId: 2, reason: 'disconnected' });
+    a.inLobby = false;
+    const again = await a.call({ t: 'join', code: h.lobby.code }, 'lobby');
+    a.inLobby = true;
+    assert.ok(again.you > 2);
+    await h.next('peer_joined');
+    await h.callError({ t: 'kick', peerId: again.you, ban: 'no' }, 'bad_request');
+    await h.callError({ t: 'kick', peerId: again.you, closeCode: 1006 }, 'bad_request');
+    await h.callError({ t: 'kick', peerId: again.you, closeReason: 'x'.repeat(121) }, 'bad_request');
+  });
   T('host', 'host-only messages from a non-host -> not_host', async (t) => {
     const h = await t.host();
     const a = await t.join(h.lobby.code, {}, h);

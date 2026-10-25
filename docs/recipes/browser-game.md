@@ -13,13 +13,13 @@ keeps its message code unchanged.
 ## 1. Install
 
 ```
-npm install onelobby@^0.2.0
+npm install onelobby@^0.2.1
 npm install --save-optional node-datachannel@^0.33.4     # WebRTC for Node (libdatachannel); the host needs it
 ```
 
 ```json
 {
-  "dependencies": { "onelobby": "^0.2.0" },
+  "dependencies": { "onelobby": "^0.2.1" },
   "optionalDependencies": { "node-datachannel": "^0.33.4" }
 }
 ```

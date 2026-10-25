@@ -534,8 +534,21 @@ public sealed class Hub
         if (!RequireHost(s, out var lobby)) return;
         int? id = Int(m, "peerId");
         if (id is null || id == s.Member!.PeerId || lobby.Find(id.Value) is not { } target) { Error(s, "bad_request", "unknown peerId", Field("peerId")); return; }
-        lobby.Kicked.Add(target.Ip);
-        RemoveMember(lobby, target, "kicked");
+        // ban:false disconnects without the ban; closeCode / closeReason are passed to the removed peer (spec/signaling.md)
+        bool? ban = Bool(m, "ban");
+        if (m["ban"] is not null && ban is null) { Error(s, "bad_request", "ban must be a boolean", Field("ban")); return; }
+        int? code = Int(m, "closeCode");
+        if (m["closeCode"] is not null && (code is null || !(code == 1000 || code is >= 3000 and <= 4999)))
+        { Error(s, "bad_request", "closeCode must be 1000 or 3000-4999", Field("closeCode")); return; }
+        string? closeReason = Str(m, "closeReason");
+        if (m["closeReason"] is not null && (closeReason is null || closeReason.Length > 120))
+        { Error(s, "bad_request", "closeReason must be a string of at most 120 characters", Field("closeReason")); return; }
+        var data = new JsonObject();
+        if (ban == false) data["ban"] = false;
+        if (code is not null) data["closeCode"] = code;
+        if (closeReason is not null) data["closeReason"] = closeReason;
+        if (ban != false) lobby.Kicked.Add(target.Ip);
+        RemoveMember(lobby, target, ban == false ? "disconnected" : "kicked", data.Count > 0 ? data : null);
     }
 
     private void Approve(Session s, JsonObject m)
@@ -580,7 +593,7 @@ public sealed class Hub
     // ---------------------------------------------------------------- membership changes
 
     /// <summary>Removes a member for good. A member that is already detached was announced as left, so nothing is sent for it.</summary>
-    private void RemoveMember(Lobby lobby, Member mem, string reason)
+    private void RemoveMember(Lobby lobby, Member mem, string reason, JsonObject? kickData = null)
     {
         if (!lobby.Members.Remove(mem)) return;
         _members--;
@@ -593,8 +606,8 @@ public sealed class Hub
             var gone = new JsonObject { ["t"] = "peer_left", ["peerId"] = mem.PeerId, ["reason"] = reason };
             Broadcast(lobby, gone);
             Metrics.Inc("onelobby_peers_left_total", "reason", reason);
-            if (reason == "kicked" && ms is not null)
-                Error(ms, "kicked", "the host removed you from the lobby");
+            if (reason is "kicked" or "disconnected" && ms is not null)
+                Error(ms, "kicked", reason == "kicked" ? "the host removed you from the lobby" : "the host disconnected you", kickData);
         }
         Log(reason, lobby, ms);
 

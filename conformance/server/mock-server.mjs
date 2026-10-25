@@ -182,8 +182,16 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
         if (!l) return bad('not in a lobby'); if (!needHost()) return;
         const p = l.peers.get(m.peerId);
         if (!Number.isInteger(m.peerId) || !p || !p.conn || p.peerId === me.peerId) return bad('peerId', 'peerId');
-        const kc = p.conn; l.kicked.add(kc.id); sendTo(kc, { t: 'error', code: 'kicked', msg: 'kicked' });
-        return removePeer(l, p, 'kicked');
+        if (m.ban !== undefined && typeof m.ban !== 'boolean') return bad('ban', 'ban');
+        if (m.closeCode !== undefined && !(m.closeCode === 1000 || (Number.isInteger(m.closeCode) && m.closeCode >= 3000 && m.closeCode <= 4999))) return bad('closeCode', 'closeCode');
+        if (m.closeReason !== undefined && (typeof m.closeReason !== 'string' || m.closeReason.length > 120)) return bad('closeReason', 'closeReason');
+        const data = {};
+        if (m.ban === false) data.ban = false;
+        if (m.closeCode !== undefined) data.closeCode = m.closeCode;
+        if (m.closeReason !== undefined) data.closeReason = m.closeReason;
+        const kc = p.conn; if (m.ban !== false) l.kicked.add(kc.id);
+        sendTo(kc, { t: 'error', code: 'kicked', msg: 'kicked', ...(Object.keys(data).length ? { data } : {}) });
+        return removePeer(l, p, m.ban === false ? 'disconnected' : 'kicked');
       }
       case 'approve': {
         if (!l) return bad('not in a lobby'); if (!needHost()) return;

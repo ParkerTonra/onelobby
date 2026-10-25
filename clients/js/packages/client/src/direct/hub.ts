@@ -676,8 +676,21 @@ export class SignalingHub {
     const id = int(m, "peerId");
     const target = id === null ? undefined : lobby.find(id);
     if (id === null || id === s.member!.peerId || !target) return this.error(s, "bad_request", "unknown peerId", field("peerId"));
-    lobby.kicked.add(target.ip);
-    this.removeMember(lobby, target, "kicked");
+    // ban:false disconnects without the ban; closeCode / closeReason are passed to the removed peer (spec/signaling.md)
+    const ban = bool(m, "ban");
+    if (has(m, "ban") && ban === null) return this.error(s, "bad_request", "ban must be a boolean", field("ban"));
+    const code = int(m, "closeCode");
+    if (has(m, "closeCode") && (code === null || !(code === 1000 || (code >= 3000 && code <= 4999))))
+      return this.error(s, "bad_request", "closeCode must be 1000 or 3000-4999", field("closeCode"));
+    const closeReason = str(m, "closeReason");
+    if (has(m, "closeReason") && (closeReason === null || closeReason.length > 120))
+      return this.error(s, "bad_request", "closeReason must be a string of at most 120 characters", field("closeReason"));
+    const data: Json = {};
+    if (ban === false) data.ban = false;
+    if (code !== null) data.closeCode = code;
+    if (closeReason !== null) data.closeReason = closeReason;
+    if (ban !== false) lobby.kicked.add(target.ip);
+    this.removeMember(lobby, target, ban === false ? "disconnected" : "kicked", Object.keys(data).length ? data : undefined);
   }
 
   private approve(s: Session, m: Json): void {
@@ -719,7 +732,7 @@ export class SignalingHub {
   // ---------------------------------------------------------------- membership changes
 
   /** Removes a member for good. A member that is already detached was announced as left, so nothing is sent for it. */
-  private removeMember(lobby: HubLobby, mem: Member, reason: string): void {
+  private removeMember(lobby: HubLobby, mem: Member, reason: string, kickData?: Json): void {
     const i = lobby.members.indexOf(mem);
     if (i < 0) return;
     lobby.members.splice(i, 1);
@@ -733,7 +746,8 @@ export class SignalingHub {
     }
     if (wasConnected) {
       this.broadcast(lobby, { t: "peer_left", peerId: mem.peerId, reason });
-      if (reason === "kicked" && ms) this.error(ms, "kicked", "the host removed you from the lobby");
+      if ((reason === "kicked" || reason === "disconnected") && ms)
+        this.error(ms, "kicked", reason === "kicked" ? "the host removed you from the lobby" : "the host disconnected you", kickData);
     }
     this.logEvent(reason, lobby, ms);
     if (lobby.members.length === 0) return this.closeLobby(lobby);

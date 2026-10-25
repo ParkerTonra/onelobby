@@ -89,7 +89,13 @@ namespace OneLobby
 
         public static string Simple(string t) => Build(w => w.WriteString("t", t));
         public static string Phase(LobbyPhase p) => Build(w => { w.WriteString("t", "phase"); w.WriteString("phase", p == LobbyPhase.InGame ? "in_game" : "lobby"); });
-        public static string Kick(int peerId) => Build(w => { w.WriteString("t", "kick"); w.WriteNumber("peerId", peerId); });
+        public static string Kick(int peerId, bool ban = true, int? closeCode = null, string? closeReason = null) => Build(w =>
+        {
+            w.WriteString("t", "kick"); w.WriteNumber("peerId", peerId);
+            if (!ban) w.WriteBoolean("ban", false);
+            if (closeCode is int c) w.WriteNumber("closeCode", c);
+            if (closeReason != null) w.WriteString("closeReason", closeReason);
+        });
         public static string Approve(int peerId, bool ok) => Build(w => { w.WriteString("t", "approve"); w.WriteNumber("peerId", peerId); w.WriteBoolean("ok", ok); });
         public static string Meta(IReadOnlyDictionary<string, string> m) => Build(w => { w.WriteString("t", "meta"); WriteMeta(w, "meta", m); });
         public static string Ping(int n) => Build(w => { w.WriteString("t", "ping"); w.WriteNumber("n", n); });

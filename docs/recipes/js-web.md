@@ -10,9 +10,9 @@ folder, so they can import each other).
 npm install onelobby
 ```
 
-No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js">` sets
+No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.global.min.js">` sets
 `window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+`https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
 migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)

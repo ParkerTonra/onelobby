@@ -9,7 +9,7 @@ You need a OneLobby lobby server (the WebSocket URL, like `wss://lobby.example.c
 ## Use it from a `<script>` tag (no build tools)
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.global.min.js"></script>
 <script>
   const kit = new OneLobby.OneLobby({
     gameId: "com.you.yourgame",            // any unique name for your game
@@ -51,7 +51,7 @@ const lobby = await kit.host({ name: "My game", maxPlayers: 4 });
 console.log("Tell your friend this code:", formatCode(lobby.code));
 ```
 
-Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelobby@0.2.0/dist/onelobby.bundle.mjs"`.
+Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelobby@0.2.1/dist/onelobby.bundle.mjs"`.
 
 ## Made for players
 

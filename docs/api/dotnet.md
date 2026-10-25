@@ -169,6 +169,8 @@ public sealed class Lobby : IAsyncDisposable
     public const int PingEveryMs;
     public const int ClaimWaitMs;
     public const int MigrationGraceMs;
+    /// How long a kicked / disconnected peer's link stays open, so the hub's notice reaches it first.
+    public const int KickLingerMs;
     public string Code { get; }
     public int LocalPeerId;
     public int HostPeerId;
@@ -211,7 +213,10 @@ public sealed class Lobby : IAsyncDisposable
     public long NowMs;
     public Task StartAsync();
     public Task SetMetaAsync(IReadOnlyDictionary<string, string> meta);
+    /// Host: removes a player and bans its address from this lobby for as long as the lobby lasts (a reload or a new window included). To end a connection without the ban, use DisconnectAsync.
     public Task KickAsync(int peerId);
+    /// Host: ends one player's connection without a ban; it may join again. Its lobby ends with SessionEnded("disconnected"); closeCode (1000 or 3000-4999) and closeReason (at most 120 characters) reach a JS player's asWebSocket() onclose. Others see PeerLeft(peer, "disconnected").
+    public Task DisconnectAsync(int peerId, int? closeCode = null, string? closeReason = null);
     public Task ApproveAsync(int peerId, bool ok);
     public Task LeaveAsync();
     public ValueTask DisposeAsync();
