@@ -10,8 +10,14 @@ namespace OneLobby.Direct
     /// <summary>Settings for <see cref="DirectLobby.HostDirectAsync"/>.</summary>
     public sealed class DirectHostOptions
     {
-        /// <summary>TCP and UDP port to listen on; 0 = <c>OneLobbyConfig.DirectPort</c> (default 47810).</summary>
+        /// <summary>
+        /// TCP and UDP port to listen on; 0 = <c>OneLobbyConfig.DirectPort</c> (default 47810). When it is busy (another
+        /// program holds it) the next free one of the following <see cref="FallbackPorts"/> is used; the join code carries
+        /// the port, so friends never type it.
+        /// </summary>
         public int Port { get; set; }
+        /// <summary>How many ports after <see cref="Port"/> to try when it is busy; null = 9 with <see cref="Port"/> 0, else 0.</summary>
+        public int? FallbackPorts { get; set; }
         /// <summary>Optional; joiners must send the same one or get <c>bad_password</c>. Null or empty = none.</summary>
         public string? Password { get; set; }
         public int MaxPlayers { get; set; } = 4;
@@ -43,6 +49,9 @@ namespace OneLobby.Direct
         /// <summary>The library default for <c>P</c> (same as <c>OneLobbyConfig.DirectPort</c>).</summary>
         public const int DefaultPort = 47810;
 
+        /// <summary>With <see cref="DirectHostOptions.Port"/> left at 0, how many ports after the default are tried when it is busy.</summary>
+        public const int DefaultFallbackPorts = 9;
+
         /// <summary>
         /// Starts the embedded hub and listener on <c>P</c>, connects this client to it in memory and creates the lobby.
         /// The lobby's <see cref="Lobby.DirectAddresses"/> lists this machine's addresses for the host screen. Leaving the
@@ -53,12 +62,18 @@ namespace OneLobby.Direct
             if (client == null) throw new ArgumentNullException(nameof(client));
             var o = options ?? new DirectHostOptions();
             var port = o.Port > 0 ? o.Port : client.Config.DirectPort;
-            DirectHubHost hub;
-            try { hub = new DirectHubHost(port, HubOptions.ForDirect(o.MaxPlayers, o.Password)); }
-            catch (SocketException e)
+            var last = port + Math.Max(0, o.FallbackPorts ?? (o.Port > 0 ? 0 : DefaultFallbackPorts));
+            DirectHubHost? hub = null;
+            for (var p = port; hub == null; p++)
             {
-                return Task.FromException<Lobby>(new OneLobbyException("port_in_use",
-                    "cannot listen on port " + port + " (" + e.SocketErrorCode + "): is another copy of the game hosting?"));
+                try { hub = new DirectHubHost(p, HubOptions.ForDirect(o.MaxPlayers, o.Password)); }
+                catch (SocketException e) when (p < last && e.SocketErrorCode == SocketError.AddressAlreadyInUse) { }
+                catch (SocketException e)
+                {
+                    var range = last > port ? "ports " + port + "-" + last : "port " + port;
+                    return Task.FromException<Lobby>(new OneLobbyException("port_in_use",
+                        "cannot listen on " + range + " (" + e.SocketErrorCode + "): is another copy of the game hosting?"));
+                }
             }
             DirectHostTransport transport = null!;
             try { client.UseDirect(inner => transport = new DirectHostTransport(inner, hub), new Uri("onelobby-direct://host/"), hub); }
@@ -132,7 +147,16 @@ namespace OneLobby.Direct
                     "'" + address + "' is not an address: use 192.168.1.20, 192.168.1.20:47810 or [2001:db8::1]:47810"));
             try { client.UseDirect(inner => new DirectJoinTransport(inner, new[] { a.Candidate }), a.WebSocketUri, null); }
             catch (Exception e) { return Task.FromException<Lobby>(e); }
-            return client.JoinSingleLobbyAsync(password, ct);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), a);
+        }
+
+        /// <summary>A joiner's <see cref="Lobby.JoinCode"/> is what it joined with (the code, normalized), so a HUD can show it on both sides.</summary>
+        private static async Task<Lobby> WithJoinCode(Task<Lobby> join, DirectAddress a)
+        {
+            var lobby = await join.ConfigureAwait(false);
+            try { lobby.JoinCode = a.IsIPv6 ? a.ToString() : OneLobby.JoinCode.Encode(a.Host, a.Port); }
+            catch (ArgumentException) { lobby.JoinCode = a.ToString(); } // a host name has no code
+            return lobby;
         }
     }
 }

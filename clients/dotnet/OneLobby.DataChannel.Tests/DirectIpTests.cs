@@ -184,10 +184,30 @@ public sealed class DirectIpTests
         var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var host = Await(c1.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c1.Pump, "host");
-        var t = c2.HostDirectAsync(new DirectHostOptions { OpenPort = false });
+        var t = c2.HostDirectAsync(new DirectHostOptions { OpenPort = false, FallbackPorts = 0 });
         Assert.True(t.IsFaulted);
         Assert.Equal("port_in_use", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
         host.LeaveAsync();
+    }
+
+    [Fact]
+    public void BusyDefaultPortFallsBackToTheNextOneAndTheJoinerKeepsTheCode()
+    {
+        var port = FreePort();
+        var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var j = new LobbyClient(Cfg, new DataChannelTransport());
+        var first = Await(c1.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c1.Pump, "host 1");
+        var second = Await(c2.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c2.Pump, "host 2");
+        Assert.True(JoinCode.TryDecode(second.JoinCode, out _, out var p2, out _));
+        Assert.NotEqual(port, p2);
+        Assert.InRange(p2, port + 1, port + DirectLobby.DefaultFallbackPorts);
+
+        var joiner = Await(j.JoinDirectAsync("127.0.0.1:" + p2), () => { second.Pump(); j.Pump(); }, "join");
+        Assert.Equal(JoinCode.Encode("127.0.0.1", p2), joiner.JoinCode);
+        joiner.LeaveAsync();
+        second.LeaveAsync();
+        first.LeaveAsync();
     }
 
     [Theory]

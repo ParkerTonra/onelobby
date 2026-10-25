@@ -230,8 +230,11 @@ public async Task<bool> JoinByIpAsync(string codeOrAddress, string? password = n
 
 - Show the code grouped as it comes (`6B01-RGFE-P2B`); `JoinDirectAsync` also takes `192.168.1.20` or `ip:port`.
 - The first host on Windows gets the firewall prompt for the game's exe ("allow on private networks" is enough on a LAN;
-  tick public too for internet play). Pass `DirectHostOptions.Port` to use another port, `OpenPort = false` to skip the
-  router request.
+  tick public too for internet play). When another program holds 47810 the host takes the next free port up to 47819
+  (the code carries it); set `DirectHostOptions.Port` to pick one (`FallbackPorts` to allow others after it),
+  `OpenPort = false` to skip the router request.
+- A joiner's `Lobby.JoinCode` is the code it joined with (normalized), so a HUD shows the same code on both sides
+  (`Lobby.Code` is empty in direct mode).
 - No host migration: when the host leaves, joiners get `SessionEnded("host_left")` (with `OneLobby.Replication`, end the
   match as on `HostLost`).
 - A runner that hosted or joined by IP gets a fresh client on the next `HostAsync` / `JoinAsync`, so a game can offer both.
