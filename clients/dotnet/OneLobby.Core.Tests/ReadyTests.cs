@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
@@ -65,6 +66,88 @@ namespace OneLobby.Tests
             g.Lobby.Chat.Send("first words");
             Assert.True(rig.Until(() => lines.Count == 1));
             Assert.Equal("first words", lines[0]);
+        }
+    }
+}
+
+namespace OneLobby.Tests
+{
+    /// <summary>OneLobbyConfig.ReadyTimeout: a joiner that cannot reach the host gives up (mirrors the JS readyTimeoutMs).</summary>
+    public class ReadyTimeoutTests
+    {
+        private static (Rig Rig, Lobby Host, LobbyClient Joiner) Setup(TimeSpan? timeout = null)
+        {
+            var rig = new Rig();
+            var hc = rig.NewClient("h", SyncMode.Raw);
+            var h = rig.Await(hc.HostAsync(new LobbyOptions("raw", 4)));
+            var cfg = Rig.Config("g", mode: SyncMode.Raw);
+            if (timeout is { } t) cfg = cfg with { ReadyTimeout = t };
+            var gc = new LobbyClient(cfg, rig.Net.CreateTransport());
+            rig.Clients.Add(gc);
+            return (rig, h, gc);
+        }
+
+        [Fact]
+        public void DefaultIsFifteenSeconds() =>
+            Assert.Equal(TimeSpan.FromSeconds(15), Rig.Config().ReadyTimeout);
+
+        [Fact]
+        public void ReadyFaultsWithIceFailedLeavesAndEndsTheSessionWhenTheLinkNeverOpens()
+        {
+            var (rig, host, gc) = Setup();
+            rig.Net.CanConnect = (_, _) => false; // no ICE path at all
+            var errors = new List<LobbyError>();
+            gc.Error += e => errors.Add(e);
+            var g = rig.Await(gc.JoinAsync(host.Code));
+            var ended = new List<string>();
+            g.SessionEnded += r => ended.Add(r);
+            var left = new List<int>();
+            host.PeerLeft += (p, _) => left.Add(p.PeerId);
+            var t0 = rig.Net.NowMs;
+            Assert.True(rig.Until(() => g.ReadyAsync.IsCompleted, 1000));
+            var waited = rig.Net.NowMs - t0;
+            Assert.InRange(waited, 14_900, 15_100);
+            Assert.True(g.ReadyAsync.IsFaulted);
+            var ex = Assert.IsType<OneLobbyException>(g.ReadyAsync.Exception!.InnerException);
+            Assert.Equal("ice_failed", ex.Code);
+            Assert.Contains("15 s", ex.Message);
+            Assert.Equal(new[] { "ice_failed" }, ended.ToArray());
+            Assert.Equal(new[] { "ice_failed" }, errors.Select(e => e.Code).ToArray());
+            Assert.True(rig.Until(() => left.Count == 1, 40));
+            Assert.Equal(2, left[0]);
+            Assert.False(g.IsReady);
+        }
+
+        [Fact]
+        public void SecondHalfIsOneRelayOnlyRetryWhenTheServerOffersTurn()
+        {
+            var (rig, host, gc) = Setup(TimeSpan.FromSeconds(10));
+            rig.Net.IceServers.Add(new IceServer(new[] { "turn:turn.example.org:3478" }, "u", "p"));
+            rig.Net.CanConnect = (a, b) => a.RelayOnly || b.RelayOnly; // only the relay gets through
+            var g = rig.Await(gc.JoinAsync(host.Code));
+            var hostReady = new List<int>();
+            host.PeerReady += p => hostReady.Add(p.PeerId);
+            var t0 = rig.Net.NowMs;
+            Assert.True(rig.Until(() => g.ReadyAsync.IsCompleted, 1000));
+            Assert.True(g.ReadyAsync.IsCompletedSuccessfully);
+            Assert.InRange(rig.Net.NowMs - t0, 5_000, 5_500); // the retry starts at half the budget
+            Assert.Equal(new[] { 2 }, hostReady.ToArray());
+            rig.Step(800); // well past the full budget: the session stays up
+            Assert.True(g.IsReady);
+            Assert.True(host.IsPeerReady(2));
+        }
+
+        [Fact]
+        public void ZeroWaitsForever()
+        {
+            var (rig, host, gc) = Setup(TimeSpan.Zero);
+            rig.Net.CanConnect = (_, _) => false;
+            var g = rig.Await(gc.JoinAsync(host.Code));
+            var ended = new List<string>();
+            g.SessionEnded += r => ended.Add(r);
+            rig.Step(2400); // 60 s
+            Assert.False(g.ReadyAsync.IsCompleted);
+            Assert.Empty(ended);
         }
     }
 }

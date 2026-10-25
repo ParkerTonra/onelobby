@@ -10,7 +10,11 @@ public enum SyncMode { Lockstep, Raw }
 public enum Channel { Reliable, Fast }
 public enum Visibility { Public, Unlisted, Private }
 public enum LobbyPhase { Lobby, InGame }
-public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyServer, SyncMode Mode = SyncMode.Lockstep, int TickRate = 20, int HashEveryTicks = 20, string DisplayName = "Player", bool RelayOnly = false);
+/// Direct-IP join codes (docs/direct-ip.md s.2a): "Internet code" or "Same-network code" on the host screen.
+public enum JoinCodeKind { None, SameNetwork, Internet }
+public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyServer, SyncMode Mode = SyncMode.Lockstep, int TickRate = 20, int HashEveryTicks = 20, string DisplayName = "Player", bool RelayOnly = false, int DirectPort = 47810)
+    /// Joiner: how long Lobby.ReadyAsync waits for the link to the host to open (default 15 s, TimeSpan.Zero = wait forever). On timeout ReadyAsync faults with OneLobbyException code ice_failed, LobbyClient.Error fires, the lobby is left and Lobby.SessionEnded fires with "ice_failed". When the server offers a TURN relay (and RelayOnly is off, not direct IP), the second half of the budget is one relay-only retry. Set it with config with { ReadyTimeout = TimeSpan.FromSeconds(30) }.
+    public TimeSpan ReadyTimeout { get; init; }
 public sealed record LobbyOptions(string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted, bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null);
 public sealed record LobbySummary(string Code, string Name, string HostName, int Players, int MaxPlayers, LobbyPhase Phase, IReadOnlyDictionary<string, string> Meta, string Region, DateTimeOffset CreatedAt);
 public sealed record Peer(int PeerId, string Name, int PingMs, bool Relayed);
@@ -85,7 +89,8 @@ public interface IPeerLink : IDisposable
     bool TryTakeSignal(out PeerSignal signal);
     void Send(PeerChannel channel, ReadOnlySpan<byte> frame);
     bool TryReceive(out PeerChannel channel, out byte[] frame);
-public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly);
+/// What a transport needs to build one peer link.
+public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly, int PortRangeBegin = 0, int PortRangeEnd = 0, IReadOnlyList<string>? ExtraRemoteCandidates = null, bool NoIceServers = false);
 /// Engine-specific plumbing. OneLobby.Godot and InMemoryNetwork implement it.
 public interface ITransport
     /// Monotonic milliseconds. Tests drive it by hand.
@@ -116,6 +121,10 @@ public sealed class InMemoryNetwork
     public Func<PeerChannel, double>? ExtraDelayMs { get; set; }
     /// Bytes and frames this transport has sent on its peer links (whole frames, lobby header included), counted before loss.
     public TrafficCounter Traffic(ITransport transport);
+    /// When set, called with (offerer, answerer) link options for each connection attempt; return false and that link never opens (ICE that cannot complete: a firewall or strict NAT). E.g. (a, b) =&gt; a.RelayOnly || b.RelayOnly models a network where only the TURN relay gets through.
+    public Func<PeerLinkOptions, PeerLinkOptions, bool>? CanConnect { get; set; }
+    /// ICE servers the fake server offers in its welcome (default none; add a turn: URL to model TURN).
+    public IList<IceServer> IceServers { get; }
     /// Allowed (gameId) values; empty means any.
     public ISet<string> AllowedGames { get; }
     public void Advance(long ms);
@@ -128,6 +137,26 @@ public sealed class InMemoryNetwork
     public void ShutdownServer();
     /// Pumps every client once and advances the clock by ms. Test helper.
     public void Step(IEnumerable<LobbyClient> clients, long ms = 25);
+```
+
+## OneLobby.Core/JoinCode.cs
+
+```csharp
+/// dc1 join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in 11 Crockford characters, shown K3J7-X9QA-2MT. The code is the address in disguise, so decoding needs nothing outside the game. Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5, CRC-5 with polynomial 0x05 over the 50 bits before it, which catches every single mistyped character.
+public static class JoinCode
+    public const int Length;
+    /// Canonical code without hyphens.
+    public static string EncodeRaw(uint ipv4, int port);
+    /// Display form for an IPv4 address in dotted form, e.g. 6B01-RGFE-P2B.
+    public static string Encode(string ipv4, int port);
+    /// 6B01RGFEP2B -> 6B01-RGFE-P2B.
+    public static string Group(string raw);
+    /// Upper case, spaces and hyphens dropped, i/l -> 1, o -> 0; null unless 11 alphabet characters.
+    public static string? Normalize(string? input);
+    /// Decodes a code to ip (dotted IPv4) and port. On failure error is bad_code (malformed or a typo) or unknown_version (a newer kind of code).
+    public static bool TryDecode(string? input, out string ip, out int port, out string? error);
+    /// True when the input is shaped like a join code (11 alphabet characters once separators go, no dots or colons), so a failed decode should say bad_code rather than be tried as a host name.
+    public static bool LooksLikeCode(string? input);
 ```
 
 ## OneLobby.Core/Lobby.cs
@@ -153,11 +182,21 @@ public sealed class Lobby : IAsyncDisposable
     public LockstepSession? Lockstep { get; }
     public VoiceChannel Voice { get; }
     public TextChat Chat { get; }
+    /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen, e.g. 192.168.1.20:47810. Empty otherwise.
+    public IReadOnlyList<string> DirectAddresses { get; internal set; }
+    /// Direct-IP host only: the code friends paste to join, e.g. 6B01-RGFE-P2B (docs/direct-ip.md s.2a). Show it with JoinCodeKind. Empty when this machine has no IPv4 address.
+    public string JoinCode { get; internal set; }
+    /// Whether JoinCode carries the router's public address (internet) or this PC's LAN address.
+    public JoinCodeKind JoinCodeKind { get; internal set; }
+    /// Direct-IP host only: how the router port-open went, for logs ("UPnP", "no UPnP gateway answered; ...").
+    public string PortMapping { get; internal set; }
     /// True once the data channel to the host is up and welcomed (always true on the host).
     public bool IsReady;
     /// Completes when IsReady first becomes true (immediately for a host).
     public Task ReadyAsync;
     public IReadOnlyList<Peer> Peers;
+    /// True once PeerReady has fired for this peer (its data channels are open and its handshake is done). Always true for the local player.
+    public bool IsPeerReady(int peerId);
     public event Action? Ready;
     /// A peer's data channels are open and its handshake is done: from here Send/Broadcast reach it at once. (PeerJoined fires earlier, when the server announces the peer; reliable sends made in between are queued and delivered in order when the link opens.) On a joiner this fires once for the host.
     public event Action<Peer>? PeerReady;
@@ -292,6 +331,8 @@ public static class Wire
     public const int ProtoVersion;
     public const int MaxFrame;
     public const int ChunkPayload;
+    /// Cap on one reassembled chunk set (spec/binary.md "Snapshot and chunks").
+    public const int MaxReassembled;
     public const byte Hi;
     public const byte ModeLockstep;
     public const byte SnapshotDeflate;
@@ -315,8 +356,8 @@ public static class Wire
         public ulong U64();
         public ReadOnlySpan<byte> Bytes(int n);
         public ReadOnlySpan<byte> Rest();
-    /// Strict structural check of one frame (spec/binary.md): null when valid or of an unknown type (those are ignored), else "too_short", "trailing", "too_long" or "bad_utf8".
-    public static string? Validate(ReadOnlySpan<byte> frame);
+    /// Strict structural check of one frame (spec/binary.md): null when valid or of an unknown type (those are ignored), else "too_short", "trailing", "too_long" or "bad_utf8". A frame reassembled from chunks passes MaxReassembled as maxLength.
+    public static string? Validate(ReadOnlySpan<byte> frame, int maxLength = MaxFrame);
     public static string DecodeUtf8(ReadOnlySpan<byte> b);
     public static byte Type(ReadOnlySpan<byte> frame);
     public static int Route(ReadOnlySpan<byte> frame);
@@ -513,8 +554,12 @@ public sealed class ReplicationSession : IDisposable
     public void SetOwner(NetId id, int owner);
     /// Host: entities currently registered.
     public IEnumerable<EntityInfo> HostEntities;
-    /// Host: peers receiving snapshots.
+    /// Host: peers receiving snapshots. A peer is added when its link is up (Lobby.PeerReady), not when the server announces it, and its first snapshot is a full one; it is removed on Lobby.PeerLeft.
     public IReadOnlyCollection<int> Clients;
+    /// Host: true when peerId is in Clients (its link is up and it gets snapshots).
+    public bool IsClientReady(int peerId);
+    /// Host: a peer's link is up and it joined Clients (spawn its avatar here). Fires on the pumping thread.
+    public event Action<int>? ClientReady;
     /// Host: newest snapshot tick this client acknowledged (0 = none yet: it gets full snapshots).
     public uint AckedTick(int peerId);
     /// Host: replication bytes sent to one client (payloads, no lobby header).

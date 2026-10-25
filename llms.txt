@@ -17,7 +17,10 @@ message, metaChanged, serverLost, sessionEnded.
 JS defaults: host() is unlisted unless visibility "public"; empty displayName shows as "Player N"; a joiner that cannot
 reach the host in readyTimeoutMs (15000) fails with code ice_failed (sessionEnded reason "ice_failed"); rememberSeat keeps
 the seat across a reload (kit.resume(), kit.rememberedCode); seams go under options.advanced; describeError(e),
-shareUrl(code) and codeFromUrl() are player-facing helpers. Install: npm install onelobby, or the script-tag
+shareUrl(code) and codeFromUrl() are player-facing helpers. C#: OneLobbyConfig.ReadyTimeout (15 s, Zero = forever)
+does the same as readyTimeoutMs (ReadyAsync faults with OneLobbyException code ice_failed); Unity's OneLobbyRunner keeps
+Application.runInBackground on while in a lobby (KeepRunningInBackground); ReplicationSession.Clients counts a peer only
+once its link is up (ClientReady). Install: npm install onelobby, or the script-tag
 build dist/onelobby.global.min.js (window.OneLobby).
 
 ## Recipes

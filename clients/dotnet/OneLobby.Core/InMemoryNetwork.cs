@@ -61,13 +61,14 @@ namespace OneLobby
             public readonly InMemoryTransport Owner;
             public readonly InMemoryNetwork Net;
             public readonly bool Initiator;
+            public readonly PeerLinkOptions Options;
             public readonly string Token;
             public Link? Other;
             public bool Open, Failed;
             public readonly Queue<PeerSignal> Out = new();
             public readonly List<(long At, PeerChannel Ch, byte[] Data)> Inbox = new();
             private long _lastReliableAt;
-            public Link(InMemoryTransport owner, bool initiator, string token) { Owner = owner; Net = owner.Net; Initiator = initiator; Token = token; }
+            public Link(InMemoryTransport owner, PeerLinkOptions options, string token) { Owner = owner; Net = owner.Net; Options = options; Initiator = options.Initiator; Token = token; }
             public bool IsOpen => Open && !Failed;
             public bool IsFailed => Failed;
             public int PingMs => (int)(Net.LatencyMs * 2);
@@ -84,6 +85,7 @@ namespace OneLobby
                 {
                     var token = s.Sdp.Substring("offer:".Length);
                     if (!Net.Offers.TryGetValue(token, out var offerer) || offerer.Failed) return;
+                    if (Net.CanConnect != null && !Net.CanConnect(offerer.Options, Options)) return; // ICE never completes
                     Other = offerer; offerer.Other = this;
                     Out.Enqueue(PeerSignal.Description("answer", "answer:" + token));
                 }
@@ -151,7 +153,7 @@ namespace OneLobby
             public IPeerLink CreatePeerLink(PeerLinkOptions options)
             {
                 var token = options.Initiator ? "L" + (++Net._tokenCounter) : "";
-                var l = new Link(this, options.Initiator, token);
+                var l = new Link(this, options, token);
                 Links.Add(l);
                 return l;
             }
@@ -182,6 +184,16 @@ namespace OneLobby
 
         /// <summary>Bytes and frames this transport has sent on its peer links (whole frames, lobby header included), counted before loss.</summary>
         public TrafficCounter Traffic(ITransport transport) => ((InMemoryTransport)transport).Traffic;
+
+        /// <summary>
+        /// When set, called with (offerer, answerer) link options for each connection attempt; return false and that link
+        /// never opens (ICE that cannot complete: a firewall or strict NAT). E.g. <c>(a, b) =&gt; a.RelayOnly || b.RelayOnly</c>
+        /// models a network where only the TURN relay gets through.
+        /// </summary>
+        public Func<PeerLinkOptions, PeerLinkOptions, bool>? CanConnect { get; set; }
+
+        /// <summary>ICE servers the fake server offers in its <c>welcome</c> (default none; add a <c>turn:</c> URL to model TURN).</summary>
+        public IList<IceServer> IceServers { get; } = new List<IceServer>();
 
         /// <summary>Allowed (gameId) values; empty means any.</summary>
         public ISet<string> AllowedGames { get; } = new HashSet<string>();
@@ -247,7 +259,16 @@ namespace OneLobby
                         Reply(s, Signaling.Build(w =>
                         {
                             w.WriteString("t", "welcome");
-                            w.WriteStartArray("ice"); w.WriteEndArray();
+                            w.WriteStartArray("ice");
+                            foreach (var ice in IceServers)
+                            {
+                                w.WriteStartObject();
+                                w.WriteStartArray("urls"); foreach (var u in ice.Urls) w.WriteStringValue(u); w.WriteEndArray();
+                                if (ice.Username != null) w.WriteString("username", ice.Username);
+                                if (ice.Credential != null) w.WriteString("credential", ice.Credential);
+                                w.WriteEndObject();
+                            }
+                            w.WriteEndArray();
                             w.WriteNumber("serverTime", NowMs);
                             w.WriteStartObject("limits"); w.WriteNumber("maxMsg", 16384); w.WriteNumber("maxPlayers", 250); w.WriteEndObject();
                         }));

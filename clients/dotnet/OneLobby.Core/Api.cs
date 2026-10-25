@@ -26,7 +26,18 @@ namespace OneLobby
         int HashEveryTicks = 20,
         string DisplayName = "Player",
         bool RelayOnly = false,
-        int DirectPort = 47810);
+        int DirectPort = 47810)
+    {
+        /// <summary>
+        /// Joiner: how long <see cref="Lobby.ReadyAsync"/> waits for the link to the host to open (default 15 s,
+        /// <see cref="TimeSpan.Zero"/> = wait forever). On timeout ReadyAsync faults with <see cref="OneLobbyException"/>
+        /// code <c>ice_failed</c>, <see cref="LobbyClient.Error"/> fires, the lobby is left and
+        /// <see cref="Lobby.SessionEnded"/> fires with <c>"ice_failed"</c>. When the server offers a TURN relay (and
+        /// <see cref="RelayOnly"/> is off, not direct IP), the second half of the budget is one relay-only retry.
+        /// Set it with <c>config with { ReadyTimeout = TimeSpan.FromSeconds(30) }</c>.
+        /// </summary>
+        public TimeSpan ReadyTimeout { get; init; } = TimeSpan.FromSeconds(15);
+    }
 
     public sealed record LobbyOptions(
         string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted,
