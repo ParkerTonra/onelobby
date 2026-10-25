@@ -1,5 +1,24 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { OneLobbyError, codeFromUrl, describeError, shareUrl } from "../src/index.js";
+import { ErrorCodes, OneLobbyError, codeFromUrl, describeError, shareUrl } from "../src/index.js";
+
+describe("ErrorCodes", () => {
+  const values: string[] = Object.values(ErrorCodes);
+
+  it("covers every code the C# client shares (LobbyErrorCodes), with the same names", () => {
+    const cs = readFileSync(new URL("../../../../dotnet/OneLobby.Core/LobbyErrorCodes.cs", import.meta.url), "utf8");
+    const pairs = [...cs.matchAll(/const string (\w+) = "([a-z_]+)"/g)].map((m) => [m[1], m[2]]);
+    expect(pairs.length).toBeGreaterThan(15);
+    for (const [name, value] of pairs) expect((ErrorCodes as Record<string, string>)[name!]).toBe(value);
+  });
+
+  it("every code with friendly text is listed, and the pinned strings hold", () => {
+    expect(new Set(values).size).toBe(values.length);
+    for (const code of [...SERVER_CODES, ...CLIENT_CODES]) expect(values).toContain(code);
+    expect(ErrorCodes.LobbyFull).toBe("lobby_full");
+    expect(ErrorCodes.VersionMismatch).toBe("version_mismatch");
+  });
+});
 
 const SERVER_CODES = ["bad_request", "game_not_allowed", "in_game", "kicked", "lobby_full", "not_host", "rate_limited", "server_full", "unknown_code", "version_mismatch"];
 const CLIENT_CODES = ["bad_code", "closed", "connect_failed", "invalid_token", "ice_failed", "timeout", "server_lost"];

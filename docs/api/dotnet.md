@@ -252,6 +252,49 @@ public sealed class LobbyClient : IAsyncDisposable
     public async ValueTask DisposeAsync();
 ```
 
+## OneLobby.Core/LobbyErrorCodes.cs
+
+```csharp
+/// Every Code a OneLobbyException or LobbyError can carry (spec/signaling.md and the client's own). Compare against these instead of string literals; JS has the same values in ErrorCodes.
+public static class LobbyErrorCodes
+    /// No lobby with that code (or it ended).
+    public const string UnknownCode;
+    /// The code is not a well-formed lobby code.
+    public const string BadCode;
+    /// The lobby has MaxPlayers members (or too many join requests are pending).
+    public const string LobbyFull;
+    /// The joiner's NetVersion differs from the lobby's.
+    public const string VersionMismatch;
+    /// The game started and the lobby was created with LateJoin false.
+    public const string InGame;
+    /// The host removed this player, banned this address, or turned a private-lobby join request down.
+    public const string Kicked;
+    /// Wrong lobby password.
+    public const string BadPassword;
+    /// A host-only request from a non-host.
+    public const string NotHost;
+    /// Too many requests in a short time, or too many lobbies open from this address.
+    public const string RateLimited;
+    /// The server is at its connection or lobby limit.
+    public const string ServerFull;
+    /// The server does not host this GameId.
+    public const string GameNotAllowed;
+    /// The server could not parse a request.
+    public const string BadRequest;
+    /// The signaling socket closed before or during a request.
+    public const string ServerClosed;
+    /// No peer link to the host within ReadyTimeout (including the relay-only retry).
+    public const string IceFailed;
+    /// A request got no answer in time.
+    public const string Timeout;
+    /// Direct IP: nothing answered on the host's TCP port.
+    public const string DirectUnreachable;
+    /// Direct IP: the join code or address could not be read.
+    public const string BadAddress;
+    /// Direct IP host: no port in 47810-47819 could be bound.
+    public const string PortInUse;
+```
+
 ## OneLobby.Core/LockstepSession.cs
 
 ```csharp

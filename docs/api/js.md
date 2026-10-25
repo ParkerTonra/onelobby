@@ -37,8 +37,8 @@ export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
-export { describeError, shareUrl, codeFromUrl } from "./friendly.js";
-export type { FriendlyError } from "./friendly.js";
+export { describeError, shareUrl, codeFromUrl, ErrorCodes } from "./friendly.js";
+export type { FriendlyError, ErrorCode } from "./friendly.js";
 export { Keepalive, KeepaliveError } from "./deprecated.js";
 export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
 ```
@@ -1078,6 +1078,37 @@ export interface FriendlyError {
     /** What the player can do about it, when there is something. */
     hint?: string;
 }
+/**
+ * Every `code` a `OneLobbyError` can carry. Compare against these instead of string literals; C# has the shared ones in
+ * `LobbyErrorCodes`. `kicked` with `data.reason === "denied"` is a refused join request; `rate_limited` with
+ * `data.reason === "max_lobbies"` is the per-address lobby limit.
+ */
+export declare const ErrorCodes: {
+    readonly UnknownCode: "unknown_code";
+    readonly BadCode: "bad_code";
+    readonly LobbyFull: "lobby_full";
+    readonly VersionMismatch: "version_mismatch";
+    readonly InGame: "in_game";
+    readonly Kicked: "kicked";
+    readonly BadPassword: "bad_password";
+    readonly NotHost: "not_host";
+    readonly RateLimited: "rate_limited";
+    readonly ServerFull: "server_full";
+    readonly GameNotAllowed: "game_not_allowed";
+    readonly BadRequest: "bad_request";
+    readonly ServerClosed: "server_closed";
+    readonly IceFailed: "ice_failed";
+    readonly Timeout: "timeout";
+    readonly DirectUnreachable: "direct_unreachable";
+    readonly BadAddress: "bad_address";
+    readonly PortInUse: "port_in_use";
+    readonly ConnectFailed: "connect_failed";
+    readonly Closed: "closed";
+    readonly ServerLost: "server_lost";
+    readonly InvalidToken: "invalid_token";
+    readonly NoServer: "no_server";
+};
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 /**
  * Plain-language, player-facing text for any error the kit (or its server) can produce.
  * Never returns a stack trace or raw technical message; unknown errors get a generic friendly line.

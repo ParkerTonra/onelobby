@@ -151,6 +151,8 @@ Full reference (generated): `docs/api/`.
   directly in handlers.
 - `ReplicationSession.Clients` (host) holds only peers whose link is up (`PeerReady`); `ClientReady` fires when one
   joins it and its first snapshot is a full one.
+- Error codes are constants: `LobbyErrorCodes.LobbyFull` (C#) / `ErrorCodes.LobbyFull` (JS) = `"lobby_full"`,
+  `VersionMismatch` = `"version_mismatch"`, `InGame`, `UnknownCode`, `IceFailed`, ... Compare `e.Code` / `e.code` to them.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 

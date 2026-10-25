@@ -15,6 +15,40 @@ export interface FriendlyError {
 
 type Entry = { message: string; hint?: string };
 
+/**
+ * Every `code` a `OneLobbyError` can carry. Compare against these instead of string literals; C# has the shared ones in
+ * `LobbyErrorCodes`. `kicked` with `data.reason === "denied"` is a refused join request; `rate_limited` with
+ * `data.reason === "max_lobbies"` is the per-address lobby limit.
+ */
+export const ErrorCodes = {
+  // from the lobby server or a direct host's hub
+  UnknownCode: "unknown_code",
+  BadCode: "bad_code",
+  LobbyFull: "lobby_full",
+  VersionMismatch: "version_mismatch",
+  InGame: "in_game",
+  Kicked: "kicked",
+  BadPassword: "bad_password",
+  NotHost: "not_host",
+  RateLimited: "rate_limited",
+  ServerFull: "server_full",
+  GameNotAllowed: "game_not_allowed",
+  BadRequest: "bad_request",
+  // from this client
+  ServerClosed: "server_closed",
+  IceFailed: "ice_failed",
+  Timeout: "timeout",
+  DirectUnreachable: "direct_unreachable",
+  BadAddress: "bad_address",
+  PortInUse: "port_in_use",
+  ConnectFailed: "connect_failed",
+  Closed: "closed",
+  ServerLost: "server_lost",
+  InvalidToken: "invalid_token",
+  NoServer: "no_server",
+} as const;
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
 const TEXT: Record<string, Entry> = {
   // server errors (spec/signaling.md)
   unknown_code: { message: "We couldn't find a lobby with that code.", hint: "Check the code with the host. Codes stop working once everyone leaves." },
