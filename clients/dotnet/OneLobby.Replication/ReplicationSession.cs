@@ -596,6 +596,7 @@ namespace OneLobby.Replication
                     case Proto.KindStreamEvent:
                     {
                         if (!IsHost && from != _lobby.HostPeerId) return;
+                        if (channel != Channel.Reliable) { Stats.Malformed++; return; }   // spec: reliable only
                         var (tick, stream, seq, body) = Proto.DecodeStreamEvent(span);
                         ReceiveStreamEvent(new ReplicatedEvent(from, tick, stream, seq, body, channel));
                         break;
@@ -613,6 +614,7 @@ namespace OneLobby.Replication
             var key = (e.From, e.Stream);
             _recvSeq.TryGetValue(key, out var last);
             if (e.Seq <= last) { Stats.EventsDuplicate++; return; }
+            if (e.Seq - last > MaxStreamAhead) { Stats.Malformed++; return; }
             if (e.Seq == last + 1)
             {
                 _recvSeq[key] = e.Seq;
@@ -624,6 +626,10 @@ namespace OneLobby.Replication
             if (buf.Events.ContainsKey(e.Seq)) { Stats.EventsDuplicate++; return; }
             buf.Events[e.Seq] = e;
             Stats.EventsOutOfOrder++;
+            // a sender cannot make this buffer grow without bound: past the cap the hole is skipped now, not in a second
+            var bytes = 0L;
+            foreach (var v in buf.Events.Values) bytes += v.Payload.Length;
+            if (buf.Events.Count > MaxStreamBuffered || bytes > MaxStreamBufferedBytes) SkipHole(key);
         }
 
         private void DrainEarly((int Peer, byte Stream) key)
@@ -645,19 +651,30 @@ namespace OneLobby.Replication
             if (_early.Count == 0) return;
             foreach (var key in _early.Keys.ToList())
             {
-                var buf = _early[key];
-                if (now - buf.Since < StreamGapTimeoutMs) continue;
-                _recvSeq.TryGetValue(key, out var last);
-                var first = buf.Events.Keys.First();
-                Stats.EventsGap++;
-                EventGap?.Invoke(new StreamGap(key.Peer, key.Stream, last + 1, first));
-                _recvSeq[key] = first - 1;
-                DrainEarly(key);
+                if (now - _early[key].Since >= StreamGapTimeoutMs) SkipHole(key);
             }
+        }
+
+        private void SkipHole((int Peer, byte Stream) key)
+        {
+            _recvSeq.TryGetValue(key, out var last);
+            var first = _early[key].Events.Keys.First();
+            Stats.EventsGap++;
+            EventGap?.Invoke(new StreamGap(key.Peer, key.Stream, last + 1, first));
+            _recvSeq[key] = first - 1;
+            DrainEarly(key);
         }
 
         /// <summary>How long a numbered stream waits for a missing sequence number before <see cref="EventGap"/> skips it.</summary>
         public const int StreamGapTimeoutMs = 1000;
+
+        /// <summary>Most events one numbered stream holds while it waits for a missing one; past this (or
+        /// <see cref="MaxStreamBufferedBytes"/>) the hole is reported as a gap at once.</summary>
+        public const int MaxStreamBuffered = 64;
+        /// <summary>Most payload bytes one numbered stream holds while it waits for a missing one.</summary>
+        public const int MaxStreamBufferedBytes = 256 * 1024;
+        /// <summary>A sequence number further than this past the last delivered one is malformed and dropped.</summary>
+        public const uint MaxStreamAhead = 4096;
 
         private void Arrive(in ReplicatedEvent e)
         {
@@ -697,6 +714,7 @@ namespace OneLobby.Replication
         // test seams (InternalsVisibleTo OneLobby.Replication.Tests)
         internal World? HostWorld(uint tick) => _sent.TryGetValue(tick, out var w) ? w : null;
         internal IEnumerable<World> ClientWorlds => _ring.Values;
+        internal int BufferedStreamEvents => _early.Values.Sum(b => b.Events.Count);
 
         private void RequireHost()
         {

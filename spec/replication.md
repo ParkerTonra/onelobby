@@ -102,6 +102,9 @@ Same routing as kind 3. The receiver delivers each `(sender, stream)` in `seq` o
 delivered or already waiting is dropped (a duplicate); one past a missing number waits for it; a hole still open after
 1000 ms is reported as a gap and skipped. Reliable links never trigger either, so both are counted as anomalies. A
 sender restarts a peer's numbering at 1 when that peer (re)joins; receivers forget a peer's streams when it leaves.
+Limits a receiver enforces so a misbehaving sender cannot make it hold events without bound: a kind 4 frame on `fast`,
+or with a `seq` more than 4096 past the last delivered one, is malformed and dropped; when more than 64 events or
+256 KiB of payload wait in one `(sender, stream)`, the hole is reported as a gap at once instead of after 1000 ms.
 
 ## State bits (inside a state, the game's schema)
 

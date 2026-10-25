@@ -114,5 +114,50 @@ namespace OneLobby.Replication.Tests
             else Assert.Equal(0, early);
             Assert.Equal(got.Select(e => e.Seq).OrderBy(s => s), got.Select(e => e.Seq));
         }
+
+        // A joiner that breaks the stream contract on purpose (holes, huge jumps, the Fast channel) cannot make the host
+        // hold its events without bound.
+        private static void Forge(Player from, int to, byte stream, uint seq, int payloadBytes = 4, Channel channel = Channel.Reliable)
+            => from.Lobby.Send(to, Proto.EncodeStreamEvent(1, stream, seq, new byte[payloadBytes], new ByteWriter()), channel);
+
+        [Fact]
+        public void AJoinerSendingOnlyHolesCannotGrowTheHostsBuffer()
+        {
+            var (rig, host, a, _, _) = Setup();
+            var gaps = new List<StreamGap>();
+            host.Session.EventGap += g => gaps.Add(g);
+            for (uint seq = 2; seq <= 2000; seq += 2)
+            {
+                Forge(a, host.Lobby.LocalPeerId, 1, seq);
+                if (seq % 100 == 0) rig.Step();
+            }
+            rig.Run(0.3);                                                  // well under the 1 s gap timeout
+            Assert.InRange(host.Session.BufferedStreamEvents, 0, ReplicationSession.MaxStreamBuffered);
+            Assert.NotEmpty(gaps);
+        }
+
+        [Fact]
+        public void BigPayloadsHitTheByteCapBeforeTheCountCap()
+        {
+            var (rig, host, a, _, _) = Setup();
+            for (uint seq = 2; seq <= 40; seq += 2) Forge(a, host.Lobby.LocalPeerId, 1, seq, payloadBytes: 64 * 1024);
+            rig.Run(0.3);
+            Assert.InRange(host.Session.BufferedStreamEvents, 0, ReplicationSession.MaxStreamBufferedBytes / (64 * 1024));
+        }
+
+        [Fact]
+        public void AFarJumpOrTheFastChannelIsMalformed()
+        {
+            var (rig, host, a, _, _) = Setup();
+            var got = new List<ReplicatedEvent>();
+            host.Session.EventDelivered += e => got.Add(e);
+            Forge(a, host.Lobby.LocalPeerId, 1, ReplicationSession.MaxStreamAhead + 1);
+            Forge(a, host.Lobby.LocalPeerId, 2, 1, channel: Channel.Fast);
+            Forge(a, host.Lobby.LocalPeerId, 3, 1);                        // a good one still arrives
+            rig.Run(0.3);
+            Assert.Equal(2, host.Session.Stats.Malformed);
+            Assert.Equal(0, host.Session.BufferedStreamEvents);
+            Assert.Equal(new byte[] { 3 }, got.Select(e => e.Stream));
+        }
     }
 }

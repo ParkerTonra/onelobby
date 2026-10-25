@@ -151,6 +151,8 @@ Full reference (generated): `docs/api/`.
 - A peer that leaves on purpose is not cut off: when the server (or a direct host's socket) says it is gone, the lobby
   keeps reading its link until that closes (at most `Lobby.LeaveGraceMs`, 500 ms), so messages it sent before
   `LeaveAsync` arrive before `PeerLeft` / `HostChanged` / `SessionEnded`. `FlushAsync` makes sure they left its machine.
+  The same grace applies when the server times a peer out or its seat is taken over; `KickAsync` / `DisconnectAsync`
+  cut it off at once.
 - Every C# event (lobby, chat, voice, replication) fires synchronously inside `Pump()` on the calling thread, and
   `ReadyAsync` / `HostAsync` / `JoinAsync` complete there too: pump from the engine's main loop and touch engine APIs
   directly in handlers.
