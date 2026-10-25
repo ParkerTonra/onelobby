@@ -6,6 +6,8 @@ public sealed class ServerOptions : HubOptions
     public string Listen { get; set; } = ":8080";
     public string PublicUrl { get; set; } = "";
     public bool TrustProxy { get; set; }
+    /// <summary>Trusted proxies in front of the server: the client IP is the X-Forwarded-For entry this many from the right.</summary>
+    public int TrustProxyHops { get; set; } = 1;
 
     public const string Help = @"onelobby-server: lobby and signaling server for OneLobby (protocol lk1)
 
@@ -22,6 +24,7 @@ public sealed class ServerOptions : HubOptions
   --turn-ttl <seconds>     TURN credential lifetime, default 3600       (ONELOBBY_TURN_TTL)
   --max-msg <bytes>        signaling message cap, default 16384         (ONELOBBY_MAX_MSG)
   --trust-proxy            take client IP from X-Forwarded-For          (ONELOBBY_TRUST_PROXY)
+  --trust-proxy-hops <n>   proxies you run in front, default 1          (ONELOBBY_TRUST_PROXY_HOPS)
   --max-players <n>        largest maxPlayers a lobby may ask for, <=250 (ONELOBBY_MAX_PLAYERS, default 64)
   --rate-scale <n>         testing only: multiply the per-IP limits     (ONELOBBY_RATE_SCALE, default 1)
   --disable-ip-limits      testing only: no per-IP rate limits          (ONELOBBY_DISABLE_IP_LIMITS)
@@ -45,7 +48,7 @@ Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecate
     private static readonly string[] Keys =
     {
         "listen", "turn-urls", "turn-secret", "stun-urls", "public-url", "allowed-games", "max-lobbies", "max-peers",
-        "game-quotas", "region", "turn-ttl", "max-msg", "trust-proxy", "disable-ip-limits", "max-players", "rate-scale",
+        "game-quotas", "region", "turn-ttl", "max-msg", "trust-proxy", "trust-proxy-hops", "disable-ip-limits", "max-players", "rate-scale",
     };
 
     /// <summary>Env var prefix from before the Keepalive -> OneLobby rename; read as a fallback for one version.</summary>
@@ -79,6 +82,7 @@ Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecate
                 case "turn-ttl": o.TurnTtlSeconds = Int(key, val); break;
                 case "max-msg": o.MaxMessageBytes = Int(key, val); break;
                 case "trust-proxy": o.TrustProxy = Bool(val); break;
+                case "trust-proxy-hops": o.TrustProxyHops = Math.Max(1, Int(key, val)); break;
                 case "disable-ip-limits": o.DisableIpLimits = Bool(val); break;
                 default: throw new ArgumentException($"unknown option --{key}");
             }

@@ -33,14 +33,22 @@ public static class ServerApp
         return app;
     }
 
-    private static string ClientIp(HttpContext ctx, ServerOptions o)
+    private static string ClientIp(HttpContext ctx, ServerOptions o) =>
+        PickClientIp(o.TrustProxy ? ctx.Request.Headers["X-Forwarded-For"].ToString() : null, ctx.Connection.RemoteIpAddress?.ToString(), o.TrustProxyHops);
+
+    /// <summary>
+    /// The client address behind trusted proxies. Each proxy appends the address it saw, so the entry <paramref name="hops"/> from
+    /// the right is the one our own proxy added; entries further left are whatever the client claimed and are ignored.
+    /// A header with fewer entries than hops falls back to the connection's address.
+    /// </summary>
+    public static string PickClientIp(string? xForwardedFor, string? remote, int hops)
     {
-        if (o.TrustProxy && ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var xff))
+        if (!string.IsNullOrEmpty(xForwardedFor) && hops >= 1)
         {
-            string first = xff.ToString().Split(',')[0].Trim();
-            if (first.Length > 0) return first;
+            var parts = xForwardedFor.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length >= hops && parts[^hops].Length > 0) return parts[^hops];
         }
-        return ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return remote ?? "unknown";
     }
 
     private static async Task HandleSocket(HttpContext ctx, Hub hub, ServerOptions o)

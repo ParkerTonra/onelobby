@@ -42,6 +42,7 @@ A flag wins over its `ONELOBBY_*` environment variable.
 | `--turn-ttl` | `ONELOBBY_TURN_TTL` | 3600 | TURN credential lifetime, seconds |
 | `--max-msg` | `ONELOBBY_MAX_MSG` | 16384 | frame size limit; advertised as `limits.maxMsg` |
 | `--trust-proxy` | `ONELOBBY_TRUST_PROXY` | off | take the client IP from `X-Forwarded-For` (set it behind Caddy, else every client shares the proxy IP and the per-IP limits) |
+| `--trust-proxy-hops n` | `ONELOBBY_TRUST_PROXY_HOPS` | 1 | with `--trust-proxy`: how many proxies you run in front; the client IP is the `X-Forwarded-For` entry that many from the right (what your proxy appended, not what the client claimed) |
 | `--rate-scale n` | `ONELOBBY_RATE_SCALE` | 1 | testing only: multiply the per-IP limits (conformance runs with 20) |
 | `--disable-ip-limits` | `ONELOBBY_DISABLE_IP_LIMITS` | off | testing only: no per-IP limits (load script) |
 

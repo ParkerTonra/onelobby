@@ -29,6 +29,11 @@ docker compose up -d
 Open these ports: 80/tcp, 443/tcp+udp, 3478/udp+tcp, 5349/tcp, 49160-49400/udp. Port 8080 stays internal.
 Caddy fetches the TLS certificate on first start. Players behind strict networks use the coturn relay on the same box.
 
+Compose and the unit pass `--trust-proxy`, so the per-IP limits see each player's real address. The server takes the
+rightmost `X-Forwarded-For` entry (the one Caddy appended), because anything further left is written by the client and
+could be forged to dodge the limits. If you chain more proxies (a CDN in front of Caddy), set `--trust-proxy-hops 2`
+(`ONELOBBY_TRUST_PROXY_HOPS`), one per proxy you run; with fewer entries than that the connection's own address is used.
+
 ## Point the game at it
 
 Expose `lobby_server` as a setting (Multiplayer, Advanced) with your default filled in, and pass the same value to

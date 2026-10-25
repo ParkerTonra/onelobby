@@ -656,6 +656,26 @@ public class HubTests
     }
 
     [Fact]
+    public void Client_ip_behind_a_proxy_is_the_entry_n_from_the_right()
+    {
+        // a client that forges the leftmost entry gets the address the proxy appended, not its claim
+        Assert.Equal("203.0.113.7", ServerApp.PickClientIp("1.2.3.4, 203.0.113.7", "10.0.0.1", 1));
+        Assert.Equal("1.2.3.4", ServerApp.PickClientIp("9.9.9.9, 1.2.3.4, 10.1.1.1", "10.0.0.1", 2));
+        Assert.Equal("10.0.0.1", ServerApp.PickClientIp("203.0.113.7", "10.0.0.1", 2));   // header shorter than hops
+        Assert.Equal("10.0.0.1", ServerApp.PickClientIp(null, "10.0.0.1", 1));
+        Assert.Equal("10.0.0.1", ServerApp.PickClientIp("", "10.0.0.1", 1));
+        Assert.Equal("unknown", ServerApp.PickClientIp(null, null, 1));
+    }
+
+    [Fact]
+    public void Trust_proxy_hops_option_parses()
+    {
+        Assert.Equal(1, ServerOptions.Parse(new[] { "--trust-proxy" }, _ => null).TrustProxyHops);
+        Assert.Equal(2, ServerOptions.Parse(new[] { "--trust-proxy", "--trust-proxy-hops", "2" }, _ => null).TrustProxyHops);
+        Assert.Equal(3, ServerOptions.Parse(Array.Empty<string>(), k => k == "ONELOBBY_TRUST_PROXY_HOPS" ? "3" : null).TrustProxyHops);
+    }
+
+    [Fact]
     public void Options_parse_flags_and_env()
     {
         var o = ServerOptions.Parse(
