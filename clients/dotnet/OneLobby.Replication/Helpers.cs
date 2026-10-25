@@ -146,4 +146,79 @@ namespace OneLobby.Replication
             return s;
         }
     }
+
+    /// <summary>
+    /// Hides small prediction corrections (Unreal/Overwatch practice). The sim adopts the corrected state at once; draw
+    /// the local player at sim position + <see cref="Offset"/>, which starts at minus the correction and decays linearly to
+    /// zero over <see cref="DecayMs"/>, so the player sees a short glide instead of a pop. Corrections past the snap
+    /// thresholds, or with a changed teleport sequence, snap (offset cleared): a teleport or a desync must be visible.
+    /// Y is up. Engine-free: plain floats, call <see cref="Update"/> once per rendered frame.
+    /// </summary>
+    public sealed class PredictionSmoother
+    {
+        private float _sx, _sy, _sz;          // offset when the current decay started
+        private float _leftMs;
+        private int? _seq;
+
+        public PredictionSmoother(float decayMs = 100, float snapHorizontal = 2f, float snapVertical = 0.5f)
+        {
+            DecayMs = decayMs;
+            SnapHorizontal = snapHorizontal;
+            SnapVertical = snapVertical;
+        }
+
+        /// <summary>Time for an offset to reach zero (default 100 ms, the interpolation window).</summary>
+        public float DecayMs { get; set; }
+        /// <summary>A correction longer than this on the X/Z plane snaps (default 2.0).</summary>
+        public float SnapHorizontal { get; set; }
+        /// <summary>A correction longer than this on Y snaps (default 0.5).</summary>
+        public float SnapVertical { get; set; }
+
+        /// <summary>Add this to the sim position when drawing.</summary>
+        public (float X, float Y, float Z) Offset { get; private set; }
+        /// <summary>Length of <see cref="Offset"/> (for a debug overlay).</summary>
+        public float OffsetRemaining => (float)Math.Sqrt(Offset.X * Offset.X + Offset.Y * Offset.Y + Offset.Z * Offset.Z);
+        /// <summary>Corrections that snapped instead of gliding.</summary>
+        public int SnapCount { get; private set; }
+
+        /// <summary>
+        /// Report a correction: <paramref name="errorX"/>..Z is the corrected sim position minus the position before it
+        /// (zero is fine: nothing changes). Pass the state's teleport sequence as <paramref name="sequence"/> to snap
+        /// whenever it differs from the last one seen. Returns true when it snapped.
+        /// </summary>
+        public bool Correct(float errorX, float errorY, float errorZ, int? sequence = null)
+        {
+            var seqChanged = sequence.HasValue && _seq.HasValue && sequence != _seq;
+            if (sequence.HasValue) _seq = sequence;
+            if (seqChanged || Math.Sqrt(errorX * errorX + errorZ * errorZ) > SnapHorizontal || Math.Abs(errorY) > SnapVertical)
+            {
+                Snap();
+                SnapCount++;
+                return true;
+            }
+            if (errorX == 0 && errorY == 0 && errorZ == 0) return false;
+            var o = Offset;
+            _sx = o.X - errorX; _sy = o.Y - errorY; _sz = o.Z - errorZ;
+            _leftMs = DecayMs;
+            Offset = DecayMs > 0 ? (_sx, _sy, _sz) : (0f, 0f, 0f);
+            return false;
+        }
+
+        /// <summary>Advance the decay by one frame's time.</summary>
+        public void Update(float deltaMs)
+        {
+            if (_leftMs <= 0) return;
+            _leftMs = Math.Max(0, _leftMs - deltaMs);
+            var k = DecayMs > 0 ? _leftMs / DecayMs : 0;
+            Offset = (_sx * k, _sy * k, _sz * k);
+        }
+
+        /// <summary>Clear the offset now (respawn, teleport handled elsewhere).</summary>
+        public void Snap()
+        {
+            _leftMs = 0;
+            _sx = _sy = _sz = 0;
+            Offset = (0f, 0f, 0f);
+        }
+    }
 }

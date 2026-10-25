@@ -208,6 +208,22 @@ namespace OneLobby.Replication
     {
         public static float Lerp(float a, float b, float t) => a + (b - a) * t;
 
+        /// <summary>
+        /// Lerp, but return <paramref name="b"/> when the two samples are more than <paramref name="maxDistance"/> apart:
+        /// a teleport or blink between two snapshots is drawn as a jump, not a one-tick streak. Pick a distance longer
+        /// than anything moves legally in one tick.
+        /// </summary>
+        public static float LerpOrSnap(float a, float b, float t, float maxDistance) =>
+            Math.Abs(b - a) > maxDistance ? b : Lerp(a, b, t);
+
+        /// <inheritdoc cref="LerpOrSnap(float, float, float, float)"/>
+        public static (float X, float Y, float Z) LerpOrSnap((float X, float Y, float Z) a, (float X, float Y, float Z) b, float t, float maxDistance)
+        {
+            float dx = b.X - a.X, dy = b.Y - a.Y, dz = b.Z - a.Z;
+            if (dx * dx + dy * dy + dz * dz > maxDistance * maxDistance) return b;
+            return (Lerp(a.X, b.X, t), Lerp(a.Y, b.Y, t), Lerp(a.Z, b.Z, t));
+        }
+
         /// <summary>Lerp between two angles in degrees along the shorter arc; result in [0, 360).</summary>
         public static float LerpAngle(float a, float b, float t)
         {

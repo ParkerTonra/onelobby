@@ -54,12 +54,17 @@ public struct AlienState : IReplicatedState<AlienState>
         Anim = (byte)r.ReadBits(4);
         Health = (byte)r.ReadBits(7);
     }
-    public AlienState Interpolate(in AlienState to, float t) => new AlienState
+    public AlienState Interpolate(in AlienState to, float t)
     {
-        X = NetMath.Lerp(X, to.X, t), Y = NetMath.Lerp(Y, to.Y, t), Z = NetMath.Lerp(Z, to.Z, t),
-        Yaw = NetMath.LerpAngle(Yaw, to.Yaw, t),
-        Anim = t < 0.5f ? Anim : to.Anim, Health = t < 0.5f ? Health : to.Health,   // discrete values snap
-    };
+        // more than 2 m between two ticks is a teleport: jump, don't streak (pick > the fastest legal move per tick)
+        var (x, y, z) = NetMath.LerpOrSnap((X, Y, Z), (to.X, to.Y, to.Z), t, maxDistance: 2f);
+        return new AlienState
+        {
+            X = x, Y = y, Z = z,
+            Yaw = NetMath.LerpAngle(Yaw, to.Yaw, t),
+            Anim = t < 0.5f ? Anim : to.Anim, Health = t < 0.5f ? Health : to.Health,   // discrete values snap
+        };
+    }
 }
 
 // What a client sends every tick: movement, look and buttons in 6 bytes.
@@ -168,7 +173,9 @@ public sealed class HostLoop
 ## 3. Client loop
 
 Remote entities are drawn at `RenderTick` (100 ms behind the host) with `TrySample`: smooth even at 5% loss. Your own
-avatar is predicted with `Reconciler` so movement responds at once; each snapshot corrects it.
+avatar is predicted with `Reconciler` so movement responds at once; each snapshot corrects it, and `PredictionSmoother`
+turns small corrections into a 100 ms glide (over 2 m horizontal or 0.5 m vertical it snaps). For teleports, put a
+counter in the player's state that the host bumps on every teleport and pass it as `sequence:`: a change always snaps.
 
 ```csharp compile file=ClientLoop.cs
 using System.Collections.Generic;
@@ -181,6 +188,7 @@ public sealed class ClientLoop
     readonly HashSet<NetId> _visible = new();
     NetId _me;
     readonly Reconciler<PlayerInput, AlienState> _predict;
+    readonly PredictionSmoother _smooth = new();               // 100 ms glide, snap past 2.0 m / 0.5 m
 
     public ClientLoop(Lobby lobby)                            // lobby: SyncMode.Raw, joiner
     {
@@ -202,7 +210,7 @@ public sealed class ClientLoop
         return s;
     }
 
-    public void Frame(PlayerInput current)                     // current = this frame's sticks/mouse/buttons
+    public void Frame(PlayerInput current, float deltaMs)      // current = this frame's sticks/mouse/buttons
     {
         _rep.Pump();
         while (_rep.Clock.TryAdvance())
@@ -212,8 +220,13 @@ public sealed class ClientLoop
             current.Fire = false;                              // one shot per press
         }
         if (!_me.IsNone && _rep.TryGetLatest<AlienState>(_me, out var auth, out _))
-            _predict.Reconcile(auth, _rep.LastProcessedInput);
-        // draw my avatar at _predict.Current
+        {
+            var before = _predict.Current;
+            var after = _predict.Reconcile(auth, _rep.LastProcessedInput);
+            _smooth.Correct(after.X - before.X, after.Y - before.Y, after.Z - before.Z);   // + sequence: your teleport counter
+        }
+        _smooth.Update(deltaMs);
+        // draw my avatar at _predict.Current + _smooth.Offset
 
         foreach (var id in _visible)
             if (_rep.TrySample<AlienState>(id, out var s))

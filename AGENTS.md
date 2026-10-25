@@ -44,6 +44,7 @@ rep.SendEvent(bytes, peer, Channel.Reliable, stream: 3); rep.EventDelivered += e
 rep.TrySample<TState>(id, out var s);                      // client: TState : IReplicatedState<TState>, at rep.RenderTick
 rep.RttMs; rep.PeerRttMs(peer); rep.SnapshotAgeMs; rep.InputStatsFor(peer); rep.SendFullSnapshot(peer);   // overlay, resync
 new Reconciler<TInput, TState>(start, step); new HistoryRing<T>(ticks, lerp); rep.RewindTick(f);   // prediction, hitscan
+new PredictionSmoother().Correct(dx, dy, dz, sequence); smoother.Update(ms); smoother.Offset; NetMath.LerpOrSnap(a, b, t, maxDistance);
 ```
 
 ```ts
