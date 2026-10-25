@@ -44,6 +44,7 @@ namespace OneLobby.Replication
         // host
         private readonly SortedDictionary<uint, HostEnt> _hostEnts = new();
         private readonly Dictionary<int, ClientRec> _clients = new();
+        private readonly HashSet<int> _joining = new(); // announced by the server, link not open yet
         private readonly Dictionary<uint, World> _sent = new();
         private readonly Queue<uint> _sentOrder = new();
         private uint _nextId = 1;
@@ -74,8 +75,15 @@ namespace OneLobby.Replication
             _lobby.MessageReceived += OnMessage;
             _lobby.HostChanged += OnHostChanged;
             _lobby.PeerJoined += OnPeerJoined;
+            _lobby.PeerReady += OnPeerReady;
             _lobby.PeerLeft += OnPeerLeft;
-            if (IsHost) foreach (var p in lobby.Peers) if (p.PeerId != lobby.LocalPeerId) AddClient(p.PeerId);
+            if (IsHost)
+                foreach (var p in lobby.Peers)
+                    if (p.PeerId != lobby.LocalPeerId)
+                    {
+                        if (lobby.IsPeerReady(p.PeerId)) AddClient(p.PeerId);
+                        else _joining.Add(p.PeerId);
+                    }
             _lastPumpMs = lobby.NowMs;
         }
 
@@ -142,8 +150,17 @@ namespace OneLobby.Replication
         /// <summary>Host: entities currently registered.</summary>
         public IEnumerable<EntityInfo> HostEntities => _hostEnts.Select(kv => new EntityInfo(new NetId(kv.Key), kv.Value.Type, kv.Value.Owner));
 
-        /// <summary>Host: peers receiving snapshots.</summary>
+        /// <summary>
+        /// Host: peers receiving snapshots. A peer is added when its link is up (<see cref="Lobby.PeerReady"/>), not when
+        /// the server announces it, and its first snapshot is a full one; it is removed on <see cref="Lobby.PeerLeft"/>.
+        /// </summary>
         public IReadOnlyCollection<int> Clients => _clients.Keys;
+
+        /// <summary>Host: true when <paramref name="peerId"/> is in <see cref="Clients"/> (its link is up and it gets snapshots).</summary>
+        public bool IsClientReady(int peerId) => _clients.ContainsKey(peerId);
+
+        /// <summary>Host: a peer's link is up and it joined <see cref="Clients"/> (spawn its avatar here). Fires on the pumping thread.</summary>
+        public event Action<int>? ClientReady;
 
         /// <summary>Host: newest snapshot tick this client acknowledged (0 = none yet: it gets full snapshots).</summary>
         public uint AckedTick(int peerId) => _clients.TryGetValue(peerId, out var c) ? c.Ack : 0;
@@ -245,15 +262,20 @@ namespace OneLobby.Replication
             if (!IsHost) { _lobby.Send(_lobby.HostPeerId, bytes, channel); return; }
             if (toPeer != 0) { _lobby.Send(toPeer, bytes, channel); return; }
             foreach (var c in _clients.Keys) _lobby.Send(c, bytes, channel);
+            foreach (var c in _joining) _lobby.Send(c, bytes, channel); // reliable ones are queued until the link opens
         }
 
         private void AddClient(int peer)
         {
-            if (!_clients.ContainsKey(peer)) _clients[peer] = new ClientRec { Peer = peer };
+            _joining.Remove(peer);
+            if (_clients.ContainsKey(peer)) return;
+            _clients[peer] = new ClientRec { Peer = peer }; // Ack 0: the first snapshot it gets is a full one
+            ClientReady?.Invoke(peer);
         }
 
-        private void OnPeerJoined(Peer p) { if (IsHost && p.PeerId != LocalPeerId) AddClient(p.PeerId); }
-        private void OnPeerLeft(Peer p, string reason) { _clients.Remove(p.PeerId); }
+        private void OnPeerJoined(Peer p) { if (IsHost && p.PeerId != LocalPeerId && !_clients.ContainsKey(p.PeerId)) _joining.Add(p.PeerId); }
+        private void OnPeerReady(Peer p) { if (IsHost && p.PeerId != LocalPeerId) AddClient(p.PeerId); }
+        private void OnPeerLeft(Peer p, string reason) { _clients.Remove(p.PeerId); _joining.Remove(p.PeerId); }
 
         private void HostReceiveInput(int from, ReadOnlySpan<byte> payload)
         {
@@ -501,6 +523,7 @@ namespace OneLobby.Replication
             _lobby.MessageReceived -= OnMessage;
             _lobby.HostChanged -= OnHostChanged;
             _lobby.PeerJoined -= OnPeerJoined;
+            _lobby.PeerReady -= OnPeerReady;
             _lobby.PeerLeft -= OnPeerLeft;
         }
     }

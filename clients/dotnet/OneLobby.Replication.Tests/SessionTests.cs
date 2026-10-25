@@ -128,6 +128,35 @@ namespace OneLobby.Replication.Tests
         }
 
         [Fact]
+        public void HostCountsAClientOnlyOnceItsLinkIsUp()
+        {
+            var rig = new Rig(latencyMs: 30);
+            var host = rig.StartHost();
+            var ready = new List<int>();
+            host.Session.ClientReady += p => ready.Add(p);
+            host.Session.Spawn(AlienType, 0, new Alien { X = 1 });
+            rig.Net.CanConnect = (_, _) => false; // this joiner's link never opens
+            var stuck = rig.Join("stuck");
+            rig.Run(2);
+            Assert.False(stuck.Lobby.IsReady);
+            Assert.Empty(host.Session.Clients);
+            Assert.False(host.Session.IsClientReady(stuck.Lobby.LocalPeerId));
+            Assert.Equal(0, host.Session.Stats.SnapshotsSent); // nothing streamed into a dead link
+            Assert.True(rig.Until(() => stuck.Lobby.ReadyAsync.IsCompleted, 1200)); // ReadyTimeout gives up
+            rig.Run(0.5);
+            rig.Net.CanConnect = null;
+            var ok = rig.Join("ok");
+            Assert.True(ok.Lobby.IsReady);
+            Assert.True(rig.Until(() => ok.Spawned.Count == 1));
+            rig.Run(1);
+            Assert.Equal(new[] { ok.Lobby.LocalPeerId }, host.Session.Clients.ToArray());
+            Assert.Equal(new[] { ok.Lobby.LocalPeerId }, ready.ToArray());
+            Assert.True(host.Session.IsClientReady(ok.Lobby.LocalPeerId));
+            Assert.True(host.Session.Stats.FullSnapshotsSent >= 1); // its first snapshot was a full one
+            AssertWorldsMatchHost(host.Session, ok.Session);
+        }
+
+        [Fact]
         public void InterpolationRendersAboutOneHundredMsBehindAndIsSmooth()
         {
             var rig = new Rig(latencyMs: 25, jitterMs: 10);
