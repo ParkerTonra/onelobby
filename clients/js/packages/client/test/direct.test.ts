@@ -98,6 +98,23 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     expect([hc.hostId, hc.epoch]).toEqual([2, 3]);
   });
 
+  it("a resume token for another game leaves the live socket alone; the right game takes it over", async () => {
+    const host = await DirectHubHost.listen(0, { ...defaultHubOptions(), rateScale: 20 }, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    const a = await raw(host.port);
+    await a.hello();
+    a.send({ t: "create", name: "L", maxPlayers: 4, mode: "raw", visibility: "unlisted" });
+    const lobby = await a.next("lobby");
+    const other = await raw(host.port);
+    other.send({ t: "hello", proto: "lk1", gameId: "other-game", netVersion: "1", name: "x", resumeToken: lobby.resumeToken });
+    expect((await other.next("welcome")).peerId).toBeUndefined();
+    expect(a.ws.readyState).toBe(WebSocket.OPEN);
+    const same = await raw(host.port);
+    same.send({ t: "hello", proto: "lk1", gameId: "g", netVersion: "1", name: "x", resumeToken: lobby.resumeToken });
+    expect((await same.next("welcome")).peerId).toBe(1);
+    await until(() => a.ws.readyState === WebSocket.CLOSED, "old socket closed");
+  });
+
   it("host_changed claims are rejected outright in a direct lobby", async () => {
     const host = await DirectHubHost.listen(0, directHubOptions(4, null), { host: "127.0.0.1" });
     cleanup.push(() => host.close());

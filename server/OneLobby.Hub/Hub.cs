@@ -245,10 +245,16 @@ public sealed class Hub
         if (token is not null && _tokens.TryGetValue(token, out var entry)
             && entry.Lobby.GameId == gameId && entry.Lobby.NetVersion == netVersion)
         {
-            // A token whose old socket is still open is a take-over: drop the old socket first (it detaches normally).
-            if (entry.Member.Session is { } old && old != s) CloseSession(old);
-            if (entry.Member.DetachedAt > 0 && _clock.NowMs - entry.Member.DetachedAt < _o.ResumeWindowMs)
-            { resumed = entry.Member; rl = entry.Lobby; }
+            // Validate first: a live socket (take-over) or a detached seat still inside the resume window. Only a valid
+            // resume closes the old socket (it detaches normally, which starts the window anew).
+            var old = entry.Member.Session;
+            bool takeOver = old is not null && old != s;
+            bool inWindow = entry.Member.DetachedAt > 0 && _clock.NowMs - entry.Member.DetachedAt < _o.ResumeWindowMs;
+            if (takeOver || inWindow)
+            {
+                if (takeOver) CloseSession(old!);
+                resumed = entry.Member; rl = entry.Lobby;
+            }
         }
 
         var w = new JsonObject

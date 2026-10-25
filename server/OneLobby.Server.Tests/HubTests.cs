@@ -407,6 +407,18 @@ public class HubTests
     }
 
     [Fact]
+    public void Resume_with_a_token_for_another_game_leaves_the_live_socket_alone()
+    {
+        var (hub, _) = T.NewHub();
+        var (_, j, _) = T.Pair(hub);
+        string token = (string)j.Last("lobby")["resumeToken"]!;
+        var other = new Client(hub, "10.0.0.2").Hello(game: "other", resume: token);
+        Assert.Null(other.Last("welcome")["peerId"]);   // plain welcome, not a resume
+        Assert.False(j.Closed);
+        Assert.False(j.Has("error"));
+    }
+
+    [Fact]
     public void Idle_timeout_30s_and_ping_keeps_alive()
     {
         var (hub, clock) = T.NewHub();

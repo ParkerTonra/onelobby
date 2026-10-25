@@ -401,10 +401,13 @@ export class SignalingHub {
     const token = str(m, "resumeToken");
     const entry = token !== null ? this.tokens.get(token) : undefined;
     if (entry && entry.lobby.gameId === gameId && entry.lobby.netVersion === netVersion) {
-      // A token whose old socket is still open is a take-over: drop the old socket first (it detaches normally).
+      // Validate first: a live socket (take-over) or a detached seat still inside the resume window. Only a valid
+      // resume closes the old socket (it detaches normally, which starts the window anew).
       const old = entry.member.session;
-      if (old && old !== s) this.closeSession(old);
-      if (entry.member.detachedAt > 0 && this.now() - entry.member.detachedAt < this.o.resumeWindowMs) {
+      const takeOver = old !== null && old !== undefined && old !== s;
+      const inWindow = entry.member.detachedAt > 0 && this.now() - entry.member.detachedAt < this.o.resumeWindowMs;
+      if (takeOver || inWindow) {
+        if (takeOver) this.closeSession(old!);
         resumed = entry.member;
         rl = entry.lobby;
       }
