@@ -127,9 +127,16 @@ namespace OneLobby.Unity
             var l = Lobby;
             if (l == null) return;
             Lobby = null;
-            await l.LeaveAsync();
-            ReleaseBackground();
-            LobbyChanged?.Invoke(null);
+            try
+            {
+                await l.LeaveAsync();
+            }
+            finally
+            {
+                // even when leaving throws (socket already dead), the game is solo again
+                ReleaseBackground();
+                LobbyChanged?.Invoke(null);
+            }
         }
 
         private void OnDestroy()

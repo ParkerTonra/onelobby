@@ -199,6 +199,81 @@ A native library cannot load in WebGL, and `ClientWebSocket` does not work there
 exact channel setup) behind the same `ITransport`. Not built yet. (libdatachannel's datachannel-wasm wrapper is the other
 route.)
 
+## Testing two players headless (batchmode)
+
+Test multiplayer with two **batchmode** players, not two windows: they need no screen, no focus and no audio device, they
+always run (an unfocused window may not; the runner keeps `runInBackground` on while in a lobby, but batchmode never
+needs it), and they leave logs a script can check. Reach for windows only when the test is about rendering, and then
+mute them and keep them off the user's screens.
+
+Give the game a few command-line flags (read once at startup; ignored in normal play):
+
+```csharp
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using OneLobby;
+using OneLobby.Unity;
+using UnityEngine;
+
+/// <summary>Test-only: `--smoke-host <file>` hosts and writes the code to file; `--smoke-join <file>` joins it.</summary>
+public sealed class SmokeFlags : MonoBehaviour
+{
+    [SerializeField] OneLobbyRunner runner = null!;
+
+    async void Start()
+    {
+        string? Arg(string name) { var a = Environment.GetCommandLineArgs(); int i = Array.IndexOf(a, name); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }
+        var hostFile = Arg("--smoke-host");
+        var joinFile = Arg("--smoke-join");
+        if (hostFile == null && joinFile == null) return;
+        try
+        {
+            Lobby lobby;
+            if (hostFile != null)
+            {
+                lobby = await runner.HostAsync(new LobbyOptions("smoke", MaxPlayers: 2));
+                File.WriteAllText(hostFile, lobby.Code);
+            }
+            else
+            {
+                string code;
+                while (!File.Exists(joinFile!) || (code = File.ReadAllText(joinFile!).Trim()) == "") await Task.Delay(200);
+                lobby = await runner.JoinAsync(code);
+                await lobby.ReadyAsync;                // faults with "ice_failed" after ReadyTimeout (default 15 s)
+            }
+            lobby.PeerJoined += p => Debug.Log($"[smoke] player {p.PeerId} entered");
+            lobby.MessageReceived += (from, bytes, ch) => Debug.Log($"[smoke] got {bytes.Length} bytes from {from}");
+            lobby.Broadcast(new byte[] { 1, 2, 3 });
+            Debug.Log("[smoke] ready");
+            await Task.Delay(20_000);
+            Debug.Log("[smoke] PASS");                 // the script also checks the "got" lines
+            Application.Quit(0);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[smoke] FAIL {e.Message}");
+            Application.Quit(1);
+        }
+    }
+}
+```
+
+Then build a standalone player once and run two copies with a local server (PowerShell):
+
+```
+dotnet run --project server/OneLobby.Server -- --listen :8080     # in its own terminal
+$exe = "C:\path\to\Build\MyGame.exe"; $code = "$env:TEMP\smoke-code.txt"; Remove-Item $code -ErrorAction Ignore
+$h = Start-Process $exe -PassThru -ArgumentList "-batchmode -nographics -logFile $env:TEMP\host.log --smoke-host $code"
+$j = Start-Process $exe -PassThru -ArgumentList "-batchmode -nographics -logFile $env:TEMP\join.log --smoke-join $code"
+$h, $j | Wait-Process -Timeout 60
+Select-String "\[smoke\]" $env:TEMP\host.log, $env:TEMP\join.log
+```
+
+Both logs should show `[smoke] ready`, a `got 3 bytes` line and `[smoke] PASS`. `-nographics` also skips the GPU, so
+this runs on CI machines. The same flags drive a windowed run when a test needs pixels: add
+`-screen-fullscreen 0` and mute the game (`AudioListener.volume = 0` when a `--mute` flag is set).
+
 ## Done when
 
 - The project compiles with the package added and the Console shows no errors.
