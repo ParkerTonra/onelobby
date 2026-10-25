@@ -2,7 +2,8 @@
 
 Godot uses `OneLobby.Core` unchanged and adds `OneLobby.Godot` for the WebRTC transport, microphone capture and Opus.
 Godot snippets are not compiled by `check-snippets.mjs` (they need GodotSharp); the engine-free parts are in
-`dotnet-generic.md` and are. Use Godot 4.3+ with the .NET build.
+`dotnet-generic.md` and are. Use Godot 4.5 or newer with the .NET build (tested on 4.5.1 and 4.7.2; `OneLobby.Godot`
+builds against GodotSharp 4.5.1, and a newer project's GodotSharp takes its place).
 
 ## 1. Add the packages
 
