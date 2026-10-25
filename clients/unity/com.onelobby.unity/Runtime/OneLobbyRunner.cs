@@ -49,18 +49,41 @@ namespace OneLobby.Unity
         /// <summary>Extra config applied when the client is created (for OneLobbyConfig fields not exposed above).</summary>
         public Func<OneLobbyConfig, OneLobbyConfig>? ConfigureConfig;
 
+        /// <summary>
+        /// Dev builds: make the network worse on purpose (<see cref="NetSimTransport"/>). Set before the first Host/Join,
+        /// or pass <c>--fakelag=ms --fakejitter=ms --fakeloss=percent</c> on the command line. Change it while running with
+        /// <see cref="Sim"/>.<c>Options</c>.
+        /// </summary>
+        public NetSimOptions? NetSim;
+        /// <summary>The bad-network wrapper when <see cref="NetSim"/> is on, else null.</summary>
+        public NetSimTransport? Sim { get; private set; }
+
         private void Awake()
         {
             if (KeepAcrossScenes) DontDestroyOnLoad(gameObject);
             foreach (var arg in Environment.GetCommandLineArgs())
+            {
                 if (arg.StartsWith("--lobby-server=", StringComparison.Ordinal)) LobbyServer = arg.Substring("--lobby-server=".Length);
+                else if (FlagMs(arg, "--fakelag=", out var v)) NetSim = (NetSim ?? new NetSimOptions()) with { LatencyMs = v };
+                else if (FlagMs(arg, "--fakejitter=", out v)) NetSim = (NetSim ?? new NetSimOptions()) with { JitterMs = v };
+                else if (FlagMs(arg, "--fakeloss=", out v)) NetSim = (NetSim ?? new NetSimOptions()) with { LossPercent = v };
+            }
+        }
+
+        private static bool FlagMs(string arg, string name, out double value)
+        {
+            value = 0;
+            return arg.StartsWith(name, StringComparison.Ordinal) && double.TryParse(arg.Substring(name.Length),
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
         }
 
         private LobbyClient CreateClient()
         {
             var config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
             if (ConfigureConfig != null) config = ConfigureConfig(config);
-            var c = new LobbyClient(config, Transport);
+            ITransport transport = Transport;
+            if (NetSim != null) transport = Sim = new NetSimTransport(Transport, NetSim);
+            var c = new LobbyClient(config, transport);
             c.Error += e => Error?.Invoke(e);
             return c;
         }
