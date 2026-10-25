@@ -23,7 +23,7 @@
   },
   "type": "module",
   "bin": {
-    "create-onelobby": "./bin/create-onelobby.js"
+    "create-onelobby": "bin/create-onelobby.js"
   },
   "files": [
     "bin",

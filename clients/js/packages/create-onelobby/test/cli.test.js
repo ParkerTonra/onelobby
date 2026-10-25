@@ -282,3 +282,10 @@ describe("help", () => {
     expect(r.out).toContain("--dry-run");
   });
 });
+
+describe("package.json", () => {
+  it("keeps its bin entry when packed (npm 11 drops a bin path that starts with ./)", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(pkg.bin["create-onelobby"]).toBe("bin/create-onelobby.js");
+  });
+});
