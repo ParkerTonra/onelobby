@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <LowkeyRepo Condition="'$(LowkeyRepo)' == ''">C:/Users/parke/ClaudeCode/Lowkey</LowkeyRepo>
+    <LowkeyRepo Condition="'$(LowkeyRepo)' == ''">$(MSBuildThisFileDirectory)../../../../Lowkey</LowkeyRepo>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="LowkeyIndustries.Sim">
