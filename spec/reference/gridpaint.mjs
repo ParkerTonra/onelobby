@@ -1,4 +1,4 @@
-// Gridpaint reference implementation (DESIGN s.15.1, spec/demo-game.md). Pure, deterministic, no I/O.
+// Gridpaint reference implementation (DESIGN s.14.1, spec/demo-game.md). Pure, deterministic, no I/O.
 import { normalize } from './codes.mjs';
 
 export const W = 16;

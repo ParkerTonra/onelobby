@@ -66,11 +66,11 @@ public class HubTests
     [Fact]
     public void Game_allow_list()
     {
-        var (hub, _) = T.NewHub(o => o.AllowedGames = new() { "lowkey" });
+        var (hub, _) = T.NewHub(o => o.AllowedGames = new() { "com.example.allowed" });
         var bad = new Client(hub).Hello("other");
         Assert.Equal("game_not_allowed", bad.LastError);
         Assert.True(bad.Closed);
-        Assert.True(T.Ready(hub, game: "lowkey").Has("welcome"));
+        Assert.True(T.Ready(hub, game: "com.example.allowed").Has("welcome"));
     }
 
     [Fact]

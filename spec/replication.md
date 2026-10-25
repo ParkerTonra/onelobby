@@ -1,6 +1,6 @@
 # Replication protocol, version 1 (inside `raw` payloads)
 
-Normative source: DESIGN s.19. Reference implementation: `clients/dotnet/OneLobby.Replication` (`Protocol.cs`,
+Normative source: DESIGN s.18. Reference implementation: `clients/dotnet/OneLobby.Replication` (`Protocol.cs`,
 `NetBits.cs`). Test vectors: `spec/vectors/replication.json` (every implementation must encode them byte for byte and
 reject the `invalid` ones). This layer changes nothing in the lobby protocol (`lk1`, `signaling.md`) or the data-channel
 frames (`binary.md`): each message below is the body of one `raw` frame (type 0x20), on the channel named here.

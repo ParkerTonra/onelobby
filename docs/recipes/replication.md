@@ -5,7 +5,7 @@ and the other players see it: shooters, brawlers, co-op horde games. It sits on 
 clock, entity spawn/despawn, delta snapshots (about 100 kbit/s per client for 50 moving enemies), interpolation, a
 redundant input stream, reliable events, local-player prediction and lag-compensated hitscan. No engine types: the same
 DLL runs under Unity, Godot C# and plain .NET; your engine code only copies transforms in and out.
-Design: DESIGN s.19. Wire format: `spec/replication.md`. Snippets tagged `csharp compile` are compiled by
+Design: DESIGN s.18. Wire format: `spec/replication.md`. Snippets tagged `csharp compile` are compiled by
 `docs/check-snippets.mjs`.
 
 Connect first (`docs/recipes/dotnet-generic.md` or `godot-csharp.md`) with `SyncMode.Raw`, then add this.

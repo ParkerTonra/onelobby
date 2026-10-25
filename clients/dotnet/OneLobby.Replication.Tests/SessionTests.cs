@@ -373,7 +373,7 @@ namespace OneLobby.Replication.Tests
         [Fact]
         public void BandwidthFourPlayersFiftyAliensUnderBudget()
         {
-            // Eons Later worst case: host + 3 clients, 50 aliens all moving every tick, 4 avatars, 5% loss, jitter.
+            // Worst case for a 4-player co-op game: host + 3 clients, 50 aliens all moving every tick, 4 avatars, 5% loss, jitter.
             var rig = new Rig(latencyMs: 40, lossRate: 0.05, jitterMs: 15);
             var host = rig.StartHost();
             var clients = new[] { rig.Join("a"), rig.Join("b"), rig.Join("c") };
@@ -420,7 +420,7 @@ namespace OneLobby.Replication.Tests
             _out.WriteLine($"client upstream (inputs x4 + pings) {clientUp * 8 / 1000:F1} kbit/s");
             foreach (var c in clients) AssertWorldsMatchHost(host.Session, c.Session);
 
-            // Budget (DESIGN s.19): 128 kbit/s per client down, 3 x 128 host up, 16 kbit/s client up, MTU-safe snapshots.
+            // Budget (DESIGN s.18): 128 kbit/s per client down, 3 x 128 host up, 16 kbit/s client up, MTU-safe snapshots.
             Assert.All(perClient, b => Assert.True(b * 8 <= 128_000, $"client downstream {b * 8 / 1000:F1} kbit/s"));
             Assert.True(hostFastUp * 8 <= 3 * 128_000, $"host upstream {hostFastUp * 8 / 1000:F1} kbit/s");
             Assert.True(clientUp * 8 <= 16_000, $"client upstream {clientUp * 8 / 1000:F1} kbit/s");

@@ -6,7 +6,7 @@ using OneLobby.Replication;
 
 namespace OneLobby.Replication.Tests
 {
-    /// <summary>An Eons-Later-shaped alien: position on a 512 m map, height, yaw, animation, health. 64 bits on the wire.</summary>
+    /// <summary>A typical creature: position on a 512 m map, height, yaw, animation, health. 64 bits on the wire.</summary>
     internal sealed class Alien : IReplicatedEntity
     {
         public float X, Y, Z, Yaw;
