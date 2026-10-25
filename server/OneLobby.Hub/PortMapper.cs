@@ -43,7 +43,7 @@ public sealed class PortMapperOptions
 /// <c>GetExternalIPAddress</c> + <c>AddPortMapping</c>), then NAT-PMP (RFC 6886; most PCP routers answer it too).
 /// These are requests from inside the home to the player's own router; CERT VU#357851 is about routers that accept
 /// them from the WAN. Same external and internal port or nothing: a join code carries one port number. Leases renew
-/// at half-life; <see cref="Dispose"/> deletes the mappings (best effort, about a second).
+/// at half-life; <see cref="Dispose"/> deletes the mappings (best effort, about two seconds), even mid-<see cref="OpenAsync"/>.
 /// </summary>
 public sealed class PortMapper : IDisposable
 {
@@ -70,6 +70,10 @@ public sealed class PortMapper : IDisposable
     private int _lease;
     private IPEndPoint? _natPmp;
     private Task? _renewer;
+    private Task? _opening;
+    // Every mapping a request was sent for and the router did not refuse ("upnp TCP", "pmp 1", ...): what Dispose
+    // deletes. Added before the request goes out, so a host that quits mid-request still undoes it.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _maybeMapped = new();
 
     public int Port => _port;
     public PortMapResult? Result => _result;
@@ -86,7 +90,24 @@ public sealed class PortMapper : IDisposable
     }
 
     /// <summary>Finds the router and maps TCP + UDP <c>P</c>. Never throws for network trouble: see <see cref="PortMapResult.Detail"/>.</summary>
-    public async Task<PortMapResult> OpenAsync(CancellationToken ct = default)
+    public Task<PortMapResult> OpenAsync(CancellationToken ct = default)
+    {
+        var t = OpenCoreAsync(ct);
+        _opening = t;
+        return t;
+    }
+
+    private async Task<PortMapResult> OpenCoreAsync(CancellationToken outer)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(outer, _cts.Token);
+        try { return await TryBothAsync(linked.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested && !outer.IsCancellationRequested)
+        {
+            return new PortMapResult { Detail = "closed before the router answered" };
+        }
+    }
+
+    private async Task<PortMapResult> TryBothAsync(CancellationToken ct)
     {
         var notes = new List<string>();
         if (_o.TryUpnp)
@@ -115,7 +136,7 @@ public sealed class PortMapper : IDisposable
     private PortMapResult Done(PortMapResult r)
     {
         _result = r;
-        if (r.Mapped && _renewer == null)
+        if (r.Mapped && _renewer == null && !_cts.IsCancellationRequested)
         {
             var every = TimeSpan.FromSeconds(Math.Max(30, (_lease > 0 ? _lease : _o.LeaseSeconds) / 2));
             if (_lease > 0 || r.Method == PortMapMethod.NatPmp) _renewer = Task.Run(() => RenewLoop(every));
@@ -185,12 +206,25 @@ public sealed class PortMapper : IDisposable
     private async Task AddUpnpBoth(string local, int lease, CancellationToken ct)
     {
         foreach (var proto in new[] { "TCP", "UDP" })
-            await SoapAsync("AddPortMapping", new[]
+        {
+            ct.ThrowIfCancellationRequested();
+            _maybeMapped["upnp " + proto] = 0;
+            try
             {
-                ("NewRemoteHost", ""), ("NewExternalPort", P()), ("NewProtocol", proto), ("NewInternalPort", P()),
-                ("NewInternalClient", local), ("NewEnabled", "1"), ("NewPortMappingDescription", _o.Description),
-                ("NewLeaseDuration", lease.ToString(CultureInfo.InvariantCulture)),
-            }, ct).ConfigureAwait(false);
+                await SoapAsync("AddPortMapping", new[]
+                {
+                    ("NewRemoteHost", ""), ("NewExternalPort", P()), ("NewProtocol", proto), ("NewInternalPort", P()),
+                    ("NewInternalClient", local), ("NewEnabled", "1"), ("NewPortMappingDescription", _o.Description),
+                    ("NewLeaseDuration", lease.ToString(CultureInfo.InvariantCulture)),
+                }, ct).ConfigureAwait(false);
+            }
+            catch (UpnpException)
+            {
+                // refused (e.g. 718: another device holds the port): not ours, so Dispose must not delete it
+                _maybeMapped.TryRemove("upnp " + proto, out _);
+                throw;
+            }
+        }
     }
 
     private string P() => _port.ToString(CultureInfo.InvariantCulture);
@@ -380,13 +414,21 @@ public sealed class PortMapper : IDisposable
     {
         foreach (var op in new byte[] { 1, 2 })
         {
+            ct.ThrowIfCancellationRequested();
+            var key = "pmp " + op;
+            _maybeMapped[key] = 0;
             var reply = await NatPmpRequest(_natPmp!, MapRequest(op, lifetime), 16, ct).ConfigureAwait(false);
             if (reply == null) return "no answer to the mapping request";
-            if (ResultCode(reply) != 0) return "result code " + ResultCode(reply);
+            if (ResultCode(reply) != 0)
+            {
+                _maybeMapped.TryRemove(key, out _);
+                return "result code " + ResultCode(reply);
+            }
             var mapped = (reply[10] << 8) | reply[11];
             if (lifetime > 0 && mapped != _port)
             {
                 await NatPmpRequest(_natPmp!, MapRequest(op, 0), 16, ct).ConfigureAwait(false);
+                _maybeMapped.TryRemove(key, out _);
                 return "router offered port " + mapped + " instead of " + _port;
             }
         }
@@ -462,22 +504,26 @@ public sealed class PortMapper : IDisposable
         return true;
     }
 
-    /// <summary>Deletes the mappings (best effort, bounded to about a second) and stops renewing.</summary>
+    /// <summary>
+    /// Stops renewing, cancels an <see cref="OpenAsync"/> still in progress and deletes every mapping it may have made
+    /// (best effort, bounded to about two seconds; blocks the caller, so a game can call it as it quits).
+    /// </summary>
     public void Dispose()
     {
         if (_cts.IsCancellationRequested) return;
         _cts.Cancel();
-        var r = _result;
-        if (r is { Mapped: true })
+        // let a cancelled open unwind first, so no mapping request goes out after the deletes
+        try { _opening?.Wait(TimeSpan.FromMilliseconds(500)); } catch (Exception) { }
+        var undo = _maybeMapped.Keys.ToList();
+        if (undo.Count > 0)
         {
             using var quick = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
             try
             {
-                Task t = r.Method == PortMapMethod.Upnp
-                    ? Task.WhenAll(new[] { "TCP", "UDP" }.Select(p => SoapAsync("DeletePortMapping",
-                        new[] { ("NewRemoteHost", ""), ("NewExternalPort", P()), ("NewProtocol", p) }, quick.Token)))
-                    : Task.WhenAll(new byte[] { 1, 2 }.Select(op => NatPmpOnce(MapRequest(op, 0))));
-                t.Wait(TimeSpan.FromMilliseconds(1500));
+                Task.WhenAll(undo.Select(k => k.StartsWith("upnp ", StringComparison.Ordinal)
+                    ? (Task)SoapAsync("DeletePortMapping", new[] { ("NewRemoteHost", ""), ("NewExternalPort", P()), ("NewProtocol", k.Substring(5)) }, quick.Token)
+                    : NatPmpOnce(MapRequest(byte.Parse(k.Substring(4), CultureInfo.InvariantCulture), 0))))
+                    .Wait(TimeSpan.FromMilliseconds(1500));
             }
             catch (Exception) { /* the lease expires on its own */ }
         }

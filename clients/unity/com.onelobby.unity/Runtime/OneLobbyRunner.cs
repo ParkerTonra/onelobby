@@ -102,12 +102,20 @@ namespace OneLobby.Unity
             return Client;
         }
 
-        private void DropClient()
+        private void DropClient(bool wait = false)
         {
             var c = _client;
             _client = null;
             _clientIsDirect = false;
-            if (c != null) _ = c.DisposeAsync().AsTask();
+            if (c == null) return;
+            var t = c.DisposeAsync().AsTask();
+            // On quit the process exits right after OnDestroy: give a direct host's router mapping delete time to go out
+            // (PortMapper bounds it to about two seconds; DisposeAsync never needs the main thread, so this cannot deadlock).
+            if (wait)
+            {
+                try { t.Wait(TimeSpan.FromSeconds(3)); }
+                catch (Exception e) { Debug.LogWarning("OneLobby: leaving on quit failed: " + e.Message); }
+            }
         }
 
         /// <summary>Runs a Host/Join call with the background hold on from the start; drops the hold if the call fails.</summary>
@@ -182,7 +190,7 @@ namespace OneLobby.Unity
         {
             Lobby = null;
             ReleaseBackground();
-            DropClient();
+            DropClient(wait: true);
         }
     }
 }

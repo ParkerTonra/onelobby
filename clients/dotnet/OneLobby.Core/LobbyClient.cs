@@ -271,11 +271,18 @@ namespace OneLobby
 
         public async ValueTask DisposeAsync()
         {
-            if (_lobby != null) await _lobby.LeaveAsync().ConfigureAwait(false);
-            Socket?.Dispose();
-            Socket = null;
-            _owned?.Dispose();
-            _owned = null;
+            try
+            {
+                if (_lobby != null) await _lobby.LeaveAsync().ConfigureAwait(false);
+                Socket?.Dispose();
+            }
+            finally
+            {
+                // a direct host's hub (and its router mapping) goes even when leaving throws
+                Socket = null;
+                _owned?.Dispose();
+                _owned = null;
+            }
         }
     }
 }

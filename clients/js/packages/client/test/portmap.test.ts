@@ -14,6 +14,8 @@ class FakeUpnp {
   mappings = new Map<string, string>();
   external = "203.0.113.7";
   addError = 0;
+  addDelayMs = 0; // a slow router: AddPortMapping takes effect at once but the reply comes this late
+  actions: string[] = [];
   constructor() {
     this.http = createServer((req, res) => {
       let body = "";
@@ -27,11 +29,13 @@ class FakeUpnp {
           return send(200, `<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device><serviceList><service>` +
             `<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType><controlURL>/ctl/IPConn</controlURL></service></serviceList></device></root>`);
         const action = /#(\w+)"/.exec(String(req.headers.soapaction))?.[1];
+        if (action) this.actions.push(action);
         if (action === "GetExternalIPAddress") return send(200, env(`<u:R xmlns:u="x"><NewExternalIPAddress>${this.external}</NewExternalIPAddress></u:R>`));
         if (action === "AddPortMapping") {
           if (this.addError && !(this.addError === 725 && arg(body, "NewLeaseDuration") === "0"))
             return send(500, env(`<s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>${this.addError}</errorCode><errorDescription>nope</errorDescription></UPnPError></detail></s:Fault>`));
           this.mappings.set(`${arg(body, "NewProtocol")} ${arg(body, "NewExternalPort")}`, `${arg(body, "NewInternalClient")} lease ${arg(body, "NewLeaseDuration")}`);
+          if (this.addDelayMs) return void setTimeout(() => send(200, env("")), this.addDelayMs);
           return send(200, env(""));
         }
         if (action === "DeletePortMapping") {
@@ -57,6 +61,7 @@ class FakeUpnp {
   }
   stop() {
     this.ssdp.close();
+    this.http.closeAllConnections();
     this.http.close();
   }
 }
@@ -138,6 +143,37 @@ describe("PortMapper", () => {
     expect(r.mapped).toBe(false);
     expect(r.detail).toContain("718");
     expect(r.externalIPv4).toBe("203.0.113.7");
+  });
+
+  it("UPnP close mid-open still deletes what the router mapped", async () => {
+    const gw = await new FakeUpnp().start();
+    gw.addDelayMs = 1000;
+    stops.push(() => gw.stop());
+    const m = new PortMapper(47810, opts(gw));
+    const open = m.open();
+    const t0 = Date.now();
+    while (!gw.mappings.has("TCP 47810")) {
+      expect(Date.now() - t0).toBeLessThan(5000);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await m.close(); // the game quits while the router has not answered yet
+    const r = await open;
+    expect(r.mapped).toBe(false);
+    await new Promise((r2) => setTimeout(r2, 1500)); // the late reply lands and undoes itself
+    expect(gw.mappings.size).toBe(0);
+    expect(gw.actions.filter((a) => a === "AddPortMapping")).toHaveLength(1); // the UDP request never went out
+  });
+
+  it("UPnP close leaves a mapping the router refused alone", async () => {
+    const gw = await new FakeUpnp().start();
+    gw.addError = 718;
+    gw.mappings.set("TCP 47810", "192.168.1.50 lease 0"); // another device on the network holds the port
+    stops.push(() => gw.stop());
+    const m = new PortMapper(47810, opts(gw));
+    expect((await m.open()).mapped).toBe(false);
+    await m.close();
+    expect(gw.actions).not.toContain("DeletePortMapping");
+    expect(gw.mappings.get("TCP 47810")).toBe("192.168.1.50 lease 0");
   });
 
   it("NAT-PMP maps both and reports the external address", async () => {

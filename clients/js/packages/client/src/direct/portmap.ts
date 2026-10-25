@@ -65,6 +65,12 @@ export class PortMapper {
   private natPmpAt: { address: string; port: number } | null = null;
   private renew: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private opening: Promise<PortMapResult> | null = null;
+  /**
+   * Every mapping a request was sent for and the router did not refuse ("upnp TCP", "pmp 1", ...): what close()
+   * deletes. Added before the request goes out, so a host that quits mid-request still undoes it.
+   */
+  private readonly maybeMapped = new Set<string>();
 
   constructor(readonly port: number, options: PortMapperOptions = {}) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new RangeError(`bad port ${port}`);
@@ -81,7 +87,11 @@ export class PortMapper {
   }
 
   /** Finds the router and maps TCP + UDP `port`. Never rejects for network trouble: see `detail`. */
-  async open(): Promise<PortMapResult> {
+  open(): Promise<PortMapResult> {
+    return (this.opening = this.openBoth());
+  }
+
+  private async openBoth(): Promise<PortMapResult> {
     const notes: string[] = [];
     if (this.o.tryUpnp) {
       try {
@@ -160,11 +170,23 @@ export class PortMapper {
   }
 
   private async addUpnpBoth(local: string, lease: number): Promise<void> {
-    for (const proto of ["TCP", "UDP"])
-      await this.soap("AddPortMapping", [
-        ["NewRemoteHost", ""], ["NewExternalPort", String(this.port)], ["NewProtocol", proto], ["NewInternalPort", String(this.port)],
-        ["NewInternalClient", local], ["NewEnabled", "1"], ["NewPortMappingDescription", this.o.description], ["NewLeaseDuration", String(lease)],
-      ]);
+    for (const proto of ["TCP", "UDP"]) {
+      if (this.stopped) throw new Error("closed before the router answered");
+      const key = `upnp ${proto}`;
+      this.maybeMapped.add(key);
+      try {
+        await this.soap("AddPortMapping", [
+          ["NewRemoteHost", ""], ["NewExternalPort", String(this.port)], ["NewProtocol", proto], ["NewInternalPort", String(this.port)],
+          ["NewInternalClient", local], ["NewEnabled", "1"], ["NewPortMappingDescription", this.o.description], ["NewLeaseDuration", String(lease)],
+        ]);
+      } catch (e) {
+        // refused (e.g. 718: another device holds the port): not ours, so close() must not delete it
+        if (e instanceof UpnpError) this.maybeMapped.delete(key);
+        throw e;
+      }
+      // close() ran while this request was out: its delete may have reached the router first, so undo it now
+      if (this.stopped) await this.undo([key]);
+    }
   }
 
   /**
@@ -275,13 +297,21 @@ export class PortMapper {
   /** Maps UDP then TCP; null on success, else why. A different external port counts as failure (and is undone). */
   private async natPmpMapBoth(lifetime: number): Promise<string | null> {
     for (const op of [1, 2]) {
+      if (this.stopped) return "closed before the router answered";
+      const key = `pmp ${op}`;
+      this.maybeMapped.add(key);
       const reply = await this.natPmpRequest(this.natPmpAt!, this.mapRequest(op, lifetime), 16);
+      if (this.stopped) await this.undo([key]);
       if (!reply) return "no answer to the mapping request";
       const rc = reply.readUInt16BE(2);
-      if (rc !== 0) return `result code ${rc}`;
+      if (rc !== 0) {
+        this.maybeMapped.delete(key);
+        return `result code ${rc}`;
+      }
       const mapped = reply.readUInt16BE(10);
       if (lifetime > 0 && mapped !== this.port) {
         await this.natPmpRequest(this.natPmpAt!, this.mapRequest(op, 0), 16);
+        this.maybeMapped.delete(key);
         return `router offered port ${mapped} instead of ${this.port}`;
       }
     }
@@ -323,18 +353,29 @@ export class PortMapper {
     });
   }
 
-  /** Deletes the mappings (best effort, bounded to about 1.5 s) and stops renewing. */
+  /**
+   * Stops renewing and deletes every mapping it may have made, even while {@link open} is still talking to the router
+   * (best effort, bounded to about two seconds; a request still out when it returns undoes itself when it lands).
+   */
   async close(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     if (this.renew) clearInterval(this.renew);
-    const r = this.result;
-    if (!r?.mapped) return;
-    const work =
-      r.method === "upnp"
-        ? Promise.all(["TCP", "UDP"].map((p) => this.soap("DeletePortMapping", [["NewRemoteHost", ""], ["NewExternalPort", String(this.port)], ["NewProtocol", p]])))
-        : Promise.all([1, 2].map((op) => this.natPmpOnce(this.mapRequest(op, 0))));
-    await Promise.race([work.catch(() => {}), new Promise((r2) => setTimeout(r2, 1500).unref?.())]);
+    if (this.opening) await Promise.race([this.opening.catch(() => {}), delay(500)]);
+    await this.undo([...this.maybeMapped]);
+  }
+
+  private async undo(keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const work = Promise.all(
+      keys.map((k) => {
+        this.maybeMapped.delete(k);
+        return k.startsWith("upnp ")
+          ? this.soap("DeletePortMapping", [["NewRemoteHost", ""], ["NewExternalPort", String(this.port)], ["NewProtocol", k.slice(5)]])
+          : this.natPmpOnce(this.mapRequest(Number(k.slice(4)), 0));
+      }),
+    );
+    await Promise.race([work.catch(() => {}), delay(1500)]);
   }
 
   private natPmpOnce(req: Buffer): Promise<void> {
@@ -466,4 +507,8 @@ export function localAddresses(port: number): string[] {
     }
   }
   return [...v4, ...v6];
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms).unref?.());
 }

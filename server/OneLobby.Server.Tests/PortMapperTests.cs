@@ -21,6 +21,7 @@ public class PortMapperTests
         public string External = "203.0.113.7";
         public int AddError; // UPnP error code to answer AddPortMapping with (0 = ok); 725 is cleared after one use
         public string ContentType = "text/xml";
+        public int AddDelayMs; // a slow router: AddPortMapping takes effect at once but the reply comes this late
         private readonly CancellationTokenSource _cts = new();
 
         public IPEndPoint SsdpEndpoint => (IPEndPoint)Ssdp.Client.LocalEndPoint!;
@@ -71,6 +72,7 @@ public class PortMapperTests
             while (got < headerEnd + 4 + len) got += await s.ReadAsync(buf.AsMemory(got));
             var body = Encoding.UTF8.GetString(buf, headerEnd + 4, len);
             var (status, xml) = Handle(head, body);
+            if (AddDelayMs > 0 && head.Contains("#AddPortMapping\"")) await Task.Delay(AddDelayMs);
             var bytes = Encoding.UTF8.GetBytes(xml);
             var resp = $"HTTP/1.1 {status}\r\nContent-Type: {ContentType}\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
             await s.WriteAsync(Encoding.ASCII.GetBytes(resp));
@@ -220,6 +222,35 @@ public class PortMapperTests
         Assert.False(r.Mapped);
         Assert.Contains("718", r.Detail);
         Assert.Equal("203.0.113.7", r.ExternalIPv4);
+    }
+
+    [Fact]
+    public async Task UpnpDisposeMidOpenStillDeletesWhatTheRouterMapped()
+    {
+        using var gw = new FakeUpnp { AddDelayMs = 3000 };
+        var m = new PortMapper(47810, Opts(gw));
+        var open = m.OpenAsync();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!gw.Mappings.ContainsKey("TCP 47810")) { Assert.True(sw.ElapsedMilliseconds < 5000, "no AddPortMapping"); await Task.Delay(10); }
+        m.Dispose(); // the game quits while the router has not answered yet
+        var r = await open;
+        Assert.False(r.Mapped);
+        Assert.Empty(gw.Mappings);
+        await Task.Delay(300);
+        Assert.Empty(gw.Mappings); // and nothing was mapped after the delete
+        Assert.Single(gw.Actions, a => a == "AddPortMapping"); // the UDP request never went out
+    }
+
+    [Fact]
+    public async Task UpnpDisposeLeavesAMappingTheRouterRefusedAlone()
+    {
+        using var gw = new FakeUpnp { AddError = 718 };
+        gw.Mappings["TCP 47810"] = "192.168.1.50 lease 0"; // another device on the network holds the port
+        var m = new PortMapper(47810, Opts(gw));
+        Assert.False((await m.OpenAsync()).Mapped);
+        m.Dispose();
+        Assert.DoesNotContain("DeletePortMapping", gw.Actions);
+        Assert.Equal("192.168.1.50 lease 0", gw.Mappings["TCP 47810"]);
     }
 
     [Fact]

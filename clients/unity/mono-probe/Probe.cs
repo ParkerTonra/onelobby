@@ -151,6 +151,7 @@ static class Probe
                     else
                     {
                         if (head.Contains("#AddPortMapping")) lock (mapped) mapped.Add("add");
+                        if (head.Contains("#DeletePortMapping")) lock (mapped) mapped.Add("delete");
                         xml = string.Format(env, "<u:Response xmlns:u=\"urn:schemas-upnp-org:service:WANIPConnection:1\"/>");
                     }
                     var body = Encoding.UTF8.GetBytes(xml);
@@ -168,10 +169,11 @@ static class Probe
         });
         var r = m.OpenAsync().GetAwaiter().GetResult();
         Console.WriteLine($"upnp: mapped={r.Mapped} method={r.Method} external={r.ExternalIPv4} detail={r.Detail}");
-        int adds;
-        lock (mapped) adds = mapped.Count;
-        var ok = r.Mapped && r.ExternalIPv4 == "203.0.113.7" && adds == 2;
-        m.Dispose();
+        m.Dispose(); // blocks until the router deletes are answered, as OneLobbyRunner.OnDestroy does on quit
+        int adds, deletes;
+        lock (mapped) { adds = mapped.FindAll(x => x == "add").Count; deletes = mapped.FindAll(x => x == "delete").Count; }
+        Console.WriteLine($"upnp: {adds} adds, {deletes} deletes");
+        var ok = r.Mapped && r.ExternalIPv4 == "203.0.113.7" && adds == 2 && deletes == 2;
         ssdp.Close();
         http.Stop();
         Console.WriteLine(ok ? "PASS" : "FAIL");
