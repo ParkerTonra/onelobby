@@ -59,7 +59,7 @@ namespace OneLobby
     public enum VoiceMode { PushToTalk, VoiceActivity }
 
     /// <summary>Thrown by the async lobby calls when the server answers with an error.</summary>
-    public sealed class OneLobbyException : Exception
+    public class OneLobbyException : Exception
     {
         public string Code { get; }
         public OneLobbyException(string code, string message) : base(code + ": " + message) { Code = code; }

@@ -81,6 +81,41 @@ namespace OneLobby
         internal Task<Lobby> JoinSingleLobbyAsync(string? password, CancellationToken ct = default) =>
             Run(null, Signaling.JoinDirect(password), new[] { "lobby" }, EnterLobby, ct);
 
+        /// <summary>The blueprint this client was built from (<see cref="FromBlueprint"/>), or null. A blueprint client enforces it.</summary>
+        public Blueprint? Blueprint { get; private set; }
+
+        /// <summary>
+        /// A client that runs from <c>onelobby.json</c>. <paramref name="lobbyServerOverride"/> (when not empty) replaces
+        /// <c>hosting.lobbyServer</c>, the per-player layer above the file;
+        /// <paramref name="configure"/> may adjust the final config. Throws <see cref="OneLobbyException"/>
+        /// <c>identity_anonymous</c> / <c>bad_config</c> (path <c>displayName</c>) when the name breaks <c>players.*</c>.
+        /// </summary>
+        public static LobbyClient FromBlueprint(Blueprint blueprint, ITransport transport, string? displayName = null,
+            string? lobbyServerOverride = null, Func<OneLobbyConfig, OneLobbyConfig>? configure = null)
+        {
+            if (blueprint == null) throw new ArgumentNullException(nameof(blueprint));
+            blueprint.CheckDisplayName(displayName);
+            var config = blueprint.ToConfig(displayName);
+            if (!string.IsNullOrEmpty(lobbyServerOverride))
+            {
+                if (!Uri.TryCreate(lobbyServerOverride, UriKind.Absolute, out var u))
+                    throw new BlueprintException("lobbyServer", "type", "not a URL: " + lobbyServerOverride);
+                config = config with { LobbyServer = u };
+            }
+            if (configure != null) config = configure(config);
+            return new LobbyClient(config, transport) { Blueprint = blueprint };
+        }
+
+        /// <summary>Creates a lobby from the blueprint (<see cref="Blueprint.ToLobbyOptions"/>). Needs a blueprint client with a lobby server.</summary>
+        public Task<Lobby> HostAsync(CancellationToken ct = default)
+        {
+            if (Blueprint == null) return Task.FromException<Lobby>(new InvalidOperationException("HostAsync() needs a client made with FromBlueprint; pass LobbyOptions"));
+            if (ReferenceEquals(Config.LobbyServer, OneLobby.Blueprint.NoServer))
+                return Task.FromException<Lobby>(new BlueprintException("hosting.lobbyServer", "required",
+                    "no lobby server: set hosting.lobbyServer in onelobby.json or pass lobbyServerOverride (direct-only games use HostDirectAsync)"));
+            return HostAsync(Blueprint.ToLobbyOptions(null, Config.DisplayName), ct);
+        }
+
         public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
             Run(null, Signaling.Create(Config, options), new[] { "lobby" }, EnterLobby, ct);
 
@@ -96,7 +131,10 @@ namespace OneLobby
 
         public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null,
             CancellationToken ct = default) =>
-            Run<IReadOnlyList<LobbySummary>>(null, Signaling.List(metaFilter), new[] { "lobbies" }, e =>
+            Blueprint is { Hosting: { Server: false } }
+            ? Task.FromException<IReadOnlyList<LobbySummary>>(new OneLobbyException(LobbyErrorCodes.ListingDisabled,
+                "listing needs a lobby server (hosting.server is false in onelobby.json)"))
+            : Run<IReadOnlyList<LobbySummary>>(null, Signaling.List(metaFilter), new[] { "lobbies" }, e =>
             {
                 var items = new List<LobbySummary>();
                 if (e.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)

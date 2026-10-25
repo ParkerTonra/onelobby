@@ -7,7 +7,7 @@ using OneLobby.Server;
 
 namespace OneLobby.Direct
 {
-    /// <summary>Settings for <see cref="DirectLobby.HostDirectAsync"/>.</summary>
+    /// <summary>Settings for <see cref="DirectLobby.HostDirectAsync(LobbyClient, DirectHostOptions, CancellationToken)"/>.</summary>
     public sealed class DirectHostOptions
     {
         /// <summary>
@@ -59,11 +59,46 @@ namespace OneLobby.Direct
         public const int DefaultFallbackPorts = 9;
 
         /// <summary>
+        /// Hosts direct with the client's blueprint (<see cref="ToDirectHostOptions"/>); a plain client gets
+        /// <see cref="DirectHostOptions"/> defaults. A blueprint with <c>hosting.direct</c> false fails with <c>bad_config</c>.
+        /// </summary>
+        public static Task<Lobby> HostDirectAsync(this LobbyClient client, CancellationToken ct = default)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            var bp = client.Blueprint;
+            if (bp == null) return HostDirectAsync(client, (DirectHostOptions?)null, ct);
+            if (!bp.Hosting.Direct)
+                return Task.FromException<Lobby>(new BlueprintException("hosting.direct", "const", "direct hosting is off in onelobby.json (hosting.direct is false)"));
+            return HostDirectAsync(client, bp.ToDirectHostOptions(null, client.Config.DisplayName), ct);
+        }
+
+        /// <summary>
+        /// <see cref="DirectHostOptions"/> from <c>hosting.*</c> and <c>lobby.*</c>: port (with the 9 fallback ports),
+        /// OpenPort, AllowedOrigins, MaxPlayers, LateJoin, Meta and the lobby name. Password and rate limit have no
+        /// field in the options and are not applied.
+        /// </summary>
+        public static DirectHostOptions ToDirectHostOptions(this Blueprint bp, string? name = null, string? displayName = null)
+        {
+            if (bp == null) throw new ArgumentNullException(nameof(bp));
+            return new DirectHostOptions
+            {
+                Port = bp.Hosting.DirectPort,
+                FallbackPorts = DefaultFallbackPorts,
+                OpenPort = bp.Hosting.OpenPort,
+                AllowedOrigins = bp.Hosting.AllowedOrigins.Count == 0 ? null : bp.Hosting.AllowedOrigins,
+                MaxPlayers = bp.Lobby.MaxPlayers,
+                LateJoin = bp.Lobby.LateJoin,
+                Meta = bp.Lobby.Meta.Count == 0 ? null : bp.Lobby.Meta,
+                Name = string.IsNullOrEmpty(name) ? Blueprint.DefaultLobbyName(displayName) : name,
+            };
+        }
+
+        /// <summary>
         /// Starts the embedded hub and listener on <c>P</c>, connects this client to it in memory and creates the lobby.
         /// The lobby's <see cref="Lobby.DirectAddresses"/> lists this machine's addresses for the host screen. Leaving the
         /// lobby stops the listener and ends the session for everyone.
         /// </summary>
-        public static Task<Lobby> HostDirectAsync(this LobbyClient client, DirectHostOptions? options = null, CancellationToken ct = default)
+        public static Task<Lobby> HostDirectAsync(this LobbyClient client, DirectHostOptions? options, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             var o = options ?? new DirectHostOptions();

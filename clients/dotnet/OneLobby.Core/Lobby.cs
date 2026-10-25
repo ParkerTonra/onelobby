@@ -85,6 +85,8 @@ namespace OneLobby
             if (Mode == SyncMode.Lockstep) Lockstep = new LockstepSession(this);
         }
 
+        /// <summary>The blueprint of the client that made this lobby, or null for a plain client.</summary>
+        internal Blueprint? Blueprint => _c.Blueprint;
         public string Code { get; }
         public int LocalPeerId => _you;
         public int HostPeerId => _hostId;

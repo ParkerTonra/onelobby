@@ -81,6 +81,8 @@ namespace OneLobby
             set
             {
                 if (_enabled == value) return;
+                if (value && _lobby.Blueprint is { Chat: { Voice: false } })
+                    throw new OneLobbyException(LobbyErrorCodes.VoiceDisabled, "voice chat is off in onelobby.json (chat.voice is false)");
                 _enabled = value;
                 if (!value) { StopTalking(false); StopCaptureIfRunning(); }
             }

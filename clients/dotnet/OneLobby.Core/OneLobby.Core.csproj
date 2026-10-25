@@ -11,6 +11,9 @@
     <InternalsVisibleTo Include="OneLobby.Conformance" />
     <InternalsVisibleTo Include="OneLobby.Direct" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\spec\blueprint.schema.json" LogicalName="OneLobby.blueprint.schema.json" Link="blueprint.schema.json" />
+  </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>

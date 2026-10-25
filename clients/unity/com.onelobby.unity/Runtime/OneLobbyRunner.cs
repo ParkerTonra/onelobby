@@ -20,7 +20,12 @@ namespace OneLobby.Unity
     {
         [Tooltip("WebSocket endpoint of the lobby server, ending in /ws (unused by HostDirectAsync / JoinDirectAsync). " +
                  "Command line: --lobby-server=ws://127.0.0.1:8080/ws")]
-        public string LobbyServer = "ws://127.0.0.1:8080/ws";
+        public string LobbyServer = DefaultLobbyServer;
+        private const string DefaultLobbyServer = "ws://127.0.0.1:8080/ws";
+        [Tooltip("Optional onelobby.json (the blueprint, docs/design/blueprint.md). When set it supplies GameId, NetVersion, sync mode, " +
+                 "timeouts, lobby defaults and the enforcement rules; those fields above are ignored. DisplayName still applies, and a " +
+                 "LobbyServer you changed from its default (or --lobby-server=) overrides the file's hosting.lobbyServer.")]
+        public TextAsset? Blueprint;
         public string GameId = "com.you.yourgame";
         [Tooltip("Bump whenever your message bytes or rules change; peers with a different NetVersion cannot meet.")]
         public string NetVersion = "1";
@@ -79,8 +84,18 @@ namespace OneLobby.Unity
 
         private LobbyClient CreateClient()
         {
-            var config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
-            if (ConfigureConfig != null) config = ConfigureConfig(config);
+            OneLobbyConfig config = null!;
+            OneLobby.Blueprint? bp = null;
+            if (Blueprint != null)
+            {
+                bp = OneLobby.Blueprint.Parse(Blueprint.text);
+                KeepRunningInBackground = bp.Session.RunInBackground;
+            }
+            else
+            {
+                config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
+                if (ConfigureConfig != null) config = ConfigureConfig(config);
+            }
             ITransport transport = Transport;
             if (NetSim != null)
             {
@@ -88,7 +103,10 @@ namespace OneLobby.Unity
                 // one line so a --fakelag run can be confirmed from the player log
                 Debug.Log(FormattableString.Invariant($"OneLobby: NetSim on: latency {NetSim.LatencyMs} ms, jitter {NetSim.JitterMs} ms, Fast loss {NetSim.LossPercent}%"));
             }
-            var c = new LobbyClient(config, transport);
+            var c = bp != null
+                ? LobbyClient.FromBlueprint(bp, transport, DisplayName,
+                    string.IsNullOrEmpty(LobbyServer) || LobbyServer == DefaultLobbyServer ? null : LobbyServer, ConfigureConfig)
+                : new LobbyClient(config, transport);
             c.Error += e => Error?.Invoke(e);
             return c;
         }
@@ -100,6 +118,8 @@ namespace OneLobby.Unity
         }
 
         public Task<Lobby> HostAsync(LobbyOptions options) => Enter(() => ServerClient().HostAsync(options));
+        /// <summary>Host a lobby with the lobby.* settings of the <see cref="Blueprint"/> file.</summary>
+        public Task<Lobby> HostAsync() => Enter(() => ServerClient().HostAsync());
         public Task<Lobby> JoinAsync(string code) => Enter(() => ServerClient().JoinAsync(code));
         public Task<Lobby> RejoinAsync(string resumeToken) => Enter(() => ServerClient().RejoinAsync(resumeToken));
         public Task<IReadOnlyList<LobbySummary>> ListAsync() => ServerClient().ListAsync();
@@ -113,7 +133,7 @@ namespace OneLobby.Unity
         /// </summary>
         public async Task<Lobby> HostDirectAsync(DirectHostOptions? options = null)
         {
-            var lobby = await Enter(() => DirectClient().HostDirectAsync(options));
+            var lobby = await Enter(() => options == null ? DirectClient().HostDirectAsync() : DirectClient().HostDirectAsync(options));
             Debug.Log(DirectLobby.HostLogLine(lobby)); // bound port (after any busy-port fallback), code, router mapping
             return lobby;
         }

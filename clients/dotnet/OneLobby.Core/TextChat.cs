@@ -32,6 +32,8 @@ namespace OneLobby
         /// <summary>Send a line (at most 256 UTF-8 bytes). Over-long text is rejected locally with reason "length".</summary>
         public void Send(string text)
         {
+            if (_lobby.Blueprint is { Chat: { Text: false } })
+                throw new OneLobbyException(LobbyErrorCodes.ChatDisabled, "text chat is off in onelobby.json (chat.text is false)");
             var id = ++_localId;
             if (Encoding.UTF8.GetByteCount(text) > MaxBytes) { Rejected?.Invoke(id, "length"); return; }
             if (_lobby.IsHost) HostHandle(_lobby.LocalPeerId, id, text);
