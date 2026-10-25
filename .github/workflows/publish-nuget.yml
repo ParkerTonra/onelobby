@@ -1,0 +1,42 @@
+# Publishes the OneLobby NuGet packages (clients/dotnet/pack.sh: Core, Opus, Godot, Direct, Hub, Replication,
+# DataChannel) when a tag dotnet-vX.Y.Z is pushed. NuGet trusted publishing: nuget.org trusts this workflow through
+# GitHub OIDC and hands out a one-hour key, so no long-lived API key is stored anywhere.
+# One-time setup:
+#   - nuget.org > account > Trusted Publishing: add a policy for repository ParkerTonra/onelobby, workflow
+#     publish-nuget.yml, environment nuget.
+#   - GitHub > repo settings > Secrets > Actions: NUGET_USER = the nuget.org profile name (not the email).
+#   - GitHub > repo settings > Environments: "nuget" with the owner as required reviewer.
+# Release: git tag dotnet-v0.6.0 origin/main && git push origin dotnet-v0.6.0
+# The job then WAITS for the owner to approve the "nuget" environment deployment on GitHub. Agents never approve it.
+name: Publish OneLobby to NuGet
+
+on:
+  push:
+    tags: ["dotnet-v*"]
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for NuGet trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: nuget # protected: the owner approves each publish on GitHub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Tests
+        run: |
+          dotnet test clients/dotnet/OneLobby.Core.Tests -c Release
+          dotnet test clients/dotnet/OneLobby.Replication.Tests -c Release
+      - name: Pack
+        run: bash clients/dotnet/pack.sh "${GITHUB_REF_NAME#dotnet-v}" out
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push
+        run: dotnet nuget push "out/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
