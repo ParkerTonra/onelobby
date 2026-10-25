@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <!-- The bare name "onelobby" resolves through this import map, so there is no bundling step. -->
+  <script type="importmap">{ "imports": { "onelobby": "./node_modules/onelobby/dist/onelobby.bundle.mjs" } }</script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 34rem; margin: 1rem auto; padding: 0 1rem; }
+    canvas { width: 100%; max-width: 24rem; aspect-ratio: 1; border: 1px solid #888; touch-action: none; }
+    section { margin-top: 1rem; }
+    label, button, input { margin: 0.15rem 0; }
+    #chat-log { height: 6rem; overflow-y: auto; border: 1px solid #ccc; padding: 0.25rem; }
+    #lobbies li { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>{{title}}</h1>
+  <canvas id="grid" width="384" height="384"></canvas>
+  <div id="status">loading</div>
+
+  <!-- Which controls show is decided by onelobby.json at runtime (src/multiplayer.js). -->
+  <section id="net" hidden>
+    <div id="name-row"><label>Name <input id="name" placeholder="Player"></label></div>
+    <div id="server-row"><label>Lobby server <input id="server" size="34" placeholder="ws://127.0.0.1:8080/ws"></label></div>
+    <button id="host">Host lobby</button>
+    <input id="code" placeholder="Join code" size="10"> <button id="join">Join lobby</button>
+    <button id="browse" hidden>Browse</button>
+    <ul id="lobbies"></ul>
+    <button id="start" hidden>Start</button>
+    <button id="leave" hidden>Leave</button>
+    <button id="voice" hidden>Hold to talk</button>
+    <div id="net-status"></div>
+  </section>
+
+  <section id="chat" hidden>
+    <div id="chat-log"></div>
+    <form id="chat-form"><input id="chat-input" placeholder="Say something" autocomplete="off"> <button>Send</button></form>
+  </section>
+
+  <script type="module" src="./src/multiplayer.js"></script>
+</body>
+</html>

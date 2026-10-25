@@ -1,0 +1,3 @@
+vendor/
+# the repo root ignores every bin/ folder (dotnet output); this one is the CLI entry
+!bin/

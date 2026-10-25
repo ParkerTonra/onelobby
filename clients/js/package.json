@@ -9,6 +9,7 @@
     "build": "npm run build -w onelobby",
     "test": "npm test -w onelobby",
     "typecheck": "npm run typecheck -w onelobby",
+    "test:create": "npm test -w create-onelobby",
     "demo": "node demo/serve.mjs",
     "e2e:dropin": "npm run build && node e2e/dropin.mjs"
   },

@@ -1,0 +1,51 @@
+{
+  "name": "create-onelobby",
+  "version": "0.1.0",
+  "description": "Scaffold a multiplayer browser game with OneLobby: writes onelobby.json (the blueprint), the glue and a two-player test. Zero runtime dependencies.",
+  "keywords": [
+    "onelobby",
+    "create",
+    "scaffold",
+    "multiplayer",
+    "game",
+    "gamedev"
+  ],
+  "license": "MIT",
+  "author": "Parker Tonra",
+  "homepage": "https://github.com/ParkerTonra/onelobby#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ParkerTonra/onelobby.git",
+    "directory": "clients/js/packages/create-onelobby"
+  },
+  "bugs": {
+    "url": "https://github.com/ParkerTonra/onelobby/issues"
+  },
+  "type": "module",
+  "bin": {
+    "create-onelobby": "./bin/create-onelobby.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "pretest": "node scripts/build.mjs",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
