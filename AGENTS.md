@@ -232,6 +232,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
   is the code it joined with; host leaving ends the session)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
   adapter): `docs/recipes/browser-game.md`
+- Dev console a local tool can reach (`ogc1`: loopback HTTP, token file, off by default): `docs/recipes/game-console.md`
 - Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).
