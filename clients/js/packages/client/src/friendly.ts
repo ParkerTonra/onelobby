@@ -161,6 +161,32 @@ export function shareUrl(code: string, base?: string, param = "join"): string {
   return u.toString();
 }
 
+/** What a direct host answers at `GET /joininfo` (onelobby/direct). */
+export interface JoinInfo {
+  joinCode: string;
+  joinCodeKind: "internet" | "same_network" | "none";
+  /** `http://<public or LAN address>:<port>/` when the host serves pages; else null. */
+  joinUrl: string | null;
+  port: number;
+}
+
+/**
+ * For a page served by a direct host (`hostDirect` with `http`): the host's current join code and share link, so a
+ * player who opened the page at a LAN or localhost address still shares the public one. `base` defaults to the page's
+ * origin. Null when the host has no code yet or cannot be reached. Ask again after a while: the code turns "internet"
+ * when the router answers a later port-mapping retry.
+ */
+export async function directJoinInfo(base?: string): Promise<JoinInfo | null> {
+  const b = base ?? currentHref();
+  if (!b) return null;
+  try {
+    const res = await fetch(new URL("/joininfo", b), { cache: "no-store" });
+    return res.ok ? ((await res.json()) as JoinInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
 export function codeFromUrl(url?: string, param = "join"): string | null {
   const href = url ?? currentHref();

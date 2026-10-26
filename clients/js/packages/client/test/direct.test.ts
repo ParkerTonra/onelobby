@@ -11,6 +11,7 @@ import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, defaultHubOptions, directHubOptions, formatHostLog, hostDirect, originAllowed } from "../src/direct/index.js";
 import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
 import { freePort } from "./helpers.js";
+import { directJoinInfo } from "../src/friendly.js";
 
 /**
  * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
@@ -264,6 +265,117 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("ws failed")); });
     ws.close();
   });
+
+  it("an http reply's headers are sent (Cache-Control replaces no-store); the hub keeps Content-Length; a line break is 500", async () => {
+    const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    host.http = (path) =>
+      path === "/app.js"
+        ? { type: "text/javascript", body: "x", headers: { "Cache-Control": "max-age=60", "Content-Length": "999", "X-Game": "1" } }
+        : path === "/bad"
+          ? { type: "text/plain", body: "x", headers: { "X-Bad": "a\r\nSet-Cookie: y" } }
+          : { type: "text/plain", body: "plain" };
+    const js = await fetch(`http://127.0.0.1:${host.port}/app.js`);
+    expect(js.headers.get("cache-control")).toBe("max-age=60");
+    expect(js.headers.get("content-length")).toBe("1");
+    expect(js.headers.get("x-game")).toBe("1");
+    expect(js.headers.get("x-content-type-options")).toBe("nosniff");
+    expect((await fetch(`http://127.0.0.1:${host.port}/`)).headers.get("cache-control")).toBe("no-store");
+    const bad = await fetch(`http://127.0.0.1:${host.port}/bad`);
+    expect(bad.status).toBe(500);
+    expect(bad.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("GET /joininfo is 404 until the host has a code, then the code, kind, link and port as JSON", async () => {
+    const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    expect((await fetch(`http://127.0.0.1:${host.port}/joininfo`)).status).toBe(404);
+    host.joinInfo = { joinCode: "6B01-RGFE-P2B", joinCodeKind: "internet", joinUrl: "http://203.0.113.7:47810/", port: host.port };
+    const res = await fetch(`http://127.0.0.1:${host.port}/joininfo?t=1`);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(await res.json()).toEqual(host.joinInfo);
+  });
+});
+
+describe("hostDirect join code: manual public address and router retry", () => {
+  it("publicAddress makes an internet code and joinUrl without asking the router; /joininfo and directJoinInfo match", async () => {
+    const port = await freePort();
+    const host = await hostDirect(kit("Host"), {
+      port, publicAddress: "203.0.113.7", log: false, http: () => ({ type: "text/html", body: "page" }),
+      portMapping: { ssdp: { address: "127.0.0.1", port: 9 }, natPmp: { address: "127.0.0.1", port: 9 } },
+    });
+    cleanup.push(() => host.leave());
+    expect(host.directHub.portMapper).toBeNull();
+    expect(host.joinCode).toBe(encodeJoinCode("203.0.113.7", port));
+    expect(host.joinCodeKind).toBe("internet");
+    expect(host.portMapping).toBe("manual");
+    expect(host.joinUrl).toBe(`http://203.0.113.7:${port}/`);
+    // a page opened at a LAN or loopback address learns the public link
+    expect(await directJoinInfo(`http://127.0.0.1:${port}/game?x=1`)).toEqual({
+      joinCode: host.joinCode, joinCodeKind: "internet", joinUrl: host.joinUrl, port,
+    });
+    expect(await directJoinInfo(`http://127.0.0.1:${await freePort()}/`)).toBeNull();
+    await expect(hostDirect(kit("Bad"), { port: await freePort(), publicAddress: "my.host.example", log: false }))
+      .rejects.toMatchObject({ code: "bad_address" });
+  });
+
+  it("a router that answers late flips the code to internet and fires joinCodeChanged, no restart", async () => {
+    // NAT-PMP gateway on loopback that is silent (router still booting) until `up`
+    let up = false;
+    const gw = createSocket("udp4");
+    gw.on("message", (q, r) => {
+      if (!up) return;
+      if (q[1] === 0) return void gw.send(Buffer.from([0, 128, 0, 0, 0, 0, 0, 1, 198, 51, 100, 9]), r.port, r.address);
+      const reply = Buffer.alloc(16);
+      reply[1] = 128 + q[1];
+      reply.writeUInt32BE(1, 4);
+      reply.writeUInt16BE(q.readUInt16BE(4), 8);
+      reply.writeUInt16BE(q.readUInt32BE(8) === 0 ? 0 : q.readUInt16BE(4), 10);
+      reply.writeUInt32BE(q.readUInt32BE(8), 12);
+      gw.send(reply, r.port, r.address);
+    });
+    await new Promise<void>((r) => gw.bind(0, "127.0.0.1", () => r()));
+    cleanup.push(() => {
+      gw.close();
+    });
+    const port = await freePort();
+    const lines: string[] = [];
+    const host = await hostDirect(kit("Host"), {
+      port, log: (l) => lines.push(l), http: () => ({ type: "text/html", body: "page" }),
+      portMapping: { natPmp: { address: "127.0.0.1", port: gw.address().port }, tryUpnp: false, retryMs: 100 },
+    });
+    cleanup.push(() => host.leave());
+    expect(host.joinCodeKind).not.toBe("internet");
+    const changed: [string, string][] = [];
+    host.on("joinCodeChanged", (code, kind) => changed.push([code, kind]));
+    up = true;
+    await until(() => changed.length > 0, "joinCodeChanged after the router comes back", 15000);
+    expect(changed).toEqual([[encodeJoinCode("198.51.100.9", port), "internet"]]);
+    expect(host.joinCode).toBe(encodeJoinCode("198.51.100.9", port));
+    expect(host.joinUrl).toBe(`http://198.51.100.9:${port}/`);
+    expect(host.portMapping).toBe("NAT-PMP");
+    expect(lines.at(-1)).toBe(host.directHostLog);
+    expect(lines.at(-1)).toContain("(Internet); port mapping NAT-PMP");
+    expect(host.directHub.joinInfo?.joinCodeKind).toBe("internet");
+  }, 30000);
+
+  it("retryMs: 0 asks the router once only", async () => {
+    let asked = 0;
+    const gw = createSocket("udp4");
+    gw.on("message", () => void asked++);
+    await new Promise<void>((r) => gw.bind(0, "127.0.0.1", () => r()));
+    cleanup.push(() => {
+      gw.close();
+    });
+    const host = await hostDirect(kit("Host"), {
+      port: await freePort(), log: false,
+      portMapping: { natPmp: { address: "127.0.0.1", port: gw.address().port }, tryUpnp: false, retryMs: 0 },
+    });
+    cleanup.push(() => host.leave());
+    const once = asked;
+    await new Promise((r) => setTimeout(r, 600));
+    expect(asked).toBe(once);
+  }, 30000);
 });
 
 describe("direct host startup line", () => {

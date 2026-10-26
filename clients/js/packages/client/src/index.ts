@@ -38,8 +38,8 @@ export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 // Types for the seams in OneLobbyOptions (ChannelName also tags raw messages).
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
-export { describeError, shareUrl, codeFromUrl, ErrorCodes } from "./friendly.js";
-export type { FriendlyError, ErrorCode } from "./friendly.js";
+export { describeError, shareUrl, codeFromUrl, directJoinInfo, ErrorCodes } from "./friendly.js";
+export type { FriendlyError, ErrorCode, JoinInfo } from "./friendly.js";
 // Pre-rename names, kept for one version so existing games keep working.
 export { Keepalive, KeepaliveError } from "./deprecated.js";
 export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";

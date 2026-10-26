@@ -32,6 +32,11 @@ export interface PortMapperOptions {
   tryUpnp?: boolean;
   tryNatPmp?: boolean;
   /**
+   * `hostDirect` only: when nothing was mapped, ask the router again after this many ms, doubling up to 5 minutes, until
+   * it answers or the host quits (a router still booting after a power cut, UPnP switched back on). Default 30000; 0 never.
+   */
+  retryMs?: number;
+  /**
    * Optional log hook; left out (default) stays quiet. Gets one line when the host quits and its mappings are deleted:
    * `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`.
    */
@@ -87,11 +92,17 @@ export class PortMapper {
       description: "OneLobby",
       tryUpnp: true,
       tryNatPmp: true,
+      retryMs: 30000,
       ...options,
     };
   }
 
-  /** Finds the router and maps TCP + UDP `port`. Never rejects for network trouble: see `detail`. */
+  /** True once {@link close} ran: no more requests go out. */
+  get closed(): boolean {
+    return this.stopped;
+  }
+
+  /** Finds the router and maps TCP + UDP `port`. Never rejects for network trouble: see `detail`. May run again after an unmapped result. */
   open(): Promise<PortMapResult> {
     return (this.opening = this.openBoth());
   }

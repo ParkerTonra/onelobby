@@ -16,11 +16,11 @@ import { encodeJoinCode } from "../joincode.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
 import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from "./hub-host.js";
 import { directHubOptions } from "./hub.js";
-import { isPublicIPv4, lanIPv4, localAddresses, type PortMapResult, type PortMapperOptions } from "./portmap.js";
+import { isPublicIPv4, lanIPv4, localAddresses, type PortMapper, type PortMapResult, type PortMapperOptions } from "./portmap.js";
 import { OneLobbyError } from "../signaling.js";
 
 export { DirectHubHost, LocalHubSocket, PortInUseError, originAllowed } from "./hub-host.js";
-export type { HttpHandler, HttpReply } from "./hub-host.js";
+export type { HttpHandler, HttpReply, DirectJoinInfo } from "./hub-host.js";
 export { SignalingHub, Session, RateWindow, sanitize, defaultHubOptions, directHubOptions, PROTO } from "./hub.js";
 export type { HubOptions, HubDeps } from "./hub.js";
 export { PortMapper, isPublicIPv4, lanIPv4, localAddresses } from "./portmap.js";
@@ -44,6 +44,12 @@ export interface DirectHostOptions {
   meta?: Record<string, string>;
   /** Ask the router to forward the port so the code works from the internet (s.2a). The host-menu toggle; default on. */
   openPort?: boolean;
+  /**
+   * This machine's public IPv4 address when the player forwarded the port by hand (no UPnP): the join code and
+   * `joinUrl` carry it and `joinCodeKind` is "internet". Default: the `ONELOBBY_PUBLIC_IP` environment variable. With it
+   * set the router is not asked unless `openPort: true` is passed.
+   */
+  publicAddress?: string;
   /** Test seam and knobs for the router request (description defaults to "OneLobby <gameId>"). */
   portMapping?: PortMapperOptions;
   /**
@@ -129,9 +135,14 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   }
   hub.http = o.http ?? null;
   hub.allowedOrigins = o.allowedOrigins ?? [];
+  const manual = (o.publicAddress ?? process.env.ONELOBBY_PUBLIC_IP ?? "").trim() || null;
+  if (manual && !isIPv4(manual)) {
+    await hub.close();
+    throw new OneLobbyError("bad_address", `publicAddress must be an IPv4 address like 203.0.113.7, got "${manual}"`);
+  }
   // The router request runs alongside lobby creation; it takes up to a few seconds when nothing answers.
   const mapping: Promise<PortMapResult | null> =
-    o.openPort === false
+    o.openPort === false || (manual && opts.openPort !== true)
       ? Promise.resolve(null)
       : hub.openPort({ description: `OneLobby ${kit.options.gameId}`, ...o.portMapping }).catch((e: Error) => ({
           mapped: false, method: "none" as const, externalIPv4: null, localIPv4: null, detail: e.message,
@@ -161,22 +172,55 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     }
   };
   const map = await mapping;
-  lobby.directAddresses = localAddresses(hub.port);
-  lobby.portMapping = map ? map.detail : "off";
-  let codeIp: string | null = null;
-  if (map?.mapped && isPublicIPv4(map.externalIPv4)) {
-    codeIp = map.externalIPv4!;
-    lobby.joinCode = encodeJoinCode(codeIp, hub.port);
-    lobby.joinCodeKind = "internet";
-  } else {
-    codeIp = map?.localIPv4 ?? (await lanIPv4());
-    if (codeIp) {
-      lobby.joinCode = encodeJoinCode(codeIp, hub.port);
-      lobby.joinCodeKind = "same_network";
-    }
+  const direct = Object.assign(lobby, { directHub: hub, joinUrl: null as string | null });
+  direct.directAddresses = localAddresses(hub.port);
+  const log = o.log === false ? null : (o.log ?? console.log);
+  // Sets joinCode / joinCodeKind / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
+  const applyCode = (ip: string | null, kind: "internet" | "same_network", mappingNote: string) => {
+    direct.portMapping = mappingNote;
+    direct.joinCode = ip ? encodeJoinCode(ip, hub.port) : "";
+    direct.joinCodeKind = ip ? kind : "none";
+    direct.joinUrl = o.http && ip ? `http://${ip}:${hub.port}/` : null;
+    direct.directHostLog = formatHostLog(port, hub.port, direct.joinCode, direct.joinCodeKind, direct.portMapping);
+    hub.joinInfo = { joinCode: direct.joinCode, joinCodeKind: direct.joinCodeKind, joinUrl: direct.joinUrl, port: hub.port };
+    log?.(direct.directHostLog);
+  };
+  if (manual) applyCode(manual, "internet", map?.mapped ? map.detail : "manual");
+  else if (map?.mapped && isPublicIPv4(map.externalIPv4)) applyCode(map.externalIPv4, "internet", map.detail);
+  else {
+    applyCode(map?.localIPv4 ?? (await lanIPv4()), "same_network", map ? map.detail : "off");
+    if (map && !map.mapped && hub.portMapper) retryMapping(hub.portMapper, o.portMapping?.retryMs ?? 30000, (r) => {
+      if (!isPublicIPv4(r.externalIPv4)) return;
+      applyCode(r.externalIPv4, "internet", r.detail);
+      direct.notifyJoinCodeChanged();
+    });
   }
-  lobby.directHostLog = formatHostLog(port, hub.port, lobby.joinCode, lobby.joinCodeKind, lobby.portMapping);
-  if (o.log !== false) (o.log ?? console.log)(lobby.directHostLog);
-  const joinUrl = o.http && codeIp ? `http://${codeIp}:${hub.port}/` : null;
-  return Object.assign(lobby, { directHub: hub, joinUrl });
+  return direct;
+}
+
+const MAX_RETRY_MS = 5 * 60_000;
+
+/** Asks the router again after `firstMs`, doubling up to 5 minutes, until a mapping lands or the host quits. */
+function retryMapping(mapper: PortMapper, firstMs: number, onMapped: (r: PortMapResult) => void): void {
+  if (!(firstMs > 0)) return;
+  let wait = firstMs;
+  const round = () => {
+    const t = setTimeout(async () => {
+      if (mapper.closed) return;
+      const r = await mapper.open();
+      if (mapper.closed) return;
+      if (r.mapped) onMapped(r);
+      else {
+        wait = Math.min(wait * 2, MAX_RETRY_MS);
+        round();
+      }
+    }, wait);
+    t.unref?.();
+  };
+  round();
+}
+
+function isIPv4(s: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  return !!m && m.slice(1).every((x) => Number(x) <= 255);
 }

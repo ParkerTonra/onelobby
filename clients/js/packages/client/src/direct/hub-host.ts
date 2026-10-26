@@ -90,6 +90,34 @@ export interface HttpReply {
   /** Content-Type, e.g. "text/html; charset=utf-8". */
   type: string;
   body: string | Uint8Array;
+  /**
+   * Extra response headers, e.g. `{ "Cache-Control": "max-age=3600" }` for a static asset (default `no-store`). The
+   * hub owns Content-Type, Content-Length and Connection; a name or value with a line break answers 500.
+   */
+  headers?: Record<string, string>;
+}
+
+/** `GET /joininfo` on a direct host: what a page served from the host shows as its share link (`directJoinInfo()`). */
+export interface DirectJoinInfo {
+  joinCode: string;
+  joinCodeKind: "internet" | "same_network" | "none";
+  /** With `http`: `http://<the code's address>:<port>/`; else null. */
+  joinUrl: string | null;
+  port: number;
+}
+
+const HUB_OWNED_HEADERS = new Set(["content-type", "content-length", "connection", "transfer-encoding"]);
+
+function replyHeaders(extra: Record<string, string> | undefined): string {
+  const h = new Map<string, [string, string]>([
+    ["cache-control", ["Cache-Control", "no-store"]],
+    ["x-content-type-options", ["X-Content-Type-Options", "nosniff"]],
+  ]);
+  for (const [k, v] of Object.entries(extra ?? {})) {
+    if (/[\r\n:]/.test(k) || /[\r\n]/.test(String(v)) || !k) throw new Error("bad header");
+    if (!HUB_OWNED_HEADERS.has(k.toLowerCase())) h.set(k.toLowerCase(), [k, String(v)]);
+  }
+  return [...h.values()].map(([k, v]) => `${k}: ${v}\r\n`).join("");
 }
 
 /** Serves plain `GET` requests on the direct port (path without the query); null answers 404. */
@@ -107,6 +135,8 @@ export class DirectHubHost {
    * clients), the host's own page (Origin equal to the request's Host) and localhost pages are always allowed.
    */
   allowedOrigins: string[] = [];
+  /** Served as JSON at `GET /joininfo` (404 while null); `hostDirect` keeps it current as the join code changes. */
+  joinInfo: DirectJoinInfo | null = null;
   /** The bound TCP port (the requested one, or the one the OS picked for 0). */
   readonly port: number;
   portMapper: PortMapper | null = null;
@@ -250,18 +280,27 @@ export class DirectHubHost {
     }
     const key = headers.get("sec-websocket-key");
     const upgrade = /websocket/i.test(headers.get("upgrade") ?? "");
+    // The share link for a page the host serves: a player who opened it at a LAN address still shares the public one.
+    if (method === "GET" && !upgrade && path?.split("?")[0] === "/joininfo") {
+      if (this.joinInfo) reply("200 OK", JSON.stringify(this.joinInfo), "application/json");
+      else reply("404 Not Found", "no join code yet");
+      return false;
+    }
     if (method === "GET" && !upgrade && this.http && path) {
       let page: HttpReply | null = null;
+      let extra = "";
       try {
         page = this.http(path.split("?")[0]);
+        extra = replyHeaders(page?.headers);
       } catch {
         page = { status: 500, type: "text/plain", body: "error" };
+        extra = replyHeaders(undefined);
       }
       const p = page ?? { status: 404, type: "text/plain", body: "not found" };
       const body = typeof p.body === "string" ? Buffer.from(p.body, "utf8") : Buffer.from(p.body);
       const status = p.status ?? 200;
       sock.write(`HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? "OK"}\r\nContent-Type: ${p.type}\r\n` +
-        `Content-Length: ${body.length}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n`);
+        `Content-Length: ${body.length}\r\n${extra}Connection: close\r\n\r\n`);
       sock.end(body);
       return false;
     }

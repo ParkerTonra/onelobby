@@ -74,7 +74,7 @@ describe("export surface", () => {
   it("root is the small public API", () => {
     expect(Object.keys(root).sort()).toEqual([
       "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "OneLobby", "OneLobbyError", "LIB_NAME", "LIB_VERSION", "Pause",
-      "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "formatCode", "normalizeCode", "shareUrl",
+      "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "directJoinInfo", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
       "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
       "parseBlueprint", "defineBlueprint", "BlueprintError", "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version

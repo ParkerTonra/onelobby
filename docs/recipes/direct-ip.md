@@ -148,7 +148,15 @@ const lobby = await hostDirect(kit, { maxPlayers: 8, openPort: true });   // 478
 console.log(lobby.joinCodeKind === "internet" ? "Internet code:" : "Same-network code:", lobby.joinCode);
 lobby.on("message", (from, bytes, channel) => { /* the host is truth: validate, then broadcast */ });
 // lobby.leave() closes the listener and removes the router mapping; joiners get sessionEnded("host_left")
+// the router may answer later (still booting, UPnP switched back on): the code then turns "internet" by itself
+lobby.on("joinCodeChanged", (code, kind) => console.log("New", kind, "code:", code, lobby.joinUrl ?? ""));
 ```
+
+When no mapping lands, the host asks the router again after 30 s, doubling up to 5 minutes, until it answers or the
+host quits (`portMapping: { retryMs }`, 0 = never); each new code prints the startup line again. A player who forwarded
+TCP and UDP 47810 by hand passes the public address, and the router is not asked:
+`hostDirect(kit, { publicAddress: "203.0.113.7" })`, or the environment variable `ONELOBBY_PUBLIC_IP=203.0.113.7`. The
+code is then an internet one with `portMapping` "manual".
 
 `hostDirect` runs the TypeScript port of the hub (`onelobby/direct`'s `SignalingHub`, held to the same
 `conformance/server` suite as the C# one) behind a dependency-free WebSocket listener, binds every peer link to UDP
@@ -194,8 +202,19 @@ const lobby = await hostDirect(kit, {
 console.log("Send this link:", lobby.joinUrl);
 ```
 
-The handler gets the path without the query and returns `{ status?, type, body }` or null (404). Serve only fixed
-paths from memory, never files by path. A game that already has its own web server can do the same on that server: what
+The handler gets the path without the query and returns `{ status?, type, body, headers? }` or null (404). Replies
+carry `Cache-Control: no-store` unless `headers` sets its own (e.g. `{ "Cache-Control": "max-age=3600" }` for a big
+static file). Serve only fixed paths from memory, never files by path.
+
+A page should show the link to share from the host, not its own address: a host who opened the page at a LAN or
+`localhost` address would otherwise share a link nobody outside can open. The port answers `GET /joininfo` with
+`{ joinCode, joinCodeKind, joinUrl, port }`, and `directJoinInfo()` from `onelobby` fetches it:
+
+```js
+import { directJoinInfo } from "onelobby";
+const info = await directJoinInfo();   // null when this page is not served by a direct host
+if (info?.joinUrl) shareBox.value = info.joinUrl;   // ask again later: it turns "internet" if the router answers late
+``` A game that already has its own web server can do the same on that server: what
 matters is that the page comes from the host's address over `http`. A whole game built this way:
 [browser-game.md](browser-game.md). Smoke: `node e2e/direct-smoke.mjs
 host 47810 --page --wait=600` prints `join page http://...`; opening it shows "It works!" and the host prints `PASS

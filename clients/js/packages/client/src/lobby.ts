@@ -55,6 +55,11 @@ export type LobbyEvents = {
   /** The signaling server went away. The game continues on the data channels (s.9). */
   serverLost: [];
   metaChanged: [Record<string, string>];
+  /**
+   * Direct-IP host only: the join code changed after `hostDirect` resolved, e.g. the router answered a later port-mapping
+   * retry and the code went from "same_network" to "internet". Show the new code (and `joinUrl`).
+   */
+  joinCodeChanged: [code: string, kind: "internet" | "same_network" | "none"];
 };
 
 export interface LobbyConfig {
@@ -149,6 +154,11 @@ export class Lobby extends Emitter<LobbyEvents> {
   portMapping = "";
   /** Direct-IP host only: the one startup line (bound port, join code, port mapping); see `formatHostLog` in onelobby/direct. */
   directHostLog = "";
+
+  /** @internal onelobby/direct: fires `joinCodeChanged` with the current code. */
+  notifyJoinCodeChanged(): void {
+    this.emit("joinCodeChanged", this.joinCode, this.joinCodeKind);
+  }
 
   private signaling: SignalingClient;
   private cfg: LobbyConfig;

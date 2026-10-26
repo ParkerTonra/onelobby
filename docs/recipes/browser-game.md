@@ -162,8 +162,12 @@ site the host happens to visit cannot reach the lobby. The page this recipe serv
 
 ## 5. What the host needs to know
 
-- Router: UPnP or NAT-PMP on, or TCP and UDP 47810 forwarded by hand. Otherwise `joinUrl` is a same-network address
-  and only players on the host's own network can use it; say so on screen (`kind`).
+- Router: UPnP or NAT-PMP on, or TCP and UDP 47810 forwarded by hand (then start with `ONELOBBY_PUBLIC_IP=<public ip>`
+  or `publicAddress`). Otherwise `joinUrl` is a same-network address and only players on the host's own network can use
+  it; say so on screen (`kind`). The host keeps asking the router in the background; `lobby.on("joinCodeChanged")` fires
+  when the link turns into an internet one, no restart needed.
+- The page itself shows the share link from `await directJoinInfo()` (`onelobby`), not `location.href`: the host may
+  have opened it at a LAN or `localhost` address.
 - Windows: the network must be **Private**, and `node.exe` (or your packaged exe) allowed through the firewall on
   Private. An old Public-only answer silently blocks friends. Details: [direct-ip.md s.6](direct-ip.md#6-shipping-the-firewall).
 - No host migration: when the host stops, the session ends for everyone (direct lobbies never emit `hostChanged`).
