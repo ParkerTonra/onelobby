@@ -17,11 +17,14 @@ namespace OneLobby
 
         public const byte Hi = 0x01, WelcomeDc = 0x02, Cmd = 0x10, FrameMsg = 0x11, Hash = 0x12, Desync = 0x13,
             SnapshotReq = 0x14, Snapshot = 0x15, Chunk = 0x16, Raw = 0x20, Ping = 0x30, Pong = 0x31,
-            HostClaim = 0x40, Voice = 0x50, Chat = 0x60, ChatHistory = 0x61, ChatReject = 0x62;
+            HostClaim = 0x40, Voice = 0x50, Chat = 0x60, ChatHistory = 0x61, ChatReject = 0x62,
+            PauseRequest = 0x70, PauseState = 0x71, PauseRefuse = 0x72;
 
         public const byte ModeLockstep = 1, ModeRaw = 2;
         public const byte SnapshotDeflate = 1;
         public const byte ChatRate = 1, ChatLength = 2, ChatMuted = 3;
+        public const byte PauseRefusedNotInGame = 1, PauseRefusedRate = 2, PauseRefusedNotAllowed = 3;
+        public const byte PauseFlagPauserLeft = 1;
 
         public sealed class Writer
         {
@@ -101,6 +104,9 @@ namespace OneLobby
                         break;
                     }
                     case ChatReject: r.U32(); r.U8(); break;
+                    case PauseRequest: r.U8(); break;
+                    case PauseState: r.U8(); r.U16(); r.U8(); break;
+                    case PauseRefuse: r.U8(); r.U8(); break;
                     default: return null;
                 }
             }
@@ -200,6 +206,16 @@ namespace OneLobby
         }
 
         public static byte[] BuildChatReject(uint id, byte reason) => new Writer(ChatReject, 0).U32(id).U8(reason).ToArray();
+
+        /// <summary>Joiner to host: pause (1) or resume (0) for everyone.</summary>
+        public static byte[] BuildPauseRequest(bool paused) => new Writer(PauseRequest, 0).U8(paused ? 1 : 0).ToArray();
+
+        /// <summary>Host to everyone: the shared pause state. Flags bit 0 = the pauser left and the host holds the pause.</summary>
+        public static byte[] BuildPauseState(bool paused, int byPeer, bool pauserLeft) =>
+            new Writer(PauseState, 0).U8(paused ? 1 : 0).U16(byPeer).U8(pauserLeft ? PauseFlagPauserLeft : 0).ToArray();
+
+        /// <summary>Host to the requester: the request (<paramref name="paused"/> = what it asked for) was refused.</summary>
+        public static byte[] BuildPauseRefuse(bool paused, byte reason) => new Writer(PauseRefuse, 0).U8(paused ? 1 : 0).U8(reason).ToArray();
 
         /// <summary>Strips C0/C1 control characters and bidi override/isolate characters (DESIGN s.9b).</summary>
         public static string SanitizeChat(string text)

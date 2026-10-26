@@ -19,6 +19,8 @@ export type { LobbySocket, LobbySocketOptions } from "./socket.js";
 export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";
+export { Pause } from "./pause.js";
+export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";
 export type { VoiceEvents, VoiceDeps } from "./voice.js";

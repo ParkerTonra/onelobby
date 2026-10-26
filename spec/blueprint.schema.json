@@ -134,7 +134,7 @@
           "default": "end"
         },
         "pause": {
-          "description": "off: no network pause. host: only the host pauses and resumes. anyone: any player can (planned, blueprint s.10).",
+          "description": "off: no network pause (lobby.Pause.Request / pause.request throws pause_disabled). host: only the host pauses and resumes. anyone: any player pauses; the pauser or the host resumes. A lobby made without a blueprint behaves as anyone.",
           "enum": ["off", "host", "anyone"],
           "default": "off"
         },

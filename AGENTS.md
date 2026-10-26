@@ -27,6 +27,8 @@ lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to ho
 await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();   // KickAsync bans; DisconnectAsync(id, code?, reason?) does not
 bool sent = await lobby.FlushAsync(TimeSpan.FromSeconds(1));   // before LeaveAsync: last reliable messages leave first (keep pumping)
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
+lobby.Pause.Request(true); lobby.Pause.State;              // shared pause: { Paused, ByPeer, PauserLeft }; Changed / Refused events
+lobby.Pause.CanResume; lobby.Pause.Policy = (peer, wantPaused) => true; lobby.Pause.Clear();   // Policy and Clear: host only
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
 lobby.Voice.ReleaseHangMs = 150; lobby.Voice.MuteAll(true); lobby.Voice.IsMuted(id); lobby.Voice.InputLevel; lobby.Voice.IsTransmitting;
 lobby.Lockstep!.Submit(cmd); while (lobby.Lockstep.TryNextFrame(out var f)) { /* f.Tick, f.Commands */ }
@@ -60,6 +62,8 @@ lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "se
 lobby.on("ready", () => {}); await lobby.ready;            // joiner: link to host open (host: at once)
 await lobby.start(); await lobby.kick(id); await lobby.leave();   // kick bans the address; lobby.disconnect(id, code?, reason?) does not
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
+lobby.pause.request(true); lobby.pause.state;              // shared pause: { paused, byPeer, pauserLeft }; "changed" / "refused" events
+lobby.pause.canResume; lobby.pause.policy = (peer, wantPaused) => true; lobby.pause.clear();   // policy and clear: host only
 const ws = lobby.asWebSocket();                            // joiner: WebSocket-shaped link to the host (text; { binary: true })
 lobby.onConnection((conn) => { conn.onmessage = (e) => conn.send(e.data); });   // host: one WebSocket-shaped conn per joiner
 lobby.voice.enabled = true; lobby.voice.pushToTalk(down);
@@ -100,7 +104,8 @@ npm install file:/path/to/onelobby/clients/js/packages/client
 ```
 
 Installing a folder only links it (npm runs no build), so build before every `npm install <folder>` that should pick
-up new changes. Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
+up new changes. Installing a folder or a `.tgz` reworks the whole `node_modules` tree and removes any package your
+`package.json` does not list, so declare every tool you use (e.g. a browser driver for tests) first. Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
 `<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
@@ -163,6 +168,11 @@ Full reference (generated): `docs/api/`.
   directly in handlers.
 - `ReplicationSession.Clients` (host) holds only peers whose link is up (`PeerReady`); `ClientReady` fires when one
   joins it and its first snapshot is a full one.
+- Shared pause (`lobby.Pause` / `lobby.pause`): default policy anyone pauses, the pauser or the host resumes; the host validates, keeps
+  the state and tells everyone (late joiners too). Refusals arrive as `Refused` / `"refused"` with `not_in_game`, `rate_limited`
+  (0.5 s per peer) or `not_allowed`. The pauser leaving hands the pause to the host (`PauserLeft`). In lockstep the host
+  stops its frames while paused. It is outside the sim (rule 8). A blueprint `session.pause` of `off` throws `pause_disabled`,
+  `host` makes the default host-only.
 - Error codes are constants: `LobbyErrorCodes.LobbyFull` (C#) / `ErrorCodes.LobbyFull` (JS) = `"lobby_full"`,
   `VersionMismatch` = `"version_mismatch"`, `InGame`, `UnknownCode`, `IceFailed`, ... Compare `e.Code` / `e.code` to them.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
@@ -224,6 +234,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Replicated state (host-authoritative real-time: shooters, physics, AI), C#: `docs/recipes/replication.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
+- Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
   / `JoinDirectAsync` / `RejoinDirectAsync(code, token)` from `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:

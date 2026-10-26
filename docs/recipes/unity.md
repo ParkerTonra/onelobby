@@ -185,6 +185,13 @@ principle). Mobile needs the microphone permission (iOS: Microphone Usage Descri
 `Permission.Microphone`). Voice on Unity has not been verified on real audio hardware yet; data channels are the
 tested path.
 
+## Shared pause
+
+`runner.Lobby.Pause` needs nothing from the runner: call `Pause.Request(true)` from your pause button and set `Time.timeScale` in 
+`Pause.Changed` (`Time.timeScale = s.Paused ? 0f : 1f`). `OneLobbyRunner` keeps pumping at timeScale 0 (it uses real time), so 
+the pause itself, pings and chat keep working. The host calls `Pause.Clear()` before reloading the scene for a restart. 
+Details: `pause.md`.
+
 ## Threading notes
 
 - Everything OneLobby raises (events, task completions) happens inside `Pump`, on the thread that calls it. `OneLobbyRunner`

@@ -430,6 +430,95 @@
       "hex": "6200000b00000003"
     },
     {
+      "name": "pause_request_pause",
+      "desc": "joiner -> host: pause the match (paused 1)",
+      "msg": {
+        "type": "pause_request",
+        "route": 0,
+        "paused": 1
+      },
+      "hex": "70000001"
+    },
+    {
+      "name": "pause_request_resume",
+      "desc": "joiner -> host: resume (paused 0)",
+      "msg": {
+        "type": "pause_request",
+        "route": 0,
+        "paused": 0
+      },
+      "hex": "70000000"
+    },
+    {
+      "name": "pause_state_paused",
+      "desc": "host -> all: paused by peer 2",
+      "msg": {
+        "type": "pause_state",
+        "route": 0,
+        "paused": 1,
+        "byPeer": 2,
+        "flags": 0
+      },
+      "hex": "71000001020000"
+    },
+    {
+      "name": "pause_state_pauser_left",
+      "desc": "host -> all: the pauser left, host (peer 1) holds the pause (flags bit 0)",
+      "msg": {
+        "type": "pause_state",
+        "route": 0,
+        "paused": 1,
+        "byPeer": 1,
+        "flags": 1
+      },
+      "hex": "71000001010001"
+    },
+    {
+      "name": "pause_state_resumed",
+      "desc": "host -> all: resumed by peer 300",
+      "msg": {
+        "type": "pause_state",
+        "route": 0,
+        "paused": 0,
+        "byPeer": 300,
+        "flags": 0
+      },
+      "hex": "710000002c0100"
+    },
+    {
+      "name": "pause_refuse_not_in_game",
+      "desc": "host -> requester: reason 1 = not_in_game",
+      "msg": {
+        "type": "pause_refuse",
+        "route": 0,
+        "paused": 1,
+        "reason": 1
+      },
+      "hex": "7200000101"
+    },
+    {
+      "name": "pause_refuse_rate",
+      "desc": "reason 2 = rate_limited",
+      "msg": {
+        "type": "pause_refuse",
+        "route": 0,
+        "paused": 0,
+        "reason": 2
+      },
+      "hex": "7200000002"
+    },
+    {
+      "name": "pause_refuse_not_allowed",
+      "desc": "reason 3 = not_allowed",
+      "msg": {
+        "type": "pause_refuse",
+        "route": 0,
+        "paused": 0,
+        "reason": 3
+      },
+      "hex": "7200000003"
+    },
+    {
       "name": "raw_max_frame",
       "desc": "exactly 16384 bytes (the limit); body bytes all 0xab",
       "msg": {

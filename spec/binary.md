@@ -52,6 +52,9 @@ with the id of the connection the frame arrived on. **(decision)** `cmd`, `hash`
 | 0x60 | `chat` | `id:u32, ts:i64, len:u16, utf8[len]` | on `reliable` |
 | 0x61 | `chat_history` | `n:u16, n x (peerId:u16, id:u32, ts:i64, len:u16, utf8[len])` | host -> joiner |
 | 0x62 | `chat_reject` | `id:u32, reason:u8` | host -> sender. 1 rate, 2 length, 3 muted_by_host |
+| 0x70 | `pause_request` | `paused:u8` | joiner -> host, on `reliable`, `route 0`. 1 = pause, 0 = resume (any non-zero byte reads as 1) |
+| 0x71 | `pause_state` | `paused:u8, byPeer:u16, flags:u8` | host -> every peer that said `hi`, and to a peer right after its `hi` while paused. `flags` bit 0 = the pauser left and the host holds the pause; other bits 0 |
+| 0x72 | `pause_refuse` | `paused:u8, reason:u8` | host -> the requester. `paused` echoes what it asked for. 1 not_in_game, 2 rate_limited, 3 not_allowed |
 
 ## Handshake and late join (lockstep)
 
@@ -118,6 +121,28 @@ hash of the state at tick `T`.
   `route = sender` to **every peer including the sender**; the host's own UI receives it too.
 - `chat_history`: after `welcome_dc`, last <= 100 lines, oldest first. Lines carry `peerId` of the author.
 - Local mute drops the text at the receiver; `hostMute` is host-side state keyed by `peerId`.
+
+## Pause (s.9c)
+
+A shared pause the host owns. Library-internal: never a lockstep command, never in a hash.
+
+- State: `{paused, byPeer, pauserLeft}`, all peers hold a copy, the host's is truth. Initially `{false, 0, false}`.
+- `pause_request{paused}` joiner -> host. Host checks in this order: the lobby phase is not `in_game` -> `pause_refuse 1`;
+  the request equals the current state -> ignored (no reply); this peer had a request accepted less than 500 ms ago ->
+  `pause_refuse 2` (a refusal spends no slot); policy denies -> `pause_refuse 3`. Default policy: anyone pauses, the
+  current `byPeer` or the host resumes (a host-only blueprint: only the host does either).
+- Accepted: state becomes `{paused, byPeer = requester, pauserLeft = false}` and `pause_state` goes to every peer that said
+  `hi` (the sender included). The host's own requests follow the same checks and apply locally.
+- Pauser leaves while paused (`pauserLeft` false, `byPeer` gone): the host sets `{true, hostId, true}` and broadcasts. A host
+  that takes over by migration keeps the state, and applies the same rule when `byPeer` is no longer in its roster.
+- A peer that says `hi` while the state is paused gets `pause_state` right after `welcome_dc` and `chat_history`. While not
+  paused nothing is sent.
+- Phase back to `lobby` clears the state on every peer (`{false, host, false}`); the host also broadcasts it.
+- Host `clear()`: `{false, hostId, false}` broadcast at once, no policy, no rate limit. A joiner ignores `pause_request`
+  and `pause_refuse` as a host and `pause_state` from anyone but its host.
+- Lockstep: while `paused` the host emits no `frame`; on resume the next frame is the next tick and the cadence restarts
+  from the resume instant. A joiner does not run the 3 s silent-host rule while paused, and the host does not run the 10 s
+  silent-peer (no `hash`) rule across a pause.
 
 ## Voice (s.9a)
 

@@ -27,6 +27,9 @@ export const MsgType = {
   chat: 0x60,
   chat_history: 0x61,
   chat_reject: 0x62,
+  pause_request: 0x70,
+  pause_state: 0x71,
+  pause_refuse: 0x72,
 } as const;
 
 /** welcome_dc.mode: 1 = lockstep, 2 = raw (0 reserved) per spec/binary.md. */
@@ -69,7 +72,10 @@ export type Message =
   | { type: "voice"; seq: number; flags: number; frames: Uint8Array[] }
   | { type: "chat"; id: number; ts: number; text: string }
   | { type: "chat_history"; lines: ChatLine[] }
-  | { type: "chat_reject"; id: number; reason: number };
+  | { type: "chat_reject"; id: number; reason: number }
+  | { type: "pause_request"; paused: number }
+  | { type: "pause_state"; paused: number; byPeer: number; flags: number }
+  | { type: "pause_refuse"; paused: number; reason: number };
 
 export interface Decoded {
   route: number;
@@ -159,6 +165,9 @@ export function encodeMessage(msg: Message, route = 0, allowOversize = false): U
       }
       break;
     case "chat_reject": w.u32(msg.id); w.u8(msg.reason); break;
+    case "pause_request": w.u8(msg.paused); break;
+    case "pause_state": w.u8(msg.paused); w.u16(msg.byPeer); w.u8(msg.flags); break;
+    case "pause_refuse": w.u8(msg.paused); w.u8(msg.reason); break;
   }
   const out = w.done();
   if (!allowOversize && out.length > MAX_FRAME_BYTES) throw new CodecError("too_long", `${out.length} > ${MAX_FRAME_BYTES}`);
@@ -214,6 +223,9 @@ export function decodeMessage(buf: Uint8Array, reassembled = false): Decoded | n
       msg = { type, lines }; break;
     }
     case "chat_reject": msg = { type, id: r.u32(), reason: r.u8() }; break;
+    case "pause_request": msg = { type, paused: r.u8() }; break;
+    case "pause_state": msg = { type, paused: r.u8(), byPeer: r.u16(), flags: r.u8() }; break;
+    case "pause_refuse": msg = { type, paused: r.u8(), reason: r.u8() }; break;
   }
   if (r.pos !== buf.length) throw new CodecError("trailing", `${buf.length - r.pos} extra bytes`);
   return { route, msg };
@@ -232,3 +244,8 @@ export type ChatRejectReason = "rate" | "length" | "muted_by_host" | "unknown";
 export function chatRejectName(code: number): ChatRejectReason {
   return code === 1 ? "rate" : code === 2 ? "length" : code === 3 ? "muted_by_host" : "unknown";
 }
+
+/** `pause_state.flags` bit 0: the pauser left and the host holds the pause. */
+export const PAUSE_FLAG_PAUSER_LEFT = 1;
+/** `pause_refuse.reason`: 1 not_in_game, 2 rate_limited, 3 not_allowed. */
+export const PAUSE_REFUSE = { notInGame: 1, rateLimited: 2, notAllowed: 3 } as const;

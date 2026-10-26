@@ -22,6 +22,9 @@ function fromJson(j: any): { msg: Message; route: number } {
     case "chat": return { route, msg: { type: "chat", id: j.id, ts: Number(j.ts), text: j.text } };
     case "chat_history": return { route, msg: { type: "chat_history", lines: j.lines.map((l: any) => ({ peerId: l.peerId, id: l.id, ts: Number(l.ts), text: l.text })) } };
     case "chat_reject": return { route, msg: { type: "chat_reject", id: j.id, reason: j.reason } };
+    case "pause_request": return { route, msg: { type: "pause_request", paused: j.paused } };
+    case "pause_state": return { route, msg: { type: "pause_state", paused: j.paused, byPeer: j.byPeer, flags: j.flags } };
+    case "pause_refuse": return { route, msg: { type: "pause_refuse", paused: j.paused, reason: j.reason } };
   }
   throw new Error("unknown vector type " + j.type);
 }

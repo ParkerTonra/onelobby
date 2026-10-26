@@ -15,6 +15,7 @@ import { Emitter } from "./emitter.js";
 import type { Hub } from "./hub.js";
 import { Lockstep } from "./lockstep.js";
 import { claimWinsWrapped, pickNewHost } from "./migration.js";
+import { Pause } from "./pause.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink, SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -122,6 +123,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   readonly tickRate: number;
   readonly lockstep: Lockstep;
   readonly chat: Chat;
+  /** The shared co-op pause (docs/recipes/pause.md). */
+  readonly pause: Pause;
   readonly voice: Voice;
 
   localPeerId: number;
@@ -229,6 +232,11 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.lockstep = new Lockstep(this.hub, { hashEveryTicks: cfg.hashEveryTicks });
     this.chat = new Chat(this.hub, cfg.wall, (id) => this.voice.isMutedPeer(id));
     this.voice = new Voice(this.hub, cfg.voice);
+    this.pause = new Pause(this.hub, {
+      phase: () => this.phase,
+      hold: (held) => this.lockstep.hold(held),
+      hasPeer: (id) => this.roster.has(id),
+    });
     this.lockstep.on("started", () => this.setPhase("in_game"));
     this.lockstep.on("error", (e) => this.reportError(e));
 
@@ -577,6 +585,9 @@ export class Lobby extends Emitter<LobbyEvents> {
       case "chat": case "chat_history": case "chat_reject":
         this.chat.handle(from, route, msg);
         break;
+      case "pause_request": case "pause_state": case "pause_refuse":
+        this.pause.handle(from, msg);
+        break;
       case "voice":
         if (channel === "voice") this.voice.handle(from, route, msg); // a voice frame on another channel is ignored
         break;
@@ -607,6 +618,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       hostId: this.localPeerId,
     }, 0);
     this.chat.sendHistory(from);
+    this.pause.sendState(from);
     if (this.mode === "lockstep") this.lockstep.onPeerHi(from, lastTick);
     this.emit("peerReady", this.roster.get(from) ?? { peerId: from, name: "" });
     this.flush(from);
@@ -686,6 +698,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.hiSentTo.clear();
     this.lastHeard.clear(); // joiners spoke to the old host; their clocks start when they say hi to us
     this.lockstep.becomeHost();
+    this.pause.onBecameHost();
     this.emit("hostChanged", this.localPeerId);
     if (this.serverUp) this.signaling.send({ t: "host_changed", hostId: this.localPeerId, epoch: this.epoch });
     for (const p of this.roster.keys()) {
@@ -859,6 +872,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.lockstep.onPeerLeft(peerId);
     this.chat.onPeerLeft(peerId);
     this.voice.onPeerLeft(peerId);
+    this.pause.onPeerLeft(peerId);
     if (peer) this.emit("peerLeft", peer, reason, close);
     if (peerId === this.hostPeerId && !this.isHost) {
       this.handleHostLost(reason);
@@ -875,6 +889,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (p !== "lobby" && p !== "in_game") return;
     if (this.phase === p) return;
     this.phase = p;
+    if (p === "lobby") this.pause.onLobbyPhase();
     if (p === "in_game" && !this.lockstep.started) this.lockstep.markStarted();
     this.emit("phase", p);
   }

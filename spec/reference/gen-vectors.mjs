@@ -52,6 +52,14 @@ const msgs = [
   ['chat_reject_rate', 'reason 1 = rate', { type: 'chat_reject', route: 0, id: 9, reason: 1 }],
   ['chat_reject_length', 'reason 2 = length', { type: 'chat_reject', route: 0, id: 10, reason: 2 }],
   ['chat_reject_muted', 'reason 3 = muted_by_host', { type: 'chat_reject', route: 0, id: 11, reason: 3 }],
+  ['pause_request_pause', 'joiner -> host: pause the match (paused 1)', { type: 'pause_request', route: 0, paused: 1 }],
+  ['pause_request_resume', 'joiner -> host: resume (paused 0)', { type: 'pause_request', route: 0, paused: 0 }],
+  ['pause_state_paused', 'host -> all: paused by peer 2', { type: 'pause_state', route: 0, paused: 1, byPeer: 2, flags: 0 }],
+  ['pause_state_pauser_left', 'host -> all: the pauser left, host (peer 1) holds the pause (flags bit 0)', { type: 'pause_state', route: 0, paused: 1, byPeer: 1, flags: 1 }],
+  ['pause_state_resumed', 'host -> all: resumed by peer 300', { type: 'pause_state', route: 0, paused: 0, byPeer: 300, flags: 0 }],
+  ['pause_refuse_not_in_game', 'host -> requester: reason 1 = not_in_game', { type: 'pause_refuse', route: 0, paused: 1, reason: 1 }],
+  ['pause_refuse_rate', 'reason 2 = rate_limited', { type: 'pause_refuse', route: 0, paused: 0, reason: 2 }],
+  ['pause_refuse_not_allowed', 'reason 3 = not_allowed', { type: 'pause_refuse', route: 0, paused: 0, reason: 3 }],
 ];
 const frames = msgs.map(([name, desc, msg]) => ({ name, desc, msg, hex: hex(encode(fromJson(msg))) }));
 // max-size frame: raw with 16381 bytes of payload = exactly 16384.
@@ -99,6 +107,8 @@ write('invalid.json', {
     { name: 'cmd_len_exceeds', hex: '10000001000000ff00ab', error: 'too_short' },
     { name: 'chat_bad_utf8', hex: '600000' + '01000000' + '0000000000000000' + '0200' + 'c328', error: 'bad_utf8' },
     { name: 'chat_trailing', hex: f('chat_send') + '00', error: 'trailing' },
+    { name: 'pause_state_truncated', hex: f('pause_state_paused').slice(0, -2), error: 'too_short' },
+    { name: 'pause_request_trailing', hex: f('pause_request_pause') + '00', error: 'trailing' },
     { name: 'voice_truncated_packet', hex: '500300' + '0900' + '00' + '01' + '0500' + 'f8', error: 'too_short' },
     { name: 'oversize_frame', hex: '200000' + rep(0, MAX_FRAME - 2), error: 'too_long' },
   ],

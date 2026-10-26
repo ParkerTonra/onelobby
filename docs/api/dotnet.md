@@ -249,6 +249,8 @@ public sealed class Lobby : IAsyncDisposable
     public bool IsHost;
     public LobbyPhase Phase;
     public IReadOnlyDictionary<string, string> Meta;
+    /// The lobby's name as the server keeps it (LobbyOptions.Name / DirectHostOptions.Name, sanitised); "" if the server sends none.
+    public string Name { get; private set; }
     public string ResumeToken { get; private set; }
     public SyncMode Mode { get; }
     public int TickRate { get; }
@@ -256,6 +258,8 @@ public sealed class Lobby : IAsyncDisposable
     public LockstepSession? Lockstep { get; }
     public VoiceChannel Voice { get; }
     public TextChat Chat { get; }
+    /// The shared co-op pause (docs/recipes/pause.md).
+    public SharedPause Pause { get; }
     /// Host: the per-joiner cap on incoming raw messages (LobbyOptions.RateLimit); null = none.
     public RateLimit? RateLimit { get; internal set; }
     /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen, e.g. 192.168.1.20:47810. Empty otherwise.
@@ -374,12 +378,18 @@ public static class LobbyErrorCodes
     public const string BadAddress;
     /// Direct IP host: no port in 47810-47819 could be bound.
     public const string PortInUse;
+    /// A pause request outside the InGame phase (Pause.Refused reason); also what a host-side refusal carries.
+    public const string NotInGame;
+    /// A pause request the host's policy turned down (for example a non-pauser trying to resume; Pause.Refused reason).
+    public const string NotAllowed;
     /// onelobby.json is invalid, or a value breaks it (BlueprintException carries the path and rule).
     public const string BadConfig;
     /// Voice was switched on but the blueprint says chat.voice is false.
     public const string VoiceDisabled;
     /// Text chat was used but the blueprint says chat.text is false.
     public const string ChatDisabled;
+    /// Pause.Request was used but the blueprint says session.pause is "off".
+    public const string PauseDisabled;
     /// ListAsync on a blueprint client whose hosting.server is false.
     public const string ListingDisabled;
     /// A display name was given but the blueprint says players.identity is anonymous.
@@ -427,6 +437,31 @@ public sealed class NetSimTransport : ITransport
     public ISignalingSocket ConnectSignaling(Uri url);
     public IPeerLink CreatePeerLink(PeerLinkOptions options);
     public void Poll();
+```
+
+## OneLobby.Core/SharedPause.cs
+
+```csharp
+/// The shared pause: who holds the match paused. ByPeer is the peer that paused (while Paused) or that last resumed it; PauserLeft says the pauser left and the host now holds the pause (ByPeer is then the host).
+public readonly record struct PauseState(bool Paused, int ByPeer, bool PauserLeft);
+/// Shared co-op pause (docs/recipes/pause.md): any player asks the host to pause or resume the match for everyone. The host validates (phase, rate, policy), keeps the state and broadcasts it. OneLobby moves the state and, in lockstep, stops the host's frames; scaling time, menus and banners stay in the game. Outside the sim: never put it in a lockstep command or hash.
+public sealed class SharedPause
+    /// The least time between two accepted requests from one peer.
+    public const int MinRequestGapMs;
+    /// The current shared state (the same on every peer once the host's broadcast has arrived).
+    public PauseState State;
+    /// True when the local peer may resume now under the default policy: the pauser or the host (a host-only blueprint: the host). A custom Policy lives on the host, so on a joiner this is a hint.
+    public bool CanResume;
+    /// The state changed (paused, resumed, pauser left, cleared). Fires on every peer, inside Pump on a joiner.
+    public event Action<PauseState>? Changed;
+    /// A request of this peer was refused: LobbyErrorCodes.NotInGame, LobbyErrorCodes.RateLimited or LobbyErrorCodes.NotAllowed.
+    public event Action<string>? Refused;
+    /// Host: replaces the default policy. Called with (requesting peer, true to pause / false to resume); return true to allow. Default: anyone pauses, the pauser or the host resumes. A blueprint with session.pause "host" makes the default host-only. Phase and rate checks run first.
+    public Func<int, bool, bool>? Policy { get; set; }
+    /// Ask to pause (true) or resume (false) the match for everyone. Throws pause_disabled when the blueprint says session.pause is "off". The result arrives as Changed or Refused; asking for the state that already holds does nothing.
+    public void Request(bool paused);
+    /// Host only: unpause at once, skipping the policy and the rate limit. Call it before a restart or game over so the next round does not start frozen. Does nothing when not paused.
+    public void Clear();
 ```
 
 ## OneLobby.Core/TextChat.cs
@@ -522,6 +557,8 @@ public static class Wire
     public const byte ModeLockstep;
     public const byte SnapshotDeflate;
     public const byte ChatRate;
+    public const byte PauseRefusedNotInGame;
+    public const byte PauseFlagPauserLeft;
     public sealed class Writer
         public Writer(byte type, int route);
         public Writer U8(int v);
@@ -567,6 +604,12 @@ public static class Wire
     public static byte[] BuildChat(int route, uint id, long ts, string text);
     public static byte[] BuildChatHistory(IReadOnlyList<ChatLine> lines);
     public static byte[] BuildChatReject(uint id, byte reason);
+    /// Joiner to host: pause (1) or resume (0) for everyone.
+    public static byte[] BuildPauseRequest(bool paused);
+    /// Host to everyone: the shared pause state. Flags bit 0 = the pauser left and the host holds the pause.
+    public static byte[] BuildPauseState(bool paused, int byPeer, bool pauserLeft);
+    /// Host to the requester: the request (paused = what it asked for) was refused.
+    public static byte[] BuildPauseRefuse(bool paused, byte reason);
     /// Strips C0/C1 control characters and bidi override/isolate characters (DESIGN s.9b).
     public static string SanitizeChat(string text);
 ```

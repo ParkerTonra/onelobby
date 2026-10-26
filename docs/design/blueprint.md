@@ -231,7 +231,7 @@ what makes the hand-edit path real: the file wins even over code that still call
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
 | `session.hostLeaves` | `"end"` \| `"migrate"` | `"end"` | both | `migrate` exists for server lobbies (lowest `peerId`, lockstep needs Snapshot/Restore); direct lobbies always end | Photon PUN (lowest actor), Steam automatic owner migration; direct-ip recipe |
-| `session.pause` | `"off"` \| `"host"` \| `"anyone"` | `"off"` for real-time action; agent proposes `"anyone"` for RTS, strategy and long co-op sessions, `"host"` when the host runs the world | both | **new** (s.10) | Stardew host-only `/pause`; Factorio pauses when empty; Terraria autopause "For singleplayer only"; Mirror/FishNet/Netcode have no network pause |
+| `session.pause` | `"off"` \| `"host"` \| `"anyone"` | `"off"` for real-time action; agent proposes `"anyone"` for RTS, strategy and long co-op sessions, `"host"` when the host runs the world | both | exists (`lobby.pause` / `lobby.Pause`, `docs/recipes/pause.md`; enforced: `off` throws `pause_disabled`, `host` is host-only) | Stardew host-only `/pause`; Factorio pauses when empty; Terraria autopause "For singleplayer only"; Mirror/FishNet/Netcode have no network pause |
 | `session.readyTimeoutMs` | int | 15000 | R | exists | AGENTS.md friendly defaults |
 | `session.peerTimeoutMs` | int, 0 or ≥ 6000 | 0 | R | exists | FishNet Remote Client Timeout |
 | `session.rateLimit` | `{ messages, perMs }` | none | R | exists (`rateLimit`) | browser-game recipe |

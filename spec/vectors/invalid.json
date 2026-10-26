@@ -42,6 +42,16 @@
       "error": "trailing"
     },
     {
+      "name": "pause_state_truncated",
+      "hex": "710000010200",
+      "error": "too_short"
+    },
+    {
+      "name": "pause_request_trailing",
+      "hex": "7000000100",
+      "error": "trailing"
+    },
+    {
       "name": "voice_truncated_packet",
       "hex": "500300090000010500f8",
       "error": "too_short"

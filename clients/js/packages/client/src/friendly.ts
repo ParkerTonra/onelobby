@@ -46,10 +46,14 @@ export const ErrorCodes = {
   ServerLost: "server_lost",
   InvalidToken: "invalid_token",
   NoServer: "no_server",
+  // from the shared pause (lobby.pause)
+  NotInGame: "not_in_game",
+  NotAllowed: "not_allowed",
   // from a blueprint (onelobby.json)
   BadConfig: "bad_config",
   VoiceDisabled: "voice_disabled",
   ChatDisabled: "chat_disabled",
+  PauseDisabled: "pause_disabled",
   ListingDisabled: "listing_disabled",
   IdentityAnonymous: "identity_anonymous",
 } as const;
@@ -80,6 +84,9 @@ const TEXT: Record<string, Entry> = {
   timeout: { message: "The connection took too long.", hint: "Check your internet connection, then try again." },
   voice_disabled: { message: "Voice chat is turned off in this game." },
   chat_disabled: { message: "Text chat is turned off in this game." },
+  pause_disabled: { message: "Pausing is turned off in this game." },
+  not_in_game: { message: "You can only pause while a game is running.", hint: "Start the game first." },
+  not_allowed: { message: "You can't do that right now.", hint: "The player who paused, or the host, can resume." },
   listing_disabled: { message: "This game has no public lobby list.", hint: "Join with a code or a link from the host." },
   identity_anonymous: { message: "This game doesn't use player names.", hint: "Everyone shows up as Player 1, Player 2, and so on." },
   bad_config: { message: "The game's multiplayer settings file is not valid.", hint: "Let the game's owner know; the details are in the error message." },

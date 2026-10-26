@@ -591,6 +591,7 @@ function guardLobby(lobby: Lobby, bp: Blueprint): void {
       });
     }
   }
+  lobby.pause.mode = bp.session.pause;
   if (!bp.chat.text) {
     lobby.chat.send = () => {
       throw new OneLobbyError("chat_disabled", "this game has text chat turned off (chat.text is false)");

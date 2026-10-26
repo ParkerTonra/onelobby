@@ -67,6 +67,9 @@ namespace OneLobby.Tests
                         .Select(l => new ChatLine(l.GetProperty("peerId").GetInt32(), l.GetProperty("id").GetUInt32(),
                             long.Parse(l.GetProperty("ts").GetString()!), l.GetProperty("text").GetString()!)).ToList());
                 case "chat_reject": return Wire.BuildChatReject(UI("id"), (byte)I("reason"));
+                case "pause_request": return Wire.BuildPauseRequest(I("paused") != 0);
+                case "pause_state": return Wire.BuildPauseState(I("paused") != 0, I("byPeer"), (I("flags") & Wire.PauseFlagPauserLeft) != 0);
+                case "pause_refuse": return Wire.BuildPauseRefuse(I("paused") != 0, (byte)I("reason"));
                 default: throw new InvalidOperationException("unknown vector type " + type);
             }
         }

@@ -78,6 +78,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
   private cancelTicker: (() => void) | null = null;
   private baseTime = 0;
   private emitted = 0;
+  private held = false;
   private ownHashes = new Map<number, bigint>();
   private peerHashes = new Map<number, Map<number, bigint>>();
   private desyncs = new Map<number, number>();
@@ -203,6 +204,25 @@ export class Lockstep extends Emitter<LockstepEvents> {
     this.emit("started");
   }
 
+  /** The shared pause is on: the host emits no frames and a joiner expects none (no silent-host check). */
+  get isHeld(): boolean {
+    return this.held;
+  }
+
+  /**
+   * Pause (true) or resume (false) frame emission (the shared pause calls this; not for games). Resuming rebases the
+   * host's tick clock to now, so the next frame is simply tick+1 (no gap, no burst) and nobody counts as silent.
+   */
+  hold(held: boolean): void {
+    if (this.held === held) return;
+    this.held = held;
+    if (held) return;
+    const now = this.hub.clock.now();
+    this.baseTime = now - this.emitted * (1000 / this.hub.tickRate);
+    this.lastFrameRx = now;
+    for (const p of this.ready) this.lastHashRx.set(p, now);
+  }
+
   stop(): void {
     this.cancelTicker?.();
     this.cancelTicker = null;
@@ -221,7 +241,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
   // ---- host: frame emission ---------------------------------------------------------------------------------------
 
   private pump(interval: number): void {
-    if (!this.hosting) return;
+    if (!this.hosting || this.held) return;
     const now = this.hub.clock.now();
     let due = Math.floor((now - this.baseTime + 1) / interval) - this.emitted;
     if (due > 10) {
@@ -487,7 +507,7 @@ export class Lockstep extends Emitter<LockstepEvents> {
 
   /** True when a started joiner has heard no frames for 3 s: the Lobby then runs the host-loss rule (s.9). */
   hostSilent(): boolean {
-    return !this.hosting && this._started && this.msSinceFrame > HOST_SILENCE_MS;
+    return !this.hosting && !this.held && this._started && this.msSinceFrame > HOST_SILENCE_MS;
   }
 
   /** Reset the silence timer, e.g. after the link to a new host opened. */

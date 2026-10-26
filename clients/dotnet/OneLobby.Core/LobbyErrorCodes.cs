@@ -50,6 +50,12 @@ namespace OneLobby
         /// <summary>Direct IP host: no port in 47810-47819 could be bound.</summary>
         public const string PortInUse = "port_in_use";
 
+        // ---- from the shared pause (Lobby.Pause) ----
+        /// <summary>A pause request outside the InGame phase (Pause.Refused reason); also what a host-side refusal carries.</summary>
+        public const string NotInGame = "not_in_game";
+        /// <summary>A pause request the host's policy turned down (for example a non-pauser trying to resume; Pause.Refused reason).</summary>
+        public const string NotAllowed = "not_allowed";
+
         // ---- from the blueprint (onelobby.json, docs/design/blueprint.md) ----
         /// <summary>onelobby.json is invalid, or a value breaks it (<see cref="BlueprintException"/> carries the path and rule).</summary>
         public const string BadConfig = "bad_config";
@@ -57,6 +63,8 @@ namespace OneLobby
         public const string VoiceDisabled = "voice_disabled";
         /// <summary>Text chat was used but the blueprint says chat.text is false.</summary>
         public const string ChatDisabled = "chat_disabled";
+        /// <summary>Pause.Request was used but the blueprint says session.pause is "off".</summary>
+        public const string PauseDisabled = "pause_disabled";
         /// <summary>ListAsync on a blueprint client whose hosting.server is false.</summary>
         public const string ListingDisabled = "listing_disabled";
         /// <summary>A display name was given but the blueprint says players.identity is anonymous.</summary>

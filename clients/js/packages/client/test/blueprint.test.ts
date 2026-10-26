@@ -237,6 +237,31 @@ describe("enforcement", () => {
     expect(() => l2.chat.send("hi")).not.toThrow();
   });
 
+  it("pause_disabled: pause.request throws when session.pause is off (the default); host makes pausing host-only; anyone opens it", async () => {
+    const w = world();
+    const off = OneLobby.fromConfig({ game: { id: "g" }, engine: "web" }, { advanced: w.advanced("a") });
+    const lobby = await off.host();
+    expect(() => lobby.pause.request(true)).toThrowError(expect.objectContaining({ code: "pause_disabled" }));
+    expect(ErrorCodes.PauseDisabled).toBe("pause_disabled");
+    expect(describeError(ErrorCodes.PauseDisabled).message).toBeTruthy();
+
+    const host = OneLobby.fromConfig({ game: { id: "g" }, engine: "web", session: { pause: "host" } }, { advanced: w.advanced("b") });
+    const hl = await host.host();
+    const joiner = OneLobby.fromConfig({ game: { id: "g" }, engine: "web", session: { pause: "anyone" } }, { advanced: w.advanced("c") });
+    const jl = await joiner.join(hl.code);
+    await settle();
+    await hl.start();
+    await settle();
+    jl.pause.request(true);
+    await settle();
+    expect(hl.pause.state.paused).toBe(false);
+    hl.pause.request(true);
+    await settle();
+    expect(jl.pause.state.paused).toBe(true);
+    expect(jl.pause.canResume).toBe(false);
+    expect(hl.pause.canResume).toBe(true);
+  });
+
   it("listing_disabled: list() rejects when hosting.server is false", async () => {
     const w = world();
     const kit = OneLobby.fromConfig({ game: { id: "g" }, engine: "dotnet" }, { advanced: w.advanced("a") });

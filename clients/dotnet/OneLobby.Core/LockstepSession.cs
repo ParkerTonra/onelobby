@@ -29,6 +29,7 @@ namespace OneLobby
         private long _emitStartTick;
         private long _lastSnapshotReqMs = -100_000;
         private bool _graceFix;
+        private bool _held;
 
         internal LockstepSession(Lobby lobby) { _lobby = lobby; }
 
@@ -141,6 +142,24 @@ namespace OneLobby
 
         internal bool Emitting => _emitting;
 
+        /// <summary>The shared pause is on: the host emits no frames and a joiner expects none (no silent-host snapshot request).</summary>
+        internal bool Held => _held;
+
+        /// <summary>
+        /// Pause (true) or resume (false) frame emission. Resuming rebases the host's tick clock to now, so the next frame
+        /// is simply tick+1 (no gap, no burst to catch up); commands queued meanwhile go into it.
+        /// </summary>
+        internal void Hold(bool held)
+        {
+            if (_held == held) return;
+            _held = held;
+            if (!held && _emitting && !_graceFix)
+            {
+                _emitStartMs = _lobby.NowMs;
+                _emitStartTick = _head;
+            }
+        }
+
         internal void ShortenGrace(long startMs) { if (_graceFix && startMs < _emitStartMs) _emitStartMs = startMs; }
 
         internal void StopEmitting() => _emitting = false;
@@ -169,7 +188,7 @@ namespace OneLobby
         /// <summary>Host: emit all frames due on the clock. Returns frames emitted.</summary>
         internal void EmitDue(long nowMs)
         {
-            if (!_emitting || nowMs < _emitStartMs) return;
+            if (!_emitting || _held || nowMs < _emitStartMs) return;
             if (_graceFix) { _graceFix = false; _emitStartTick = _head; }
             var rate = _lobby.TickRate;
             var burst = 0;

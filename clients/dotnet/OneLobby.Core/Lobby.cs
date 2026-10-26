@@ -91,6 +91,7 @@ namespace OneLobby
             _hostTimeoutMs = pt > 0 ? _peerTimeoutMs : HostTimeoutMs;
             Voice = new VoiceChannel(this);
             Chat = new TextChat(this);
+            Pause = new SharedPause(this);
             if (Mode == SyncMode.Lockstep) Lockstep = new LockstepSession(this);
         }
 
@@ -113,6 +114,8 @@ namespace OneLobby
         public LockstepSession? Lockstep { get; }
         public VoiceChannel Voice { get; }
         public TextChat Chat { get; }
+        /// <summary>The shared co-op pause (docs/recipes/pause.md).</summary>
+        public SharedPause Pause { get; }
         /// <summary>Host: the per-joiner cap on incoming raw messages (<see cref="LobbyOptions.RateLimit"/>); null = none.</summary>
         public RateLimit? RateLimit { get; internal set; }
 
@@ -381,6 +384,7 @@ namespace OneLobby
         internal IEnumerable<PeerRec> PeerRecords() => _peers.Values.ToList();
         private IEnumerable<PeerRec> HelloPeers() => _peers.Values.Where(r => r.Id != _you && r.Hello && r.Link != null && r.Link.IsOpen).ToList();
         internal bool IsLocallyMuted(int peerId) => Voice.IsMuted(peerId);
+        internal bool HasPeer(int peerId) => _peers.ContainsKey(peerId);
 
         private void ConnectPeer(PeerRec rec, bool initiator, bool relayOnly = false)
         {
@@ -440,6 +444,7 @@ namespace OneLobby
         {
             if (_phase == p) return;
             _phase = p;
+            if (p == LobbyPhase.Lobby) Pause.OnLobbyPhase();
             PhaseChanged?.Invoke(p);
         }
 
@@ -541,7 +546,7 @@ namespace OneLobby
         private void CheckSilentFrames(long now)
         {
             var ls = Lockstep;
-            if (ls == null || !_ready || _phase != LobbyPhase.InGame || _awaitingClaim) return;
+            if (ls == null || !_ready || _phase != LobbyPhase.InGame || _awaitingClaim || ls.Held) return;
             if (_lastFrameRxMs == 0) _lastFrameRxMs = now;
             if (now - _lastFrameRxMs > 3000 && ls.ShouldRequestSnapshot(now))
                 SendToHost(PeerChannel.Reliable, Wire.BuildSnapshotReq(ls.Tick));
@@ -640,6 +645,7 @@ namespace OneLobby
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildWelcomeDc(Lockstep?.Tick ?? 0, TickRate,
                         Mode == SyncMode.Raw ? Wire.ModeRaw : Wire.ModeLockstep, _you));
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildChatHistory(Chat.History));
+                    Pause.SendTo(rec);
                     if (Lockstep != null && _phase == LobbyPhase.InGame && (Lockstep.Head > 0 || lastTick >= 0))
                     {
                         if (lastTick >= 0 && Lockstep.LogCovers(lastTick))
@@ -716,6 +722,9 @@ namespace OneLobby
                     Chat.HostHandle(rec.Id, id, Wire.DecodeUtf8(raw));
                     return;
                 }
+                case Wire.PauseRequest:
+                    if (rec.Hello) Pause.HostHandle(rec.Id, body[0] != 0);
+                    return;
                 case Wire.Voice:
                 {
                     if (!rec.Hello) return;
@@ -816,6 +825,20 @@ namespace OneLobby
                     var r = new Wire.Reader(body);
                     var id = r.U32(); var reason = r.U8();
                     Chat.OnReject(id, reason);
+                    return;
+                }
+                case Wire.PauseState:
+                {
+                    var r = new Wire.Reader(body);
+                    var paused = r.U8() != 0; var by = r.U16(); var flags = r.U8();
+                    Pause.OnState(paused, by, (flags & Wire.PauseFlagPauserLeft) != 0);
+                    return;
+                }
+                case Wire.PauseRefuse:
+                {
+                    var r = new Wire.Reader(body);
+                    r.U8();
+                    Pause.OnRefuse(r.U8());
                     return;
                 }
                 case Wire.Voice:
@@ -990,6 +1013,7 @@ namespace OneLobby
             rec.Link = null;
             Lockstep?.DropPending(rec.Id);
             Voice.OnPeerGone(rec.Id);
+            Pause.OnPeerGone(rec.Id);
             PeerLeft?.Invoke(ToPeer(rec), reason);
         }
 
@@ -1099,6 +1123,7 @@ namespace OneLobby
                 _migrationEmitStartMs = NowMs + MigrationGraceMs;
                 _migrationHold = true;
             }
+            Pause.OnBecameHost();
             _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "host_changed"); w.WriteNumber("hostId", _you); w.WriteNumber("epoch", _epoch); }));
             HostChanged?.Invoke(_you);
         }

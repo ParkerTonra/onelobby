@@ -284,6 +284,9 @@ to the host, the source `peerId` when received from it: the host rewrites it whe
 | 0x60 | `chat` | `id:u32, ts:i64, len:u16, utf8[len]` | sender → host → all on `reliable`; `route` = sender; host stamps `id`/`ts` (s.9b) |
 | 0x61 | `chat_history` | `n:u16, n × (peerId:u16, id:u32, ts:i64, len:u16, utf8[len])` | host → joiner, after `welcome_dc` |
 | 0x62 | `chat_reject` | `id:u32, reason:u8 (1 = rate, 2 = length, 3 = muted_by_host)` | host → sender |
+| 0x70 | `pause_request` | `paused:u8` | joiner → host: pause (1) or resume (0) for everyone (s.9c) |
+| 0x71 | `pause_state` | `paused:u8, byPeer:u16, flags:u8 (bit 0 = pauser left, host holds)` | host → all peers, and to a peer right after its `hi` while paused |
+| 0x72 | `pause_refuse` | `paused:u8, reason:u8 (1 = not_in_game, 2 = rate_limited, 3 = not_allowed)` | host → requester |
 
 **Lockstep scheduling** (host-ordered command relay):
 
@@ -356,6 +359,23 @@ API additions (both languages; see s.11): `lobby.voice.enabled`, `.mode`, `.push
 
 API additions: `lobby.chat.send(text)`, `lobby.chat.history`, `lobby.chat.hostMute(peerId, bool)`, event
 `chat(peerId, text, id, ts)`, `chatRejected(id, reason)`.
+
+## 9c. Shared pause
+
+| Rule | Value |
+|---|---|
+| Channel | `pause_request` joiner → host, `pause_state` host → all, `pause_refuse` host → requester, all on `reliable`; the server never sees them |
+| Scope | The `in_game` phase only (`not_in_game` otherwise); the state clears when the phase goes back to `lobby`. Server and direct-IP lobbies alike |
+| Policy | Default: anyone pauses; the pauser or the host resumes. A host-side hook replaces it; blueprint `session.pause` is `off` (request throws `pause_disabled`), `host` (host-only) or `anyone` |
+| Limits | One accepted request per peer per 500 ms (`rate_limited`); a request equal to the current state is ignored |
+| Late join / leave | A late joiner gets the state after `hi`. The pauser leaving hands the pause to the host (`pauserLeft`). A migrating host keeps the state as is |
+| Lockstep | The host emits no frames while paused and restarts its tick clock on resume (next frame = next tick, no gap, no hash problem); the joiner silent-host and host silent-peer rules sit out the pause |
+| Not the sim | Never a lockstep command, never in a hash. Time scale, menus and banners are the game's |
+| Host `clear()` | Unpauses at once, skipping policy and rate limit; the game calls it before a restart or game over |
+
+API additions: `lobby.pause.request(bool)`, `.state` `{ paused, byPeer, pauserLeft }`, `.canResume`, `.policy` (host),
+`.clear()` (host), events `changed(state)`, `refused(code)`. C#: `lobby.Pause.Request`, `.State`, `.CanResume`, `.Policy`,
+`.Clear()`, `Changed`, `Refused`. Wire: `spec/binary.md` "Pause". Recipe: `docs/recipes/pause.md`.
 
 ---
 
@@ -549,6 +569,9 @@ lobby.voice.muted = false; lobby.voice.setMuted(peerId, true); lobby.voice.setVo
 lobby.voice.inputLevel; lobby.voice.on("speaking", (peerId, talking) => {}); lobby.voice.on("error", (e) => {});
 lobby.chat.send("gg"); lobby.chat.history; lobby.chat.hostMute(peerId, true); lobby.chat.filter = (t) => t;
 lobby.chat.on("message", ({ peerId, id, ts, text }) => {}); lobby.chat.on("rejected", (id, reason) => {});
+// shared pause (s.9c)
+lobby.pause.request(true); lobby.pause.state; lobby.pause.canResume; lobby.pause.clear();   // clear: host only
+lobby.pause.on("changed", ({ paused, byPeer, pauserLeft }) => {}); lobby.pause.on("refused", (code) => {});
 ```
 
 No `pump()` in JS: events fire from the event loop. Both APIs are the same shape on purpose so the demos and the

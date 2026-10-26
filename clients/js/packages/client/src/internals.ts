@@ -7,6 +7,8 @@
 export * from "./index.js";
 export { MAX_DESYNCS, HOST_SILENCE_MS } from "./lockstep.js";
 export { ChatLimiter, sanitizeChat, CHAT_HISTORY_LINES } from "./chat.js";
+export { PAUSE_MIN_REQUEST_GAP_MS } from "./pause.js";
+export { PAUSE_FLAG_PAUSER_LEFT, PAUSE_REFUSE } from "./codec.js";
 export {
   JitterBuffer,
   VoiceGate,

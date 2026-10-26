@@ -25,6 +25,8 @@ export type { LobbySocket, LobbySocketOptions } from "./socket.js";
 export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";
+export { Pause } from "./pause.js";
+export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";
 export type { VoiceEvents, VoiceDeps } from "./voice.js";
@@ -394,6 +396,7 @@ import type { Clock } from "./clock.js";
 import { PROTO } from "./codec.js";
 import { Emitter } from "./emitter.js";
 import { Lockstep } from "./lockstep.js";
+import { Pause } from "./pause.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
 import type { ChannelName, IceServer, LinkFactory, PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -482,11 +485,15 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     readonly tickRate: number;
     readonly lockstep: Lockstep;
     readonly chat: Chat;
+    /** The shared co-op pause (docs/recipes/pause.md). */
+    readonly pause: Pause;
     readonly voice: Voice;
     localPeerId: number;
     hostPeerId: number;
     phase: Phase;
     meta: Record<string, string>;
+    /** The lobby's name as the server keeps it (host()'s `name`, sanitised); "" if the server sends none. */
+    name: string;
     resumeToken: string;
     /** Last measured round trip to the host in ms (joiners), or 0. */
     rtt: number;
@@ -501,6 +508,8 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     directAddresses: string[];
     /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
     portMapping: string;
+    /** Direct-IP host only: the one startup line (bound port, join code, port mapping); see `formatHostLog` in onelobby/direct. */
+    directHostLog: string;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
     /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
@@ -730,6 +739,13 @@ export declare class Lockstep extends Emitter<LockstepEvents> {
     becomeJoiner(): void;
     /** A joiner just learned the session is in game (first frame, snapshot, or phase from the server). */
     markStarted(): void;
+    /** The shared pause is on: the host emits no frames and a joiner expects none (no silent-host check). */
+    get isHeld(): boolean;
+    /**
+     * Pause (true) or resume (false) frame emission (the shared pause calls this; not for games). Resuming rebases the
+     * host's tick clock to now, so the next frame is simply tick+1 (no gap, no burst) and nobody counts as silent.
+     */
+    hold(held: boolean): void;
     stop(): void;
     onPeerLeft(peerId: number): void;
     /** The host drops a peer it has had no `hash` from for 10 s (scaled up when hashes are rare). */
@@ -804,6 +820,86 @@ export declare class Chat extends Emitter<ChatEvents> {
     /** Host: send recent lines to a freshly connected peer. */
     sendHistory(peerId: number): void;
     handle(from: number, route: number, msg: Message): void;
+}
+```
+
+## pause
+
+```ts
+import { type Message } from "./codec.js";
+import { Emitter } from "./emitter.js";
+import type { Hub } from "./hub.js";
+/** The least time between two accepted pause requests from one peer. */
+export declare const PAUSE_MIN_REQUEST_GAP_MS = 500;
+/**
+ * The shared pause: `paused` is on while someone holds the match; `byPeer` is the peer that paused (while paused) or
+ * that last resumed it; `pauserLeft` says the pauser left and the host now holds the pause (`byPeer` is then the host).
+ */
+export interface PauseState {
+    readonly paused: boolean;
+    readonly byPeer: number;
+    readonly pauserLeft: boolean;
+}
+/** Why a request was refused: `not_in_game`, `rate_limited` or `not_allowed` (the `ErrorCodes` constants). */
+export type PauseRefusal = "not_in_game" | "rate_limited" | "not_allowed" | "unknown";
+export type PauseEvents = {
+    /** The state changed (paused, resumed, pauser left, cleared). Fires on every peer. */
+    changed: [PauseState];
+    /** A request of this peer was refused; `code` is a `PauseRefusal`. */
+    refused: [code: PauseRefusal];
+};
+/** `session.pause` of a blueprint: "off" makes `request` throw `pause_disabled`, "host" makes the default policy host-only. */
+export type PauseMode = "off" | "host" | "anyone";
+export interface PauseDeps {
+    /** The lobby's phase now ("lobby" | "in_game"). */
+    phase: () => string;
+    /** Lockstep: stop (true) or resume (false) the host's frame emission. */
+    hold: (held: boolean) => void;
+    /** Whether `peerId` is still in the roster. */
+    hasPeer: (peerId: number) => boolean;
+}
+/**
+ * Shared co-op pause (docs/recipes/pause.md): any player asks the host to pause or resume the match for everyone.
+ * The host validates (phase, rate, policy), keeps the state and broadcasts it over the reliable channel. OneLobby moves
+ * the state and, in lockstep, stops the host's frames; scaling time, menus and banners stay in the game. It is outside
+ * the sim: never put it in a lockstep command or hash.
+ */
+export declare class Pause extends Emitter<PauseEvents> {
+    /** Set by a blueprint (`session.pause`); the default is "anyone". */
+    mode: PauseMode;
+    /**
+     * Host: replaces the default policy. Called with (requesting peer, true to pause / false to resume); return true to
+     * allow. Default: anyone pauses, the pauser or the host resumes (host only in "host" mode). Phase and rate run first.
+     */
+    policy: ((peerId: number, paused: boolean) => boolean) | null;
+    constructor(hub: Hub, deps: PauseDeps);
+    /** The current shared state (the same on every peer once the host's broadcast has arrived). */
+    get state(): PauseState;
+    /**
+     * True when the local peer may resume now under the default policy: the pauser or the host (in "host" mode, the
+     * host). A custom `policy` lives on the host, so on a joiner this is a hint.
+     */
+    get canResume(): boolean;
+    /**
+     * Ask to pause (true) or resume (false) the match for everyone. Throws `pause_disabled` when the blueprint says
+     * `session.pause` is "off". The result arrives as `changed` or `refused`; asking for the state that already holds
+     * does nothing.
+     */
+    request(paused: boolean): void;
+    /**
+     * Host only: unpause at once, skipping the policy and the rate limit. Call it before a restart or game over so the
+     * next round does not start frozen. Does nothing when not paused.
+     */
+    clear(): void;
+    handle(from: number, msg: Message): void;
+    /** Host: a late joiner's link is up; it gets the state when there is one to tell. */
+    sendState(peerId: number): void;
+    /** A peer is gone: the host takes over the pause its leaver held. */
+    onPeerLeft(peerId: number): void;
+    /** This peer just became the host (migration): it keeps the state as is, and takes over a pause whose holder is gone. */
+    onBecameHost(): void;
+    /** The lobby went back to the lobby phase: nothing stays paused. */
+    onLobbyPhase(): void;
 }
 ```
 
@@ -1313,9 +1409,12 @@ export declare const ErrorCodes: {
     readonly ServerLost: "server_lost";
     readonly InvalidToken: "invalid_token";
     readonly NoServer: "no_server";
+    readonly NotInGame: "not_in_game";
+    readonly NotAllowed: "not_allowed";
     readonly BadConfig: "bad_config";
     readonly VoiceDisabled: "voice_disabled";
     readonly ChatDisabled: "chat_disabled";
+    readonly PauseDisabled: "pause_disabled";
     readonly ListingDisabled: "listing_disabled";
     readonly IdentityAnonymous: "identity_anonymous";
 };
