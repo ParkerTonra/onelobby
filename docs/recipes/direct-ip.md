@@ -125,7 +125,8 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
   `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`. Left out, nothing is logged.
 - A direct host looks like onelobby-server from outside: its port answers `GET /healthz` (`ok`) and `GET /metrics`
   (Prometheus text, same names, but loopback callers only, since the port faces the internet), so the OneLobby Console and
-  scripts treat every hub shape alike. JS/Node `hostDirect` prints the same startup line as above to `console.log`
+  scripts treat every hub shape alike. `GET /joininfo` answers `{ joinCode, joinCodeKind, joinUrl, port }` (404 until the host has a
+  code; `joinUrl` is null on a C# host, which serves no page). JS/Node `hostDirect` prints the same startup line as above to `console.log`
   (`lobby.directHostLog`; pass `log: (line) => ...` to redirect it or `log: false` to silence it). Every hub prints
   `OneLobby: <server|direct host> listening on <TCP|TCP+UDP> :<port>; ...`.
 
@@ -153,10 +154,11 @@ lobby.on("joinCodeChanged", (code, kind) => console.log("New", kind, "code:", co
 ```
 
 When no mapping lands, the host asks the router again after 30 s, doubling up to 5 minutes, until it answers or the
-host quits (`portMapping: { retryMs }`, 0 = never); each new code prints the startup line again. A player who forwarded
+host quits (`portMapping: { retryMs }`; C#: `PortMapperOptions.RetryMs`, 0 = never, and `Lobby.JoinCodeChanged` fires inside `Pump()`); each new code prints the startup line again. A player who forwarded
 TCP and UDP 47810 by hand passes the public address, and the router is not asked:
 `hostDirect(kit, { publicAddress: "203.0.113.7" })`, or the environment variable `ONELOBBY_PUBLIC_IP=203.0.113.7`. The
-code is then an internet one with `portMapping` "manual".
+code is then an internet one with `portMapping` "manual" ("manual (ONELOBBY_PUBLIC_IP)" when it came from the variable, so a stray variable shows in the startup line). C# is the same: `DirectHostOptions.PublicAddress` (a hostname fails
+with `bad_address`); the router is then asked only if `OpenPort` is set to true explicitly.
 
 `hostDirect` runs the TypeScript port of the hub (`onelobby/direct`'s `SignalingHub`, held to the same
 `conformance/server` suite as the C# one) behind a dependency-free WebSocket listener, binds every peer link to UDP

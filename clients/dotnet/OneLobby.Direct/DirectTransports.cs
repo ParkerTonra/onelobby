@@ -37,6 +37,7 @@ namespace OneLobby.Direct
         {
             _host.Pump();
             _inner.Poll();
+            while (_posted.TryDequeue(out var act)) act();
             for (var i = _waits.Count - 1; i >= 0; i--)
                 if (_waits[i].Work.IsCompleted)
                 {
@@ -45,6 +46,11 @@ namespace OneLobby.Direct
                     tcs.TrySetResult(true);
                 }
         }
+
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _posted = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+
+        /// <summary>Runs <paramref name="action"/> from inside the next <see cref="Poll"/>, on the game's pumping thread.</summary>
+        public void Post(Action action) => _posted.Enqueue(action);
 
         private readonly List<(Task Work, TaskCompletionSource<bool> Done)> _waits = new List<(Task, TaskCompletionSource<bool>)>();
 

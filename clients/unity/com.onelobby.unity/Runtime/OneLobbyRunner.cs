@@ -135,6 +135,7 @@ namespace OneLobby.Unity
         {
             var lobby = await Enter(() => options == null ? DirectClient().HostDirectAsync() : DirectClient().HostDirectAsync(options));
             Debug.Log(DirectLobby.HostLogLine(lobby)); // bound port (after any busy-port fallback), code, router mapping
+            lobby.JoinCodeChanged += (_, _) => Debug.Log(DirectLobby.HostLogLine(lobby)); // the router answered a later retry
             return lobby;
         }
 

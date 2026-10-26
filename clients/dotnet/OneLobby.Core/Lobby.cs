@@ -140,6 +140,15 @@ namespace OneLobby
         /// <summary>Direct-IP host only: one log line with the bound port, the join code and the mapping (OneLobby.Direct sets it).</summary>
         internal string DirectHostLog { get; set; } = "";
 
+        /// <summary>
+        /// Direct-IP host only: the join code changed after hosting began, e.g. the router answered a later port-mapping retry and
+        /// the code went from <c>SameNetwork</c> to <c>Internet</c>. Fires inside <see cref="Pump"/> like every lobby event; show the
+        /// new code.
+        /// </summary>
+        public event Action<string, JoinCodeKind>? JoinCodeChanged;
+
+        internal void RaiseJoinCodeChanged() => JoinCodeChanged?.Invoke(JoinCode, JoinCodeKind);
+
         /// <summary>Direct IP has no migration: the hub lives in the host (docs/direct-ip.md s.2).</summary>
         private bool DirectJoiner => _c.Direct && !IsHost;
 

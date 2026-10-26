@@ -115,6 +115,22 @@ public class DirectHubHostTests
     }
 
     [Fact]
+    public async Task Joininfo_is_404_until_the_host_sets_it_then_JSON()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        var none = await RawGet(host, "/joininfo");
+        Assert.StartsWith("HTTP/1.1 404", none);
+        Assert.EndsWith("no join code yet", none);
+        host.JoinInfo = new DirectJoinInfo("6B01-RGFE-P2B", "internet", null, host.Port);
+        var res = await RawGet(host, "/joininfo?x=1");
+        Assert.StartsWith("HTTP/1.1 200", res);
+        Assert.Contains("Content-Type: application/json\r\n", res);
+        Assert.EndsWith("\r\n\r\n{\"joinCode\":\"6B01-RGFE-P2B\",\"joinCodeKind\":\"internet\",\"joinUrl\":null,\"port\":" + host.Port + "}", res);
+        host.JoinInfo = new DirectJoinInfo("0A00-0BSE-P3S", "same_network", null, host.Port);
+        Assert.Contains("\"same_network\"", await RawGet(host, "/joininfo"));
+    }
+
+    [Fact]
     public async Task Metrics_from_loopback_render_the_hub_counters()
     {
         using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));

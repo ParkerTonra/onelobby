@@ -46,7 +46,7 @@ export interface DirectHostOptions {
   openPort?: boolean;
   /**
    * This machine's public IPv4 address when the player forwarded the port by hand (no UPnP): the join code and
-   * `joinUrl` carry it and `joinCodeKind` is "internet". Default: the `ONELOBBY_PUBLIC_IP` environment variable. With it
+   * `joinUrl` carry it and `joinCodeKind` is "internet". Default: the `ONELOBBY_PUBLIC_IP` environment variable (then `portMapping` reads "manual (ONELOBBY_PUBLIC_IP)"). With it
    * set the router is not asked unless `openPort: true` is passed.
    */
   publicAddress?: string;
@@ -185,7 +185,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     hub.joinInfo = { joinCode: direct.joinCode, joinCodeKind: direct.joinCodeKind, joinUrl: direct.joinUrl, port: hub.port };
     log?.(direct.directHostLog);
   };
-  if (manual) applyCode(manual, "internet", map?.mapped ? map.detail : "manual");
+  if (manual) applyCode(manual, "internet", map?.mapped ? map.detail : o.publicAddress ? "manual" : "manual (ONELOBBY_PUBLIC_IP)");
   else if (map?.mapped && isPublicIPv4(map.externalIPv4)) applyCode(map.externalIPv4, "internet", map.detail);
   else {
     applyCode(map?.localIPv4 ?? (await lanIPv4()), "same_network", map ? map.detail : "off");

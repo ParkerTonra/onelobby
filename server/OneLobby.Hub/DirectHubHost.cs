@@ -38,6 +38,11 @@ public sealed class DirectHubHost : IDisposable
     /// <summary>The bound TCP port (the requested one, or the one the OS picked for port 0).</summary>
     public int Port { get; }
     public bool Disposed { get; private set; }
+    private volatile DirectJoinInfo? _joinInfo;
+    /// <summary>
+    /// Served as JSON at <c>GET /joininfo</c> (404 while null); the direct host keeps it current as the join code changes.
+    /// </summary>
+    public DirectJoinInfo? JoinInfo { get => _joinInfo; set => _joinInfo = value; }
     /// <summary>Joiner sockets currently open.</summary>
     public int ConnectionCount => _conns.Count;
 
@@ -234,7 +239,7 @@ public sealed class DirectHubHost : IDisposable
 
     /// <summary>
     /// Reads the HTTP/1.1 request head byte by byte (nothing past the blank line is consumed) and answers 101 with
-    /// Sec-WebSocket-Accept, or 400/426 for anything that is not a WebSocket upgrade. <c>GET /healthz</c> and <c>GET /metrics</c>
+    /// Sec-WebSocket-Accept, or 400/426 for anything that is not a WebSocket upgrade. <c>GET /healthz</c>, <c>GET /joininfo</c> and <c>GET /metrics</c>
     /// are answered first, as onelobby-server does; /metrics only to a loopback <paramref name="remote"/>, since this port faces the internet.
     /// </summary>
     private async Task<bool> Handshake(Stream stream, IPAddress? remote, CancellationToken ct)
@@ -256,6 +261,13 @@ public sealed class DirectHubHost : IDisposable
         { await Reply(stream, "400 Bad Request", null, ct).ConfigureAwait(false); return false; }
         string path = request[1].Split('?')[0];
         if (path == "/healthz") { await Reply(stream, "200 OK", null, ct, "ok\n").ConfigureAwait(false); return false; }
+        if (path == "/joininfo")
+        {
+            var info = _joinInfo;
+            if (info != null) await Reply(stream, "200 OK", null, ct, info.ToJson(), "application/json").ConfigureAwait(false);
+            else await Reply(stream, "404 Not Found", null, ct, "no join code yet").ConfigureAwait(false);
+            return false;
+        }
         if (path == "/metrics")
         {
             if (IsLoopback(remote)) await Reply(stream, "200 OK", null, ct, Hub.Metrics.Render(), "text/plain; version=0.0.4").ConfigureAwait(false);
@@ -350,4 +362,16 @@ public sealed class DirectHubHost : IDisposable
             foreach (var c in _conns.Keys) { try { c.Tcp.Dispose(); } catch (Exception) { } }
         });
     }
+}
+
+/// <summary>What a direct host answers at <c>GET /joininfo</c>: the current join code and where it works (same shape as the JS host).</summary>
+/// <param name="JoinCode">Ungrouped-or-grouped code as shown to players; empty when there is none.</param>
+/// <param name="JoinCodeKind"><c>"internet"</c>, <c>"same_network"</c> or <c>"none"</c>.</param>
+/// <param name="JoinUrl">A page link when the host serves pages; null otherwise (C# hosts do not serve pages).</param>
+public sealed record DirectJoinInfo(string JoinCode, string JoinCodeKind, string? JoinUrl, int Port)
+{
+    public string ToJson() => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+    {
+        ["joinCode"] = JoinCode, ["joinCodeKind"] = JoinCodeKind, ["joinUrl"] = JoinUrl, ["port"] = Port,
+    });
 }

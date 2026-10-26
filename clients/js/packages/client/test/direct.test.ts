@@ -317,6 +317,15 @@ describe("hostDirect join code: manual public address and router retry", () => {
     expect(await directJoinInfo(`http://127.0.0.1:${await freePort()}/`)).toBeNull();
     await expect(hostDirect(kit("Bad"), { port: await freePort(), publicAddress: "my.host.example", log: false }))
       .rejects.toMatchObject({ code: "bad_address" });
+    process.env.ONELOBBY_PUBLIC_IP = "203.0.113.8";
+    try {
+      const fromEnv = await hostDirect(kit("Env"), { port: await freePort(), log: false });
+      cleanup.push(() => fromEnv.leave());
+      expect(fromEnv.joinCodeKind).toBe("internet");
+      expect(fromEnv.portMapping).toBe("manual (ONELOBBY_PUBLIC_IP)");
+    } finally {
+      delete process.env.ONELOBBY_PUBLIC_IP;
+    }
   });
 
   it("a router that answers late flips the code to internet and fires joinCodeChanged, no restart", async () => {

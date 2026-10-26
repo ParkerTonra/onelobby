@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using OneLobby.Direct;
+using OneLobby.Server;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -343,6 +344,129 @@ public sealed class DirectIpTests
         var t = c2.HostDirectAsync(new DirectHostOptions { OpenPort = false, FallbackPorts = 0 });
         Assert.True(t.IsFaulted);
         Assert.Equal("port_in_use", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
+        host.LeaveAsync();
+    }
+
+    private static async Task<string> GetJoinInfo(int port)
+    {
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("127.0.0.1", port);
+        var s = tcp.GetStream();
+        await s.WriteAsync(Encoding.ASCII.GetBytes("GET /joininfo HTTP/1.1\r\nHost: x\r\n\r\n"));
+        using var r = new System.IO.StreamReader(s, Encoding.UTF8);
+        using var cts = new CancellationTokenSource(5000);
+        return await r.ReadToEndAsync(cts.Token);
+    }
+
+    [Fact]
+    public void PublicAddressGivesAnInternetCodeAndSkipsTheRouter() => RunPublicAddress();
+
+    private void RunPublicAddress()
+    {
+        var port = FreePort();
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { PublicAddress = "198.51.100.9" }), c.Pump, "host");
+        Assert.Equal(JoinCodeKind.Internet, host.JoinCodeKind);
+        Assert.Equal(JoinCode.Encode("198.51.100.9", port), host.JoinCode);
+        Assert.Equal("manual", host.PortMapping);
+        Assert.Contains("; code " + host.JoinCode + " (Internet); port mapping manual", DirectLobby.HostLogLine(host));
+        var info = GetJoinInfo(port).GetAwaiter().GetResult();
+        Assert.Contains("\"joinCodeKind\":\"internet\"", info);
+        Assert.Contains("\"joinCode\":\"" + host.JoinCode + "\"", info);
+        host.LeaveAsync();
+    }
+
+    [Fact]
+    public void PublicAddressMustBeDottedIPv4()
+    {
+        var c = new LobbyClient(Cfg, new DataChannelTransport());
+        var t = c.HostDirectAsync(new DirectHostOptions { PublicAddress = "my-pc.example.com" });
+        Assert.True(t.IsFaulted);
+        Assert.Equal("bad_address", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
+    }
+
+    /// <summary>NAT-PMP gateway on loopback that stays silent until <see cref="On"/>, then answers like a router with a public WAN address.</summary>
+    private sealed class SilentThenNatPmp : IDisposable
+    {
+        public readonly UdpClient Udp = new(new IPEndPoint(IPAddress.Loopback, 0));
+        public volatile bool On;
+        public int Requests;
+        private readonly CancellationTokenSource _cts = new();
+        public IPEndPoint Endpoint => (IPEndPoint)Udp.Client.LocalEndPoint!;
+        public SilentThenNatPmp() => _ = Task.Run(Loop);
+
+        private async Task Loop()
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                UdpReceiveResult r;
+                try { r = await Udp.ReceiveAsync(_cts.Token); }
+                catch (SocketException) { continue; }
+                catch (Exception) { return; }
+                Interlocked.Increment(ref Requests);
+                if (!On) continue;
+                var q = r.Buffer;
+                byte[] reply;
+                if (q[1] == 0) reply = new byte[] { 0, 128, 0, 0, 0, 0, 0, 1, 198, 51, 100, 9 };
+                else
+                {
+                    var life = (q[8] << 24) | (q[9] << 16) | (q[10] << 8) | q[11];
+                    var ext = life == 0 ? 0 : (q[4] << 8) | q[5];
+                    reply = new byte[] { 0, (byte)(128 + q[1]), 0, 0, 0, 0, 0, 1, q[4], q[5], (byte)(ext >> 8), (byte)ext, q[8], q[9], q[10], q[11] };
+                }
+                await Udp.SendAsync(reply, reply.Length, r.RemoteEndPoint);
+            }
+        }
+
+        public void Dispose() { _cts.Cancel(); Udp.Dispose(); }
+    }
+
+    private static PortMapperOptions SilentOpts(SilentThenNatPmp gw, int retryMs) => new()
+    {
+        TryUpnp = false,
+        NatPmpEndpoint = gw.Endpoint,
+        RequestTimeout = TimeSpan.FromMilliseconds(150),
+        DiscoveryTimeout = TimeSpan.FromMilliseconds(150),
+        RetryMs = retryMs,
+    };
+
+    [Fact]
+    public void LateRouterAnswerTurnsTheCodeInternetAndRaisesJoinCodeChanged() => RunLateRouter();
+
+    private void RunLateRouter()
+    {
+        using var gw = new SilentThenNatPmp();
+        var port = FreePort();
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { PortMapping = SilentOpts(gw, 100) }), c.Pump, "host");
+        Assert.NotEqual(JoinCodeKind.Internet, host.JoinCodeKind);
+        var changed = new List<(string, JoinCodeKind, int)>();
+        host.JoinCodeChanged += (code, kind) => changed.Add((code, kind, Environment.CurrentManagedThreadId));
+        var pumpThread = Environment.CurrentManagedThreadId;
+        PumpUntil(() => gw.Requests >= 3, c.Pump, "router asked again");   // a couple of silent rounds first
+        Assert.Empty(changed);
+        gw.On = true;
+        PumpUntil(() => changed.Count > 0, c.Pump, "JoinCodeChanged", 15000);
+        Assert.Equal((JoinCode.Encode("198.51.100.9", port), JoinCodeKind.Internet, pumpThread), changed[0]);
+        Assert.Equal(host.JoinCode, changed[0].Item1);
+        Assert.Contains("(Internet)", DirectLobby.HostLogLine(host));
+        Assert.Contains("\"joinCodeKind\":\"internet\"", GetJoinInfo(port).GetAwaiter().GetResult());
+        host.LeaveAsync();
+    }
+
+    [Fact]
+    public void RetryMsZeroAsksTheRouterOnlyOnce() => RunNoRetry();
+
+    private void RunNoRetry()
+    {
+        using var gw = new SilentThenNatPmp();
+        var c = new LobbyClient(Cfg with { DirectPort = FreePort() }, new DataChannelTransport());
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { PortMapping = SilentOpts(gw, 0) }), c.Pump, "host");
+        var asked = gw.Requests;
+        Assert.True(asked > 0);
+        var sw = Stopwatch.StartNew();
+        PumpUntil(() => sw.ElapsedMilliseconds > 1200, c.Pump, "wait");
+        Assert.Equal(asked, gw.Requests);
         host.LeaveAsync();
     }
 

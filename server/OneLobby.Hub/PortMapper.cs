@@ -37,6 +37,12 @@ public sealed class PortMapperOptions
     public bool TryUpnp { get; set; } = true;
     public bool TryNatPmp { get; set; } = true;
     /// <summary>
+    /// Direct host only (<c>HostDirectAsync</c>): when nothing was mapped, ask the router again after this many ms, doubling up
+    /// to 5 minutes, until it answers or the host quits (a router still booting after a power cut, UPnP switched back on).
+    /// Default 30000; 0 never asks again.
+    /// </summary>
+    public int RetryMs { get; set; } = 30000;
+    /// <summary>
     /// Optional log hook; null (default) stays quiet. Gets one line when the host quits and its mappings are deleted:
     /// <c>direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP</c>.
     /// </summary>
@@ -82,6 +88,8 @@ public sealed class PortMapper : IDisposable
 
     public int Port => _port;
     public PortMapResult? Result => _result;
+    /// <summary>True once <see cref="Dispose"/> ran: no more requests go out.</summary>
+    public bool Closed => _cts.IsCancellationRequested;
 
     public PortMapper(int port, PortMapperOptions? options = null)
     {
@@ -94,7 +102,7 @@ public sealed class PortMapper : IDisposable
         _http.DefaultRequestHeaders.ConnectionClose = true;
     }
 
-    /// <summary>Finds the router and maps TCP + UDP <c>P</c>. Never throws for network trouble: see <see cref="PortMapResult.Detail"/>.</summary>
+    /// <summary>Finds the router and maps TCP + UDP <c>P</c>. Never throws for network trouble: see <see cref="PortMapResult.Detail"/>. May run again after an unmapped result.</summary>
     public Task<PortMapResult> OpenAsync(CancellationToken ct = default)
     {
         var t = OpenCoreAsync(ct);

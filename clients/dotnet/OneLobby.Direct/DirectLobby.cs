@@ -29,9 +29,25 @@ namespace OneLobby.Direct
         public RateLimit? RateLimit { get; set; }
         /// <summary>
         /// Ask the home router to forward TCP + UDP P (UPnP, then NAT-PMP) so the join code works from the internet
-        /// (docs/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on.
+        /// (docs/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on, except with
+        /// <see cref="PublicAddress"/> set: then the router is asked only when this is set to true explicitly.
         /// </summary>
-        public bool OpenPort { get; set; } = true;
+        public bool OpenPort
+        {
+            get => _openPort ?? true;
+            set => _openPort = value;
+        }
+        private bool? _openPort;
+        internal bool OpenPortExplicitlyTrue => _openPort == true;
+        internal bool OpenPortOff => _openPort == false;
+
+        /// <summary>
+        /// This machine's public IPv4 address when the player forwarded the port by hand (no UPnP), e.g. <c>203.0.113.7</c>:
+        /// the join code carries it, <see cref="Lobby.JoinCodeKind"/> is <c>Internet</c> and <see cref="Lobby.PortMapping"/> is
+        /// "manual". Default: the <c>ONELOBBY_PUBLIC_IP</c> environment variable. Anything but dotted IPv4 fails with
+        /// <c>bad_address</c>. With it set the router is not asked unless <see cref="OpenPort"/> is set to true explicitly.
+        /// </summary>
+        public string? PublicAddress { get; set; }
         /// <summary>Test seam and knobs for the router request; null = defaults (description "OneLobby &lt;GameId&gt;").</summary>
         public PortMapperOptions? PortMapping { get; set; }
         /// <summary>
@@ -82,11 +98,10 @@ namespace OneLobby.Direct
         public static DirectHostOptions ToDirectHostOptions(this Blueprint bp, string? name = null, string? displayName = null)
         {
             if (bp == null) throw new ArgumentNullException(nameof(bp));
-            return new DirectHostOptions
+            var o = new DirectHostOptions
             {
                 Port = bp.Hosting.DirectPort,
                 FallbackPorts = DefaultFallbackPorts,
-                OpenPort = bp.Hosting.OpenPort,
                 AllowedOrigins = bp.Hosting.AllowedOrigins.Count == 0 ? null : bp.Hosting.AllowedOrigins,
                 MaxPlayers = bp.Lobby.MaxPlayers,
                 LateJoin = bp.Lobby.LateJoin,
@@ -94,6 +109,9 @@ namespace OneLobby.Direct
                 RateLimit = bp.Session.RateLimit,
                 Name = string.IsNullOrEmpty(name) ? Blueprint.DefaultLobbyName(displayName) : name,
             };
+            // set only when off: an untouched OpenPort lets PublicAddress (a hand-forwarded port) skip the router
+            if (!bp.Hosting.OpenPort) o.OpenPort = false;
+            return o;
         }
 
         /// <summary>
@@ -107,6 +125,10 @@ namespace OneLobby.Direct
             var o = options ?? new DirectHostOptions();
             var port = o.Port > 0 ? o.Port : client.Config.DirectPort;
             var last = port + Math.Max(0, o.FallbackPorts ?? (o.Port > 0 ? 0 : DefaultFallbackPorts));
+            var manual = (o.PublicAddress ?? Environment.GetEnvironmentVariable("ONELOBBY_PUBLIC_IP") ?? "").Trim();
+            if (manual.Length > 0 && !IsDottedIPv4(manual))
+                return Task.FromException<Lobby>(new OneLobbyException("bad_address",
+                    "PublicAddress must be an IPv4 address like 203.0.113.7, got \"" + manual + "\""));
             DirectHubHost? hub = null;
             bool anyBusy = false, anyReserved = false;
             for (var p = port; hub == null; p++)
@@ -132,11 +154,13 @@ namespace OneLobby.Direct
             }
             var name = string.IsNullOrEmpty(o.Name) ? client.Config.DisplayName + "'s game" : o.Name!;
             // The router request runs off the game thread alongside lobby creation; its answer is handed back from Pump.
-            Task<PortMapResult?> mapping = o.OpenPort
-                ? MapAsync(hub, o.PortMapping ?? new PortMapperOptions { Description = "OneLobby " + client.Config.GameId })
+            var ask = manual.Length > 0 ? o.OpenPortExplicitlyTrue : !o.OpenPortOff && o.OpenPort;
+            var mapOptions = o.PortMapping ?? new PortMapperOptions { Description = "OneLobby " + client.Config.GameId };
+            Task<PortMapResult?> mapping = ask
+                ? MapAsync(hub, mapOptions)
                 : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit }, ct);
-            return FinishHost(create, mapping, transport, hub, port);
+            return FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs);
         }
 
         /// <summary>
@@ -160,13 +184,48 @@ namespace OneLobby.Direct
             return line + "; port mapping " + (string.IsNullOrEmpty(mapping) ? "off" : mapping);
         }
 
+        private static string KindName(JoinCodeKind k) =>
+            k == JoinCodeKind.Internet ? "internet" : k == JoinCodeKind.SameNetwork ? "same_network" : "none";
+
+        private const int MaxRetryMs = 5 * 60_000;
+
+        /// <summary>Asks the router again after <paramref name="firstMs"/>, doubling up to 5 minutes, until a mapping lands or the host quits.</summary>
+        private static void RetryMapping(PortMapper mapper, int firstMs, DirectHubHost hub, Action<PortMapResult> onMapped)
+        {
+            if (firstMs <= 0) return;
+            _ = Task.Run(async () =>
+            {
+                var wait = firstMs;
+                while (true)
+                {
+                    await Task.Delay(wait).ConfigureAwait(false);
+                    if (mapper.Closed || hub.Disposed) return;
+                    PortMapResult r;
+                    try { r = await mapper.OpenAsync().ConfigureAwait(false); }
+                    catch (Exception) { return; }
+                    if (mapper.Closed || hub.Disposed) return;
+                    if (r.Mapped) { onMapped(r); return; }
+                    wait = Math.Min(wait * 2, MaxRetryMs);
+                }
+            });
+        }
+
+        private static bool IsDottedIPv4(string s)
+        {
+            var parts = s.Split('.');
+            if (parts.Length != 4) return false;
+            foreach (var p in parts)
+                if (p.Length == 0 || p.Length > 3 || !int.TryParse(p, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) || n > 255) return false;
+            return true;
+        }
+
         private static async Task<PortMapResult?> MapAsync(DirectHubHost hub, PortMapperOptions options)
         {
             try { return await hub.OpenPortAsync(options).ConfigureAwait(false); }
             catch (Exception e) { return new PortMapResult { Detail = e.Message }; }
         }
 
-        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort)
+        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort, string? manual, string manualNote, int retryMs)
         {
             try
             {
@@ -174,18 +233,32 @@ namespace OneLobby.Direct
                 await transport.AfterPump(mapping).ConfigureAwait(false);
                 var map = mapping.Result;
                 lobby.DirectAddresses = DirectAddress.Local(hub.Port);
-                lobby.PortMapping = map == null ? "off" : map.Detail;
-                if (map is { Mapped: true } && PortMapper.IsPublicIPv4(map.ExternalIPv4))
+                // Sets JoinCode / JoinCodeKind / PortMapping / DirectHostLog and what GET /joininfo answers.
+                void Apply(string? ip, JoinCodeKind kind, string note)
                 {
-                    lobby.JoinCode = OneLobby.JoinCode.Encode(map.ExternalIPv4!, hub.Port);
-                    lobby.JoinCodeKind = JoinCodeKind.Internet;
+                    lobby.PortMapping = note;
+                    lobby.JoinCode = ip == null ? "" : OneLobby.JoinCode.Encode(ip, hub.Port);
+                    lobby.JoinCodeKind = ip == null ? JoinCodeKind.None : kind;
+                    lobby.DirectHostLog = FormatHostLog(requestedPort, hub.Port, lobby.JoinCode, lobby.JoinCodeKind, lobby.PortMapping);
+                    hub.JoinInfo = new DirectJoinInfo(lobby.JoinCode, KindName(lobby.JoinCodeKind), null, hub.Port);
                 }
-                else if ((map?.LocalIPv4 ?? DirectAddress.LanIPv4()) is { } lan)
+                if (manual != null) Apply(manual, JoinCodeKind.Internet, map is { Mapped: true } ? map.Detail : manualNote);
+                else if (map is { Mapped: true } && PortMapper.IsPublicIPv4(map.ExternalIPv4)) Apply(map.ExternalIPv4, JoinCodeKind.Internet, map.Detail);
+                else
                 {
-                    lobby.JoinCode = OneLobby.JoinCode.Encode(lan, hub.Port);
-                    lobby.JoinCodeKind = JoinCodeKind.SameNetwork;
+                    Apply(map?.LocalIPv4 ?? DirectAddress.LanIPv4(), JoinCodeKind.SameNetwork, map == null ? "off" : map.Detail);
+                    if (map is { Mapped: false } && hub.PortMapper is { } mapper)
+                        RetryMapping(mapper, retryMs, hub, r =>
+                        {
+                            if (!PortMapper.IsPublicIPv4(r.ExternalIPv4)) return;
+                            transport.Post(() =>
+                            {
+                                if (hub.Disposed) return;
+                                Apply(r.ExternalIPv4, JoinCodeKind.Internet, r.Detail);
+                                lobby.RaiseJoinCodeChanged();
+                            });
+                        });
                 }
-                lobby.DirectHostLog = FormatHostLog(requestedPort, hub.Port, lobby.JoinCode, lobby.JoinCodeKind, lobby.PortMapping);
                 return lobby;
             }
             catch
