@@ -16,8 +16,7 @@ catch (ArgumentException e)
 }
 
 var app = ServerApp.Build(options);
-app.Logger.LogInformation("onelobby-server listening on {Url} (turn {Turn}, games {Games})",
-    options.ListenUrl(), options.TurnUrls.Count > 0 && options.TurnSecret.Length > 0 ? "on" : "off",
-    options.AllowedGames.Count == 0 ? "any" : string.Join(",", options.AllowedGames));
+// one plain stdout line, the same shape as the direct hosts', so tools (olc) parse every hub alike
+Console.WriteLine(options.StartupLine());
 await app.RunAsync();
 return 0;

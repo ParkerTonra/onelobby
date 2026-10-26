@@ -146,7 +146,7 @@ public sealed class DirectHubHost : IDisposable
             using (var hs = new CancellationTokenSource(HandshakeTimeoutMs))
             using (hs.Token.Register(() => tcp.Dispose()))
             {
-                try { upgraded = await Handshake(stream, hs.Token).ConfigureAwait(false); }
+                try { upgraded = await Handshake(stream, (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address, hs.Token).ConfigureAwait(false); }
                 finally { Interlocked.Decrement(ref _handshakes); }
             }
             if (!upgraded) return;
@@ -234,9 +234,10 @@ public sealed class DirectHubHost : IDisposable
 
     /// <summary>
     /// Reads the HTTP/1.1 request head byte by byte (nothing past the blank line is consumed) and answers 101 with
-    /// Sec-WebSocket-Accept, or 400/426 for anything that is not a WebSocket upgrade.
+    /// Sec-WebSocket-Accept, or 400/426 for anything that is not a WebSocket upgrade. <c>GET /healthz</c> and <c>GET /metrics</c>
+    /// are answered first, as onelobby-server does; /metrics only to a loopback <paramref name="remote"/>, since this port faces the internet.
     /// </summary>
-    private async Task<bool> Handshake(Stream stream, CancellationToken ct)
+    private async Task<bool> Handshake(Stream stream, IPAddress? remote, CancellationToken ct)
     {
         var head = new byte[MaxHeaderBytes];
         int n = 0;
@@ -253,6 +254,14 @@ public sealed class DirectHubHost : IDisposable
         var request = lines[0].Split(' ');
         if (request.Length < 3 || request[0] != "GET" || !request[2].StartsWith("HTTP/1.1", StringComparison.Ordinal))
         { await Reply(stream, "400 Bad Request", null, ct).ConfigureAwait(false); return false; }
+        string path = request[1].Split('?')[0];
+        if (path == "/healthz") { await Reply(stream, "200 OK", null, ct, "ok\n").ConfigureAwait(false); return false; }
+        if (path == "/metrics")
+        {
+            if (IsLoopback(remote)) await Reply(stream, "200 OK", null, ct, Hub.Metrics.Render(), "text/plain; version=0.0.4").ConfigureAwait(false);
+            else await Reply(stream, "403 Forbidden", null, ct, "metrics are local only (OneLobby direct host)\n").ConfigureAwait(false);
+            return false;
+        }
         var h = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 1; i < lines.Length; i++)
         {
@@ -292,11 +301,19 @@ public sealed class DirectHubHost : IDisposable
     public static string AcceptKey(string key) =>
         Convert.ToBase64String(Compat.Sha1(Encoding.ASCII.GetBytes(key.Trim() + WebSocketGuid)));
 
-    private static async Task Reply(Stream stream, string status, string? extraHeaders, CancellationToken ct)
+    /// <summary>127.0.0.0/8, ::1 or an IPv4-mapped loopback address (a dual-stack listener reports IPv4 callers as mapped).</summary>
+    public static bool IsLoopback(IPAddress? a)
     {
-        const string body = "OneLobby direct host (lk1): connect over WebSocket\n";
-        var bytes = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + "\r\nContent-Type: text/plain\r\nConnection: close\r\n" + (extraHeaders ?? "")
-                                            + "Content-Length: " + body.Length + "\r\n\r\n" + body);
+        if (a is null) return false;
+        if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+        return IPAddress.IsLoopback(a);
+    }
+
+    private static async Task Reply(Stream stream, string status, string? extraHeaders, CancellationToken ct,
+                                    string body = "OneLobby direct host (lk1): connect over WebSocket\n", string contentType = "text/plain")
+    {
+        var bytes = Encoding.UTF8.GetBytes("HTTP/1.1 " + status + "\r\nContent-Type: " + contentType + "\r\nConnection: close\r\n" + (extraHeaders ?? "")
+                                           + "Content-Length: " + Encoding.UTF8.GetByteCount(body) + "\r\n\r\n" + body);
         try { await stream.WriteAsync(bytes, 0, bytes.Length, ct).ConfigureAwait(false); } catch (Exception) { }
     }
 

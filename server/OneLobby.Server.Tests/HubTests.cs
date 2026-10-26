@@ -722,5 +722,14 @@ public class HubTests
         Assert.Equal("http://127.0.0.1:9000", ServerOptions.Parse(new[] { "--listen", "127.0.0.1:9000" }, k => k == "PORT" ? "10000" : null).ListenUrl());
         Assert.Throws<ArgumentException>(() => ServerOptions.Parse(Array.Empty<string>(), k => k == "PORT" ? "web" : null));
     }
+
+    [Fact]
+    public void Startup_line_has_the_shape_every_hub_prints()
+    {
+        Assert.Equal("OneLobby: server listening on TCP :8080 (http://0.0.0.0:8080); turn off; games any", new ServerOptions().StartupLine());
+        var o = ServerOptions.Parse(new[] { "--listen", "127.0.0.1:9000", "--turn-urls=turn:a:3478" },
+            k => k == "ONELOBBY_TURN_SECRET" ? "sek" : k == "ONELOBBY_ALLOWED_GAMES" ? "a,b" : null);
+        Assert.Equal("OneLobby: server listening on TCP :9000 (http://127.0.0.1:9000); turn on; games a,b", o.StartupLine());
+    }
 }
 

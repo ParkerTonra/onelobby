@@ -30,6 +30,12 @@ export function originAllowed(origin: string, host: string | undefined, allowed:
   return host !== undefined && u.host.toLowerCase() === host.trim().toLowerCase();
 }
 
+/** Whether `ip` (as the socket reports it) is 127.0.0.0/8, ::1 or an IPv4-mapped loopback address. */
+export function isLoopback(ip: string): boolean {
+  const a = ip.replace(/^::ffff:/i, "");
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a) || a === "::1";
+}
+
 /**
  * Rejects (EADDRINUSE) when another program holds IPv4 TCP or UDP `port`. Windows lets the dual-stack listener bind
  * over a program on 0.0.0.0 (every IPv4 joiner would then reach that program), and the peer links need UDP `port`
@@ -73,7 +79,8 @@ export function portFailureHint(anyBusy: boolean, anyReserved: boolean): string 
  * Runs a {@link SignalingHub} inside a Node process and listens for joiners' signaling WebSockets on TCP `port`: the
  * Node twin of C#'s `DirectHubHost` (docs/direct-ip.md s.2, s.5 step 3). A plain `net` server with a minimal HTTP/1.1
  * upgrade and RFC 6455 framing (text, close, ping/pong, fragments; client frames must be masked), so the package keeps
- * zero runtime dependencies. Any path upgrades; `GET /healthz` answers `ok`. The host's own client talks to the hub in
+ * zero runtime dependencies. Any path upgrades; `GET /healthz` answers `ok` and `GET /metrics` the hub's Prometheus text
+ * (loopback callers only), as onelobby-server does, ahead of the `http` callback. The host's own client talks to the hub in
  * memory through {@link connectLocal}. `hub.tick()` runs once a second on an unref'd timer.
  */
 /** One plain-HTTP answer from the host's port, e.g. a browser join page. */
@@ -214,14 +221,14 @@ export class DirectHubHost {
       clearTimeout(timer);
       sock.off("data", onData);
       const rest = head.subarray(end + 4);
-      if (!this.handshake(sock, head.subarray(0, end).toString("latin1"))) return;
+      if (!this.handshake(sock, ip, head.subarray(0, end).toString("latin1"))) return;
       this.run(sock, ip, rest);
     };
     sock.on("data", onData);
   }
 
-  /** RFC 6455 s.4.2: answers 101 with Sec-WebSocket-Accept, or 200 for /healthz, or 400/426. */
-  private handshake(sock: Socket, head: string): boolean {
+  /** RFC 6455 s.4.2: answers 101 with Sec-WebSocket-Accept, or 200 for /healthz and /metrics (loopback only), or 400/426. */
+  private handshake(sock: Socket, ip: string, head: string): boolean {
     const [requestLine, ...lines] = head.split("\r\n");
     const headers = new Map<string, string>();
     for (const l of lines) {
@@ -229,10 +236,16 @@ export class DirectHubHost {
       if (i > 0) headers.set(l.slice(0, i).trim().toLowerCase(), l.slice(i + 1).trim());
     }
     const [method, path] = requestLine.split(" ");
-    const reply = (status: string, body: string) =>
-      sock.end(`HTTP/1.1 ${status}\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    const reply = (status: string, body: string, type = "text/plain") =>
+      sock.end(`HTTP/1.1 ${status}\r\nContent-Type: ${type}\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    // The same two endpoints as onelobby-server; /metrics stays local because this port faces the internet.
     if (method === "GET" && path === "/healthz") {
-      reply("200 OK", "ok");
+      reply("200 OK", "ok\n");
+      return false;
+    }
+    if (method === "GET" && path === "/metrics") {
+      if (isLoopback(ip)) reply("200 OK", this.hub.metrics.render(), "text/plain; version=0.0.4");
+      else reply("403 Forbidden", "metrics are local only (OneLobby direct host)");
       return false;
     }
     const key = headers.get("sec-websocket-key");

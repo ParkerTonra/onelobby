@@ -144,6 +144,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   directAddresses: string[] = [];
   /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
   portMapping = "";
+  /** Direct-IP host only: the one startup line (bound port, join code, port mapping); see `formatHostLog` in onelobby/direct. */
+  directHostLog = "";
 
   private signaling: SignalingClient;
   private cfg: LobbyConfig;

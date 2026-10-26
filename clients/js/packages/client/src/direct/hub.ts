@@ -5,10 +5,14 @@ import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
  * The signaling hub (protocol lk1) in TypeScript, for a Node process that hosts direct-IP lobbies
  * (docs/direct-ip.md s.2): a line-by-line port of `server/OneLobby.Hub/Hub.cs`, held to the same rules by
  * `conformance/server`. Transport-agnostic: feed it text frames with `receive`, call `tick` about once a second.
- * Metrics are left out (that is onelobby-server's job); everything else (codes, list, resume, private lobbies,
- * kicks, migration claims, TURN credentials, rate limits) behaves as in C#.
+ * Metrics (same names, labels and help text as C#, rendered by `metrics.render()`) are counted too, so every hub shape
+ * looks the same from outside; everything else (codes, list, resume, private lobbies, kicks, migration claims, TURN
+ * credentials, rate limits) behaves as in C#.
  */
 
+import { Metrics } from "./metrics.js";
+
+export { Metrics };
 export const PROTO = "lk1";
 const NAME_MAX = 24;
 const LOBBY_NAME_MAX = 48;
@@ -246,12 +250,23 @@ export class SignalingHub {
   private createdOnce = false;
   private members = 0;
   private readonly logSalt = hex(8);
+  readonly metrics = new Metrics();
 
   constructor(options: Partial<HubOptions> = {}, deps: HubDeps = {}) {
     this.o = { ...defaultHubOptions(), ...options };
     this.now = deps.now ?? (() => Date.now());
     this.rand = deps.randomInt ?? ((n) => randomInt(n));
     this.log = deps.log ?? (() => {});
+    const m = this.metrics;
+    m.gauge("onelobby_lobbies", "Live lobbies.", () => this.lobbyCount);
+    m.gauge("onelobby_sockets", "Open signaling sockets.", () => this.socketCount);
+    m.gauge("onelobby_lobbies_retired", "Join codes held back from reuse.", () => this.retired.size);
+    m.describe("onelobby_messages_total", "Client messages received, by type.");
+    m.describe("onelobby_errors_total", "Error replies sent, by code.");
+    m.describe("onelobby_path_total", "ICE path reports from peers: direct vs relayed (DESIGN s.10).");
+    m.describe("onelobby_connections_total", "Sockets accepted since start.");
+    m.describe("onelobby_lobbies_created_total", "Lobbies created since start.");
+    m.describe("onelobby_rate_limit_hits_total", "Requests refused by a rate limit, by kind.");
   }
 
   get lobbyCount(): number {
@@ -270,6 +285,7 @@ export class SignalingHub {
   connect(ip: string, send: (text: string) => void, close: () => void): Session | null {
     const s = new Session(++this.nextSession, ip, hex(6), send, close, new RateWindow(this.o.signalPerSec * this.scale, 1000));
     s.lastSeen = this.now();
+    this.metrics.inc("onelobby_connections_total");
     if (this.sessions.size >= this.o.maxPeers) {
       this.error(s, "server_full", "server is at its peer limit");
       s.close();
@@ -300,6 +316,7 @@ export class SignalingHub {
       s.lobby = null;
       this.logEvent("detach", lobby, s);
       this.broadcast(lobby, { t: "peer_left", peerId: m.peerId, reason: "timeout" });
+      this.metrics.inc("onelobby_peers_left_total", "reason", "timeout");
       if (lobby.hostId === m.peerId) this.promoteHost(lobby, m.peerId);
     }
   }
@@ -314,7 +331,11 @@ export class SignalingHub {
   /** Call about once a second: idle timeouts, resume-window expiry, code retirement. */
   tick(): void {
     const now = this.now();
-    for (const s of [...this.sessions.values()]) if (now - s.lastSeen > this.o.idleTimeoutMs) this.closeSession(s);
+    for (const s of [...this.sessions.values()])
+      if (now - s.lastSeen > this.o.idleTimeoutMs) {
+        this.metrics.inc("onelobby_idle_timeouts_total");
+        this.closeSession(s);
+      }
     for (const lobby of [...this.lobbies.values()])
       for (const m of [...lobby.members]) if (m.detachedAt > 0 && now - m.detachedAt >= this.o.resumeWindowMs) this.removeMember(lobby, m, "timeout");
     for (const [code, at] of [...this.retired]) if (now - at >= this.o.codeReuseMs) this.retired.delete(code);
@@ -344,6 +365,7 @@ export class SignalingHub {
       this.error(s, "bad_request", "expected a JSON object with a string t", field("t"));
       return;
     }
+    this.metrics.inc("onelobby_messages_total", "type", KNOWN_TYPES.has(t) ? t : "unknown");
     if (t === "hello") return this.hello(s, msg);
     if (!s.helloDone) {
       if (KNOWN_TYPES.has(t)) this.error(s, "bad_request", "send hello first");
@@ -431,6 +453,7 @@ export class SignalingHub {
       s.lobby = rl;
       s.member = resumed;
       this.logEvent("resume", rl, s);
+      this.metrics.inc("onelobby_resumes_total");
       for (const other of rl.members) if (other !== resumed) this.sendTo(other, { t: "peer_joined", peer: this.peerObj(resumed) });
       this.send(s, this.lobbyMsg(rl, resumed));
     }
@@ -501,6 +524,7 @@ export class SignalingHub {
     this.createdOnce = true;
     this.gameLobbies.set(s.gameId, (this.gameLobbies.get(s.gameId) ?? 0) + 1);
     ip.open++;
+    this.metrics.inc("onelobby_lobbies_created_total");
     const host = this.addMember(lobby, s, null);
     lobby.hostId = host.peerId;
     this.logEvent("create", lobby, s);
@@ -643,6 +667,7 @@ export class SignalingHub {
     if (has(m, "sdp")) o.sdp = m.sdp;
     if (has(m, "ice")) o.ice = m.ice;
     this.send(target.session, o);
+    this.metrics.inc("onelobby_signals_relayed_total");
   }
 
   private requireHost(s: Session): HubLobby | null {
@@ -737,12 +762,14 @@ export class SignalingHub {
     lobby.epoch = epoch;
     lobby.pendingClaimPeer = lobby.pendingClaimEpoch = 0;
     this.broadcast(lobby, { t: "host_changed", hostId: lobby.hostId, epoch: lobby.epoch });
+    this.metrics.inc("onelobby_host_changes_total");
     this.logEvent("host_claim", lobby, s);
   }
 
   private pathReport(s: Session, m: Json): void {
     const p = str(m, "path");
-    if (p !== "relayed" && p !== "direct") this.error(s, "bad_request", "path must be relayed or direct", field("path"));
+    if (p === "relayed" || p === "direct") this.metrics.inc("onelobby_path_total", "path", p);
+    else this.error(s, "bad_request", "path must be relayed or direct", field("path"));
   }
 
   // ---------------------------------------------------------------- membership changes
@@ -762,6 +789,7 @@ export class SignalingHub {
     }
     if (wasConnected) {
       this.broadcast(lobby, { t: "peer_left", peerId: mem.peerId, reason });
+      this.metrics.inc("onelobby_peers_left_total", "reason", reason);
       if ((reason === "kicked" || reason === "disconnected") && ms)
         this.error(ms, "kicked", reason === "kicked" ? "the host removed you from the lobby" : "the host disconnected you", kickData);
     }
@@ -790,6 +818,7 @@ export class SignalingHub {
     if (claimant) lobby.epoch = claimEpoch;
     else lobby.epoch++;
     this.broadcast(lobby, { t: "host_changed", hostId: next.peerId, epoch: lobby.epoch });
+    this.metrics.inc("onelobby_host_changes_total");
     const hs = next.session;
     if (hs) for (const pm of lobby.pending) this.send(hs, { t: "join_request", peer: this.peerObj(pm) }); // the new host inherits the pending requests
     this.logEvent("host_changed", lobby, next.session);
@@ -861,12 +890,14 @@ export class SignalingHub {
   }
 
   private error(s: Session, code: string, msg: string, data?: Json): void {
+    this.metrics.inc("onelobby_errors_total", "code", code);
     const o: Json = { t: "error", code, msg };
     if (data !== undefined) o.data = data;
     s.send(JSON.stringify(o));
   }
 
   private rateLimited(s: Session, kind: string, retryAfterMs: number, reason: string | null): void {
+    this.metrics.inc("onelobby_rate_limit_hits_total", "kind", kind);
     this.log(`rate_limit kind=${kind} ip=${this.hashIp(s.ip)}`);
     const data: Json = { retryAfterMs };
     if (reason !== null) data.reason = reason;

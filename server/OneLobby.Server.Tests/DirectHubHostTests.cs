@@ -90,6 +90,69 @@ public class DirectHubHostTests
         Assert.Equal(0, host.Hub.SocketCount);
     }
 
+    /// <summary>One plain GET over raw TCP; the host answers with Connection: close, so read to the end.</summary>
+    private static async Task<string> RawGet(DirectHubHost host, string path)
+    {
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("127.0.0.1", host.Port);
+        var s = tcp.GetStream();
+        await s.WriteAsync(Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"));
+        using var r = new StreamReader(s, Encoding.UTF8);
+        using var cts = new CancellationTokenSource(5000);
+        return await r.ReadToEndAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task Healthz_answers_ok_and_other_paths_keep_the_400()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        var res = await RawGet(host, "/healthz");
+        Assert.StartsWith("HTTP/1.1 200", res);
+        Assert.Contains("Content-Type: text/plain\r\n", res);
+        Assert.EndsWith("\r\n\r\nok\n", res);
+        Assert.StartsWith("HTTP/1.1 400", await RawGet(host, "/anything"));
+        Assert.Equal(0, host.Hub.SocketCount);
+    }
+
+    [Fact]
+    public async Task Metrics_from_loopback_render_the_hub_counters()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        var before = await RawGet(host, "/metrics");
+        Assert.StartsWith("HTTP/1.1 200", before);
+        Assert.Contains("Content-Type: text/plain; version=0.0.4\r\n", before);
+        Assert.Contains("onelobby_lobbies 0\n", before);
+        Assert.DoesNotContain("onelobby_lobbies_created_total 1", before);
+
+        using var h = await Hello(host.Port, "Host");
+        await Send(h, "{\"t\":\"create\",\"name\":\"L\",\"maxPlayers\":4,\"visibility\":\"unlisted\",\"mode\":\"raw\"}");
+        Assert.Equal("lobby", (string?)(await Next(h))["t"]);
+        await Send(h, "{\"t\":\"create\",\"name\":\"L\",\"maxPlayers\":4}"); // already in a lobby: bad_request
+        Assert.Equal("error", (string?)(await Next(h))["t"]);
+        var after = await RawGet(host, "/metrics");
+        Assert.Contains("onelobby_lobbies 1\n", after);
+        Assert.Contains("onelobby_lobbies_created_total 1\n", after);
+        Assert.Contains("onelobby_connections_total 1\n", after);
+        Assert.Contains("onelobby_errors_total{code=\"bad_request\"} 1\n", after);
+        // the JS hub (direct.test.ts) pins the same list for the same scenario
+        var names = after.Split('\n').Where(l => l.StartsWith("# TYPE ")).Select(l => l.Split(' ')[2]).Order(StringComparer.Ordinal);
+        Assert.Equal(new[]
+        {
+            "onelobby_connections_total", "onelobby_errors_total", "onelobby_lobbies", "onelobby_lobbies_created_total",
+            "onelobby_lobbies_retired", "onelobby_messages_total", "onelobby_sockets",
+        }, names);
+    }
+
+    [Fact]
+    public void Metrics_are_loopback_only()
+    {
+        foreach (var ok in new[] { "127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1" })
+            Assert.True(DirectHubHost.IsLoopback(System.Net.IPAddress.Parse(ok)), ok);
+        foreach (var no in new[] { "192.168.1.5", "10.0.0.1", "8.8.8.8", "::2", "2001:db8::1", "::ffff:192.168.1.5" })
+            Assert.False(DirectHubHost.IsLoopback(System.Net.IPAddress.Parse(no)), no);
+        Assert.False(DirectHubHost.IsLoopback(null));
+    }
+
     private static async Task<string> UpgradeStatus(DirectHubHost host, string? origin, string hostHeader = "game.example:47810")
     {
         using var tcp = new TcpClient();

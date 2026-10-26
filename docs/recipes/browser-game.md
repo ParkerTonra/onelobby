@@ -167,6 +167,9 @@ site the host happens to visit cannot reach the lobby. The page this recipe serv
 - Windows: the network must be **Private**, and `node.exe` (or your packaged exe) allowed through the firewall on
   Private. An old Public-only answer silently blocks friends. Details: [direct-ip.md s.6](direct-ip.md#6-shipping-the-firewall).
 - No host migration: when the host stops, the session ends for everyone (direct lobbies never emit `hostChanged`).
+- The port also answers `GET /healthz` and loopback-only `GET /metrics` in the same format as onelobby-server; these win over
+  your `http` callback. `hostDirect` prints one startup line (`OneLobby: direct host listening on TCP+UDP :<port>; ...`) to
+  `console.log`; see [direct-ip.md](direct-ip.md) for `log`.
 
 ## Done when
 

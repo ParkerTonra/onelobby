@@ -8,8 +8,8 @@ import { OneLobbyError } from "../src/signaling.js";
 import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
-import { DirectHubHost, defaultHubOptions, directHubOptions, hostDirect, originAllowed } from "../src/direct/index.js";
-import { PortInUseError, portFailureHint } from "../src/direct/hub-host.js";
+import { DirectHubHost, defaultHubOptions, directHubOptions, formatHostLog, hostDirect, originAllowed } from "../src/direct/index.js";
+import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
 import { freePort } from "./helpers.js";
 
 /**
@@ -202,8 +202,48 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
   it("GET /healthz answers ok and plain HTTP gets 426", async () => {
     const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
     cleanup.push(() => host.close());
-    expect(await (await fetch(`http://127.0.0.1:${host.port}/healthz`)).text()).toBe("ok");
+    expect(await (await fetch(`http://127.0.0.1:${host.port}/healthz`)).text()).toBe("ok\n");
     expect((await fetch(`http://127.0.0.1:${host.port}/`)).status).toBe(426);
+  });
+
+  it("GET /metrics from loopback renders the hub counters, with the same names as the C# hub", async () => {
+    const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
+    cleanup.push(() => host.close());
+    const get = () => fetch(`http://127.0.0.1:${host.port}/metrics`);
+    const before = await get();
+    expect(before.status).toBe(200);
+    expect(before.headers.get("content-type")).toBe("text/plain; version=0.0.4");
+    const first = await before.text();
+    expect(first).toContain("onelobby_lobbies 0\n");
+    expect(first).not.toContain("onelobby_lobbies_created_total 1");
+
+    // same scenario as C# DirectHubHostTests.Metrics_from_loopback_render_the_hub_counters
+    const h = await raw(host.port);
+    await h.hello();
+    h.send({ t: "create", name: "L", maxPlayers: 4, mode: "raw", visibility: "unlisted" });
+    await h.next("lobby");
+    h.send({ t: "create", name: "L", maxPlayers: 4 });
+    await h.next("error");
+    const after = await (await get()).text();
+    expect(after).toContain("onelobby_lobbies 1\n");
+    expect(after).toContain("onelobby_lobbies_created_total 1\n");
+    expect(after).toContain("onelobby_connections_total 1\n");
+    expect(after).toContain('onelobby_errors_total{code="bad_request"} 1\n');
+    expect(after).toContain("# HELP onelobby_errors_total Error replies sent, by code.\n");
+    const names = after.split("\n").filter((l) => l.startsWith("# TYPE ")).map((l) => l.split(" ")[2]).sort();
+    expect(names).toEqual([
+      "onelobby_connections_total", "onelobby_errors_total", "onelobby_lobbies", "onelobby_lobbies_created_total",
+      "onelobby_lobbies_retired", "onelobby_messages_total", "onelobby_sockets",
+    ]);
+    // /metrics and /healthz win over the game's http callback
+    host.http = () => ({ type: "text/plain", body: "game" });
+    expect(await (await fetch(`http://127.0.0.1:${host.port}/healthz`)).text()).toBe("ok\n");
+    expect(await (await get()).text()).toContain("onelobby_lobbies 1\n");
+  });
+
+  it("only loopback callers may read /metrics", () => {
+    for (const ip of ["127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1"]) expect(isLoopback(ip), ip).toBe(true);
+    for (const ip of ["192.168.1.5", "10.0.0.1", "8.8.8.8", "::2", "2001:db8::1", "::ffff:192.168.1.5", "", "local"]) expect(isLoopback(ip), ip).toBe(false);
   });
 
   it("serves plain GETs from the http handler (join page), 404 for null, WebSocket still upgrades", async () => {
@@ -223,6 +263,37 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${host.port}/`);
     await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("ws failed")); });
     ws.close();
+  });
+});
+
+describe("direct host startup line", () => {
+  it("matches C# FormatHostLog character for character", () => {
+    // the three strings are copied from clients/dotnet/OneLobby.DataChannel.Tests/DirectIpTests.cs
+    expect(formatHostLog(47810, 47810, "6B01-RGFE-P2B", "internet", "UPnP"))
+      .toBe("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP");
+    expect(formatHostLog(47810, 47811, "0A00-0BSE-P3S", "same_network", "off"))
+      .toBe("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off");
+    expect(formatHostLog(47810, 47813, "", "none", ""))
+      .toBe("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off");
+  });
+
+  it("hostDirect calls the log option once with lobby.directHostLog; log: false prints nothing", async () => {
+    const lines: string[] = [];
+    const port = await freePort();
+    const host = await hostDirect(kit("Host"), { port, openPort: false, log: (l) => lines.push(l) });
+    cleanup.push(() => host.leave());
+    expect(lines).toEqual([host.directHostLog]);
+    expect(host.directHostLog).toMatch(new RegExp(`^OneLobby: direct host listening on TCP\\+UDP :${port}; (code \\S+ \\((Internet|SameNetwork)\\)|no join code \\(no IPv4 address\\)); port mapping off$`));
+    const seen: unknown[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void seen.push(a);
+    try {
+      const quiet = await hostDirect(kit("Quiet"), { port: await freePort(), openPort: false, log: false });
+      cleanup.push(() => quiet.leave());
+    } finally {
+      console.log = real;
+    }
+    expect(seen).toEqual([]);
   });
 });
 

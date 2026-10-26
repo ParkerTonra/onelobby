@@ -123,6 +123,11 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
   `new DirectHostOptions { PortMapping = new PortMapperOptions { Log = Debug.Log } }` (JS/Node:
   `hostDirect(kit, { portMapping: { log: console.log } })`). It gets one line per mapping kind:
   `direct host mapping deleted port=47810 protocols=TCP,UDP mapping=UPnP`. Left out, nothing is logged.
+- A direct host looks like onelobby-server from outside: its port answers `GET /healthz` (`ok`) and `GET /metrics`
+  (Prometheus text, same names, but loopback callers only, since the port faces the internet), so the OneLobby Console and
+  scripts treat every hub shape alike. JS/Node `hostDirect` prints the same startup line as above to `console.log`
+  (`lobby.directHostLog`; pass `log: (line) => ...` to redirect it or `log: false` to silence it). Every hub prints
+  `OneLobby: <server|direct host> listening on <TCP|TCP+UDP> :<port>; ...`.
 
 ## 3. Node: host from a game server
 

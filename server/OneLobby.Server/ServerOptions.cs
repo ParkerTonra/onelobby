@@ -127,4 +127,18 @@ Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecate
         if (Listen.StartsWith(':')) return "http://0.0.0.0" + Listen;
         return "http://" + Listen;
     }
+
+    /// <summary>
+    /// The startup line, in the shape every hub prints (<c>OneLobby: &lt;server|direct host&gt; listening on &lt;TCP|TCP+UDP&gt; :&lt;port&gt;; ...</c>,
+    /// as the direct hosts do), e.g. <c>OneLobby: server listening on TCP :8080 (http://0.0.0.0:8080); turn off; games any</c>.
+    /// </summary>
+    public string StartupLine()
+    {
+        string url = ListenUrl();
+        var m = System.Text.RegularExpressions.Regex.Match(url, @":(\d+)(?:/|$)");
+        string port = m.Success ? m.Groups[1].Value : url.StartsWith("https:", StringComparison.OrdinalIgnoreCase) ? "443" : "80";
+        string turn = TurnUrls.Count > 0 && TurnSecret.Length > 0 ? "on" : "off";
+        string games = AllowedGames.Count == 0 ? "any" : string.Join(",", AllowedGames);
+        return $"OneLobby: server listening on TCP :{port} ({url}); turn {turn}; games {games}";
+    }
 }

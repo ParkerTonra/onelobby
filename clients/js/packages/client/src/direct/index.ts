@@ -59,6 +59,20 @@ export interface DirectHostOptions {
   allowedOrigins?: string[];
   /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped. */
   rateLimit?: RateLimit;
+  /** Receives the startup line (`lobby.directHostLog`) once the host is up. Default `console.log`; `false` prints nothing. */
+  log?: ((line: string) => void) | false;
+}
+
+/**
+ * The one startup line for a direct host, character for character as C#'s `DirectLobby.FormatHostLog`, e.g.
+ * `OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off`.
+ */
+export function formatHostLog(requested: number, bound: number, code: string, kind: "internet" | "same_network" | "none", mapping: string): string {
+  let line = `OneLobby: direct host listening on TCP+UDP :${bound}`;
+  if (bound !== requested) line += ` (${bound - requested === 1 ? requested : `${requested}-${bound - 1}`} busy)`;
+  const kindName = kind === "internet" ? "Internet" : kind === "same_network" ? "SameNetwork" : "None";
+  line += code ? `; code ${code} (${kindName}); port mapping ` : "; no join code (no IPv4 address); port mapping ";
+  return line + (mapping || "off");
 }
 
 /** A direct host lobby: the normal Lobby, plus the hub behind it. Leaving or ending the lobby stops the hub. */
@@ -161,6 +175,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       lobby.joinCodeKind = "same_network";
     }
   }
+  lobby.directHostLog = formatHostLog(port, hub.port, lobby.joinCode, lobby.joinCodeKind, lobby.portMapping);
+  if (o.log !== false) (o.log ?? console.log)(lobby.directHostLog);
   const joinUrl = o.http && codeIp ? `http://${codeIp}:${hub.port}/` : null;
   return Object.assign(lobby, { directHub: hub, joinUrl });
 }
