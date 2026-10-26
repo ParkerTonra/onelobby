@@ -67,6 +67,17 @@ function blockedDirect(net: MemoryNetwork, owner: string, relayWorks: boolean): 
   return out;
 }
 
+describe("lobby name", () => {
+  it("host and joiners read the name the host gave", async () => {
+    const w = world();
+    const la = await w.make("alice").host({ name: "Friday room", maxPlayers: 4 });
+    const lb = await w.make("bob").join(la.code);
+    await settle();
+    expect(la.name).toBe("Friday room");
+    expect(lb.name).toBe("Friday room");
+  });
+});
+
 describe("joiner ready timeout (ice_failed)", () => {
   it("rejects ready, emits a describable error and leaves when the host is unreachable (no TURN)", async () => {
     const w = world();

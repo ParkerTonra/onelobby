@@ -262,6 +262,64 @@ public sealed class DirectIpTests
         _ = hostClient.DisposeAsync();
     }
 
+    // A raw direct lobby has the same phase machine as a server one: StartAsync reaches every joiner as PhaseChanged,
+    // a late joiner arrives InGame, and LateJoin = false turns joiners away with in_game. Joiners see the lobby name.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void StartAsyncMovesARawDirectLobbyInGame(bool lateJoin) => RunStart(lateJoin);
+
+    private void RunStart(bool lateJoin)
+    {
+        var port = FreePort();
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
+        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
+        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport());
+        Lobby? host = null, a = null, b = null;
+        void Pump()
+        {
+            if (host != null) host.Pump(); else hostClient.Pump();
+            if (a != null) a.Pump(); else aClient.Pump();
+            if (b != null) b.Pump(); else bClient.Pump();
+        }
+
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Name = "Test room", LateJoin = lateJoin, OpenPort = false }), Pump, "host");
+        Assert.Equal("Test room", host.Name);
+        a = Await(aClient.JoinDirectAsync("127.0.0.1:" + port), Pump, "join a");
+        Assert.Equal("Test room", a.Name);
+        Assert.Equal(LobbyPhase.Lobby, a.Phase);
+        PumpUntil(() => a.ReadyAsync.IsCompleted, Pump, "a ready");
+
+        var hostPhases = new List<LobbyPhase>();
+        var aPhases = new List<LobbyPhase>();
+        host.PhaseChanged += hostPhases.Add;
+        a.PhaseChanged += aPhases.Add;
+        _ = host.StartAsync();
+        Assert.Equal(LobbyPhase.InGame, host.Phase);
+        Assert.Equal(new[] { LobbyPhase.InGame }, hostPhases);
+        PumpUntil(() => a.Phase == LobbyPhase.InGame, Pump, "a sees in_game");
+        Assert.Equal(new[] { LobbyPhase.InGame }, aPhases);
+
+        var late = bClient.JoinDirectAsync("127.0.0.1:" + port);
+        PumpUntil(() => late.IsCompleted, Pump, "late join answered");
+        if (lateJoin)
+        {
+            b = late.GetAwaiter().GetResult();
+            Assert.Equal(LobbyPhase.InGame, b.Phase);
+            PumpUntil(() => b.ReadyAsync.IsCompleted, Pump, "late joiner ready");
+            Assert.True(b.ReadyAsync.IsCompletedSuccessfully, b.ReadyAsync.Exception?.GetBaseException().Message);
+        }
+        else
+        {
+            var e = Assert.IsType<OneLobbyException>(late.Exception!.GetBaseException());
+            Assert.Equal(LobbyErrorCodes.InGame, e.Code);
+        }
+        host.LeaveAsync();
+        aClient.DisposeAsync().AsTask().Wait();
+        bClient.DisposeAsync().AsTask().Wait();
+        hostClient.DisposeAsync().AsTask().Wait();
+    }
+
     [Fact]
     public void NobodyListeningIsDirectUnreachable()
     {

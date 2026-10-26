@@ -41,6 +41,10 @@ Or build a tarball with `-Pack` (`--pack`) and use Package Manager, "Add package
 after pulling OneLobby changes. If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
 `Runtime/Plugins/Dependencies`), delete the duplicate there.
 
+Committing the tarball into your game's repo: if that repo tracks `*.tgz` with Git LFS, a fresh clone or worktree holds
+only a small pointer file and Unity fails to read the package. Run `git lfs pull -I "Packages/*.tgz"` (your path) after
+cloning, and say so in your game's build notes.
+
 ## 2. `Net.cs`: one object that owns the lobby
 
 Put it on a GameObject in your first scene. The lobby server is a setting (AGENTS.md rule 5): a default, a saved

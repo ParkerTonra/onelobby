@@ -109,7 +109,7 @@ Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/w
 The server returns codes ungrouped (`C5AFX8`); show them grouped (`C5A FX8`) with `formatCode` or by hand. `join` accepts
 either form. `lobby.peers` includes the local player and the host, so a two-player lobby has `peers.length === 2` on both sides.
 
-Useful fields: `lobby.code`, `localPeerId`, `hostPeerId`, `isHost`, `phase`, `peers`, `meta`, `resumeToken`.
+Useful fields: `lobby.code`, `localPeerId`, `hostPeerId`, `isHost`, `phase`, `peers`, `meta`, `name`, `resumeToken`.
 Full reference (generated): `docs/api/`.
 
 ## Friendly defaults (JS)

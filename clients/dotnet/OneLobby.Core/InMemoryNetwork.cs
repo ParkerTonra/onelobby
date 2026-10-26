@@ -431,6 +431,7 @@ namespace OneLobby
             foreach (var m in l.Members) { w.WriteStartObject(); w.WriteNumber("peerId", m.Key); w.WriteString("name", m.Value.Name); w.WriteNumber("joinedAt", 0); w.WriteEndObject(); }
             w.WriteEndArray();
             w.WriteString("resumeToken", "tok-" + l.Code + "-" + you);
+            w.WriteString("name", l.Name);
         });
 
         private void BroadcastLobby(SrvLobby l)

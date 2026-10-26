@@ -81,6 +81,7 @@ namespace OneLobby
             TickRate = Math.Max(1, msg.TickRate);
             LateJoin = msg.LateJoin;
             _meta = msg.Meta;
+            Name = msg.Name;
             ResumeToken = msg.ResumeToken;
             foreach (var p in msg.Peers) _peers[p.PeerId] = new PeerRec { Id = p.PeerId, Name = p.Name };
             if (!_peers.ContainsKey(_you)) _peers[_you] = new PeerRec { Id = _you, Name = client.Config.DisplayName };
@@ -101,6 +102,8 @@ namespace OneLobby
         public bool IsHost => _hostId == _you;
         public LobbyPhase Phase => _phase;
         public IReadOnlyDictionary<string, string> Meta => _meta;
+        /// <summary>The lobby's name as the server keeps it (<c>LobbyOptions.Name</c> / <c>DirectHostOptions.Name</c>, sanitised); "" if the server sends none.</summary>
+        public string Name { get; private set; }
         public string ResumeToken { get; private set; }
         public SyncMode Mode { get; }
         public int TickRate { get; }
@@ -937,6 +940,7 @@ namespace OneLobby
                 {
                     var m = Signaling.ParseLobby(e);
                     _meta = m.Meta;
+                    if (!string.IsNullOrEmpty(m.Name)) Name = m.Name;
                     if (!string.IsNullOrEmpty(m.ResumeToken)) ResumeToken = m.ResumeToken;
                     SetPhase(m.Phase);
                     foreach (var p in m.Peers)

@@ -128,6 +128,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   hostPeerId: number;
   phase: Phase;
   meta: Record<string, string>;
+  /** The lobby's name as the server keeps it (host()'s `name`, sanitised); "" if the server sends none. */
+  name: string;
   resumeToken: string;
   /** Last measured round trip to the host in ms (joiners), or 0. */
   rtt = 0;
@@ -200,6 +202,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.hostPeerId = st.hostId;
     this.phase = st.phase;
     this.meta = { ...st.meta };
+    this.name = st.name ?? "";
     this.resumeToken = st.resumeToken;
     for (const p of st.peers) this.roster.set(p.peerId, seatName(p));
     this.ready.catch(() => {}); // a rejection is also reported through errorSink; awaiting `ready` stays optional
@@ -755,6 +758,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       case "lobby": {
         const st = m as unknown as LobbyState;
         this.meta = { ...st.meta };
+        if (st.name) this.name = st.name;
         if (st.resumeToken && st.resumeToken !== this.resumeToken) {
           this.resumeToken = st.resumeToken;
           this.seatSink?.(this.resumeToken);

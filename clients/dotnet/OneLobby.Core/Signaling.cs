@@ -10,7 +10,7 @@ namespace OneLobby
 
     internal sealed record LobbyMsg(string Code, string GameId, string NetVersion, int HostId, int You, SyncMode Mode,
         int TickRate, bool LateJoin, LobbyPhase Phase, Dictionary<string, string> Meta, List<LobbyPeerInfo> Peers,
-        string ResumeToken);
+        string ResumeToken, string Name = "");
 
     /// <summary>JSON signaling messages (DESIGN s.7): builders and tolerant parsers.</summary>
     internal static class Signaling
@@ -152,7 +152,7 @@ namespace OneLobby
                 foreach (var p in ps.EnumerateArray()) peers.Add(new LobbyPeerInfo(Int(p, "peerId"), Str(p, "name")));
             return new LobbyMsg(Str(e, "code"), Str(e, "gameId"), Str(e, "netVersion"), Int(e, "hostId", 1), Int(e, "you", 1),
                 Str(e, "mode") == "raw" ? SyncMode.Raw : SyncMode.Lockstep, Int(e, "tickRate", 20), Bool(e, "lateJoin", true),
-                PhaseOf(e), MetaOf(e), peers, Str(e, "resumeToken"));
+                PhaseOf(e), MetaOf(e), peers, Str(e, "resumeToken"), Str(e, "name"));
         }
 
         public static LobbySummary ParseSummary(JsonElement e)
