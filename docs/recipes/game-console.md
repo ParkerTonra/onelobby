@@ -60,6 +60,31 @@ curl -s -H "Authorization: Bearer $(cat /path/to/console-47820.token)" http://12
 curl -s -H "Authorization: Bearer $(cat /path/to/console-47820.token)" -d '{"line":"round 10"}' http://127.0.0.1:47820/cmd
 ```
 
+## 5. Unity: `GameConsoleServer`
+
+The Unity package ships the server side (`OneLobby.Unity.GameConsoleServer`). Your game supplies two callbacks, both
+run on the main thread from `Pump()`: `run` takes one line and returns `(ok, lines)` through the same path as your
+in-game console, and `info` returns the `/info` JSON body.
+
+```csharp
+using OneLobby.Unity;
+
+GameConsoleServer? console;
+
+void Start()
+{
+    if (GameConsoleServer.PortFromArgs() is int port)   // --console-port=47820; no flag, no server
+        console = GameConsoleServer.Start(port, line => MyConsole.Run(line), () => MyConsole.InfoJson(), Debug.Log);
+}
+
+void Update() => console?.Pump();
+void OnDestroy() => console?.Stop();                    // closes the port and deletes the token file
+```
+
+The token file defaults to `Application.persistentDataPath/onelobby-console/console-<port>.token`; pass a path as the
+second argument to choose another. `Start` returns null (and logs why) when the port is busy or the file cannot be
+written.
+
 ## Done when
 
 - `GET /healthz` answers `ok` with the flag, and nothing listens without it.

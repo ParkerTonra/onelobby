@@ -31,7 +31,8 @@ The full walkthrough, with the game loop and the "Done when" checks, is `docs/re
 
 `Tests/Editor/UnityTransportLoopbackTests.cs` runs two `UnityTransport` peers in one editor through a real server
 (`ONELOBBY_TEST_SERVER`, default `ws://127.0.0.1:8080/ws`; ignored when no server answers).
-`Tests/Editor/DirectLoopbackTests.cs` hosts by IP on loopback port 47832 and joins by address (no server needed). Add
+`Tests/Editor/DirectLoopbackTests.cs` hosts by IP on loopback port 47832 and joins by address (no server needed).
+`Tests/Editor/GameConsoleServerTests.cs` drives the `ogc1` dev console (`docs/recipes/game-console.md`) on loopback port 47833. Add
 `"testables": ["com.onelobby.unity"]` to the manifest, then run it from the Test Runner window or
 `Unity.exe -batchmode -projectPath <p> -runTests -testPlatform EditMode`.
 
