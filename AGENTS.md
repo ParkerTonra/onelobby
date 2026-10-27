@@ -104,12 +104,14 @@ Either depend on it with a `file:` path, or bundle with an esbuild alias (no pac
 # in your project
 npm install file:/path/to/onelobby/clients/js/packages/client
 # or, plain-JS project with no package.json
-/path/to/onelobby/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js   --alias:onelobby=/path/to/onelobby/clients/js/packages/client/dist/index.js
+/path/to/onelobby/clients/js/node_modules/.bin/esbuild src/main.js --bundle --format=esm --outfile=dist/app.js \
+  --alias:onelobby=/path/to/onelobby/clients/js/packages/client/dist/index.js
 ```
 
 Installing a folder only links it (npm runs no build), so build before every `npm install <folder>` that should pick
 up new changes. Installing a folder or a `.tgz` reworks the whole `node_modules` tree and removes any package your
-`package.json` does not list, so declare every tool you use (e.g. a browser driver for tests) first. Then load the bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
+`package.json` does not list, so declare every tool you use (e.g. a browser driver for tests) first. Then load the
+bundle from the page: `<script type="module" src="./dist/app.js"></script>`. A page that only has
 `<script type="module" src="./src/main.js">` cannot resolve the bare name `onelobby`, so bundle first.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 
@@ -137,29 +139,14 @@ Full reference (generated): `docs/api/`.
   peer, before that `peerLeft`; not for kicks or `disconnect()`. Use it to tell the host "a friend could not connect".
 - `rateLimit: { messages, perMs }` on `host()` / `hostDirect()` caps each joiner's incoming raw messages; the excess is
   dropped before `message` fires or is relayed.
-- `hostDirect` (Node) starts Nostr signaling by default: the startup line gains `; ip code ...` and ends `; nostr 5/7 relays`
-  (or `; nostr: no relay reachable`, and then `joinCode` is the IP code until a relay connects, when `joinCodeChanged`
-  fires). `hostDirect` waits up to 10 s for the first relay (and the router, in parallel) before it resolves.
-  `joinDirect` with a version 1 code and no relay or no answer fails with `direct_unreachable`.
-- `kit.hostNostr(options?)` (main entry, browser or Node) hosts a direct lobby from a browser tab with no Node process and no port:
-  the hub runs in the page and joiners find it through Nostr relays with a version 1 code (`joinCodeKind` `"nostr"`,
-  `directCode` `""`; options like `hostDirect` minus port, `openPort`, `publicAddress`, `http`, `allowedOrigins`; the blueprint
-  applies as in `host()`). Startup line `OneLobby: browser host (no port); code <v1> (Nostr); nostr 4/5 relays`. No relay
-  within 10 s rejects with `direct_unreachable` (there is no IP fallback); `hosting.nostr: false` rejects with
-  `nostr_disabled`. `onConnection` / `asWebSocket` work as with `hostDirect`. Keep the host tab visible: hidden tabs are
-  throttled, `lobby.hostHidden` / `hostHiddenChanged` tell you. No UPnP, so a strict-NAT pair fails with `ice_failed`
-  (use a Node or native host there). Recipe: `docs/recipes/browser-game.md` section 6.
-- Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
-  They are also host-and-joiners only: the hub refuses a `signal` between two joiners (`bad_request`) and a client answers
-  an SDP offer only from the host, so one player cannot open a link to another (and learn its address).
-- Hub limits a game can meet (direct host, same numbers in C# and JS): 32 open signaling sockets per address, loopback
-  included (`rate_limited` with reason `max_sockets`, closed 1008); a joiner that stops reading is closed 1008
-  `backpressure` once 1 MiB is waiting; Nostr joiners: `maxPlayers` new sessions at once (at least 16, at most 64), then 1 per second (the rest wait in line and are answered as soon as a token refills),
-  10 signals/s per target. `kick` on a Nostr joiner bans its key and, when the host knows it, the address behind it.
-- Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
-  `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
-  reason the host passes to `disconnect(id, code, reason)` / `kick(id, { code, reason })` reach the joiner's `onclose`
-  as given. The library version is `LIB_VERSION`.
+- Direct lobbies (no lobby server; `hostDirect` on Node, `kit.hostNostr()` in a browser tab) give a Nostr join code by
+  default and an IP code for LAN; they have no host migration (`sessionEnded("host_left")`) and joiners talk only to the
+  host. Failure code `direct_unreachable`. Details, startup lines, hub limits: `docs/recipes/direct-ip.md` section 7.
+- `kit.hostNostr(options?)` hosts from a browser tab with no Node and no port (`lobby.joinCode` is a Nostr code; keep the
+  tab visible, see `lobby.hostHidden`). Recipe: `docs/recipes/browser-game.md` section 6.
+- Sockets close with 1000 (you closed), 1001 (the other end left), 4000 (kicked) or 1006 (`timeout`, `ice_failed`);
+  `e.reason` is the lobby's reason, and `disconnect(id, code, reason)` / `kick(id, { code, reason })` pass theirs through
+  (full table: `docs/recipes/direct-ip.md` section 7). The library version is `LIB_VERSION`.
 - `lobby.kick(id)` bans that player's address from the lobby for as long as it lasts (a reload or new tab included).
   To end one connection without the ban (a seat taken over by another tab), use `lobby.disconnect(id, code?, reason?)`:
   the joiner's lobby ends with `sessionEnded("disconnected")` and it may join again. A ban is per address, so a player
@@ -263,16 +250,11 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
-- Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
-  / `JoinDirectAsync` / `RejoinDirectAsync(code, token)` from `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
-  `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`. `lobby.joinCode` is a Nostr code by default (`joinCodeKind`
-  "nostr", `dc1` version 1, e.g. `D1PB-1X9S-FPV`): joiners reach the host through public Nostr relays (anonymous, encrypted)
-  and then WebRTC with public STUN, so it works with no port forwarded; the IP code `6B01-RGFE-P2B` (the host's address; the
-  router is asked to open port 47810 TCP+UDP, or the next free port up to 47819; the code carries the port) is
-  `lobby.directCode` and keeps working for LAN play and open ports. `hostDirect(kit, { nostr: false })` or blueprint
-  `hosting.nostr: false` is IP codes only (`joinCode === directCode`); `hosting.nostrRelays` / `nostr: { relays, stun }`
-  pick relays; `checkNostrRelays(urls, ms)` probes them (spec `spec/nostr-signaling.md`); a joiner's `joinCode`
-  is the code it joined with; host leaving ends the session)
+- Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md`. C#: `client.HostDirectAsync` /
+  `JoinDirectAsync` / `RejoinDirectAsync(code, token)` from `OneLobby.Direct`; Unity: the same on `OneLobbyRunner`; Node:
+  `hostDirect(kit)` from `onelobby/direct`; JS joiners: `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`.
+  `lobby.joinCode` is a Nostr code by default (works with no port forwarded), `lobby.directCode` the IP code for LAN;
+  `nostr: false` / blueprint `hosting.nostr: false` is IP codes only (more: section 7 there)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
   adapter): `docs/recipes/browser-game.md`
 - Dev console a local tool can reach (`ogc1`: loopback HTTP, token file, off by default): `docs/recipes/game-console.md`

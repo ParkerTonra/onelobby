@@ -310,6 +310,46 @@ itself runs on Node.
   `node.exe` (admin PowerShell: `New-NetFirewallRule -DisplayName "Node.js (Private)" -Direction Inbound -Action Allow
   -Profile Private -Program "C:\Program Files\nodejs\node.exe"`) lets a Node host be reached from outside.
 
+## 7. Reference: direct-lobby behavior and limits
+
+Facts a game can run into with `hostDirect` / `hostNostr` (same numbers in C# and JS).
+
+- **Startup line and codes.** `hostDirect` starts Nostr signaling by default: the startup line gains `; ip code ...` and
+  ends `; nostr 5/7 relays` (or `; nostr: no relay reachable`, and then `joinCode` is the IP code until a relay connects,
+  when `joinCodeChanged` fires). `hostDirect` waits up to 10 s for the first relay (and the router, in parallel) before it
+  resolves. `joinDirect` with a version 1 code and no relay or no answer fails with `direct_unreachable`.
+- **`hostNostr`: host from a browser tab.** `kit.hostNostr(options?)` (main entry, browser or Node) hosts a direct lobby
+  with no Node process and no port: the hub runs in the page and joiners find it through Nostr relays with a version 1
+  code (`joinCodeKind` `"nostr"`, `directCode` `""`). Options are those of `hostDirect` minus `port`, `openPort`,
+  `publicAddress`, `http`, `allowedOrigins`; the blueprint applies as in `host()`. Startup line
+  `OneLobby: browser host (no port); code <v1> (Nostr); nostr 4/5 relays`. No relay within 10 s rejects with
+  `direct_unreachable` (there is no IP fallback); `hosting.nostr: false` rejects with `nostr_disabled`. `onConnection` /
+  `asWebSocket` work as with `hostDirect`. Keep the host tab visible: hidden tabs are throttled, `lobby.hostHidden` /
+  `hostHiddenChanged` tell you. No UPnP, so a strict-NAT pair fails with `ice_failed` (use a Node or native host there).
+  Recipe: [browser-game.md](browser-game.md) section 6.
+- **No migration, host and joiners only.** Direct lobbies never emit `hostChanged`: when the host goes, joiners get
+  `sessionEnded("host_left")`. The hub refuses a `signal` between two joiners (`bad_request`) and a client answers an SDP
+  offer only from the host, so one player cannot open a link to another (and learn its address).
+- **Hub limits.** 32 open signaling sockets per address, loopback included (`rate_limited` with reason `max_sockets`,
+  closed 1008); a joiner that stops reading is closed 1008 `backpressure` once 1 MiB is waiting. Nostr joiners:
+  `maxPlayers` new sessions at once (at least 16, at most 64), then 1 per second (the rest wait in line and are answered
+  as soon as a token refills), 10 signals/s per target. `kick` on a Nostr joiner bans its key and, when the host knows
+  it, the address behind it.
+- **Socket close codes.** 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
+  `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
+  reason the host passes to `disconnect(id, code, reason)` / `kick(id, { code, reason })` reach the joiner's `onclose` as given.
+- **Codes in detail.** `lobby.joinCode` is a Nostr code by default (`joinCodeKind` "nostr", `dc1` version 1, e.g.
+  `D1PB-1X9S-FPV`): joiners reach the host through public Nostr relays (anonymous, encrypted) and then WebRTC with public
+  STUN, so it works with no port forwarded. The IP code `6B01-RGFE-P2B` (the host's address; the router is asked to open
+  port 47810 TCP+UDP, or the next free port up to 47819; the code carries the port) is `lobby.directCode` and keeps
+  working for LAN play and open ports. `hostDirect(kit, { nostr: false })` or blueprint `hosting.nostr: false` is IP codes
+  only (`joinCode === directCode`); `hosting.nostrRelays` / `nostr: { relays, stun }` pick relays; `checkNostrRelays(urls,
+  ms)` probes them (spec `spec/nostr-signaling.md`). A joiner's `joinCode` is the code it joined with; host leaving ends
+  the session.
+- **API names per engine.** C#: `client.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync(code, token)` from
+  `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync`; Node:
+  `hostDirect(kit)` from `onelobby/direct`; JS joiners: `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`.
+
 ## Done when
 
 1. Build the smoke tools: `dotnet build clients/dotnet/OneLobby.DataChannel.Smoke -c Release`, and in `clients/js`
