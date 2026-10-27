@@ -161,6 +161,38 @@ namespace OneLobby
 
         internal void RaiseJoinCodeChanged() => JoinCodeChanged?.Invoke(JoinCode, JoinCodeKind);
 
+        /// <summary>
+        /// False while <see cref="JoinCode"/> can still change: a direct host whose Nostr relays have not answered yet, or whose
+        /// router may still answer a port-mapping retry. True once it cannot (the Nostr code is up), and always on other lobbies.
+        /// </summary>
+        public bool JoinCodeFinal { get; internal set; } = true;
+
+        /// <summary>
+        /// The join code once <see cref="JoinCodeFinal"/>, or whatever <see cref="JoinCode"/> is when <paramref name="timeout"/>
+        /// runs out (keep showing it and follow <see cref="JoinCodeChanged"/>), so a game need not hold the code itself.
+        /// Completes inside <see cref="Pump"/>, so keep pumping while you await it.
+        /// </summary>
+        public Task<string> FinalJoinCodeAsync(TimeSpan timeout)
+        {
+            if (JoinCodeFinal || _closed) return Task.FromResult(JoinCode);
+            var tcs = new TaskCompletionSource<string>();
+            _codeWaits.Add((tcs, timeout < TimeSpan.Zero ? long.MaxValue : NowMs + (long)timeout.TotalMilliseconds));
+            return tcs.Task;
+        }
+
+        private readonly List<(TaskCompletionSource<string> Tcs, long Until)> _codeWaits = new();
+
+        private void CheckCodeWaits(long now)
+        {
+            for (var i = _codeWaits.Count - 1; i >= 0; i--)
+            {
+                var (tcs, until) = _codeWaits[i];
+                if (!JoinCodeFinal && now < until) continue;
+                _codeWaits.RemoveAt(i);
+                tcs.TrySetResult(JoinCode);
+            }
+        }
+
         /// <summary>Direct IP has no migration: the hub lives in the host (docs/design/direct-ip.md s.2).</summary>
         private bool DirectJoiner => _c.Direct && !IsHost;
 
@@ -535,6 +567,7 @@ namespace OneLobby
                 if (_closed) return;
             }
             CheckFlushes(now);
+            CheckCodeWaits(now);
             CheckReadyTimer(now);
             if (_closed) return;
             CheckPeerWatches(now);
@@ -1267,6 +1300,8 @@ namespace OneLobby
             _lingering.Clear();
             foreach (var (tcs, _) in _flushes) tcs.TrySetResult(false);
             _flushes.Clear();
+            foreach (var (tcs, _) in _codeWaits) tcs.TrySetResult(JoinCode);
+            _codeWaits.Clear();
             Voice.Enabled = false;
             _c.LobbyClosed(this);
         }

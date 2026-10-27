@@ -338,6 +338,7 @@ namespace OneLobby.Direct
                 var ipKind = JoinCodeKind.None;
                 var nostrUp = bridge != null && settle.Result;
                 var relaysNote = nostrUp ? bridge!.Relays.Connected + "/" + bridge.Relays.Total : "";
+                var retrying = false;
                 lobby.DirectAddresses = DirectAddress.Local(hub.Port);
                 // Sets JoinCode / JoinCodeKind / PortMapping / DirectHostLog and what GET /joininfo answers.
                 void Apply(string? ip, JoinCodeKind kind, string note)
@@ -362,19 +363,26 @@ namespace OneLobby.Direct
                 else
                 {
                     Apply(map?.LocalIPv4 ?? DirectAddress.LanIPv4(), JoinCodeKind.SameNetwork, map == null ? "off" : map.Detail);
-                    if (map is { Mapped: false } && hub.PortMapper is { } mapper)
+                    if (map is { Mapped: false } && hub.PortMapper is { } mapper && retryMs > 0)
+                    {
+                        retrying = true;
                         RetryMapping(mapper, retryMs, hub, r =>
                         {
-                            if (!PortMapper.IsPublicIPv4(r.ExternalIPv4)) return;
                             transport.Post(() =>
                             {
                                 if (hub.Disposed) return;
+                                retrying = false;
+                                if (!PortMapper.IsPublicIPv4(r.ExternalIPv4)) { lobby.JoinCodeFinal = bridge == null || nostrUp; return; }
                                 Apply(r.ExternalIPv4, JoinCodeKind.Internet, r.Detail);
+                                lobby.JoinCodeFinal = bridge == null || nostrUp;
                                 lobby.RaiseJoinCodeChanged();
                             });
                         });
+                    }
                 }
-                if (bridge != null && !nostrUp) WatchForRelay(bridge, hub, transport, () => { nostrUp = true; relaysNote = bridge.Relays.Connected + "/" + bridge.Relays.Total; Publish(); lobby.RaiseJoinCodeChanged(); });
+                // final once the Nostr code is up; with Nostr off, once no port-mapping retry can change the IP code
+                lobby.JoinCodeFinal = bridge != null ? nostrUp : !retrying;
+                if (bridge != null && !nostrUp) WatchForRelay(bridge, hub, transport, () => { nostrUp = true; relaysNote = bridge.Relays.Connected + "/" + bridge.Relays.Total; Publish(); lobby.JoinCodeFinal = true; lobby.RaiseJoinCodeChanged(); });
                 return lobby;
             }
             catch

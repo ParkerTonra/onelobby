@@ -175,8 +175,15 @@ public sealed class NostrEndToEndTests
         Assert.Equal(host.DirectCode, host.JoinCode);
         var changed = new List<(string, JoinCodeKind)>();
         host.JoinCodeChanged += (code, kind) => changed.Add((code, kind));
+        Assert.False(host.JoinCodeFinal);
+        var early = host.FinalJoinCodeAsync(TimeSpan.FromMilliseconds(100));
+        PumpUntil(() => early.IsCompleted, host.Pump, "timed-out wait gives the current code", 3000);
+        Assert.Equal(host.DirectCode, early.Result);
+        var final = host.FinalJoinCodeAsync(TimeSpan.FromSeconds(10));
         relays!.Up = true;
-        PumpUntil(() => changed.Count > 0, host.Pump, "code switches to nostr once a relay answers", 5000);
+        PumpUntil(() => changed.Count > 0 && final.IsCompleted, host.Pump, "code switches to nostr once a relay answers", 5000);
+        Assert.True(host.JoinCodeFinal);
+        Assert.Equal(host.JoinCode, final.Result);
         Assert.Equal(JoinCodeKind.Nostr, host.JoinCodeKind);
         Assert.True(JoinCode.TryDecodeRoom(host.JoinCode, out _));
         Assert.EndsWith("; nostr 3/3 relays", DirectLobby.HostLogLine(host));
@@ -193,6 +200,8 @@ public sealed class NostrEndToEndTests
         var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Port = port, FallbackPorts = 0, OpenPort = false, Nostr = new NostrOptions { Enabled = false } }), c.Pump, "host");
         Assert.Equal(host.DirectCode, host.JoinCode);
         Assert.NotEqual(JoinCodeKind.Nostr, host.JoinCodeKind);
+        Assert.True(host.JoinCodeFinal); // no relay to wait for, no router retry (OpenPort false)
+        Assert.True(host.FinalJoinCodeAsync(TimeSpan.FromSeconds(10)).IsCompleted);
         Assert.DoesNotContain("nostr", DirectLobby.HostLogLine(host));
         c.DisposeAsync().AsTask().Wait();
     }

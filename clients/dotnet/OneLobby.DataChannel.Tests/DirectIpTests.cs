@@ -445,8 +445,10 @@ public sealed class DirectIpTests
         var pumpThread = Environment.CurrentManagedThreadId;
         PumpUntil(() => gw.Requests >= 3, c.Pump, "router asked again");   // a couple of silent rounds first
         Assert.Empty(changed);
+        Assert.False(host.JoinCodeFinal); // the router may still answer a retry
         gw.On = true;
         PumpUntil(() => changed.Count > 0, c.Pump, "JoinCodeChanged", 15000);
+        Assert.True(host.JoinCodeFinal);
         Assert.Equal((JoinCode.Encode("198.51.100.9", port), JoinCodeKind.Internet, pumpThread), changed[0]);
         Assert.Equal(host.JoinCode, changed[0].Item1);
         Assert.Contains("(Internet)", DirectLobby.HostLogLine(host));
