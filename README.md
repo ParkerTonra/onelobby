@@ -12,6 +12,15 @@ Free, open source (MIT), with voice and text chat built in.
 
 Engines: browser JS, Godot 4 (C#), Unity 6 (desktop and mobile), any .NET app, Node.
 
+## Status
+
+Early software (0.x): the API can still change between minor versions. Work goes where a shipping game needs it.
+
+- **Maintained:** the C# core in raw mode, `OneLobby.DataChannel`, the Unity package, `OneLobby.Replication` and the
+  lobby server. Bugs here get fixed and features still land.
+- **Frozen:** the JS client (`onelobby` on npm), the Godot glue, lockstep mode and voice. They work and keep their
+  tests, but get no new features until a second game needs them. Bug reports are still welcome.
+
 ## Using an AI coding agent?
 
 Tell it:
