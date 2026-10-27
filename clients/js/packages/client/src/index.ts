@@ -47,3 +47,5 @@ export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
 export { checkNostrRelays, DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "./nostr/relays.js";
 export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
 export { encodeRoomCode } from "./joincode.js";
+// Browser host (no Node process, no port): kit.hostNostr(options).
+export type { BrowserHostOptions, VisibilityDoc } from "./direct/browser-host.js";

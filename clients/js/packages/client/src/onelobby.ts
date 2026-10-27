@@ -23,6 +23,7 @@ import { NostrSocket } from "./nostr/socket.js";
 import { DEFAULT_NOSTR_STUN, type RelayConnect } from "./nostr/relays.js";
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
+import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 
 export const LIB_NAME = "onelobby";
 export const LIB_VERSION = "0.5.0";
@@ -577,6 +578,17 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       sig.close();
       throw e;
     }
+  }
+
+  /**
+   * Host a direct lobby from this browser tab (or any runtime with WebSocket and WebRTC): no Node process, no port.
+   * The hub runs in the page and joiners find it through Nostr relays with `lobby.joinCode` (a dc1 version 1 code,
+   * `joinCodeKind` "nostr"); they use `kit.joinDirect(code)`. Rejects with `direct_unreachable` when no relay answers
+   * within 10 s (a browser has no IP fallback) and `nostr_disabled` when the blueprint has `hosting.nostr` false.
+   * Keep the tab visible: hidden tabs are throttled (`lobby.hostHidden`, event `hostHiddenChanged`).
+   */
+  hostNostr(opts: BrowserHostOptions = {}): Promise<Lobby> {
+    return hostNostr(this, opts);
   }
 
   async rejoin(resumeToken: string): Promise<Lobby> {

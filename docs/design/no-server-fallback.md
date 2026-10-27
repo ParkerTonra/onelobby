@@ -95,3 +95,12 @@ echoed), from a home connection in the Pacific time zone, anonymous. Ok means ac
 The default list is the seven that passed first. A live run through all seven (host, joiner, one message over a real
 WebRTC link) joined in about 0.5 s. Relays come and go: when a blueprint is created, the `onelobby` skill runs
 `checkNostrRelays` again and writes the working ones to `hosting.nostrRelays`.
+
+## Browser host (built)
+
+With signaling on public relays the host no longer needs a listening port, so a browser tab can host: `kit.hostNostr()` runs
+the same hub in the page (the host's own socket is the in-memory `LocalHubSocket`) and a `NostrHostBridge` on the relays.
+There is no IP code and no router request, so the only fallback is the relay list: no relay in 10 s rejects with
+`direct_unreachable`. Links use STUN only, so a strict-NAT pair fails with `ice_failed` as above; those games need a Node or
+native host. Hidden tabs are throttled by the browser, so the lobby reports `hostHidden` rather than hiding the problem.
+Recipe: `docs/recipes/browser-game.md` section 6.

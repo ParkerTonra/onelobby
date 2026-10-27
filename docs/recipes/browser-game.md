@@ -175,6 +175,92 @@ site the host happens to visit cannot reach the lobby. The page this recipe serv
   your `http` callback. `hostDirect` prints one startup line (`OneLobby: direct host listening on TCP+UDP :<port>; ...`) to
   `console.log`; see [direct-ip.md](direct-ip.md) for `log`.
 
+## 6. Host from the browser (no Node process)
+
+The host can be a browser tab instead: `kit.hostNostr()` runs the same signaling hub inside the page, with no Node process
+and no listening port. Friends join through public Nostr relays with the normal version 1 code
+([nostr-signaling spec](../../spec/nostr-signaling.md)), so the host needs no router setup and the game page can be a
+static file on any site (GitHub Pages, itch.io). The game's host-side logic (the `lobby.onConnection` code from section 3)
+runs in the tab unchanged; joiners still use `kit.joinDirect(code)` and `lobby.asWebSocket()` (section 4).
+
+```ts compile file=browser-host.ts
+import { OneLobby, describeError, shareUrl } from "onelobby";
+
+const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer: "", mode: "raw", displayName: "Ann" });
+
+export async function host(show: (text: string) => void): Promise<void> {
+  try {
+    const lobby = await kit.hostNostr({ maxPlayers: 4 });          // resolves once a relay is up (max 10 s)
+    show(`Code ${lobby.joinCode}  Link ${shareUrl(lobby.joinCode)}`);
+    lobby.onConnection((conn) => {                                 // your game's host logic, as in section 3
+      conn.onmessage = (e) => conn.send(`echo ${e.data}`);
+    });
+    lobby.on("hostHiddenChanged", (hidden) => show(hidden ? "Keep this tab visible, or players will lag." : "Hosting"));
+  } catch (e) {
+    show(describeError(e).message);                                // direct_unreachable: no Nostr relay reachable
+  }
+}
+
+export async function join(code: string, show: (text: string) => void): Promise<WebSocket | null> {
+  try {
+    const lobby = await kit.joinDirect(code);
+    await lobby.ready;
+    const ws = lobby.asWebSocket() as unknown as WebSocket;
+    ws.onmessage = (e) => show(String(e.data));
+    return ws;
+  } catch (e) {
+    show(describeError(e).message);
+    return null;
+  }
+}
+```
+
+A minimal static page (bundle from the CDN, no build step):
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/onelobby@0.5.0/dist/onelobby.global.min.js"></script>
+<button id="host">Host</button> <input id="code" placeholder="code"> <button id="join">Join</button> <pre id="out"></pre>
+<script>
+  const kit = new OneLobby.OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer: "", mode: "raw" });
+  const out = (t) => (document.getElementById("out").textContent = t);
+  document.getElementById("host").onclick = async () => {
+    try {
+      const lobby = await kit.hostNostr();
+      out(`Code ${lobby.joinCode}\nLink ${OneLobby.shareUrl(lobby.joinCode)}`);
+      lobby.onConnection((c) => (c.onmessage = (e) => c.send("echo " + e.data)));
+    } catch (e) { out(OneLobby.describeError(e).message); }
+  };
+  document.getElementById("join").onclick = async () => {
+    const lobby = await kit.joinDirect(document.getElementById("code").value);
+    await lobby.ready;
+    const ws = lobby.asWebSocket();
+    ws.onmessage = (e) => out(e.data);
+    ws.onopen = () => ws.send("hello");
+  };
+</script>
+```
+
+`hostNostr(options?)` takes `password`, `maxPlayers`, `name`, `lateJoin`, `meta`, `rateLimit` and
+`nostr: { relays, stun }`, like `hostDirect` minus everything about ports (`port`, `openPort`, `publicAddress`, `http`,
+`allowedOrigins`). It resolves with a normal host `Lobby` whose `joinCode` is the version 1 code, `joinCodeKind` is
+`"nostr"` and `directCode` is `""` (kind `"none"`). With `OneLobby.fromConfig(...)` the `lobby.*`, `session.rateLimit` and
+`hosting.nostrRelays` keys apply as in `host()`; `hosting.nostr: false` makes `hostNostr()` reject with `nostr_disabled`
+(a browser host has no other way to be reached). With no relay answering within 10 s it rejects with `direct_unreachable`
+("no Nostr relay reachable"): there is no IP fallback. It prints one startup line (to `console.log`, or `log`):
+`OneLobby: browser host (no port); code <v1 code> (Nostr); nostr <connected>/<total> relays`.
+
+Caveats:
+
+- **Keep the host tab visible.** Browsers slow the timers of hidden tabs to about once a second, and after 5 minutes hidden
+  to about once a minute, so the hub's keep-alive and your game loop stall and players drop. The lobby tracks it:
+  `lobby.hostHidden` and the `hostHiddenChanged` event (plus a `console.warn`); show a "keep this tab open" banner. There is
+  no workaround in the library on purpose. Closing the tab ends the session for everyone, like a Node host exiting.
+- **No UPnP.** The tab cannot open a router port, so links rely on STUN hole punching. Most home networks work; a pair where
+  both sides are behind strict (symmetric or carrier-grade) NAT fails with `ice_failed` for that joiner. Those games need
+  a Node or native host with a forwarded port (sections 3 and 5) or a TURN relay.
+- An `https` page may only connect to `wss://` relays; the default relays all are. A test relay on `ws://127.0.0.1` needs
+  an `http://127.0.0.1` page (`clients/js/e2e/browser-host.mjs` does exactly that).
+
 ## Done when
 
 1. `node host.mjs` prints `Send this link: http://...:47810/` (or the `off` reason, and the game still runs).
@@ -182,3 +268,5 @@ site the host happens to visit cannot reach the lobby. The page this recipe serv
    host's `conn.onmessage` sees the page's first message.
 3. Stopping the host fires the page's `onclose` with code 1001 and reason `"host_left"`.
 4. From another network (a phone on mobile data is enough) the same link joins when `kind` is `"internet"`.
+5. A page opened from `http://127.0.0.1` calls `kit.hostNostr()` and shows a code; a second browser or Node process joins it with
+   `kit.joinDirect(code)` and its `asWebSocket()` messages reach the tab's `conn.onmessage` (`clients/js/e2e/browser-host.mjs`).

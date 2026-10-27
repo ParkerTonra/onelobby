@@ -55,6 +55,7 @@ export const ErrorCodes = {
   ChatDisabled: "chat_disabled",
   PauseDisabled: "pause_disabled",
   ListingDisabled: "listing_disabled",
+  NostrDisabled: "nostr_disabled",
   IdentityAnonymous: "identity_anonymous",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -88,6 +89,8 @@ const TEXT: Record<string, Entry> = {
   not_in_game: { message: "You can only pause while a game is running.", hint: "Start the game first." },
   not_allowed: { message: "You can't do that right now.", hint: "The player who paused, or the host, can resume." },
   listing_disabled: { message: "This game has no public lobby list.", hint: "Join with a code or a link from the host." },
+  direct_unreachable: { message: "Couldn't reach the host.", hint: "Check the code, and that the host is still online. A host in a browser needs its tab open and visible." },
+  nostr_disabled: { message: "This game can't be hosted from a browser.", hint: "Host from the desktop version, or let the game's owner know." },
   identity_anonymous: { message: "This game doesn't use player names.", hint: "Everyone shows up as Player 1, Player 2, and so on." },
   bad_config: { message: "The game's multiplayer settings file is not valid.", hint: "Let the game's owner know; the details are in the error message." },
   left: { message: "You left the lobby." },

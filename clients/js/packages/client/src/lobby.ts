@@ -63,6 +63,11 @@ export type LobbyEvents = {
    * retry and the code went from "same_network" to "internet". Show the new code (and `joinUrl`).
    */
   joinCodeChanged: [code: string, kind: JoinCodeKind];
+  /**
+   * Browser host only (`kit.hostNostr`): the host tab went hidden (`true`) or visible again (`false`). Browsers throttle
+   * timers in hidden tabs, so joiners may see lag or drop; ask the host to keep the tab visible.
+   */
+  hostHiddenChanged: [hidden: boolean];
 };
 
 export interface LobbyConfig {
@@ -167,6 +172,16 @@ export class Lobby extends Emitter<LobbyEvents> {
   portMapping = "";
   /** Direct-IP host only: the one startup line (bound port, join code, port mapping); see `formatHostLog` in onelobby/direct. */
   directHostLog = "";
+
+  /** Browser host only (`kit.hostNostr`): true while the host tab is hidden (see the `hostHiddenChanged` event). */
+  hostHidden = false;
+
+  /** @internal kit.hostNostr: the tab's visibility changed. */
+  setHostHidden(hidden: boolean): void {
+    if (this.hostHidden === hidden) return;
+    this.hostHidden = hidden;
+    this.emit("hostHiddenChanged", hidden);
+  }
 
   /** @internal onelobby/direct: fires `joinCodeChanged` with the current code. */
   notifyJoinCodeChanged(): void {

@@ -194,6 +194,8 @@ document.getElementById("browse")!.onclick = guard(async () => {
 - `rememberSeat` (on by default): a reload keeps the player's seat. `kit.rememberedCode` is the lobby to offer
   ("Rejoin 7HQ 4K2?"), `kit.resume()` takes it back. Pass `rememberSeat: false` to always join fresh.
 - Test seams (`socketFactory`, `linkFactory`, `clock`, ...) live under `advanced: { ... }`.
+- No lobby server at all: a tab can host with `kit.hostNostr()` and friends join its Nostr code with `kit.joinDirect(code)`;
+  see `browser-game.md` section 6 ("Host from the browser (no Node process)").
 
 ## 5. Move bytes
 

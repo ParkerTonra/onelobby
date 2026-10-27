@@ -1,8 +1,5 @@
-/// <reference types="node" />
-import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
-
 /**
- * The signaling hub (protocol lk1) in TypeScript, for a Node process that hosts direct-IP lobbies
+ * The signaling hub (protocol lk1) in TypeScript, for a Node process or a browser tab that hosts direct lobbies
  * (docs/direct-ip.md s.2): a line-by-line port of `server/OneLobby.Hub/Hub.cs`, held to the same rules by
  * `conformance/server`. Transport-agnostic: feed it text frames with `receive`, call `tick` about once a second.
  * Metrics (same names, labels and help text as C#, rendered by `metrics.render()`) are counted too, so every hub shape
@@ -11,6 +8,7 @@ import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
  */
 
 import { Metrics } from "./metrics.js";
+import { randomBelow, randomHex, shortHash, turnCredential } from "./sha1.js";
 
 export { Metrics };
 export const PROTO = "lk1";
@@ -208,7 +206,7 @@ const int = (o: Json, k: string): number | null => {
 const bool = (o: Json, k: string): boolean | null => (typeof o[k] === "boolean" ? (o[k] as boolean) : null);
 const has = (o: Json, k: string): boolean => o[k] !== undefined && o[k] !== null;
 const field = (name: string): Json => ({ field: name });
-const hex = (n: number): string => randomBytes(n).toString("hex");
+const hex = (n: number): string => randomHex(n);
 const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Not sanitised (spec/signaling.md): over the limits or non-string values are rejected. */
@@ -255,7 +253,7 @@ export class SignalingHub {
   constructor(options: Partial<HubOptions> = {}, deps: HubDeps = {}) {
     this.o = { ...defaultHubOptions(), ...options };
     this.now = deps.now ?? (() => Date.now());
-    this.rand = deps.randomInt ?? ((n) => randomInt(n));
+    this.rand = deps.randomInt ?? ((n) => randomBelow(n));
     this.log = deps.log ?? (() => {});
     const m = this.metrics;
     m.gauge("onelobby_lobbies", "Live lobbies.", () => this.lobbyCount);
@@ -465,7 +463,7 @@ export class SignalingHub {
     if (this.o.turnUrls.length > 0 && this.o.turnSecret.length > 0) {
       const expiry = Math.floor(this.now() / 1000) + this.o.turnTtlSeconds;
       const username = `${expiry}:${s.connId}`;
-      const credential = createHmac("sha1", this.o.turnSecret).update(username).digest("base64");
+      const credential = turnCredential(this.o.turnSecret, username);
       ice.push({ urls: [...this.o.turnUrls], username, credential, ttl: this.o.turnTtlSeconds });
     }
     return ice;
@@ -909,6 +907,6 @@ export class SignalingHub {
   }
 
   private hashIp(ip: string): string {
-    return createHash("sha256").update(this.logSalt + ip).digest("hex").slice(0, 8);
+    return shortHash(this.logSalt + ip);
   }
 }

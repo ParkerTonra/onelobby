@@ -56,6 +56,8 @@ const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer,
 const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public" });
 const lobby = await kit.join("7HQ 4K2");                   // also kit.rejoin(resumeToken), kit.resume()
 const list = await kit.list();                             // LobbySummary[]
+const lobby = await kit.hostNostr({ maxPlayers: 4 });      // host from this browser tab: no Node, no port; lobby.joinCode is a Nostr code
+lobby.hostHidden; lobby.on("hostHiddenChanged", (hidden) => {});   // browser host: hidden tabs are throttled, keep it visible
 lobby.send(peerId, bytes); lobby.broadcast(bytes);         // { channel: "fast" } optional
 lobby.on("message", (from, bytes, channel) => {});
 lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "sessionEnded", handler);
@@ -134,6 +136,14 @@ Full reference (generated): `docs/api/`.
   (or `; nostr: no relay reachable`, and then `joinCode` is the IP code until a relay connects, when `joinCodeChanged`
   fires). `hostDirect` waits up to 10 s for the first relay (and the router, in parallel) before it resolves.
   `joinDirect` with a version 1 code and no relay or no answer fails with `direct_unreachable`.
+- `kit.hostNostr(options?)` (main entry, browser or Node) hosts a direct lobby from a browser tab with no Node process and no port:
+  the hub runs in the page and joiners find it through Nostr relays with a version 1 code (`joinCodeKind` `"nostr"`,
+  `directCode` `""`; options like `hostDirect` minus port, `openPort`, `publicAddress`, `http`, `allowedOrigins`; the blueprint
+  applies as in `host()`). Startup line `OneLobby: browser host (no port); code <v1> (Nostr); nostr 4/5 relays`. No relay
+  within 10 s rejects with `direct_unreachable` (there is no IP fallback); `hosting.nostr: false` rejects with
+  `nostr_disabled`. `onConnection` / `asWebSocket` work as with `hostDirect`. Keep the host tab visible: hidden tabs are
+  throttled, `lobby.hostHidden` / `hostHiddenChanged` tell you. No UPnP, so a strict-NAT pair fails with `ice_failed`
+  (use a Node or native host there). Recipe: `docs/recipes/browser-game.md` section 6.
 - Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
 - Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
   `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and

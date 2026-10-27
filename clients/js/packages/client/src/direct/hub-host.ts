@@ -4,7 +4,8 @@ import { createSocket } from "node:dgram";
 import { createServer, type Server, type Socket } from "node:net";
 import type { SocketLike } from "../transport.js";
 import { SignalingHub, directHubOptions, type HubDeps, type HubOptions, type Session } from "./hub.js";
-import { PortMapper, type PortMapperOptions, type PortMapResult } from "./portmap.js";
+import { LocalHubSocket } from "./hub-local.js";
+import { PortMapper,type PortMapperOptions, type PortMapResult } from "./portmap.js";
 import type { NostrHostBridge } from "../nostr/host.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -480,50 +481,4 @@ class FrameReader {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ in-memory socket
-
-/**
- * The direct-IP host's own signaling socket (C#'s `HubSignalingSocket`): sends go straight into the hub; the hub's
- * replies are delivered on a microtask, so callbacks never run inside the hub.
- */
-export class LocalHubSocket implements SocketLike {
-  /** Address the hub sees for the host itself (rate limits and kicks are per address). */
-  static readonly ADDRESS = "local";
-  readyState = 0;
-  onopen: SocketLike["onopen"] = null;
-  onmessage: SocketLike["onmessage"] = null;
-  onclose: SocketLike["onclose"] = null;
-  onerror: SocketLike["onerror"] = null;
-  private session: Session | null;
-
-  constructor(private readonly hub: SignalingHub) {
-    this.session = hub.connect(LocalHubSocket.ADDRESS, (text) => queueMicrotask(() => this.readyState === 1 && this.onmessage?.({ data: text })), () =>
-      this.finish(),
-    );
-    queueMicrotask(() => {
-      if (!this.session) {
-        this.finish();
-        return;
-      }
-      this.readyState = 1;
-      this.onopen?.();
-    });
-  }
-
-  send(data: string): void {
-    if (this.readyState === 1 && this.session) this.hub.receive(this.session, data);
-  }
-
-  close(): void {
-    const s = this.session;
-    const wasOpen = this.readyState === 1;
-    this.finish();
-    if (wasOpen && s) this.hub.disconnect(s);
-  }
-
-  private finish(): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    queueMicrotask(() => this.onclose?.());
-  }
-}
+export { LocalHubSocket };
