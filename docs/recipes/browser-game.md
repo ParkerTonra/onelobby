@@ -13,13 +13,13 @@ keeps its message code unchanged.
 ## 1. Install
 
 ```
-npm install onelobby@^0.5.0
+npm install onelobby@^0.6.0
 npm install --save-optional node-datachannel@^0.33.4     # WebRTC for Node (libdatachannel); the host needs it
 ```
 
 ```json
 {
-  "dependencies": { "onelobby": "^0.5.0" },
+  "dependencies": { "onelobby": "^0.6.0" },
   "optionalDependencies": { "node-datachannel": "^0.33.4" }
 }
 ```
@@ -219,7 +219,7 @@ export async function join(code: string, show: (text: string) => void): Promise<
 A minimal static page (bundle from the CDN, no build step):
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/onelobby@0.5.0/dist/onelobby.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onelobby@0.6.0/dist/onelobby.global.min.js"></script>
 <button id="host">Host</button> <input id="code" placeholder="code"> <button id="join">Join</button> <pre id="out"></pre>
 <script>
   const kit = new OneLobby.OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer: "", mode: "raw" });

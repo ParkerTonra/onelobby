@@ -262,7 +262,7 @@ what makes the hand-edit path real: the file wins even over code that still call
 
 ```json
 {
-  "$schema": "https://unpkg.com/onelobby@0.5.0/blueprint.schema.json",
+  "$schema": "https://unpkg.com/onelobby@0.6.0/blueprint.schema.json",
   "version": 1,
   "game": { "id": "com.example.antcolony", "netVersion": "1", "title": "Ant Colony" },
   "engine": "node-browser",

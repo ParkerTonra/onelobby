@@ -5,7 +5,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <Version>0.1.0</Version>
+    <Version>0.6.0</Version>
     <Authors>OneLobby contributors</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>

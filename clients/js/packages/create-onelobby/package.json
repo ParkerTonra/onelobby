@@ -1,6 +1,6 @@
 {
   "name": "create-onelobby",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scaffold a multiplayer browser game with OneLobby: writes onelobby.json (the blueprint), the glue and a two-player test. Zero runtime dependencies.",
   "keywords": [
     "onelobby",

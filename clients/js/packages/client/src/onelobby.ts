@@ -26,7 +26,7 @@ import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.5.0";
+export const LIB_VERSION = "0.6.0";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {

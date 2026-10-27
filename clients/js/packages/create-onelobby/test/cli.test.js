@@ -90,7 +90,7 @@ describe("--yes and --no-input", () => {
   it("--yes derives com.example.<folder> and writes the full file", async () => {
     const { json: j } = await json(["My Cool Game", "--yes", "--no-input"]);
     expect(j.blueprint.game).toEqual({ id: "com.example.my-cool-game", netVersion: "1", title: "My Cool Game" });
-    expect(j.blueprint.$schema).toBe("https://unpkg.com/onelobby@0.5.0/blueprint.schema.json");
+    expect(j.blueprint.$schema).toBe("https://unpkg.com/onelobby@0.6.0/blueprint.schema.json");
     expect(j.blueprint).toMatchObject({ version: 1, engine: "web", sync: { mode: "lockstep" }, chat: { text: true, voice: false } });
     for (const k of ["hosting", "lobby", "sync", "players", "chat", "session", "platforms", "ui"]) expect(j.blueprint).toHaveProperty(k);
   });
@@ -183,15 +183,15 @@ describe("a new project", () => {
     expect(bp.game.id).toBe("com.example.proj");
     const agents = readFileSync(join(cwd, "proj/AGENTS.md"), "utf8");
     expect(agents.trim().split("\n")).toHaveLength(3);
-    expect(agents).toContain("https://unpkg.com/onelobby@0.5.0/blueprint.schema.json");
+    expect(agents).toContain("https://unpkg.com/onelobby@0.6.0/blueprint.schema.json");
     expect(readFileSync(join(cwd, "proj/test/multiplayer.mjs"), "utf8")).not.toContain("//#");
     expect(readFileSync(join(cwd, "proj/test/multiplayer.mjs"), "utf8")).toContain("realServer");
     expect(readFileSync(join(cwd, "proj/.gitignore"), "utf8")).toContain("node_modules");
   });
 
-  it("defaults the dependency to ^0.5.0", async () => {
+  it("defaults the dependency to ^0.6.0", async () => {
     await cli(["proj", "--yes", ...NO]);
-    expect(JSON.parse(readFileSync(join(cwd, "proj/package.json"), "utf8")).dependencies.onelobby).toBe("^0.5.0");
+    expect(JSON.parse(readFileSync(join(cwd, "proj/package.json"), "utf8")).dependencies.onelobby).toBe("^0.6.0");
   });
 
   it("refuses a non-empty folder without --force", async () => {
