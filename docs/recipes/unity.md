@@ -198,6 +198,40 @@ tested path.
 the pause itself, pings and chat keep working. The host calls `Pause.Clear()` before reloading the scene for a restart. 
 Details: `pause.md`.
 
+## A friend could not connect (`PeerFailed`)
+
+The host learns that a joiner never got its link up from `lobby.PeerFailed(peer, reason)`: `reason` is `"timeout"` when
+the joiner is still not ready `ReadyTimeout` (15 s) after joining (it keeps its seat and may still connect, so say "still
+trying"), otherwise why it left before its link opened (`ice_failed`, a closed game, ...). It fires inside `Pump`, at
+most once per peer, just before that peer's `PeerLeft`, and never for kicks or `DisconnectAsync`.
+
+`OneLobbyRunner` forwards no lobby events; subscribe from `LobbyChanged`, which fires before the first `Pump` of a new
+lobby, so nothing is missed. Joining mostly happens in the pre-match room, so show it there first (a line in the player
+list or a status area that stays until dismissed), not only as a short in-game banner:
+
+```csharp unity
+#nullable enable
+using System.Collections.Generic;
+using OneLobby;
+using OneLobby.Unity;
+using UnityEngine;
+
+public sealed class ConnectionNotices : MonoBehaviour
+{
+    [SerializeField] OneLobbyRunner runner = null!;
+    public readonly List<string> Lines = new();   // draw these in the room screen and the HUD; clear on dismiss
+
+    void Awake() => runner.LobbyChanged += lobby =>
+    {
+        Lines.Clear();
+        if (lobby == null || !lobby.IsHost) return;
+        lobby.PeerFailed += (peer, reason) =>
+            Lines.Add(reason == "timeout" ? $"{peer.Name} is still trying to connect" : $"{peer.Name} could not connect ({reason})");
+        lobby.PeerReady += peer => Lines.RemoveAll(l => l.StartsWith(peer.Name + " is still trying"));
+    };
+}
+```
+
 ## Threading notes
 
 - Everything OneLobby raises (events, task completions) happens inside `Pump`, on the thread that calls it. `OneLobbyRunner`
