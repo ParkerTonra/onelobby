@@ -100,6 +100,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
     const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit };
     // joiners have no address to dial: links use the hub's STUN list, no port pin
     const lobby = await kit.hostDirectWith(h, { socketFactory: () => new LocalHubSocket(hub), wrapLinks: (inner) => inner });
+    lobby.linkAddressSink = (peerId, ip) => hub.reportLinkAddress(peerId, ip);
     lobby.on("sessionEnded", teardown);
 
     lobby.joinCode = code;

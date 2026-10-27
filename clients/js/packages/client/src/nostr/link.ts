@@ -28,6 +28,9 @@ export const MAX_RESENDS = 5;
 export const BEAT_MS = 10_000;
 export const SILENCE_MS = 30_000;
 export const MAX_HELD = 64;
+/** Outbound: queued texts plus unacknowledged frames, at most this many frames and bytes; excess texts are dropped. */
+export const MAX_OUT_FRAMES = 128;
+export const MAX_OUT_BYTES = 256 * 1024;
 export const MAX_FRAME_BYTES = 30_000; // under the 32 KiB content limit, room for the JSON envelope
 const TICK_MS = 250;
 
@@ -47,6 +50,7 @@ export interface LinkOptions {
 }
 
 interface Pending {
+  bytes: number;
   frame: OutFrame;
   lastSent: number;
   resends: number;
@@ -55,6 +59,8 @@ interface Pending {
 export class ReliableLink {
   private readonly o: LinkOptions;
   private queue: string[] = [];
+  private queueBytes = 0;
+  private unackedBytes = 0;
   private nextSeq = 1;
   private readonly unacked = new Map<number, Pending>();
   private rcvNext = 1; // next seq to deliver
@@ -79,7 +85,11 @@ export class ReliableLink {
   /** Queues a hub text; sent within 30 ms, packed with its neighbours. */
   send(text: string): void {
     if (this.done) return;
+    // relays refuse high publish rates: past the cap the text is dropped, the connection is not
+    const n = byteLen(text);
+    if (this.queue.length + this.unacked.size >= MAX_OUT_FRAMES || this.queueBytes + this.unackedBytes + n > MAX_OUT_BYTES) return;
     this.queue.push(text);
+    this.queueBytes += n;
     this.scheduleFlush();
   }
 
@@ -99,7 +109,7 @@ export class ReliableLink {
       return;
     }
     if (f.type !== "data" && f.type !== "beat") return;
-    if (Number.isInteger(f.ack)) for (const s of [...this.unacked.keys()]) if (s <= f.ack) this.unacked.delete(s);
+    if (Number.isInteger(f.ack)) for (const s of [...this.unacked.keys()]) if (s <= f.ack) this.dropUnacked(s);
     if (f.type === "beat") return;
     const msgs = Array.isArray(f.msgs) ? f.msgs.filter((m) => typeof m === "string") : [];
     if (!Number.isInteger(f.seq) || f.seq < 1) return;
@@ -132,8 +142,10 @@ export class ReliableLink {
     this.cancelTick?.();
     this.cancelFlush = this.cancelTick = null;
     this.unacked.clear();
+    this.unackedBytes = 0;
     this.held.clear();
     this.queue = [];
+    this.queueBytes = 0;
   }
 
   private scheduleFlush(): void {
@@ -158,11 +170,13 @@ export class ReliableLink {
     const ship = () => {
       if (batch.length === 0) return;
       const frame: OutFrame = { type: "data", seq: this.nextSeq++, ack: this.rcvNext - 1, msgs: batch };
-      this.unacked.set(frame.seq, { frame, lastSent: now, resends: 0 });
+      this.unacked.set(frame.seq, { bytes, frame, lastSent: now, resends: 0 });
+      this.unackedBytes += bytes;
       this.emit(frame, now);
       batch = [];
       bytes = 0;
     };
+    this.queueBytes = 0;
     for (const m of this.queue.splice(0)) {
       const n = byteLen(m);
       if (batch.length > 0 && bytes + n > MAX_FRAME_BYTES) ship();
@@ -170,6 +184,13 @@ export class ReliableLink {
       bytes += n;
     }
     ship();
+  }
+
+  private dropUnacked(seq: number): void {
+    const p = this.unacked.get(seq);
+    if (!p) return;
+    this.unackedBytes -= p.bytes;
+    this.unacked.delete(seq);
   }
 
   private emit(f: OutFrame, now: number): void {

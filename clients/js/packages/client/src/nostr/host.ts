@@ -26,11 +26,15 @@ interface Peer {
 
 const PING = '{"t":"ping","n":0}';
 const CLOSED_MEMORY = 512;
+/** At most this many NEW joiner pubkeys per window per lobby; a joiner repeats `open` every 2 s, so excess just waits. */
+export const MAX_NEW_SESSIONS = 8;
+export const NEW_SESSION_WINDOW_MS = 10_000;
 
 export class NostrHostBridge {
   private readonly peers = new Map<string, Peer>();
   private readonly gone = new Set<string>();
   private stopped = false;
+  private readonly newAt: number[] = [];
 
   private constructor(private readonly hub: SignalingHub, private readonly room: NostrRoom, private readonly clock: Clock) {
     room.onFrame = (f) => this.onFrame(f);
@@ -77,13 +81,22 @@ export class NostrHostBridge {
       if (known) {
         known.link.heard();
         this.answer(f.from);
-      } else this.accept(f.from);
+      } else if (this.admitNew()) this.accept(f.from); // over the cap: not answered, the joiner's next open retries
       return;
     }
     if (!known) return;
     known.link.receive(f);
     // a joiner's beat is its keep-alive: the hub counts it as activity (its pong is dropped below)
     if (f.type === "beat" && known.session) this.hub.receive(known.session, PING);
+  }
+
+  /** Counts a new session against the per-window cap. */
+  private admitNew(): boolean {
+    const now = this.clock.now();
+    while (this.newAt.length > 0 && now - this.newAt[0] >= NEW_SESSION_WINDOW_MS) this.newAt.shift();
+    if (this.newAt.length >= MAX_NEW_SESSIONS) return false;
+    this.newAt.push(now);
+    return true;
   }
 
   private answer(pub: string): void {

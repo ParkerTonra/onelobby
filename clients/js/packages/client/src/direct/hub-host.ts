@@ -11,6 +11,9 @@ import type { NostrHostBridge } from "../nostr/host.js";
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_HEADER_BYTES = 8192;
 const HANDSHAKE_TIMEOUT_MS = 5000;
+/** A joiner socket with more than this much unsent data is closed (1008 "backpressure"); spec/signaling.md. */
+export const MAX_PENDING_WRITE_BYTES = 1024 * 1024;
+const BACKPRESSURE_GRACE_MS = 3000;
 const STATUS_TEXT: Record<number, string> = { 200: "OK", 301: "Moved Permanently", 302: "Found", 404: "Not Found", 500: "Internal Server Error" };
 
 /**
@@ -329,16 +332,25 @@ export class DirectHubHost {
 
   private run(sock: Socket, ip: string, initial: Buffer): void {
     let open = true;
-    const sendText = (text: string) => {
-      if (open && !sock.destroyed) sock.write(frame(0x1, Buffer.from(text, "utf8")));
-    };
+    let session: Session | null = null;
     const shut = (code: number, reason: string) => {
       if (!open) return;
       open = false;
-      if (!sock.destroyed) sock.end(closeFrame(code, reason));
+      if (sock.destroyed) return;
+      // a reader that stopped reading never drains its buffer: give the close frame a moment, then cut it off
+      if (code === 1008 && reason === "backpressure") {
+        sock.write(closeFrame(code, reason));
+        setTimeout(() => sock.destroy(), BACKPRESSURE_GRACE_MS).unref?.();
+        if (session) this.hub.disconnect(session);
+      } else sock.end(closeFrame(code, reason));
     };
-    let session: Session | null = null;
-    session = this.hub.connect(ip, sendText, () => shut(1000, "closed by the hub"));
+    const sendText = (text: string) => {
+      if (!open || sock.destroyed) return;
+      sock.write(frame(0x1, Buffer.from(text, "utf8")));
+      // a slow or malicious reader must not grow this process's memory without bound
+      if (sock.writableLength > MAX_PENDING_WRITE_BYTES) shut(1008, "backpressure");
+    };
+    session = this.hub.connect(ip, sendText, (code, reason) => shut(code ?? 1000, reason ?? "closed by the hub"));
     if (!session) return;
     const s = session;
     const reader = new FrameReader(this.maxMessageBytes + 1024, {

@@ -120,6 +120,8 @@ export interface RateLimit {
 export const MIN_PEER_TIMEOUT_MS = 6000;
 /** Host: how long a kicked / disconnected peer's link stays open for the hub's notice to reach it first. */
 export const KICK_LINGER_MS = 3000;
+/** How long an offer held during a possible migration stays answerable. */
+const HELD_OFFER_MS = 20_000;
 
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export function seatName(p: PeerInfo): PeerInfo {
@@ -201,6 +203,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   private links = new Map<number, PeerLink>();
   /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
   private earlyIce = new Map<number, SignalPayload[]>();
+  /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
+  private heldOffers = new Map<number, { payload: SignalPayload; at: number }>();
   private connected = new Set<number>(); // host: peers that said hi
   private hiSentTo = new Set<PeerLink>();
   private epoch = 0;
@@ -524,6 +528,9 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   // ---- links -----------------------------------------------------------------------------------------------------
 
+  /** @internal A direct host's hub learns where each joiner's link comes from (Nostr kick bans the address too). */
+  linkAddressSink: ((peerId: number, ip: string) => void) | null = null;
+
   private makeLink(peerId: number, relayOnly = this.cfg.relayOnly): PeerLink {
     const old = this.links.get(peerId);
     if (old) {
@@ -538,6 +545,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     link.onClose = (reason) => this.onLinkClosed(peerId, link, reason);
     link.onMessage = (ch, bytes) => this.onData(peerId, ch, bytes);
     link.onPath = (path) => this.signaling.send({ t: "path", path });
+    link.onRemoteAddress = (ip) => this.linkAddressSink?.(peerId, ip);
     return link;
   }
 
@@ -597,6 +605,9 @@ export class Lobby extends Emitter<LobbyEvents> {
       return;
     }
     if (!d) return;
+    // The topology is a star: a joiner hears only its host. Anything else over some other link (a peer that offered to
+    // us, or a member that dialled us) is not host traffic and must not reach raw / lockstep / pause / chat handling.
+    if (!this.isHost && from !== this.hostPeerId && d.msg.type !== "host_claim") return;
     if (!reassembled) this.lastHeard.set(from, this.cfg.clock.now());
     const { msg, route } = d;
     switch (msg.type) {
@@ -711,6 +722,11 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (hostId === this.hostPeerId) return;
     this.hostPeerId = hostId;
     this.emit("hostChanged", hostId);
+    const held = this.heldOffers.get(hostId);
+    if (held) {
+      this.heldOffers.delete(hostId);
+      if (this.cfg.clock.now() - held.at <= HELD_OFFER_MS) void this.acceptOffer(hostId, held.payload);
+    }
   }
 
   /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
@@ -737,6 +753,16 @@ export class Lobby extends Emitter<LobbyEvents> {
     const candidate = pickNewHost([...this.roster.keys(), this.localPeerId], failed) ?? this.localPeerId;
     if (candidate === this.localPeerId) this.becomeHost();
     // else: wait for the candidate's host_claim (or the server's host_changed); it offers to us and we answer with hi
+    this.replayHeldOffers();
+  }
+
+  /** Offers that came from roster members while the host link was still open: now the host is lost, answer them. */
+  private replayHeldOffers(): void {
+    const now = this.cfg.clock.now();
+    for (const [from, held] of [...this.heldOffers]) {
+      this.heldOffers.delete(from);
+      if (now - held.at <= HELD_OFFER_MS && this.roster.has(from)) void this.acceptOffer(from, held.payload);
+    }
   }
 
   private becomeHost(): void {
@@ -756,6 +782,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private onHostClaim(from: number, epoch: number, hostId: number): void {
+    if (hostId !== from) return; // a claim is a peer claiming itself; nobody claims for someone else
     const mine = { epoch: this.epoch, hostId: this.hostPeerId };
     const theirs = { epoch, hostId };
     if (hostId === this.hostPeerId && epoch === this.epoch && !this.isHost) {
@@ -864,24 +891,47 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (s.sdp) payload.sdp = s.sdp;
     if (s.ice) payload.ice = s.ice;
     if (s.sdp?.type === "offer") {
-      // We are the answerer; an offer always comes from the (new) host.
-      link = this.makeLink(from);
-      const early = this.earlyIce.get(from) ?? [];
-      this.earlyIce.delete(from);
-      // the link holds candidates until the offer is set, so hand them over right behind it
-      const done = link.handleSignal(payload);
-      for (const e of early) void link.handleSignal(e);
-      await done;
+      // We are the answerer. An offer comes from the (new) host, so a peer may dial us only as that rule allows.
+      const verdict = this.offerVerdict(from);
+      if (verdict === "hold") {
+        if (this.heldOffers.size < 64 || this.heldOffers.has(from)) this.heldOffers.set(from, { payload, at: this.cfg.clock.now() });
+      } else if (verdict === "accept") await this.acceptOffer(from, payload);
       return;
     }
     if (!link) {
       if (!payload.ice || this.ended || !this.roster.has(from)) return;
+      if (this.cfg.direct && from !== this.hostPeerId) return;
       const q = this.earlyIce.get(from) ?? [];
       if (q.length < 64) q.push(payload);
       this.earlyIce.set(from, q);
       return;
     }
     await link.handleSignal(payload);
+  }
+
+  /**
+   * Whether an SDP offer from `from` may be answered. The host (or a joiner's host) always may. Direct lobbies have no
+   * migration, so nobody else. In a server lobby a roster member may dial us when we are the host (a claim race decides
+   * who wins) or when our own link to the host is gone (the migration window); while that link is open the offer is
+   * held, to be answered if the host turns out to be lost a moment later.
+   */
+  private offerVerdict(from: number): "accept" | "hold" | "drop" {
+    if (this.ended || from === this.localPeerId) return "drop";
+    if (!this.isHost && from === this.hostPeerId) return "accept";
+    if (this.cfg.direct || !this.roster.has(from)) return "drop";
+    if (this.isHost) return "accept";
+    if (!this.isReady) return "drop"; // still joining: only the host's own offer is expected
+    return this.links.get(this.hostPeerId)?.isOpen ? "hold" : "accept";
+  }
+
+  private async acceptOffer(from: number, payload: SignalPayload): Promise<void> {
+    const link = this.makeLink(from);
+    const early = this.earlyIce.get(from) ?? [];
+    this.earlyIce.delete(from);
+    // the link holds candidates until the offer is set, so hand them over right behind it
+    const done = link.handleSignal(payload);
+    for (const e of early) void link.handleSignal(e);
+    await done;
   }
 
   /**
@@ -1035,6 +1085,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     this.links.clear();
     this.earlyIce.clear();
+    this.heldOffers.clear();
     this.lingering.clear();
     this.signaling.onClose = null;
     this.signaling.onMessage = null;

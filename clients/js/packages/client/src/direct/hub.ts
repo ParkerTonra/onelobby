@@ -40,6 +40,8 @@ export interface HubOptions {
   createPerMin: number;
   joinPerMin: number;
   signalPerSec: number;
+  /** Open sockets per address (loopback included); `disableIpLimits` lifts it, `rateScale` scales it. */
+  socketsPerIp: number;
   openLobbiesPerIp: number;
   idleTimeoutMs: number;
   resumeWindowMs: number;
@@ -57,7 +59,7 @@ export function defaultHubOptions(): HubOptions {
   return {
     turnUrls: [], turnSecret: "", stunUrls: ["stun:stun.l.google.com:19302"], region: "", allowedGames: [], gameQuotas: {},
     maxLobbies: 1000, maxPeers: 10000, hardMaxPlayers: 64, rateScale: 1, turnTtlSeconds: 3600, maxMessageBytes: 16 * 1024,
-    disableIpLimits: false, createPerMin: 10, joinPerMin: 60, signalPerSec: 20, openLobbiesPerIp: 8, idleTimeoutMs: 30_000,
+    disableIpLimits: false, createPerMin: 10, joinPerMin: 60, signalPerSec: 20, socketsPerIp: 32, openLobbiesPerIp: 8, idleTimeoutMs: 30_000,
     resumeWindowMs: 60_000, codeReuseMs: 24 * 3600 * 1000, listLimitMax: 100, singleLobby: false, password: null, issueCodes: true,
   };
 }
@@ -74,6 +76,10 @@ export function directHubOptions(maxPlayers: number, password?: string | null): 
 
 /** A session's total `signal` budget is this many targets' worth of `signalPerSec` (spec/signaling.md rate limits). */
 export const SIGNAL_FANOUT = 8;
+/** Hub sessions bridged from Nostr have the address `nostr:<pubkey prefix>`. */
+export const NOSTR_ADDR = "nostr:";
+/** `signal` per second per (sender, Nostr target): relays reject high publish rates. */
+export const NOSTR_SIGNAL_PER_SEC = 10;
 
 /** Sliding-window counter: at most `limit` events per `windowMs`. */
 export class RateWindow {
@@ -148,8 +154,10 @@ export class Session {
     readonly ip: string,
     readonly connId: string,
     readonly send: (text: string) => void,
-    readonly close: () => void,
+    readonly close: (code?: number, reason?: string) => void,
   ) {}
+  /** Nostr joiners: the remote address of the host's WebRTC link to this session, once known (kick bans it too). */
+  linkIp: string | null = null;
   /** One window per target member (a member belongs to one lobby, so a new lobby starts fresh). */
   readonly signalRates = new Map<Member, RateWindow>();
   /** All signals of this session, so the per-target budget does not grow without bound with the lobby. */
@@ -286,7 +294,7 @@ export class SignalingHub {
   // ---------------------------------------------------------------- connection lifecycle
 
   /** Registers a socket. Returns null (after sending server_full and closing) when over maxPeers. */
-  connect(ip: string, send: (text: string) => void, close: () => void): Session | null {
+  connect(ip: string, send: (text: string) => void, close: (code?: number, reason?: string) => void): Session | null {
     const s = new Session(++this.nextSession, ip, hex(6), send, close);
     s.lastSeen = this.now();
     this.metrics.inc("onelobby_connections_total");
@@ -295,8 +303,14 @@ export class SignalingHub {
       s.close();
       return null;
     }
+    const st = this.ipOf(ip);
+    if (!this.o.disableIpLimits && st.sockets >= this.o.socketsPerIp * this.scale) {
+      this.rateLimited(s, "sockets", 5000, "max_sockets");
+      s.close(1008, "too_many_sockets");
+      return null;
+    }
     this.sessions.set(s.id, s);
-    this.ipOf(ip).sockets++;
+    st.sockets++;
     return s;
   }
 
@@ -322,6 +336,25 @@ export class SignalingHub {
       this.broadcast(lobby, { t: "peer_left", peerId: m.peerId, reason: "timeout" });
       this.metrics.inc("onelobby_peers_left_total", "reason", "timeout");
       if (lobby.hostId === m.peerId) this.promoteHost(lobby, m.peerId);
+    }
+  }
+
+  /**
+   * The host's WebRTC link to joiner `peerId` has the remote address `ip` (selected candidate pair; the host's own
+   * lobby reports it, a relayed or mDNS address must not be passed). Only Nostr sessions take it: their socket address
+   * is a pubkey the joiner chose. A joiner whose link address is banned is removed as kicked; a later kick bans it.
+   */
+  reportLinkAddress(peerId: number, ip: string): void {
+    for (const lobby of this.lobbies.values()) {
+      const mem = lobby.find(peerId);
+      const sess = mem?.session;
+      if (!mem || !sess || !sess.ip.startsWith(NOSTR_ADDR)) continue;
+      sess.linkIp = ip;
+      if (lobby.kicked.has(ip)) {
+        this.removeMember(lobby, mem, "kicked");
+        this.closeSession(sess);
+      }
+      return;
     }
   }
 
@@ -664,13 +697,14 @@ export class SignalingHub {
     const to = int(m, "to");
     const target = to === null ? undefined : lobby.find(to);
     if (!target || !target.session || target === me) return this.error(s, "bad_request", "unknown signal target", field("to"));
+    // a direct hub has no migration: the only peer links are host <-> joiner, so a joiner cannot dial another joiner
+    if (this.o.singleLobby && me.peerId !== lobby.hostId && target.peerId !== lobby.hostId)
+      return this.error(s, "bad_request", "signals go to or from the host only", field("to"));
     const now = this.now();
-    if (!this.o.disableIpLimits) {
-      const rate = this.signalRate(s, target, now);
-      if (!rate.tryHit(now)) return this.rateLimited(s, "signal", rate.retryAfterMs(now), null);
-      const total = (s.signalTotal ??= new RateWindow(this.o.signalPerSec * SIGNAL_FANOUT * this.scale, 1000));
-      if (!total.tryHit(now)) return this.rateLimited(s, "signal", total.retryAfterMs(now), null);
-    }
+    const rate = this.signalRate(s, target, now);
+    if (!rate.tryHit(now)) return this.rateLimited(s, "signal", rate.retryAfterMs(now), null);
+    const total = (s.signalTotal ??= new RateWindow(this.o.signalPerSec * SIGNAL_FANOUT * this.scale, 1000));
+    if (!total.tryHit(now)) return this.rateLimited(s, "signal", total.retryAfterMs(now), null);
     if (!has(m, "sdp") && !has(m, "ice")) return this.error(s, "bad_request", "signal needs sdp or ice", field("sdp"));
     const o: Json = { t: "signal", from: me.peerId };
     if (has(m, "sdp")) o.sdp = m.sdp;
@@ -687,7 +721,8 @@ export class SignalingHub {
     let w = s.signalRates.get(to);
     if (!w) {
       for (const [k, v] of s.signalRates) if (v.isIdle(now)) s.signalRates.delete(k);
-      w = new RateWindow(this.o.signalPerSec * this.scale, 1000);
+      // relays refuse high publish rates, so a Nostr-bridged target gets half the budget
+      w = new RateWindow((to.session?.ip.startsWith(NOSTR_ADDR) ? NOSTR_SIGNAL_PER_SEC : this.o.signalPerSec) * this.scale, 1000);
       s.signalRates.set(to, w);
     }
     return w;
@@ -743,7 +778,12 @@ export class SignalingHub {
     if (ban === false) data.ban = false;
     if (code !== null) data.closeCode = code;
     if (closeReason !== null) data.closeReason = closeReason;
-    if (ban !== false) lobby.kicked.add(target.ip);
+    if (ban !== false) {
+      lobby.kicked.add(target.ip);
+      // a Nostr joiner picks its own key, so also ban the address its WebRTC link came from, when the host saw it
+      const link = target.session?.linkIp;
+      if (link && target.ip.startsWith(NOSTR_ADDR)) lobby.kicked.add(link);
+    }
     this.removeMember(lobby, target, ban === false ? "disconnected" : "kicked", Object.keys(data).length ? data : undefined);
   }
 

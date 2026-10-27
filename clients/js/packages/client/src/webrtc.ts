@@ -22,6 +22,7 @@ export class WebRtcLink implements PeerLink {
   onClose: PeerLink["onClose"] = null;
   onMessage: PeerLink["onMessage"] = null;
   onPath: PeerLink["onPath"] = null;
+  onRemoteAddress: PeerLink["onRemoteAddress"] = null;
 
   private pc: RTCPeerConnection;
   private channels = {} as Record<ChannelName, RTCDataChannel>;
@@ -154,6 +155,9 @@ export class WebRtcLink implements PeerLink {
       const l = pair && byId.get(pair.localCandidateId);
       const r = pair && byId.get(pair.remoteCandidateId);
       if (l && r) {
+        // the remote address (not a relay's, not an mDNS name) lets a Nostr host ban the IP behind a kicked key
+        const addr = String(r.address ?? r.ip ?? "");
+        if (r.candidateType !== "relay" && l.candidateType !== "relay" && addr && !addr.endsWith(".local")) this.onRemoteAddress?.(addr.replace(/^::ffff:/i, ""));
         this.onPath?.(l.candidateType === "relay" || r.candidateType === "relay" ? "relayed" : "direct");
         return;
       }

@@ -188,6 +188,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     await hub.close();
     throw e;
   }
+  lobby.linkAddressSink = (peerId, ip) => hub.hub.reportLinkAddress(peerId, ip);
   lobby.on("sessionEnded", () => void hub.close());
   // leave() resolves once the router mapping is deleted, so a host that exits right after it does not leave the port
   // forwarded until the lease runs out (2 h, or never on routers that only grant permanent leases)
