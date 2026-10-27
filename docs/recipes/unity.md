@@ -205,9 +205,11 @@ the joiner is still not ready `ReadyTimeout` (15 s) after joining (it keeps its 
 trying"), otherwise why it left before its link opened (`ice_failed`, a closed game, ...). It fires inside `Pump`, at
 most once per peer, just before that peer's `PeerLeft`, and never for kicks or `DisconnectAsync`.
 
-`OneLobbyRunner` forwards no lobby events; subscribe from `LobbyChanged`, which fires before the first `Pump` of a new
-lobby, so nothing is missed. Joining mostly happens in the pre-match room, so show it there first (a line in the player
-list or a status area that stays until dismissed), not only as a short in-game banner:
+`OneLobbyRunner` forwards no lobby events. Subscribe in exactly one place: `LobbyChanged`, which fires before the first
+`Pump` of a new lobby, so nothing is missed. Do not also subscribe where your game attaches to the lobby, or every notice
+shows twice. Key notices by `PeerId`, never by name: names can repeat and change. Joining mostly happens in the pre-match
+room, so show it there first (a line in the player list or a status area that stays until dismissed), not only as a
+short in-game banner:
 
 ```csharp unity
 #nullable enable
@@ -219,15 +221,16 @@ using UnityEngine;
 public sealed class ConnectionNotices : MonoBehaviour
 {
     [SerializeField] OneLobbyRunner runner = null!;
-    public readonly List<string> Lines = new();   // draw these in the room screen and the HUD; clear on dismiss
+    // PeerId -> line; draw these in the room screen and the HUD; Remove(id) on dismiss
+    public readonly Dictionary<int, string> Lines = new();
 
     void Awake() => runner.LobbyChanged += lobby =>
     {
-        Lines.Clear();
+        Lines.Clear();   // a new lobby is a new object, so the old one's handlers never fire again
         if (lobby == null || !lobby.IsHost) return;
-        lobby.PeerFailed += (peer, reason) =>
-            Lines.Add(reason == "timeout" ? $"{peer.Name} is still trying to connect" : $"{peer.Name} could not connect ({reason})");
-        lobby.PeerReady += peer => Lines.RemoveAll(l => l.StartsWith(peer.Name + " is still trying"));
+        lobby.PeerFailed += (peer, reason) => Lines[peer.PeerId] =
+            reason == "timeout" ? $"{peer.Name} is still trying to connect" : $"{peer.Name} could not connect ({reason})";
+        lobby.PeerReady += peer => Lines.Remove(peer.PeerId);   // a "still trying" peer made it
     };
 }
 ```
