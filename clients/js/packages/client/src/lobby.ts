@@ -49,6 +49,13 @@ export type LobbyEvents = {
   ready: [];
   /** reason "left", "kicked", "disconnected" (kick with ban false), "timeout", ...; `close` when the host gave one. */
   peerLeft: [Peer, reason: string, close?: CloseInfo];
+  /**
+   * Host only: a joiner never got its link to the host open ("a friend could not connect"). reason "timeout" when it is
+   * not ready `readyTimeoutMs` after joining (it may still connect: `peerReady` then fires as usual), else the
+   * `peerLeft` reason when it leaves before it was ready (a joiner's own `ice_failed` ends that way). Fires at most once
+   * per peer, just before that `peerLeft`; not for peers the host kicks or disconnects.
+   */
+  peerFailed: [Peer, reason: string];
   joinRequested: [Peer];
   hostChanged: [hostId: number];
   phase: [Phase];
@@ -215,6 +222,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   private lastHeard = new Map<number, number>();
   /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
   private readonly lingering = new Set<PeerLink>();
+  /** Host: joiners that joined but are not ready yet, with the cancel of their readyTimeoutMs timer (peerFailed). */
+  private notReady = new Map<number, () => void>();
   /** Host: per-peer fixed window for rateLimit. */
   private rate = new Map<number, { start: number; n: number }>();
   /**
@@ -646,6 +655,8 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   private onHi(from: number, lastTick: number): void {
     this.connected.add(from);
+    this.notReady.get(from)?.();
+    this.notReady.delete(from);
     this.sendTo(from, {
       type: "welcome_dc",
       // the tick the snapshot will carry (the game's applied tick), so welcome_dc.tick == snapshot.tick even when
@@ -781,7 +792,10 @@ export class Lobby extends Emitter<LobbyEvents> {
         const peer = seatName(m.peer as Peer);
         this.roster.set(peer.peerId, peer);
         this.emit("peerJoined", peer);
-        if (this.isHost) this.offerTo(peer.peerId);
+        if (this.isHost) {
+          this.watchReady(peer.peerId);
+          this.offerTo(peer.peerId);
+        }
         break;
       }
       case "peer_left":
@@ -883,6 +897,12 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     if (peer) this.roster.delete(peerId);
     this.earlyIce.delete(peerId);
+    const cancelWatch = this.notReady.get(peerId);
+    if (cancelWatch) {
+      cancelWatch();
+      this.notReady.delete(peerId);
+      if (peer && reason !== "kicked" && reason !== "disconnected") this.emit("peerFailed", peer, reason);
+    }
     const link = this.links.get(peerId);
     if (link && peerId !== this.hostPeerId) {
       link.onMessage = null;
@@ -980,10 +1000,26 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.sendTo(this.hostPeerId, { type: "ping", n: ++this.pingN, t: this.cfg.clock.now() >>> 0 }, 0, "fast");
   }
 
+  /** Host: report a joiner that is not ready `readyTimeoutMs` after joining as peerFailed("timeout"), once. */
+  private watchReady(peerId: number): void {
+    const ms = this.cfg.readyTimeoutMs ?? 0;
+    let cancel = () => {};
+    if (ms > 0) {
+      cancel = this.cfg.clock.setTimeout(() => {
+        if (!this.notReady.delete(peerId)) return;
+        const peer = this.roster.get(peerId);
+        if (peer) this.emit("peerFailed", peer, "timeout");
+      }, ms);
+    }
+    this.notReady.set(peerId, cancel);
+  }
+
   private teardown(reason: string, close?: CloseInfo): void {
     if (this.ended) return;
     this.ended = true;
     this.cancelReadyTimer?.();
+    for (const cancel of this.notReady.values()) cancel();
+    this.notReady.clear();
     if (!this.isReady) {
       const code = reason === "ice_failed" || reason === "kicked" ? reason : "closed";
       this.failReady(new OneLobbyError(code, `the lobby ended before connecting (${reason})`));

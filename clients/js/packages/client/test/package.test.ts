@@ -30,7 +30,7 @@ describe("npm pack", () => {
       "package.json", "README.md", "LICENSE", "blueprint.schema.json",
       "dist/index.js", "dist/index.d.ts", "dist/internals.js", "dist/internals.d.ts", "dist/testing.js", "dist/testing.d.ts",
       "dist/onelobby.global.js", "dist/onelobby.global.js.map", "dist/onelobby.global.min.js", "dist/onelobby.global.min.js.map",
-      "dist/onelobby.bundle.mjs", "dist/onelobby.bundle.mjs.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
+      "dist/onelobby.bundle.mjs", "dist/onelobby.bundle.mjs.map", "dist/onelobby.bundle.js", "dist/onelobby.bundle.js.map", "dist/global.d.ts", "dist/ui/index.js", "dist/ui/index.d.ts",
     ]) expect(files, f).toContain(f);
     const bad = files.filter((f) => /node_modules|(^|\/)test\/|\.test\.|^src\/|^scripts\/|tsconfig|\.tsbuildinfo$|\.tgz$/.test(f));
     expect(bad).toEqual([]);

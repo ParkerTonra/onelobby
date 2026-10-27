@@ -104,6 +104,33 @@ describe("joiner ready timeout (ice_failed)", () => {
     expect(la.peers.map((p) => p.peerId)).toEqual([1]); // the seat was freed
   });
 
+  it("host: peerFailed when a joiner gives up before its link opens (then peerLeft), or is not ready in readyTimeoutMs", async () => {
+    const w = world();
+    const la = await w.make("alice", { readyTimeoutMs: 0 }).host({ name: "t", maxPlayers: 4 });
+    const seen: string[] = [];
+    la.on("peerFailed", (p, r) => seen.push(`failed ${p.peerId} ${r}`));
+    la.on("peerLeft", (p, r) => seen.push(`left ${p.peerId} ${r}`));
+    const lb = await w.make("bob", { readyTimeoutMs: 10_000 }, { linkFactory: blockedDirect(w.net, "bob", false).factory }).join(la.code);
+    lb.ready.catch(() => {});
+    await w.clock.run(10_100, 100);
+    await settle();
+    expect(seen).toEqual(["failed 2 timeout", "left 2 timeout"]); // the reason is the server's peer_left reason
+
+    const w2 = world();
+    const host = await w2.make("alice", { readyTimeoutMs: 5_000 }).host({ name: "t", maxPlayers: 4 });
+    const failed: string[] = [];
+    host.on("peerFailed", (p, r) => failed.push(`${p.peerId} ${r}`));
+    await w2.make("bob", { readyTimeoutMs: 0 }, { linkFactory: blockedDirect(w2.net, "bob", false).factory }).join(host.code);
+    await w2.make("carol").join(host.code);
+    await w2.clock.run(4_900, 100);
+    expect(failed).toEqual([]);
+    await w2.clock.run(200, 100);
+    expect(failed).toEqual(["2 timeout"]); // carol (3) got ready, bob stays seated
+    await w2.clock.run(10_000, 500);
+    expect(failed).toEqual(["2 timeout"]);
+    expect(host.peers.map((p) => p.peerId)).toEqual([1, 2, 3]);
+  });
+
   it("retries once relay-only when the server offers TURN, and connects", async () => {
     const w = world();
     w.server.iceServers = [{ urls: ["stun:s.example:3478"] }, { urls: ["turn:t.example:3478"] }];

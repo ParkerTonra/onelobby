@@ -2,6 +2,7 @@
 //   dist/onelobby.global.js      IIFE, sets window.OneLobby (plain <script src>, works from file:// too)
 //   dist/onelobby.global.min.js  same, minified
 //   dist/onelobby.bundle.mjs     one ES module (import from a CDN URL without a bundler)
+//   dist/onelobby.bundle.js      the same module named .js, for static hosts that serve .mjs as text/plain
 // Each gets a .map. Prints raw / min+gzip sizes.
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
@@ -20,6 +21,7 @@ const outputs = [
   { outfile: join(dist, "onelobby.global.js"), format: "iife", globalName: "OneLobby", minify: false },
   { outfile: join(dist, "onelobby.global.min.js"), format: "iife", globalName: "OneLobby", minify: true },
   { outfile: join(dist, "onelobby.bundle.mjs"), format: "esm", minify: true },
+  { outfile: join(dist, "onelobby.bundle.js"), format: "esm", minify: true },
 ];
 for (const o of outputs) await build({ ...common, ...o });
 

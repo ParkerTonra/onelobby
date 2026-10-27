@@ -99,11 +99,11 @@ The page needs OneLobby's single-file browser bundle, so serve that too:
 ```js
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-const bundlePath = createRequire(import.meta.url).resolve("onelobby").replace(/index\.js$/, "onelobby.bundle.mjs");
+const bundlePath = createRequire(import.meta.url).resolve("onelobby").replace(/index\.js$/, "onelobby.bundle.js");
 const files = {
   "/": { type: "text/html; charset=utf-8", body: readFileSync("public/index.html", "utf8")
            .replace("<head>", '<head><meta name="onelobby" content="here">') },
-  "/onelobby.bundle.mjs": { type: "text/javascript; charset=utf-8", body: readFileSync(bundlePath) },
+  "/onelobby.bundle.js": { type: "text/javascript; charset=utf-8", body: readFileSync(bundlePath) },
   "/net/ids.mjs": { type: "text/javascript; charset=utf-8", body: readFileSync("public/net/ids.mjs") },
   "/net/onelobby.mjs": { type: "text/javascript; charset=utf-8", body: readFileSync("public/net/onelobby.mjs") },
   // ...the rest of the game's files
@@ -128,7 +128,8 @@ import { GAME_ID, NET_VERSION } from "./ids.mjs";
 
 // address: location.host when the page came from the host's port, else a join code.
 export async function dial(address, { OneLobby, kitOptions = {} } = {}) {
-  if (!OneLobby) ({ OneLobby } = await import("/onelobby.bundle.mjs"));   // the host serves the bundle
+  // the bundle sits next to index.html (the host serves it; a static copy ships it), so a subpath copy works too
+  if (!OneLobby) ({ OneLobby } = await import(new URL("onelobby.bundle.js", document.baseURI).href));
   const kit = new OneLobby({ gameId: GAME_ID, netVersion: NET_VERSION, mode: "raw", lobbyServer: "",
     peerTimeoutMs: 12000, ...kitOptions });                                 // a silent host ends the session in 12 s
   const lobby = await kit.joinDirect(address);

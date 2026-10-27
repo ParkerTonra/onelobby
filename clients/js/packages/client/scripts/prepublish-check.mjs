@@ -12,7 +12,7 @@ if (raw.includes("REPLACE-ME")) {
 if (readFileSync(join(dir, "README.md"), "utf8").includes("REPLACE-ME")) {
   problems.push('README.md still has "REPLACE-ME" links: point them at the docs.');
 }
-for (const f of ["dist/index.js", "dist/index.d.ts", "dist/onelobby.global.js", "dist/onelobby.global.min.js", "dist/onelobby.bundle.mjs", "blueprint.schema.json", "README.md", "LICENSE"]) {
+for (const f of ["dist/index.js", "dist/index.d.ts", "dist/onelobby.global.js", "dist/onelobby.global.min.js", "dist/onelobby.bundle.mjs", "dist/onelobby.bundle.js", "blueprint.schema.json", "README.md", "LICENSE"]) {
   if (!existsSync(join(dir, f))) problems.push(`missing ${f}`);
 }
 const pkg = JSON.parse(raw);

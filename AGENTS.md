@@ -61,6 +61,7 @@ lobby.hostHidden; lobby.on("hostHiddenChanged", (hidden) => {});   // browser ho
 lobby.send(peerId, bytes); lobby.broadcast(bytes);         // { channel: "fast" } optional
 lobby.on("message", (from, bytes, channel) => {});
 lobby.on("peerJoined" | "peerReady" | "peerLeft" | "hostChanged" | "phase" | "sessionEnded", handler);
+lobby.on("peerFailed", (peer, reason) => {});              // host: a joiner never got connected ("a friend could not connect")
 lobby.on("ready", () => {}); await lobby.ready;            // joiner: link to host open (host: at once)
 await lobby.start(); await lobby.kick(id); await lobby.leave();   // kick bans the address; lobby.disconnect(id, code?, reason?) does not
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
@@ -84,7 +85,8 @@ Right after a release, npm's local cache can still list only the old versions, s
 
 No bundler: `<script src="https://cdn.jsdelivr.net/npm/onelobby@0.5.0/dist/onelobby.global.min.js">` sets
 `window.OneLobby` (so `new OneLobby.OneLobby({...})`), or import the single-file ES module
-`https://cdn.jsdelivr.net/npm/onelobby@0.5.0/dist/onelobby.bundle.mjs`. Low-level pieces (codec, chunking,
+`https://cdn.jsdelivr.net/npm/onelobby@0.5.0/dist/onelobby.bundle.mjs` (`dist/onelobby.bundle.js` is the same module
+for static hosts that serve `.mjs` as `text/plain`). Low-level pieces (codec, chunking,
 migration, WebRTC classes) are in `onelobby/internals`; in-memory test doubles in `onelobby/testing`.
 
 ### From a clone of this repo (before a release is on npm, or to try unreleased changes)
@@ -130,6 +132,9 @@ Full reference (generated): `docs/api/`.
 - Liveness: a silently dead peer surfaces on its own within about 30 s (host: `peerLeft`; joiner: `hostChanged` after
   a migration, or `sessionEnded("host_left")` on a direct lobby). `peerTimeoutMs` (default 0 = that) shortens it using
   OneLobby's own 2 s pings (minimum 6000), so games need no heartbeat of their own.
+- Host: `peerFailed(peer, reason)` fires when a joiner leaves before its link opened (its `ice_failed`, a closed tab), or
+  `"timeout"` when it is not ready `readyTimeoutMs` after joining (it keeps its seat and may still connect). Once per
+  peer, before that `peerLeft`; not for kicks or `disconnect()`. Use it to tell the host "a friend could not connect".
 - `rateLimit: { messages, perMs }` on `host()` / `hostDirect()` caps each joiner's incoming raw messages; the excess is
   dropped before `message` fires or is relayed.
 - `hostDirect` (Node) starts Nostr signaling by default: the startup line gains `; ip code ...` and ends `; nostr 5/7 relays`
