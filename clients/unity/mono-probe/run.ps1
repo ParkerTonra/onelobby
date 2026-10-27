@@ -4,14 +4,20 @@
 #   dotnet run --project server/OneLobby.Server -- --listen :8080
 #   powershell -File clients/unity/mono-probe/run.ps1 -Unity "C:\Program Files\Unity\Hub\Editor\6000.2.7f2" -Server ws://127.0.0.1:8080/ws
 # -Direct needs no server: host by IP (OneLobby.Direct + the embedded hub) on loopback port 47831, join by address.
+# -Crypto needs no server or native plugin: round-trips NostrCrypto's AES-GCM (platform vs managed) on Mono and prints the path.
 # -Upnp needs no server: the router port-mapping request against a fake gateway on loopback (quoted charset replies).
-param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws', [switch]$Direct, [switch]$Upnp)
+param([Parameter(Mandatory)] [string]$Unity, [string]$Server = 'ws://127.0.0.1:8080/ws', [switch]$Direct, [switch]$Upnp, [switch]$Crypto)
 $ErrorActionPreference = 'Stop'
 $lib = Join-Path $Unity 'Editor/Data/MonoBleedingEdge/lib/mono/unityjit-win32'
 $pkg = Join-Path $PSScriptRoot '../com.onelobby.unity'
 $out = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-monoprobe-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item (Join-Path $pkg 'Runtime/Plugins/*.dll'), (Join-Path $pkg 'Runtime/Plugins/Dependencies/*.dll'), (Join-Path $pkg 'Runtime/Plugins/x86_64/datachannel.dll') $out
+# Probe reaches OneLobby.Direct's internals (InternalsVisibleTo Probe), which the shipped DLL may predate: use a fresh build of it.
+$art = Join-Path $out 'art'
+dotnet build (Join-Path $PSScriptRoot '../../dotnet/OneLobby.Direct/OneLobby.Direct.csproj') -f netstandard2.1 -c Release --artifacts-path $art -v q -nologo
+if ($LASTEXITCODE -ne 0) { throw 'OneLobby.Direct build failed' }
+Copy-Item (Join-Path $art 'bin/OneLobby.Direct/release_netstandard2.1/OneLobby.Direct.dll'), (Join-Path $art 'bin/OneLobby.Core/release_netstandard2.1/OneLobby.Core.dll') $out -Force
 $sdk = (dotnet --list-sdks | Select-Object -Last 1) -replace '^(\S+) \[(.+)\]$', '$2\$1'
 $csc = Join-Path $sdk 'Roslyn/bincore/csc.dll'
 $refs = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'Facades/netstandard.dll', 'Facades/System.Runtime.dll', 'Facades/System.Memory.dll') |
@@ -27,7 +33,7 @@ if (-not $vs) { throw 'MSVC (C++ x64 tools) is needed to build monohost.exe' }
 $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvars64.bat'
 cmd /c "`"$vcvars`" >nul 2>nul && cl /nologo /O2 `"$(Join-Path $PSScriptRoot 'host/monohost.c')`" /Fe:`"$out/monohost.exe`" /Fo:`"$out/monohost.obj`" >nul"
 if ($LASTEXITCODE -ne 0) { throw 'monohost build failed' }
-& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $(if ($Upnp) { 'upnp' } elseif ($Direct) { 'direct' } else { $Server })
+& "$out/monohost.exe" (Join-Path $Unity 'Editor/Data') "$out/Probe.exe" $(if ($Crypto) { 'crypto' } elseif ($Upnp) { 'upnp' } elseif ($Direct) { 'direct' } else { $Server })
 $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $out
 exit $code

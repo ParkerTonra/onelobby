@@ -69,6 +69,30 @@ namespace OneLobby.Direct.Nostr
 
         private static bool _noPlatformGcm;
 
+        /// <summary>For tests and the Mono probe: skip the platform <c>AesGcm</c> and use the managed GCM only.</summary>
+        internal static bool ForceManaged
+        {
+            get => _noPlatformGcm;
+            set => _noPlatformGcm = value;
+        }
+
+        /// <summary>
+        /// Called once, with a one-line reason, when the managed GCM takes over from the platform <c>AesGcm</c> (a runtime
+        /// such as Unity's Mono that lacks or half-implements it). NostrCrypto has no logger of its own; wire this to yours.
+        /// </summary>
+        internal static Action<string>? FallbackLog;
+
+        private static int _fallbackLogged;
+
+        internal static void ResetFallbackLogForTests() => _fallbackLogged = 0;
+
+        private static void PlatformGcmFailed(Exception e)
+        {
+            _noPlatformGcm = true;
+            if (System.Threading.Interlocked.Exchange(ref _fallbackLogged, 1) == 0)
+                FallbackLog?.Invoke("platform AES-GCM unavailable (" + e.GetType().Name + ": " + e.Message + "); using managed AES-GCM");
+        }
+
         /// <summary>iv (12) || ciphertext || tag (16), no associated data.</summary>
         public static byte[] GcmSeal(byte[] key, byte[] iv, byte[] plain)
         {
@@ -84,12 +108,14 @@ namespace OneLobby.Direct.Nostr
                     g.Encrypt(iv, plain, ct, tag);
                     return Join(iv, ct, tag);
                 }
-                catch (Exception e) when (e is PlatformNotSupportedException || e is TypeLoadException || e is MissingMethodException || e is NotSupportedException)
+                catch (Exception e)
                 {
-                    _noPlatformGcm = true;
+                    // Any failure of the platform ctor or Encrypt (Mono throws assorted types) falls back to the managed GCM,
+                    // which writes the same bytes, so this cannot change what goes on the wire.
+                    PlatformGcmFailed(e);
                 }
             }
-            var m = ManagedGcm.Seal(key, iv, plain, out var mtag);
+            var m =ManagedGcm.Seal(key, iv, plain, out var mtag);
             return Join(iv, m, mtag);
         }
 
@@ -115,9 +141,10 @@ namespace OneLobby.Direct.Nostr
                     return plain;
                 }
                 catch (CryptographicException) { return null; }
-                catch (Exception e) when (e is PlatformNotSupportedException || e is TypeLoadException || e is MissingMethodException || e is NotSupportedException)
+                catch (Exception e)
                 {
-                    _noPlatformGcm = true;
+                    // A wrong tag is the CryptographicException above; anything else is the platform failing, not the data.
+                    PlatformGcmFailed(e);
                 }
             }
             return ManagedGcm.Open(key, iv, ct, tag);

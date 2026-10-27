@@ -9,6 +9,7 @@ using System.Threading;
 using OneLobby;
 using OneLobby.DataChannel;
 using OneLobby.Direct;
+using OneLobby.Direct.Nostr;
 using PortMapper = OneLobby.Server.PortMapper;
 using PortMapperOptions = OneLobby.Server.PortMapperOptions;
 
@@ -29,6 +30,7 @@ static class Probe
     {
         Console.WriteLine("runtime: " + typeof(object).Assembly.Location + " | " + Type.GetType("Mono.Runtime")?.GetMethod("GetDisplayName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.Invoke(null, null));
         Console.WriteLine("System.Text.Json: " + typeof(System.Text.Json.JsonDocument).Assembly.Location);
+        if (args.Length > 0 && args[0] == "crypto") return CryptoCheck();
         if (Environment.GetEnvironmentVariable("ONELOBBY_PROBE_LOG") is { Length: > 0 } lv)
         {
             DataChannelTransport.NativeLogLevel = int.Parse(lv);
@@ -91,6 +93,43 @@ static class Probe
         b.DisposeAsync().AsTask().Wait();
         Thread.Sleep(200);
         Console.WriteLine(ok ? "PASS" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    // "crypto": NostrCrypto's AES-256-GCM on Mono. Every Nostr frame goes through it; if Mono's AesGcm is missing or half-built
+    // and the managed fallback did not engage, GcmOpen returns null and all frames drop silently. Prints which path ran.
+    static int CryptoCheck()
+    {
+        NostrCrypto.FallbackLog = l => Console.WriteLine("fallback log: " + l);
+        var key = new byte[32];
+        for (var i = 0; i < key.Length; i++) key[i] = (byte)(i * 7 + 3);
+        var iv = new byte[12];
+        for (var i = 0; i < iv.Length; i++) iv[i] = (byte)(i + 1);
+        var plain = Encoding.UTF8.GetBytes("a nostr frame {\"k\":1} on Unity's Mono, longer than one 16-byte block");
+
+        bool Same(byte[]? a, byte[] b) => a != null && Convert.ToBase64String(a) == Convert.ToBase64String(b);
+
+        var blob = NostrCrypto.GcmSeal(key, iv, plain);
+        var opened = NostrCrypto.GcmOpen(key, blob);
+        var path = NostrCrypto.ForceManaged ? "managed (platform AesGcm failed)" : "platform AesGcm";
+        var ok = Same(opened, plain);
+        Console.WriteLine("default path: " + path + ", round trip " + (ok ? "ok" : "FAILED"));
+
+        NostrCrypto.ForceManaged = true;
+        var managedBlob = NostrCrypto.GcmSeal(key, iv, plain);
+        var managedOk = Same(NostrCrypto.GcmOpen(key, managedBlob), plain) && Same(NostrCrypto.GcmOpen(key, blob), plain);
+        Console.WriteLine("forced managed: seal/open " + (managedOk ? "ok" : "FAILED") + ", opens the default path's frame");
+        ok &= managedOk;
+        var same = Convert.ToBase64String(managedBlob) == Convert.ToBase64String(blob);
+        Console.WriteLine("managed frame equals default frame: " + same);
+        ok &= same;
+        var tampered = (byte[])managedBlob.Clone();
+        tampered[tampered.Length - 1] ^= 1;
+        var rejected = NostrCrypto.GcmOpen(key, tampered) == null;
+        Console.WriteLine("tampered tag rejected: " + rejected);
+        ok &= rejected;
+        NostrCrypto.ForceManaged = false;
+        Console.WriteLine(ok ? "ok" : "FAIL");
         return ok ? 0 : 1;
     }
 
