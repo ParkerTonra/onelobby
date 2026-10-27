@@ -498,6 +498,9 @@ public sealed class Hub
         int? to = Int(m, "to");
         if (to is null || lobby.Find(to.Value) is not { Session: not null } target || target == me)
         { Error(s, "bad_request", "unknown signal target", Field("to")); return; }
+        // direct lobbies have no migration: only the host and a joiner ever need each other, so two joiners cannot dial one another
+        if (_o.SingleLobby && me.PeerId != lobby.HostId && target.PeerId != lobby.HostId)
+        { Error(s, "bad_request", "joiners signal only the host", Field("to")); return; }
         long now = _clock.NowMs;
         if (!_o.DisableIpLimits)
         {

@@ -746,6 +746,7 @@ namespace OneLobby
                 {
                     var r = new Wire.Reader(body);
                     var epoch = r.U16(); var hostId = r.U16(); r.I64();
+                    if (_c.Direct || hostId != rec.Id) return; // direct lobbies never migrate; a claim is the claimant's own
                     if (epoch > _epoch || (epoch == _epoch && hostId < _you)) Demote(hostId, epoch);
                     return;
                 }
@@ -800,6 +801,7 @@ namespace OneLobby
         {
             if (type == Wire.HostClaim)
             {
+                if (_c.Direct) return;
                 var cr = new Wire.Reader(body);
                 var epoch = cr.U16(); var claimant = cr.U16(); var tick = cr.I64();
                 if (claimant == rec.Id) AcceptClaim(rec, epoch, claimant, tick);
@@ -1000,6 +1002,7 @@ namespace OneLobby
                     var from = Signaling.Int(e, "from");
                     var sig = Signaling.ParseSignal(e);
                     if (sig == null || !_peers.TryGetValue(from, out var rec)) return;
+                    if (!IsHost && !AcceptsSignalFrom(from)) return; // only the host dials a joiner; a non-host peer only while the host is lost
                     if (rec.Link == null)
                     {
                         if (sig.SdpType != "offer" || IsHost) return;
@@ -1032,6 +1035,18 @@ namespace OneLobby
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// A joiner takes offers and ICE only from its host. Direct lobbies have no migration, so that is absolute; a server
+        /// lobby also takes them from a roster member while the link to the current host is not open (a migration window).
+        /// </summary>
+        private bool AcceptsSignalFrom(int from)
+        {
+            if (from == _hostId) return true;
+            if (DirectJoiner) return false;
+            var hostLinkAlive = !_awaitingClaim && _peers.TryGetValue(_hostId, out var h) && h.Link is { IsOpen: true, IsFailed: false };
+            return !hostLinkAlive;
         }
 
         internal void OnServerError(LobbyError err, bool disconnected = false)

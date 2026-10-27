@@ -46,6 +46,22 @@ public class DirectHubTests
     }
 
     [Fact]
+    public void Signals_between_two_joiners_are_refused_in_a_direct_lobby_but_host_and_joiner_talk()
+    {
+        var (hub, _) = Direct();
+        var h = T.Ready(hub, "local", "Host").Create("unlisted");
+        var a = JoinNoCode(T.Ready(hub, "10.0.0.2", "Ann"));
+        var b = JoinNoCode(T.Ready(hub, "10.0.0.3", "Bob"));
+        a.Send("{\"t\":\"signal\",\"to\":" + b.PeerId + ",\"sdp\":{\"type\":\"offer\",\"sdp\":\"v=0\"}}");
+        Assert.Equal("bad_request", a.LastError);
+        Assert.False(b.Has("signal"));
+        a.Send("{\"t\":\"signal\",\"to\":1,\"sdp\":{\"type\":\"answer\",\"sdp\":\"v=0\"}}");
+        Assert.True(h.Has("signal"));
+        h.Send("{\"t\":\"signal\",\"to\":" + b.PeerId + ",\"sdp\":{\"type\":\"offer\",\"sdp\":\"v=0\"}}");
+        Assert.True(b.Has("signal"));
+    }
+
+    [Fact]
     public void Join_without_code_before_any_lobby_is_unknown_code()
     {
         var (hub, _) = Direct();
