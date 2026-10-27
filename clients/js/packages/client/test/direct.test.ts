@@ -78,6 +78,24 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     expect(inbox.get(1)!.at(-1)).toMatchObject({ t: "error", code: "rate_limited" });
   });
 
+  it("the signal limit also caps a sender at 8 targets' worth (160/s) in all", () => {
+    const hub = new SignalingHub(directHubOptions(10, null), { now: () => 1_700_000_000_000 });
+    const out: any[] = [];
+    const sock = (n: number, keep: boolean) => {
+      const s = hub.connect(`10.0.0.${n}`, (t) => keep && out.push(JSON.parse(t)), () => {})!;
+      hub.receive(s, JSON.stringify({ t: "hello", proto: "lk1", gameId: "g", netVersion: "1", name: `p${n}` }));
+      return s;
+    };
+    const h = sock(1, true);
+    hub.receive(h, JSON.stringify({ t: "create", name: "L", maxPlayers: 10, visibility: "unlisted", mode: "raw", tickRate: 20, lateJoin: true, meta: {} }));
+    for (let n = 2; n <= 10; n++) hub.receive(sock(n, false), JSON.stringify({ t: "join" }));
+    let sent = 0;
+    const err = () => out.some((m) => m.t === "error");
+    for (let to = 2; to <= 10 && !err(); to++) for (let i = 0; i < 20 && !err(); i++, sent++) hub.receive(h, JSON.stringify({ t: "signal", to, ice: {} }));
+    expect(sent).toBe(161);
+    expect(out.find((m) => m.t === "error")).toMatchObject({ code: "rate_limited" });
+  });
+
   it("join without a code joins the one lobby; codes hidden; no ICE servers", async () => {
     const host = await DirectHubHost.listen(0, directHubOptions(4, null), { host: "127.0.0.1" });
     cleanup.push(() => host.close());

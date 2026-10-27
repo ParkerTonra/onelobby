@@ -502,6 +502,37 @@ public class HubTests
     }
 
     [Fact]
+    public void Rate_limit_signal_caps_a_sender_at_160_per_second_over_all_targets()
+    {
+        var (hub, clock) = T.NewHub();
+        var h = T.Ready(hub, "10.0.0.1", "Host").Create(max: 10);
+        for (int n = 2; n <= 10; n++) T.Ready(hub, $"10.0.0.{n}", $"P{n}").Join(h.Code);
+        int sent = 0;
+        for (int to = 2; to <= 10 && h.LastError is null; to++)
+            for (int i = 0; i < 20 && h.LastError is null; i++) { h.Send($"{{\"t\":\"signal\",\"to\":{to},\"ice\":{{}}}}"); sent++; }
+        Assert.Equal("rate_limited", h.LastError);
+        Assert.Equal(161, sent);
+        clock.Advance(1000);
+        h.Inbox.Clear();
+        h.Send("{\"t\":\"signal\",\"to\":10,\"ice\":{}}");
+        Assert.Null(h.LastError);
+    }
+
+    [Fact]
+    public void Rate_limit_signal_starts_fresh_in_a_new_lobby()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, _, _) = T.Pair(hub);
+        for (int i = 0; i < 20; i++) h.Send("{\"t\":\"signal\",\"to\":2,\"ice\":{}}");
+        h.Send("{\"t\":\"leave\"}").Create();
+        var j = T.Ready(hub, "10.0.0.3", "New").Join(h.Code);
+        h.Inbox.Clear();
+        h.Send("{\"t\":\"signal\",\"to\":2,\"ice\":{}}");
+        Assert.Null(h.LastError);
+        Assert.True(j.Has("signal"));
+    }
+
+    [Fact]
     public void Disable_ip_limits_for_load_tests()
     {
         var (hub, _) = T.NewHub(o => o.DisableIpLimits = true);

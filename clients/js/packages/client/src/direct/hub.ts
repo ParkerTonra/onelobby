@@ -72,6 +72,9 @@ export function directHubOptions(maxPlayers: number, password?: string | null): 
   };
 }
 
+/** A session's total `signal` budget is this many targets' worth of `signalPerSec` (spec/signaling.md rate limits). */
+export const SIGNAL_FANOUT = 8;
+
 /** Sliding-window counter: at most `limit` events per `windowMs`. */
 export class RateWindow {
   private hits: number[] = [];
@@ -147,8 +150,10 @@ export class Session {
     readonly send: (text: string) => void,
     readonly close: () => void,
   ) {}
-  /** One window per target peer: a host answering many joiners at once gets the full budget for each of them. */
-  readonly signalRates = new Map<number, RateWindow>();
+  /** One window per target member (a member belongs to one lobby, so a new lobby starts fresh). */
+  readonly signalRates = new Map<Member, RateWindow>();
+  /** All signals of this session, so the per-target budget does not grow without bound with the lobby. */
+  signalTotal: RateWindow | null = null;
 }
 
 class Member {
@@ -661,8 +666,10 @@ export class SignalingHub {
     if (!target || !target.session || target === me) return this.error(s, "bad_request", "unknown signal target", field("to"));
     const now = this.now();
     if (!this.o.disableIpLimits) {
-      const rate = this.signalRate(s, target.peerId, now);
+      const rate = this.signalRate(s, target, now);
       if (!rate.tryHit(now)) return this.rateLimited(s, "signal", rate.retryAfterMs(now), null);
+      const total = (s.signalTotal ??= new RateWindow(this.o.signalPerSec * SIGNAL_FANOUT * this.scale, 1000));
+      if (!total.tryHit(now)) return this.rateLimited(s, "signal", total.retryAfterMs(now), null);
     }
     if (!has(m, "sdp") && !has(m, "ice")) return this.error(s, "bad_request", "signal needs sdp or ice", field("sdp"));
     const o: Json = { t: "signal", from: me.peerId };
@@ -672,8 +679,11 @@ export class SignalingHub {
     this.metrics.inc("onelobby_signals_relayed_total");
   }
 
-  /** spec/signaling.md rate limits: `signal` is counted per sender and target, so the host's budget grows with its joiners. */
-  private signalRate(s: Session, to: number, now: number): RateWindow {
+  /**
+   * spec/signaling.md rate limits: `signal` is counted per sender and target, so a host answering several joiners at once
+   * gets the budget for each, and per sender in total (SIGNAL_FANOUT targets' worth).
+   */
+  private signalRate(s: Session, to: Member, now: number): RateWindow {
     let w = s.signalRates.get(to);
     if (!w) {
       for (const [k, v] of s.signalRates) if (v.isIdle(now)) s.signalRates.delete(k);

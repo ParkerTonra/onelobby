@@ -20,8 +20,10 @@ public sealed class Session
     /// <summary>Private lobby this session has asked to join and awaits approval for.</summary>
     public Lobby? PendingIn;
     public Member? PendingMember;
-    /// <summary>One window per target peer: a host answering many joiners at once gets the full budget for each of them.</summary>
-    public readonly Dictionary<int, RateWindow> SignalRates = new();
+    /// <summary>One window per target member (a member belongs to one lobby, so a new lobby starts fresh).</summary>
+    public readonly Dictionary<Member, RateWindow> SignalRates = new();
+    /// <summary>All signals of this session, so the per-target budget does not grow without bound with the lobby.</summary>
+    public RateWindow? SignalTotal;
 }
 
 public sealed class Member

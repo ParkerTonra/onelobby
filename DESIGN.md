@@ -583,7 +583,7 @@ conformance harness read alike.
 
 | Threat | Measure |
 |---|---|
-| Server abuse | Per IP: 10 `create`/min, 60 `join`/min, 20 `signal`/s per peer, 8 open lobbies; per socket 4 KiB max signaling message, 30 s idle timeout; global `maxLobbies`/`maxPeers` from config → `server_full` |
+| Server abuse | Per IP: 10 `create`/min, 60 `join`/min, 8 open lobbies; per socket 20 `signal`/s to each target and 160/s in all, 16 KiB max signaling message, 30 s idle timeout; global `maxLobbies`/`maxPeers` from config → `server_full` |
 | Relay freeloading | TURN credentials are HMAC-signed with 1 h TTL (draft-uberti); coturn `total-quota` and `user-quota`; bandwidth cap per allocation (`max-bps`) |
 | Code guessing | 1.07e9 codes, 60 joins/min/IP, `unlisted`/`private` never listed; `private` needs host approval |
 | Hostile peers | The host validates everything a game cares about; the library validates framing only. The sim's own command validation is the anti-cheat for lockstep (e.g. the command's apply step returns a rejection). The library never executes client data |
