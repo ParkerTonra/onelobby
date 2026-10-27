@@ -15,11 +15,11 @@ namespace OneLobby.Tests
             var rig = new Rig();
             var hc = rig.NewClient("h", SyncMode.Raw);
             var h = rig.Await(hc.HostAsync(new LobbyOptions("raw", 4)));
+            var rc = rig.NewClient("r", SyncMode.Raw);
+            var r = rig.Await(rc.JoinAsync(h.Code));
             var vc = rig.NewClient("v", SyncMode.Raw);
             if (direct) vc.UseDirect(t => t, new System.Uri("ws://mem/ws"), null);
             var v = rig.Await(vc.JoinAsync(h.Code));
-            var rc = rig.NewClient("r", SyncMode.Raw);
-            var r = rig.Await(rc.JoinAsync(h.Code));
             Assert.True(rig.Until(() => v.IsReady && v.Peers.Count == 3));
             return (rig, v, r.LocalPeerId);
         }
@@ -43,13 +43,13 @@ namespace OneLobby.Tests
         }
 
         [Fact]
-        public void ServerLobbyJoinerStillAcceptsAClaimantsOfferOnceTheHostLinkIsGone()
+        public void ServerLobbyJoinerHoldsAnOfferFromARosterMemberAndAnswersItOnceTheHostLinkIsGone()
         {
             var (rig, v, rogue) = ThreePlayers(false);
-            foreach (var p in v.PeerRecords().Where(p => p.Id == 1)) p.Link!.Dispose();
-            Assert.True(rig.Until(() => !v.PeerRecords().First(p => p.Id == 1).Link!.IsOpen, 20));
             v.OnSignalingMessage("signal", Offer(rogue));
-            Assert.True(HasLink(v, rogue));
+            Assert.False(HasLink(v, rogue));
+            v.PeerRecords().First(p => p.Id == 1).Link!.Dispose(); // the host link dies; the lowest id (the rogue) is elected
+            Assert.True(rig.Until(() => HasLink(v, rogue), 400));
         }
     }
 }

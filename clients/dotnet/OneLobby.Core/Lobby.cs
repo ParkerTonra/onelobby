@@ -505,6 +505,7 @@ namespace OneLobby
         {
             if (_closed) return;
             var now = NowMs;
+            if (_held.Count > 0) ReleaseHeldSignals(now);
             for (var i = _lingering.Count - 1; i >= 0; i--)
                 if (now >= _lingering[i].Until) { _lingering[i].Link.Dispose(); _lingering.RemoveAt(i); }
             foreach (var rec in _peers.Values.ToList())
@@ -1002,18 +1003,14 @@ namespace OneLobby
                     var from = Signaling.Int(e, "from");
                     var sig = Signaling.ParseSignal(e);
                     if (sig == null || !_peers.TryGetValue(from, out var rec)) return;
-                    if (!IsHost && !AcceptsSignalFrom(from)) return; // only the host dials a joiner; a non-host peer only while the host is lost
-                    if (rec.Link == null)
+                    if (!IsHost && !AcceptsSignalFrom(from))
                     {
-                        if (sig.SdpType != "offer" || IsHost) return;
-                        ConnectPeer(rec, false); // a peer is dialing us (a new host, or a rival claimant): its claim decides
+                        // only the host dials a joiner. A server lobby keeps a roster member's offer for the moment the host is
+                        // declared lost (a new host can dial before this side noticed); a direct lobby never takes it.
+                        if (!DirectJoiner) HoldSignal(from, sig);
+                        return;
                     }
-                    else if (IsHost && sig.SdpType == "offer" && _epoch == 0 && !rec.Hello && !rec.Link.IsOpen)
-                    {
-                        // a joiner whose link never opened dials us itself (its relay-only retry): answer that offer
-                        ConnectPeer(rec, false);
-                    }
-                    rec.Link!.ApplySignal(sig);
+                    DeliverSignal(rec, sig);
                     return;
                 }
                 case "lobby":
@@ -1034,6 +1031,44 @@ namespace OneLobby
                     if (m.HostId != _hostId) SwitchHost(m.HostId);
                     return;
                 }
+            }
+        }
+
+        private void DeliverSignal(PeerRec rec, PeerSignal sig)
+        {
+            if (rec.Link == null)
+            {
+                if (sig.SdpType != "offer" || IsHost) return;
+                ConnectPeer(rec, false); // a peer is dialing us (a new host, or a rival claimant): its claim decides
+            }
+            else if (IsHost && sig.SdpType == "offer" && _epoch == 0 && !rec.Hello && !rec.Link.IsOpen)
+            {
+                // a joiner whose link never opened dials us itself (its relay-only retry): answer that offer
+                ConnectPeer(rec, false);
+            }
+            rec.Link!.ApplySignal(sig);
+        }
+
+        /// <summary>Offers from a non-host roster member wait this long for the host to be declared lost.</summary>
+        public const int HeldOfferMs = 20_000;
+        private const int MaxHeldIce = 32;
+        private readonly Dictionary<int, (long At, List<PeerSignal> Signals)> _held = new();
+
+        private void HoldSignal(int from, PeerSignal sig)
+        {
+            if (sig.SdpType == "offer") _held[from] = (NowMs, new List<PeerSignal> { sig });
+            else if (_held.TryGetValue(from, out var h) && h.Signals.Count < MaxHeldIce) h.Signals.Add(sig);
+        }
+
+        private void ReleaseHeldSignals(long now)
+        {
+            foreach (var from in _held.Keys.ToList())
+            {
+                var (at, signals) = _held[from];
+                if (now - at > HeldOfferMs || !_peers.TryGetValue(from, out var rec)) { _held.Remove(from); continue; }
+                if (!AcceptsSignalFrom(from)) continue;
+                _held.Remove(from);
+                foreach (var sig in signals) DeliverSignal(rec, sig);
             }
         }
 
