@@ -3,6 +3,7 @@
  * Nothing here talks to the network; it is safe to call from any UI code.
  */
 import { formatCode, normalizeCode } from "./crockford.js";
+import type { IpCodeKind, JoinCodeKind } from "./join-code-kind.js";
 
 export interface FriendlyError {
   /** Stable machine code (the OneLobbyError code, or "unknown"). */
@@ -167,10 +168,10 @@ export function shareUrl(code: string, base?: string, param = "join"): string {
 /** What a direct host answers at `GET /joininfo` (onelobby/direct). */
 export interface JoinInfo {
   joinCode: string;
-  joinCodeKind: "nostr" | "internet" | "same_network" | "none";
+  joinCodeKind: JoinCodeKind;
   /** The IP code (address and port); equals `joinCode` when Nostr is off. */
   directCode: string;
-  directCodeKind: "internet" | "same_network" | "none";
+  directCodeKind: IpCodeKind;
   /** `http://<public or LAN address>:<port>/` when the host serves pages; else null. */
   joinUrl: string | null;
   port: number;

@@ -1,4 +1,5 @@
 import { Chat } from "./chat.js";
+import type { IpCodeKind, JoinCodeKind } from "./join-code-kind.js";
 import type { Clock } from "./clock.js";
 import {
   CodecError,
@@ -39,7 +40,7 @@ export interface KickOptions {
 export type Peer = PeerInfo;
 
 /** What a direct host's `joinCode` is: see {@link Lobby.joinCodeKind}. */
-export type JoinCodeKind = "nostr" | "internet" | "same_network" | "none";
+export type { JoinCodeKind };
 
 export type LobbyEvents = {
   peerJoined: [Peer];
@@ -174,7 +175,7 @@ export class Lobby extends Emitter<LobbyEvents> {
    * Equal to `joinCode` when Nostr is off; otherwise the code to hand out for LAN play or when the router port is open.
    */
   directCode = "";
-  directCodeKind: "internet" | "same_network" | "none" = "none";
+  directCodeKind: IpCodeKind = "none";
   /** Direct-IP host only: this machine's addresses with the port, for an "Advanced" fold-out. */
   directAddresses: string[] = [];
   /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */

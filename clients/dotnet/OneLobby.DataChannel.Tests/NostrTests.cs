@@ -785,6 +785,20 @@ public sealed class NostrBridgeTests
         Assert.True(n >= 8);
     }
 
+    [Fact]
+    public void Join_code_kinds_match_the_shared_vector()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(NostrCryptoTests.SpecDir(), "join-code-kinds.json")));
+        var kinds = doc.RootElement.GetProperty("kinds").EnumerateArray().ToList();
+        Assert.Equal(kinds.Select(k => k.GetProperty("name").GetString()).OrderBy(n => n), Enum.GetNames<JoinCodeKind>().OrderBy(n => n));
+        foreach (var k in kinds)
+        {
+            var kind = Enum.Parse<JoinCodeKind>(k.GetProperty("name").GetString()!);
+            Assert.Equal(k.GetProperty("wire").GetString(), DirectLobby.KindName(kind));
+            Assert.Equal(k.GetProperty("name").GetString(), kind.ToString());
+        }
+    }
+
     /// <summary>The JS kind name ("same_network") as the enum (<c>SameNetwork</c>).</summary>
     private static JoinCodeKind KindFromJs(string js) =>
         Enum.Parse<JoinCodeKind>(string.Concat(js.Split('_').Select(w => char.ToUpperInvariant(w[0]) + w.Substring(1))));

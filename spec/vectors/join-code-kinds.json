@@ -1,0 +1,9 @@
+{
+  "$comment": "The kinds of a direct host's join code, spelled by each client. 'wire' is the JS string (and DirectLobby.KindName's output, also the joinInfo value on the hub); 'name' is the startup-line spelling (the C# enum member). JS: JOIN_CODE_KINDS / joinCodeKindName in src/join-code-kind.ts. C#: JoinCodeKind enum, DirectLobby.KindName.",
+  "kinds": [
+    { "wire": "nostr", "name": "Nostr" },
+    { "wire": "internet", "name": "Internet" },
+    { "wire": "same_network", "name": "SameNetwork" },
+    { "wire": "none", "name": "None" }
+  ]
+}

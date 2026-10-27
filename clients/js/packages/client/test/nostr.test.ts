@@ -6,6 +6,7 @@ import { eventId, makeEvent, checkNostrRelays, RelayPool, DEFAULT_NOSTR_RELAYS }
 import { ReliableLink, type Frame, type OutFrame } from "../src/nostr/link.js";
 import { ManualClock } from "../src/testing.js";
 import { systemClock } from "../src/clock.js";
+import { JOIN_CODE_KINDS, joinCodeKindName } from "../src/join-code-kind.js";
 import * as L from "../src/nostr/limits.js";
 import { FakeRelays } from "./fake-relay.js";
 import { specJson } from "./spec.js";
@@ -249,6 +250,14 @@ describe("relay pool", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(pool.connected).toBe(1);
     pool.close();
+  });
+});
+
+describe("join code kinds (spec/vectors/join-code-kinds.json)", () => {
+  it("the tuple and the name mapper match the vector, in order", () => {
+    const kinds: { wire: string; name: string }[] = specJson("vectors/join-code-kinds.json").kinds;
+    expect([...JOIN_CODE_KINDS]).toEqual(kinds.map((k) => k.wire));
+    for (const k of kinds) expect(joinCodeKindName(k.wire as (typeof JOIN_CODE_KINDS)[number])).toBe(k.name);
   });
 });
 

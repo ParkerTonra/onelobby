@@ -283,7 +283,7 @@ namespace OneLobby.Direct
             });
         }
 
-        private static string KindName(JoinCodeKind k) =>
+        internal static string KindName(JoinCodeKind k) =>
             k == JoinCodeKind.Internet ? "internet" : k == JoinCodeKind.SameNetwork ? "same_network" : k == JoinCodeKind.Nostr ? "nostr" : "none";
 
         private const int MaxRetryMs = 5 * 60_000;

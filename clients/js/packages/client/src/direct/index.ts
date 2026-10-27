@@ -13,6 +13,7 @@ import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
 import { encodeJoinCode, encodeRoomCode } from "../joincode.js";
+import { joinCodeKindName, type IpCodeKind, type JoinCodeKind } from "../join-code-kind.js";
 import { NostrHostBridge } from "../nostr/host.js";
 import { HOST_FIRST_RELAY_MS } from "../nostr/limits.js";
 import { DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "../nostr/relays.js";
@@ -90,14 +91,14 @@ export function formatHostLog(
   requested: number,
   bound: number,
   code: string,
-  kind: "nostr" | "internet" | "same_network" | "none",
+  kind: JoinCodeKind,
   mapping: string,
   /** With Nostr on: the IP code and how many relays are connected ("4/5", or "" for none reachable). */
-  nostr?: { directCode: string; directCodeKind: "internet" | "same_network" | "none"; relays: string },
+  nostr?: { directCode: string; directCodeKind: IpCodeKind; relays: string },
 ): string {
   let line = `OneLobby: direct host listening on TCP+UDP :${bound}`;
   if (bound !== requested) line += ` (${bound - requested === 1 ? requested : `${requested}-${bound - 1}`} busy)`;
-  const name = (k: string) => (k === "internet" ? "Internet" : k === "same_network" ? "SameNetwork" : k === "nostr" ? "Nostr" : "None");
+  const name = joinCodeKindName;
   line += code ? `; code ${code} (${name(kind)})` : "; no join code (no IPv4 address)";
   if (nostr) line += nostr.directCode ? `; ip code ${nostr.directCode} (${name(nostr.directCodeKind)})` : "; no ip code (no IPv4 address)";
   line += `; port mapping ${mapping || "off"}`;
@@ -232,8 +233,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   direct.directAddresses = localAddresses(hub.port);
   const log = o.log === false ? null : (o.log ?? console.log);
   // Sets joinCode / joinCodeKind / directCode / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
-  let lastIp: [string | null, "internet" | "same_network", string] = [null, "same_network", "off"];
-  const applyCode = (ip: string | null, kind: "internet" | "same_network", mappingNote: string) => {
+  let lastIp: [string | null, Exclude<IpCodeKind, "none">, string] = [null, "same_network", "off"];
+  const applyCode = (ip: string | null, kind: Exclude<IpCodeKind, "none">, mappingNote: string) => {
     lastIp = [ip, kind, mappingNote];
     direct.portMapping = mappingNote;
     direct.directCode = ip ? encodeJoinCode(ip, hub.port) : "";

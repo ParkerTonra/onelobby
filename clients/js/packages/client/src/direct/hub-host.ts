@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createSocket } from "node:dgram";
 import { createServer, type Server, type Socket } from "node:net";
 import type { SocketLike } from "../transport.js";
+import type { IpCodeKind, JoinCodeKind } from "../join-code-kind.js";
 import { SignalingHub, directHubOptions, type HubDeps, type HubOptions, type Session } from "./hub.js";
 import { LocalHubSocket } from "./hub-local.js";
 import { PortMapper,type PortMapperOptions, type PortMapResult } from "./portmap.js";
@@ -106,10 +107,10 @@ export interface HttpReply {
 export interface DirectJoinInfo {
   /** What to hand out: the Nostr code (version 1) by default, else the IP code. */
   joinCode: string;
-  joinCodeKind: "nostr" | "internet" | "same_network" | "none";
+  joinCodeKind: JoinCodeKind;
   /** The IP code (address and port); equals `joinCode` when Nostr is off. */
   directCode: string;
-  directCodeKind: "internet" | "same_network" | "none";
+  directCodeKind: IpCodeKind;
   /** With `http`: `http://<the code's address>:<port>/`; else null. */
   joinUrl: string | null;
   port: number;
