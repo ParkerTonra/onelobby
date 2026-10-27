@@ -27,6 +27,9 @@ namespace OneLobby
             /// <summary>The server said this peer is gone while its link was open: finish when the link closes or at <see cref="DepartAtMs"/>.</summary>
             public Action? Departure;
             public long DepartAtMs;
+            /// <summary>Host: joined but not ready yet (PeerFailed pending); <see cref="WatchDeadlineMs"/> 0 = no timer.</summary>
+            public bool Watching;
+            public long WatchDeadlineMs;
         }
 
         public const int HostTimeoutMs = 8000;
@@ -194,6 +197,15 @@ namespace OneLobby
         public event Action<Peer>? PeerReady;
         public event Action<Peer>? PeerJoined;
         public event Action<Peer, string>? PeerLeft;
+        /// <summary>
+        /// Host only: a joiner never got its link to the host open ("a friend could not connect"). The reason is
+        /// <c>"timeout"</c> when it is not ready <see cref="OneLobbyConfig.ReadyTimeout"/> after joining (it keeps its seat
+        /// and may still connect: <see cref="PeerReady"/> then fires as usual), else the <see cref="PeerLeft"/> reason when it
+        /// leaves before it was ready (a joiner's own <c>ice_failed</c> ends that way). Fires at most once per peer, just
+        /// before that <see cref="PeerLeft"/>; not for peers the host kicks or disconnects. Zero <c>ReadyTimeout</c> turns
+        /// the timeout off.
+        /// </summary>
+        public event Action<Peer, string>? PeerFailed;
         public event Action<Peer>? JoinRequested;
         public event Action<int>? HostChanged;
         public event Action<LobbyPhase>? PhaseChanged;
@@ -365,6 +377,27 @@ namespace OneLobby
             _readyDeadlineMs = NowMs + first;
         }
 
+        // ---- host: joiners that never get ready (PeerFailed; same rules as the JS client's peerFailed) ------------------
+
+        private void WatchReady(PeerRec rec)
+        {
+            rec.Watching = true;
+            var ms = (long)Math.Ceiling(_c.Config.ReadyTimeout.TotalMilliseconds);
+            rec.WatchDeadlineMs = ms > 0 ? NowMs + ms : 0;
+        }
+
+        private void CheckPeerWatches(long now)
+        {
+            if (!IsHost) return;
+            foreach (var rec in _peers.Values.Where(r => r.Watching && r.WatchDeadlineMs != 0 && now >= r.WatchDeadlineMs).ToList())
+            {
+                rec.WatchDeadlineMs = 0;
+                rec.Watching = false;
+                PeerFailed?.Invoke(ToPeer(rec), "timeout");
+                if (_closed) return;
+            }
+        }
+
         private static bool HasRelay(IReadOnlyList<IceServer> ice) =>
             ice.Any(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase)
                 || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
@@ -503,6 +536,8 @@ namespace OneLobby
             CheckFlushes(now);
             CheckReadyTimer(now);
             if (_closed) return;
+            CheckPeerWatches(now);
+            if (_closed) return;
             Timeouts(now);
             if (now - _lastPingMs >= PingEveryMs)
             {
@@ -592,6 +627,7 @@ namespace OneLobby
         {
             if (rec.ReadyRaised) return;
             rec.ReadyRaised = true;
+            rec.Watching = false;
             PeerReady?.Invoke(ToPeer(rec));
         }
 
@@ -932,7 +968,7 @@ namespace OneLobby
                     if (_closed || id == _you || _peers.ContainsKey(id)) return;
                     var rec = new PeerRec { Id = id, Name = Signaling.Str(p, "name") };
                     _peers[id] = rec;
-                    if (IsHost) ConnectPeer(rec, true);
+                    if (IsHost) { WatchReady(rec); ConnectPeer(rec, true); }
                     PeerJoined?.Invoke(ToPeer(rec));
                     return;
                 }
@@ -989,7 +1025,7 @@ namespace OneLobby
                         {
                             var rec = new PeerRec { Id = p.PeerId, Name = p.Name };
                             _peers[p.PeerId] = rec;
-                            if (IsHost && p.PeerId != _you) ConnectPeer(rec, true);
+                            if (IsHost && p.PeerId != _you) { WatchReady(rec); ConnectPeer(rec, true); }
                             PeerJoined?.Invoke(ToPeer(rec));
                         }
                     if (m.HostId != _hostId) SwitchHost(m.HostId);
@@ -1032,6 +1068,11 @@ namespace OneLobby
             Lockstep?.DropPending(rec.Id);
             Voice.OnPeerGone(rec.Id);
             Pause.OnPeerGone(rec.Id);
+            if (rec.Watching)
+            {
+                rec.Watching = false;
+                if (reason is not ("kicked" or "disconnected")) PeerFailed?.Invoke(ToPeer(rec), reason);
+            }
             PeerLeft?.Invoke(ToPeer(rec), reason);
         }
 

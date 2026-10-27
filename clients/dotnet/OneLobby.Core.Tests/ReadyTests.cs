@@ -154,6 +154,66 @@ namespace OneLobby.Tests
 
 namespace OneLobby.Tests
 {
+    public class PeerFailedTests
+    {
+        private static (Rig Rig, Lobby Host, List<string> Seen) HostWith(TimeSpan timeout)
+        {
+            var rig = new Rig();
+            var cfg = Rig.Config("h", mode: SyncMode.Raw) with { ReadyTimeout = timeout };
+            var hc = new LobbyClient(cfg, rig.Net.CreateTransport());
+            rig.Clients.Add(hc);
+            var h = rig.Await(hc.HostAsync(new LobbyOptions("raw", 4)));
+            var seen = new List<string>();
+            h.PeerFailed += (p, r) => seen.Add($"failed {p.PeerId} {r}");
+            h.PeerLeft += (p, r) => seen.Add($"left {p.PeerId} {r}");
+            return (rig, h, seen);
+        }
+
+        private static Lobby JoinWith(Rig rig, string code, string name, TimeSpan timeout)
+        {
+            var gc = new LobbyClient(Rig.Config(name, mode: SyncMode.Raw) with { ReadyTimeout = timeout }, rig.Net.CreateTransport());
+            rig.Clients.Add(gc);
+            return rig.Await(gc.JoinAsync(code));
+        }
+
+        [Fact]
+        public void LeavingBeforeReadyRaisesPeerFailedThenPeerLeftWithTheSameReason() => RunLeave();
+
+        private static void RunLeave()
+        {
+            var (rig, host, seen) = HostWith(TimeSpan.Zero);
+            rig.Net.CanConnect = (_, _) => false;
+            var g = JoinWith(rig, host.Code, "g", TimeSpan.FromSeconds(10));
+            Assert.True(rig.Until(() => g.ReadyAsync.IsCompleted, 1000)); // its own ice_failed: it leaves
+            Assert.True(rig.Until(() => seen.Count >= 2, 100));
+            Assert.Equal(new[] { "failed 2 left", "left 2 left" }, seen.ToArray());
+            rig.Step(800);
+            Assert.Equal(2, seen.Count);
+        }
+
+        [Fact]
+        public void NotReadyInReadyTimeoutRaisesPeerFailedTimeoutOnceAndKeepsTheSeat() => RunTimeout();
+
+        private static void RunTimeout()
+        {
+            var (rig, host, seen) = HostWith(TimeSpan.FromSeconds(5));
+            var ready = new List<int>();
+            host.PeerReady += p => ready.Add(p.PeerId);
+            rig.Net.CanConnect = (a, b) => a.RemotePeerId != 2 && b.RemotePeerId != 2; // bob (2) never gets a link
+            JoinWith(rig, host.Code, "bob", TimeSpan.Zero);
+            var carol = JoinWith(rig, host.Code, "carol", TimeSpan.Zero);
+            Assert.True(rig.Until(() => host.IsPeerReady(3), 100));
+            rig.Step(196); // 4.9 s
+            Assert.Empty(seen);
+            rig.Step(8);
+            Assert.Equal(new[] { "failed 2 timeout" }, seen.ToArray()); // carol got ready: no event
+            rig.Step(800);
+            Assert.Equal(new[] { "failed 2 timeout" }, seen.ToArray());
+            Assert.Equal(new[] { 1, 2, 3 }, host.Peers.Select(p => p.PeerId).OrderBy(x => x).ToArray());
+            Assert.True(carol.IsReady);
+        }
+    }
+
     public class LateJoinTickTests
     {
         [Xunit.Fact]

@@ -22,7 +22,7 @@ client.Pump();                                             // only until you hol
 lobby.Pump();                                              // then this, every frame; events fire on the calling thread
 lobby.Send(peerId, bytes); lobby.Broadcast(bytes);         // Channel.Reliable (default) or Channel.Fast
 lobby.MessageReceived += (from, payload, channel) => { };
-lobby.PeerJoined / PeerReady / PeerLeft / HostChanged / PhaseChanged / SessionEnded
+lobby.PeerJoined / PeerReady / PeerFailed / PeerLeft / HostChanged / PhaseChanged / SessionEnded
 lobby.Ready += () => { }; await lobby.ReadyAsync;          // joiner: link to host open (host: at once)
 await lobby.StartAsync(); await lobby.KickAsync(id); await lobby.LeaveAsync();   // KickAsync bans; DisconnectAsync(id, code?, reason?) does not
 bool sent = await lobby.FlushAsync(TimeSpan.FromSeconds(1));   // before LeaveAsync: last reliable messages leave first (keep pumping)
@@ -171,6 +171,8 @@ Full reference (generated): `docs/api/`.
   same rules as JS `readyTimeoutMs`. `ReadyAsync` faults with `OneLobbyException` code `ice_failed`, `client.Error`
   fires, the lobby is left and `SessionEnded("ice_failed")` fires; the relay-only retry runs when the server offers
   TURN. Direct-IP joiners get the same timeout (no relay retry: direct IP has no TURN).
+- Host: `PeerFailed(peer, reason)` is the same as JS `peerFailed`, with `OneLobbyConfig.ReadyTimeout` (zero = no timeout
+  event) as the timer. Fires inside `Pump()`, once per peer, just before that `PeerLeft`.
 - Liveness: a silent joiner is dropped after 10 s and a silent host is handled as lost after 8 s;
   `config with { PeerTimeout = TimeSpan.FromSeconds(6) }` sets both (minimum 6 s). `new LobbyOptions(...) { RateLimit =
   new RateLimit(60, 1000) }` (or `DirectHostOptions.RateLimit`) caps each joiner's incoming raw messages like JS `rateLimit`.
