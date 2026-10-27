@@ -231,7 +231,9 @@ remote; Windows host to Linux joiner also works. That proves the s.2 rule. Not c
 and an internet path; those are standard NAT behaviour for a static forward and remain an optional by-hand check.
 
 Found while building: libjuice binds `P` with address reuse, so a second process can bind UDP `P` without an error;
-only the TCP listener reports `port_in_use`. Kicks are per address, so two joiners on one machine (same IP) share a ban.
+only the TCP listener reports `port_in_use`. Kicks are per address, so two joiners on one machine (same IP) share a ban. A Nostr joiner's socket address is a key it
+chooses, so a kick also bans the remote address of its WebRTC link when the host saw one (not a relayed or mDNS address);
+a fresh key from the same address is removed as soon as its link address resolves.
 `WebSocket.CreateFromStream` on Unity (s.5 step 3), checked statically against Unity 6000.2.7f2: the .NET Standard
 2.1 reference assembly declares it, and the runtime `System.dll` in both the `unityjit` (Mono) and `unityaot`
 (IL2CPP) profiles carries it with the `ManagedWebSocket` implementation behind it. Not yet exercised in a Unity player.

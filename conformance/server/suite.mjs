@@ -491,6 +491,21 @@ export function buildSuite(opts) {
     j.send({ t: 'signal', to: 1, sdp: { type: 'answer', sdp: 'v=0\r\n' }, ice });
     const c = await h.next('signal'); assert.equal(c.from, 2); assert.equal(c.sdp.type, 'answer'); assert.deepEqual(c.ice, ice);
   });
+  // ------------------------------------------------------------------ direct hubs (run with --direct against a single-lobby hub)
+  // a single-lobby hub holds one lobby for its whole life, so the direct tests share one test
+  T('direct', 'a signal where neither side is the host is bad_request and not relayed; host to joiner and back still relay', async (t) => {
+    const h = await t.host();
+    const a = await t.join(h.lobby.code, {}, h);
+    const b = await t.join(h.lobby.code, {}, h); await a.next('peer_joined');
+    await a.callError({ t: 'signal', to: 3, sdp: { type: 'offer', sdp: 'v=0\r\n' } }, 'bad_request');
+    await sleep(100);
+    assert.equal(b.drain().filter((m) => m.t === 'signal').length, 0, 'nothing relayed to the other joiner');
+    h.send({ t: 'signal', to: 2, sdp: { type: 'offer', sdp: 'v=0\r\n' } });
+    assert.equal((await a.next('signal')).from, 1);
+    a.send({ t: 'signal', to: 1, ice: { candidate: 'x', sdpMid: null, sdpMLineIndex: null } });
+    assert.equal((await h.next('signal')).from, 2);
+  }, { directOnly: true });
+
   T('signal', 'joiner to joiner works inside one lobby', async (t) => {
     const h = await t.host();
     const a = await t.join(h.lobby.code, {}, h);
@@ -614,6 +629,15 @@ export function buildSuite(opts) {
     await h.callError({ t: 'path', path: 'sideways' }, 'bad_request');
     await h.call({ t: 'ping', n: 1 }, 'pong');
   });
+  T('ratelimit', 'sockets: the 33rd open socket from one address gets rate_limited max_sockets and is closed 1008', async (t) => {
+    const n = 32 * (opts.limits.socketScale ?? 1);
+    for (let i = 0; i < n; i++) await t.raw('sock');
+    const x = await t.raw('over');
+    const m = await x.nextAny(2500, 'rate_limited');
+    assert.equal(m.t, 'error'); assert.equal(m.code, 'rate_limited'); assert.equal(m.data?.reason, 'max_sockets');
+    for (let i = 0; i < 40 && x.closed === null; i++) await sleep(50);
+    assert.equal(x.closed, 1008, 'closed with 1008');
+  }, { rateLimitOnly: true });
   T('ratelimit', 'signal: bursts above N/s -> rate_limited, the rest forwarded', async (t) => {
     const n = lim().rateSignal;
     const h = await t.host(); const j = await t.join(h.lobby.code, {}, h);

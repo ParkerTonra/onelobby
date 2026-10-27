@@ -147,7 +147,7 @@ The IP limits (`create`, `join`, open lobbies, open sockets) can be switched off
 switch never turns off the `signal` limits or the backpressure close.
 
 **Test mode (decision).** The per-IP limits make a full functional run impossible from one IP, so a server must offer a
-way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; conformance functional suite is run with 20, the
+way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; the per-IP socket cap scales with it too; conformance functional suite is run with 20, the
 `--ratelimit` suite with 1 on a fresh server). `conformance/server/README.md` has the exact invocations.
 
 ## Error `data` summary

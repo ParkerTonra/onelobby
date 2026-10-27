@@ -24,6 +24,12 @@ tests. Run in two passes:
    (when the server runs scaled, pass the scaled numbers). `--fresh` additionally asserts the (N+1)th request is the first
    refused.
 
+Hub hardening: `--ratelimit` also checks the per-IP socket cap (the 33rd open socket from one address gets `rate_limited`
+`max_sockets` and is closed 1008). `--direct` runs only the direct-hub tests (no host migration: a `signal` where neither side
+is the host is `bad_request`) and needs a single-lobby hub, e.g. `node server/run-ts-hub.mjs --direct`; it is the only suite
+that hub shape can run, since it holds one lobby. The Nostr pair limit (10 signals/s to a `nostr:` session) and the 1 MiB
+backpressure close need a transport the harness does not drive; both hubs unit-test them.
+
 Other optional tests: `--disallowed-game=<id>` (server has `allowedGameIds` without that id -> `game_not_allowed`),
 `--expect-full` (server is at `maxLobbies`/`maxPeers` -> `server_full`), `--slow` (30 s idle timeout, ~35 s).
 

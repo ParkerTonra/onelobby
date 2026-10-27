@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 export function parseArgs(argv) {
-  const o = { url: null, gameId: `conf-${Math.random().toString(36).slice(2, 7)}`, only: null, groups: null, ratelimit: false, slow: false, fresh: false,
+  const o = { url: null, gameId: `conf-${Math.random().toString(36).slice(2, 7)}`, only: null, groups: null, ratelimit: false, slow: false, fresh: false, direct: false,
     noHealth: false, disallowedGame: null, expectFull: false, json: false, limits: {}, timeout: 30000 };
   for (const a of argv) {
     if (!a.startsWith('--')) { o.url = a; continue; }
@@ -18,6 +18,7 @@ export function parseArgs(argv) {
       case 'ratelimit': o.ratelimit = true; break;
       case 'slow': o.slow = true; break;
       case 'fresh': o.fresh = true; break;
+      case 'direct': o.direct = true; break;
       case 'no-health': o.noHealth = true; break;
       case 'disallowed-game': o.disallowedGame = v; break;
       case 'expect-full': o.expectFull = true; break;
@@ -43,6 +44,7 @@ export async function runSuite(opts, out = console.log) {
   const selected = all.filter((t) => {
     if (opts.ratelimit ? !t.rateLimitOnly : t.rateLimitOnly) return false;
     if (t.slowOnly && !opts.slow) return false;
+    if (!!t.directOnly !== !!opts.direct) return false; // --direct: only the direct-hub tests, against a single-lobby hub
     if (opts.groups && !opts.groups.includes(t.group)) return false;
     if (opts.only && !`${t.group} ${t.name}`.toLowerCase().includes(opts.only.toLowerCase())) return false;
     return true;

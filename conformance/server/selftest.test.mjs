@@ -23,7 +23,7 @@ test('game_not_allowed and server_full policy tests are green against a restrict
   } finally { await s.close(); }
 });
 
-for (const only of ['open lobbies', 'create: more', 'join: more', 'signal: bursts']) {
+for (const only of ['open lobbies', 'create: more', 'join: more', 'signal: bursts', 'sockets: the 33rd']) {
   test(`rate limits on a fresh mock: ${only}`, async () => {
     const s = await startMock({ scale: 1 });
     try {
@@ -32,3 +32,12 @@ for (const only of ['open lobbies', 'create: more', 'join: more', 'signal: burst
     } finally { await s.close(); }
   });
 }
+
+test('direct-hub tests are green against a single-lobby mock, and the relay rule is the only difference', async () => {
+  const s = await startMock({ scale: 20, direct: true });
+  try {
+    const r = await runSuite(parseArgs([s.url, '--direct', '--no-health']), () => {});
+    assert.equal(r.failed, 0, JSON.stringify(r.results));
+    assert.equal(r.passed, 1);
+  } finally { await s.close(); }
+});

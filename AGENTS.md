@@ -150,6 +150,12 @@ Full reference (generated): `docs/api/`.
   throttled, `lobby.hostHidden` / `hostHiddenChanged` tell you. No UPnP, so a strict-NAT pair fails with `ice_failed`
   (use a Node or native host there). Recipe: `docs/recipes/browser-game.md` section 6.
 - Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
+  They are also host-and-joiners only: the hub refuses a `signal` between two joiners (`bad_request`) and a client answers
+  an SDP offer only from the host, so one player cannot open a link to another (and learn its address).
+- Hub limits a game can meet (direct host, same numbers in C# and JS): 32 open signaling sockets per address, loopback
+  included (`rate_limited` with reason `max_sockets`, closed 1008); a joiner that stops reading is closed 1008
+  `backpressure` once 1 MiB is waiting; Nostr joiners: 8 new sessions per 10 s (the rest keep retrying their `open`),
+  10 signals/s per target. `kick` on a Nostr joiner bans its key and, when the host knows it, the address behind it.
 - Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
   `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
   reason the host passes to `disconnect(id, code, reason)` / `kick(id, { code, reason })` reach the joiner's `onclose`

@@ -14,7 +14,9 @@ const { DirectHubHost, defaultHubOptions } = await import(pathToFileURL(dist).hr
 
 // Rate-limit pass (README): ONELOBBY_RATE_SCALE=1 node conformance/server/run-ts-hub.mjs --ratelimit --fresh
 const rateScale = Number(process.env.ONELOBBY_RATE_SCALE ?? 20);
-const host = await DirectHubHost.listen(0, { ...defaultHubOptions(), rateScale }, { host: '127.0.0.1' });
+// --direct: a single-lobby hub (what a direct host runs), for the direct-hub tests only
+const direct = process.argv.includes('--direct');
+const host = await DirectHubHost.listen(0, { ...defaultHubOptions(), rateScale, singleLobby: direct }, { host: '127.0.0.1' });
 const opts = parseArgs([`ws://127.0.0.1:${host.port}/ws`, ...process.argv.slice(2)]);
 const r = await runSuite(opts);
 await host.close();

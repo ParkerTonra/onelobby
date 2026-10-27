@@ -1,6 +1,6 @@
 // A compact in-memory reference onelobby-server, written from spec/signaling.md. It exists to prove the harness is
 // self-consistent (conformance/server self-test) and as a readable executable version of the rules. Not production code.
-//   node conformance/server/mock-server.mjs [port] [--scale=N]
+//   node conformance/server/mock-server.mjs [port] [--scale=N] [--direct]
 import { WebSocketServer } from 'ws';
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -11,11 +11,13 @@ import { normalize, ALPHABET } from '../../spec/reference/codes.mjs';
 const STRIP = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
 const MAX_MSG = 16384;
 
-export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbies = Infinity } = {}) {
+export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbies = Infinity, direct = false } = {}) {
   const lobbies = new Map();
   const tokens = new Map();
   const windows = new Map(); // key -> timestamps
   const lim = { create: 10 * scale, join: 60 * scale, signal: 20 * scale, open: 8 * scale };
+  const socketsPerIp = 32 * scale;
+  const openByIp = new Map();
   let connSeq = 0;
 
   const hit = (key, max, winMs) => {
@@ -164,6 +166,8 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
         if (!l) return bad('not in a lobby');
         const target = l.peers.get(m.to);
         if (!Number.isInteger(m.to) || !target?.conn || m.to === me.peerId) return bad('to', 'to');
+        // a direct (single-lobby) hub has no migration: signals go to or from the host only
+        if (direct && me.peerId !== l.hostId && m.to !== l.hostId) return bad('signals go to or from the host only', 'to');
         const wait = hit(`signal:${conn.id}:${l.code}:${m.to}`, lim.signal, 1000) || hit(`signal:${conn.id}`, lim.signal * 8, 1000);
         if (wait) return err(conn, 'rate_limited', 'too many signals', { retryAfterMs: wait });
         if (!m.sdp && !m.ice) return bad('sdp or ice');
@@ -215,6 +219,14 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
 
   wss.on('connection', (ws, req) => {
     const conn = { ws, id: ++connSeq, hello: null, lobby: null, peerId: null, ip: req.socket.remoteAddress, last: Date.now() };
+    // open sockets per address, loopback included (spec/signaling.md rate limits)
+    if ((openByIp.get(conn.ip) ?? 0) >= socketsPerIp) {
+      err(conn, 'rate_limited', 'too many sockets', { retryAfterMs: 5000, reason: 'max_sockets' });
+      ws.close(1008, 'too_many_sockets');
+      return;
+    }
+    openByIp.set(conn.ip, (openByIp.get(conn.ip) ?? 0) + 1);
+    ws.on('close', () => openByIp.set(conn.ip, (openByIp.get(conn.ip) ?? 1) - 1));
     ws.on('message', (data, isBinary) => {
       conn.last = Date.now();
       if (isBinary) return;
@@ -243,6 +255,6 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('server/mock-server.mjs')) {
   const port = Number(process.argv[2]?.match(/^\d+$/) ? process.argv[2] : 8080);
   const scale = Number(process.argv.find((a) => a.startsWith('--scale='))?.slice(8) ?? 1);
-  const s = await startMock({ port, scale });
+  const s = await startMock({ port, scale, direct: process.argv.includes('--direct') });
   console.log(`mock onelobby-server on ${s.url} (rate scale ${scale})`);
 }
