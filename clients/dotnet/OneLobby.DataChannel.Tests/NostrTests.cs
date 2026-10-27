@@ -454,6 +454,37 @@ public sealed class NostrLinkTests
         p.B.Receive(frames[0]);
         Assert.Equal(65, p.AtB.Count); // 1 plus the held frames 2..65; the rest wait for a resend
     }
+    [Fact]
+    public void OutboundQueueDropsTextsOverTheFrameCapWithoutClosingTheLink()
+    {
+        var p = new Pair { DeliverToB = _ => false }; // nothing is ever acknowledged
+        for (var i = 0; i < NostrLink.MaxOutFrames + 40; i++) { p.A.Queue("m" + i); p.Run(40); }
+        Assert.Equal(NostrLink.MaxOutFrames, p.A.Unacked);
+        Assert.Equal(40, p.A.Dropped);
+        Assert.False(p.A.IsClosed);
+    }
+
+    [Fact]
+    public void OutboundQueueDropsTextsOverTheByteCap()
+    {
+        var p = new Pair { DeliverToB = _ => false };
+        var big = new string('x', 20_000);
+        for (var i = 0; i < 20; i++) p.A.Queue(big); // 400 KB offered in one batch window
+        Assert.True(p.A.Dropped >= 7, "dropped " + p.A.Dropped);
+        p.Run(100);
+        Assert.False(p.A.IsClosed);
+        Assert.True(p.SentByA.Where(f => f.Type == "data").Sum(f => f.Msgs!.Count) <= 13);
+    }
+
+    [Fact]
+    public void AcknowledgedTextsFreeTheOutboundBudget()
+    {
+        var p = new Pair();
+        var big = new string('x', 20_000);
+        for (var round = 0; round < 40; round++) { p.A.Queue(big); p.Run(100); }
+        Assert.Equal(0, p.A.Dropped);
+        Assert.Equal(40, p.AtB.Count);
+    }
 }
 
 public sealed class NostrBridgeTests

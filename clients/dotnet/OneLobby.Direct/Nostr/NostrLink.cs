@@ -25,12 +25,16 @@ namespace OneLobby.Direct.Nostr
         /// <summary>UTF-8 bytes of messages per frame: under the 32 KiB content limit, room for the JSON envelope.</summary>
         public const int MaxFrameBytes = 30_000;
         public const int TickMs = 250;
+        /// <summary>Outbound cap (spec s.4 "Outbound queue"): unacknowledged frames, and bytes queued or unacknowledged. Over either, a text is dropped.</summary>
+        public const int MaxOutFrames = 128;
+        public const int MaxOutBytes = 256 * 1024;
 
         private sealed class Sent
         {
             public NostrFrame Frame = null!;
             public long LastSend;
             public int Resends;
+            public int Bytes;
         }
 
         private readonly Func<long> _now;
@@ -47,6 +51,10 @@ namespace OneLobby.Direct.Nostr
         private long _lastSent;
         private long _lastHeard;
         private bool _done;
+        private int _heldBytes; // queued + unacknowledged hub text bytes
+
+        /// <summary>Texts dropped because the outbound cap was reached.</summary>
+        public int Dropped { get; private set; }
 
         /// <summary>The other side's pubkey; every frame this link emits is addressed to it.</summary>
         public string Peer => _peer;
@@ -74,6 +82,9 @@ namespace OneLobby.Direct.Nostr
         public void Queue(string msg)
         {
             if (_done) return;
+            var n = Encoding.UTF8.GetByteCount(msg);
+            if (_unacked.Count >= MaxOutFrames || _heldBytes + n > MaxOutBytes) { Dropped++; return; } // a stuck peer: the link stays, the excess goes
+            _heldBytes += n;
             _queue.Add(msg);
             ScheduleFlush();
         }
@@ -93,7 +104,11 @@ namespace OneLobby.Direct.Nostr
                 return;
             }
             if (f.Type != "data" && f.Type != "beat") return;
-            foreach (var k in _unacked.Keys.Where(k => k <= f.Ack).ToList()) _unacked.Remove(k);
+            foreach (var k in _unacked.Keys.Where(k => k <= f.Ack).ToList())
+            {
+                _heldBytes -= _unacked[k].Bytes;
+                _unacked.Remove(k);
+            }
             if (f.Type == "beat") return;
             var msgs = f.Msgs ?? new List<string>();
             if (f.Seq < 1) return;
@@ -140,6 +155,7 @@ namespace OneLobby.Direct.Nostr
             _unacked.Clear();
             _held.Clear();
             _queue.Clear();
+            _heldBytes = 0;
         }
 
         private void ScheduleFlush()
@@ -164,7 +180,7 @@ namespace OneLobby.Direct.Nostr
             {
                 if (batch.Count == 0) return;
                 var frame = new NostrFrame { Type = "data", Seq = _nextSeq++, Ack = _rcvNext - 1, Msgs = batch };
-                _unacked[frame.Seq] = new Sent { Frame = frame, LastSend = now };
+                _unacked[frame.Seq] = new Sent { Frame = frame, LastSend = now, Bytes = bytes };
                 Emit(frame);
                 batch = new List<string>();
                 bytes = 0;
