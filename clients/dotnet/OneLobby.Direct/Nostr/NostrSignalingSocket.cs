@@ -34,6 +34,7 @@ namespace OneLobby.Direct.Nostr
         private NostrLink? _link;
         private long _lastOpen;
         private bool _opened;
+        private int _relaysSeen;
         private bool _everUp;
         private volatile int _state = (int)SocketState.Connecting;
         private volatile string? _closeReason;
@@ -104,7 +105,11 @@ namespace OneLobby.Direct.Nostr
                     if (_channel.Relays.Connected > 0) _everUp = true;
                     if (elapsed >= GiveUpMs) { Fail(NoHostReason); return; }
                     if (!_everUp && elapsed >= NoRelayMs) { Fail(NoRelayReason); return; }
-                    if (_everUp && (!_opened || now - _lastOpen >= OpenEveryMs))
+                    // a relay that comes up after the first open gets one at once, not at the next resend (spec s.4)
+                    var up = _channel.Relays.Connected;
+                    var moreRelays = up > _relaysSeen;
+                    _relaysSeen = up;
+                    if (_everUp && (!_opened || moreRelays || now - _lastOpen >= OpenEveryMs))
                     {
                         _lastOpen = now;
                         _opened = true;

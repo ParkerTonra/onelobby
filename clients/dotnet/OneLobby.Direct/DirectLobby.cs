@@ -175,7 +175,7 @@ namespace OneLobby.Direct
                     ulong room = 0;
                     foreach (var b in roomBytes) room = (room << 8) | b;
                     nostrCode = OneLobby.JoinCode.EncodeRoom(room);
-                    bridge = new NostrHostBridge(hub.Hub, OneLobby.JoinCode.Normalize(nostrCode)!, nostr);
+                    bridge = new NostrHostBridge(hub.Hub, OneLobby.JoinCode.Normalize(nostrCode)!, nostr, o.MaxPlayers);
                     hub.Own(bridge);
                 }
                 client.UseDirect(inner => transport = new DirectHostTransport(inner, hub, nostr.Enabled), new Uri("onelobby-direct://host/"), hub);

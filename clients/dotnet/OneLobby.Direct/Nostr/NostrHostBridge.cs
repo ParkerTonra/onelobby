@@ -21,11 +21,19 @@ namespace OneLobby.Direct.Nostr
         /// <summary>A pubkey that closed is ignored for the rest of the session; this many are remembered.</summary>
         public const int ClosedMemory = 512;
         /// <summary>
-        /// New joiner pubkeys are a token bucket: a burst of this many at once (a party joining together), then one more per
-        /// <see cref="NewSessionRefillMs"/>; excess <c>open</c>s are ignored (the joiner repeats them every 2 s).
+        /// New joiner pubkeys are a token bucket: a burst of <see cref="SessionBurstFor"/>(maxPlayers) at once (a party joining
+        /// together), then one more per <see cref="NewSessionRefillMs"/>. Refused pubkeys wait in a list (up to
+        /// <see cref="WaitingMax"/>, oldest first) and are answered on the tick a token refills; a waiting pubkey whose
+        /// <c>open</c> (repeated every 2 s) has not been heard for <see cref="WaitingStaleMs"/> has given up and is dropped.
         /// </summary>
         public const int NewSessionBurst = 16;
+        public const int MaxSessionBurst = 64;
         public const int NewSessionRefillMs = 1_000;
+        public const int WaitingMax = 64;
+        public const int WaitingStaleMs = 5_000;
+
+        /// <summary>A lobby sized for more than <see cref="NewSessionBurst"/> players gets a burst that fits it (up to <see cref="MaxSessionBurst"/>).</summary>
+        public static int SessionBurstFor(int maxPlayers) => Math.Max(NewSessionBurst, Math.Min(MaxSessionBurst, maxPlayers));
         /// <summary>Banned IPs remembered for the session (a kick adds one).</summary>
         public const int MaxBannedIps = 256;
         private const int AddressCheckMs = 250;
@@ -53,8 +61,12 @@ namespace OneLobby.Direct.Nostr
         private readonly Queue<string> _goneOrder = new Queue<string>();
         private readonly List<Peer> _detached = new List<Peer>();
         private readonly List<(Peer Peer, string Text)> _toHub = new List<(Peer, string)>();
-        private double _newTokens = NewSessionBurst;
+        private readonly int _burst;
+        private double _newTokens;
         private long? _newTokensAt;
+        /// <summary>Refused new pubkeys, oldest first, with when their last <c>open</c> was heard.</summary>
+        private readonly List<string> _waitingOrder = new List<string>();
+        private readonly Dictionary<string, long> _waiting = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly object _banGate = new object();
         private readonly HashSet<string> _bannedIps = new HashSet<string>(StringComparer.Ordinal);
         private readonly Queue<string> _bannedOrder = new Queue<string>();
@@ -71,9 +83,11 @@ namespace OneLobby.Direct.Nostr
         /// <summary>Joiners currently linked.</summary>
         public int PeerCount { get { lock (_gate) return _peers.Count; } }
 
-        public NostrHostBridge(Hub hub, string normalizedCode, NostrOptions options)
+        public NostrHostBridge(Hub hub, string normalizedCode, NostrOptions options, int maxPlayers = 0)
         {
             _hub = hub;
+            _burst = SessionBurstFor(maxPlayers);
+            _newTokens = _burst;
             var keys = NostrRoomKeys.Derive(normalizedCode);
             var relays = options.RelayFactory != null ? options.RelayFactory(keys.Topic) : new WebSocketRelays(options.EffectiveRelays, keys.Topic, options.UnixSeconds);
             var sw = Stopwatch.StartNew();
@@ -94,6 +108,7 @@ namespace OneLobby.Direct.Nostr
             {
                 if (_disposed) return;
                 while (_channel.TryTake(out var f)) Handle(f);
+                AdmitWaiting();
                 foreach (var p in new List<Peer>(_peers.Values))
                 {
                     while (p.FromHub.TryDequeue(out var text)) p.Link.Queue(text);
@@ -170,7 +185,13 @@ namespace OneLobby.Direct.Nostr
                     known.Link.Heard();
                     Answer(f.From);
                 }
-                else Admit(f.From);
+                else if (_waiting.ContainsKey(f.From)) _waiting[f.From] = _now(); // still trying: keep its place in the queue
+                else if (_waiting.Count == 0 && TakeToken()) Admit(f.From);
+                else if (_waiting.Count < WaitingMax)
+                {
+                    _waiting[f.From] = _now(); // over the cap: answered on the tick a token refills
+                    _waitingOrder.Add(f.From);
+                } // waiting list full too: not answered, the joiner's next open retries
                 return;
             }
             if (known == null) return;
@@ -181,13 +202,40 @@ namespace OneLobby.Direct.Nostr
 
         private void Answer(string joiner) => _channel.Publish(new NostrFrame { Type = "open", To = joiner, Seq = 0, Ack = 0 });
 
-        private void Admit(string joiner)
+        /// <summary>Answers waiting pubkeys, oldest first, while tokens last; drops the ones that gave up.</summary>
+        private void AdmitWaiting()
+        {
+            if (_waitingOrder.Count == 0) return;
+            var now = _now();
+            while (_waitingOrder.Count > 0)
+            {
+                var pub = _waitingOrder[0];
+                if (now - _waiting[pub] > WaitingStaleMs || _peers.ContainsKey(pub) || _gone.Contains(pub))
+                {
+                    _waitingOrder.RemoveAt(0);
+                    _waiting.Remove(pub);
+                    continue;
+                }
+                if (!TakeToken()) break;
+                _waitingOrder.RemoveAt(0);
+                _waiting.Remove(pub);
+                Admit(pub);
+            }
+        }
+
+        /// <summary>Spends one token of the new-session bucket, or false when it is empty.</summary>
+        private bool TakeToken()
         {
             var now = _now();
-            if (_newTokensAt is long last) _newTokens = Math.Min(NewSessionBurst, _newTokens + (now - last) / (double)NewSessionRefillMs);
+            if (_newTokensAt is long last) _newTokens = Math.Min(_burst, _newTokens + (now - last) / (double)NewSessionRefillMs);
             _newTokensAt = now;
-            if (_newTokens < 1 - 1e-6) return; // too many new pubkeys at once: not answered, the joiner repeats its open (tolerance: summed refills can leave a full token at 0.999...)
+            if (_newTokens < 1 - 1e-6) return false; // tolerance: summed refills can leave a full token at 0.999...
             _newTokens = Math.Max(0, _newTokens - 1);
+            return true;
+        }
+
+        private void Admit(string joiner)
+        {
             var p = new Peer { Pub = joiner };
             p.Link = new NostrLink(_now, joiner, fr => _channel.Publish(fr));
             p.Link.Message += m => _toHub.Add((p, m));

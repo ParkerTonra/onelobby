@@ -17,6 +17,13 @@ export interface NostrHostOptions {
   wall?: () => number;
   /** The number of connected relays changed. */
   onChange?: () => void;
+  /** The lobby's player cap: the new-session burst grows to it (see newSessionBurst). */
+  maxPlayers?: number;
+}
+
+/** A lobby sized for more than NEW_SESSION_BURST players gets a burst that fits it (up to MAX_SESSION_BURST). */
+export function newSessionBurst(maxPlayers?: number): number {
+  return Math.max(NEW_SESSION_BURST, Math.min(MAX_SESSION_BURST, maxPlayers ?? 0));
 }
 
 interface Peer {
@@ -27,25 +34,35 @@ interface Peer {
 const PING = '{"t":"ping","n":0}';
 const CLOSED_MEMORY = 512;
 /**
- * NEW joiner pubkeys per lobby are a token bucket: a burst of NEW_SESSION_BURST at once (a party joining together),
- * then one more per NEW_SESSION_REFILL_MS. A joiner repeats `open` every 2 s, so the excess just waits.
+ * NEW joiner pubkeys per lobby are a token bucket: a burst of newSessionBurst(maxPlayers) at once (a party joining
+ * together), then one more per NEW_SESSION_REFILL_MS. Refused pubkeys wait in a list (up to WAITING_MAX, oldest
+ * first) and are answered the moment a token refills; a waiting pubkey whose `open` (repeated every 2 s) has not
+ * been heard for WAITING_STALE_MS has given up and is dropped.
  */
 export const NEW_SESSION_BURST = 16;
+export const MAX_SESSION_BURST = 64;
 export const NEW_SESSION_REFILL_MS = 1_000;
+const WAITING_MAX = 64;
+const WAITING_STALE_MS = 5_000;
 
 export class NostrHostBridge {
   private readonly peers = new Map<string, Peer>();
   private readonly gone = new Set<string>();
   private stopped = false;
-  private newTokens = NEW_SESSION_BURST;
+  private readonly burst: number;
+  private newTokens: number;
   private newTokensAt: number | null = null;
+  /** Refused new pubkeys, oldest first, with when their last `open` was heard. */
+  private readonly waiting = new Map<string, number>();
+  private cancelWaiting: (() => void) | null = null;
 
-  private constructor(private readonly hub: SignalingHub, private readonly room: NostrRoom, private readonly clock: Clock) {
+  private constructor(private readonly hub: SignalingHub, private readonly room: NostrRoom, private readonly clock: Clock, maxPlayers?: number) {
+    this.burst = this.newTokens = newSessionBurst(maxPlayers);
     room.onFrame = (f) => this.onFrame(f);
   }
 
   static async start(hub: SignalingHub, o: NostrHostOptions): Promise<NostrHostBridge> {
-    return new NostrHostBridge(hub, await NostrRoom.open(o), o.clock);
+    return new NostrHostBridge(hub, await NostrRoom.open(o), o.clock, o.maxPlayers);
   }
 
   get relaysConnected(): number {
@@ -69,6 +86,9 @@ export class NostrHostBridge {
   close(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.cancelWaiting?.();
+    this.cancelWaiting = null;
+    this.waiting.clear();
     for (const [pub, p] of this.peers) {
       p.link.close("host left");
       if (p.session) this.hub.disconnect(p.session);
@@ -85,7 +105,15 @@ export class NostrHostBridge {
       if (known) {
         known.link.heard();
         this.answer(f.from);
-      } else if (this.admitNew()) this.accept(f.from); // over the cap: not answered, the joiner's next open retries
+      } else if (this.waiting.has(f.from)) {
+        this.waiting.set(f.from, this.clock.now()); // still trying: keep its place in the queue
+        this.admitWaiting();
+      } else if (this.waiting.size === 0 && this.admitNew()) {
+        this.accept(f.from);
+      } else if (this.waiting.size < WAITING_MAX) {
+        this.waiting.set(f.from, this.clock.now()); // over the cap: answered when a token refills
+        this.scheduleWaiting();
+      } // waiting list full too: not answered, the joiner's next open retries
       return;
     }
     if (!known) return;
@@ -94,11 +122,37 @@ export class NostrHostBridge {
     if (f.type === "beat" && known.session) this.hub.receive(known.session, PING);
   }
 
+  /** Arms one timer for the next token while anyone waits. */
+  private scheduleWaiting(): void {
+    if (this.cancelWaiting || this.waiting.size === 0 || this.stopped) return;
+    const missing = Math.max(0, 1 - this.newTokens);
+    this.cancelWaiting = this.clock.setTimeout(() => {
+      this.cancelWaiting = null;
+      this.admitWaiting();
+    }, Math.max(1, Math.ceil(missing * NEW_SESSION_REFILL_MS)));
+  }
+
+  /** Answers waiting pubkeys, oldest first, while tokens last; drops the ones that gave up. */
+  private admitWaiting(): void {
+    if (this.stopped) return;
+    const now = this.clock.now();
+    for (const [pub, heard] of this.waiting) {
+      if (now - heard > WAITING_STALE_MS || this.peers.has(pub) || this.gone.has(pub)) {
+        this.waiting.delete(pub);
+        continue;
+      }
+      if (!this.admitNew()) break;
+      this.waiting.delete(pub);
+      this.accept(pub);
+    }
+    this.scheduleWaiting();
+  }
+
   /** Spends one token of the new-session bucket, or false when it is empty. */
   private admitNew(): boolean {
     const now = this.clock.now();
     if (this.newTokensAt !== null) {
-      this.newTokens = Math.min(NEW_SESSION_BURST, this.newTokens + (now - this.newTokensAt) / NEW_SESSION_REFILL_MS);
+      this.newTokens = Math.min(this.burst, this.newTokens + (now - this.newTokensAt) / NEW_SESSION_REFILL_MS);
     }
     this.newTokensAt = now;
     if (this.newTokens < 1 - 1e-6) return false; // fractional clock times can leave a full token at 0.9999999999999999

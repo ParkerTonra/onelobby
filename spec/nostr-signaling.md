@@ -49,7 +49,8 @@ Publish every event to every relay in the list (s.6); receivers dedupe by event 
 
 - `from` must equal the event's `pubkey`; frames that disagree are dropped.
 - **open.** The joiner sends `open` with `to` empty every 2 s until the host answers, giving up after 15 s
-  (`connect_failed`). The host answers each `open` from a new pubkey with an `open` addressed to it (repeat answers
+  (`connect_failed`). It also sends one at once whenever its number of connected relays goes up, so a relay that
+  connects after the first `open` (perhaps the only one it shares with the host) does not wait for the next resend. The host answers each `open` from a new pubkey with an `open` addressed to it (repeat answers
   for repeat opens) and connects a hub session for it with address `nostr:<first 16 hex of the joiner pubkey>`.
   The joiner's socket is open (`onopen`) on the host's first `open` addressed to it; it then talks only to that pubkey.
   A host that is full or closing still answers, then sends `close`.
@@ -61,10 +62,14 @@ Publish every event to every relay in the list (s.6); receivers dedupe by event 
 - **Outbound queue (hardening).** A link holds at most 128 frames and 256 KiB of unacknowledged or queued outbound
   hub texts together; a text that would exceed either is dropped (the link stays open). Relays rate-limit publishes, so
   an unbounded queue only turns into dead resends.
-- **New sessions (hardening).** New joiner pubkeys per lobby are a token bucket: 16 at once (a party joining
-  together), refilled at one per second up to 16. When the bucket is empty, `open`s are ignored, not answered. The
-  joiner repeats `open` every 2 s inside its 15 s budget, so a burst past 16 gets in within a few seconds. (A fixed
-  8-per-10 s window let an 11-joiner burst land its last joiners about 1 s before their ready timeout.) Repeat `open`s from a pubkey already attached are always answered.
+- **New sessions (hardening).** New joiner pubkeys per lobby are a token bucket. Its size is the lobby's
+  `maxPlayers`, at least 16 and at most 64, so a party that fits the lobby joins at once. It refills at one per
+  second up to that size. A new pubkey that finds the bucket empty goes on a waiting list (oldest first, at most 64;
+  past that its `open` is ignored and its next one tries again). The host answers the oldest waiting pubkey as soon
+  as a token refills, not at that joiner's next `open`. A waiting pubkey whose `open` has not been heard for 5 s has
+  given up and leaves the list. (A fixed 8-per-10 s window let an 11-joiner burst land its last joiners about 1 s
+  before their ready timeout; answering only repeat `open`s added up to 2 s per refill.) Repeat `open`s from a pubkey
+  already attached are always answered.
 - **Bans (hardening).** Kicking a Nostr joiner bans its pubkey and, when the host's WebRTC link to it has a known
   remote address (selected candidate pair, not relayed, not an mDNS name), that IP too. When a later joiner's link
   resolves to a banned IP the host removes it as kicked. A link whose address is unknown cannot be matched.

@@ -87,7 +87,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
   };
   try {
     try {
-      bridge = await NostrHostBridge.start(hub, { code, relays, connect: env.connect, clock: env.clock, wall: env.wall });
+      bridge = await NostrHostBridge.start(hub, { code, relays, connect: env.connect, clock: env.clock, wall: env.wall, maxPlayers });
     } catch (e) {
       throw new OneLobbyError("direct_unreachable", `cannot reach any Nostr relay (${e instanceof Error ? e.message : String(e)}); a browser host has no other way to be reached`);
     }

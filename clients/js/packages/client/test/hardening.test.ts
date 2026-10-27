@@ -10,7 +10,7 @@ import { SignalingHub, defaultHubOptions, directHubOptions } from "../src/direct
 import { DirectHubHost } from "../src/direct/hub-host.js";
 import { hostDirect } from "../src/direct/index.js";
 import { ReliableLink, MAX_OUT_BYTES, MAX_OUT_FRAMES, type OutFrame } from "../src/nostr/link.js";
-import { NostrHostBridge, NEW_SESSION_BURST, NEW_SESSION_REFILL_MS } from "../src/nostr/host.js";
+import { NostrHostBridge, NEW_SESSION_BURST, NEW_SESSION_REFILL_MS, MAX_SESSION_BURST, newSessionBurst } from "../src/nostr/host.js";
 import { NostrSocket } from "../src/nostr/socket.js";
 import { encodeRoomCode } from "../src/joincode.js";
 import { encodeMessage } from "../src/codec.js";
@@ -219,7 +219,7 @@ describe("ReliableLink outbound queue", () => {
 
 // ---- Nostr bridge: new sessions per window --------------------------------------------------------------------------
 
-describe("Nostr host bridge: new sessions are a token bucket (burst 16, then 1 per second)", () => {
+describe("Nostr host bridge: new sessions are a token bucket (burst max(16, maxPlayers), then 1 per second)", () => {
   it("a party bursts straight in; excess joiners wait (their open repeats) and get in as tokens refill", async () => {
     const relays = new FakeRelays();
     const URLS = ["wss://r1.test"];
@@ -247,6 +247,67 @@ describe("Nostr host bridge: new sessions are a token bucket (burst 16, then 1 p
     skew = 3 * NEW_SESSION_REFILL_MS; // two more tokens
     await until(() => socks.every((s) => s.readyState === 1), "the rest get in as tokens refill");
     expect(bridge.peerCount).toBe(NEW_SESSION_BURST + 3);
+  }, 30000);
+
+  it("refused joiners wait in line and are answered as tokens refill, without repeating their open", async () => {
+    const relays = new FakeRelays();
+    const URLS = ["wss://r1.test"];
+    const hub = new SignalingHub({ ...directHubOptions(40, null), rateScale: 50 });
+    const code = encodeRoomCode();
+    const bridge = await NostrHostBridge.start(hub, { code, relays: URLS, connect: relays.connect, clock: systemClock });
+    cleanup.push(() => bridge.close());
+    const t0 = Date.now();
+    const socks = Array.from({ length: NEW_SESSION_BURST + 2 }, () => {
+      // one open only: a 2 s retry phase would land these at 2 s and 4 s, the waiting list at about 1 s and 2 s
+      const s = new NostrSocket({ code, relays: URLS, connect: relays.connect, clock: systemClock, openEveryMs: 60_000, openTimeoutMs: 60_000 });
+      cleanup.push(() => s.close());
+      return s;
+    });
+    await until(() => bridge.peerCount === NEW_SESSION_BURST + 1, "one waiter after one refill");
+    expect(Date.now() - t0).toBeLessThan(1_800);
+    await until(() => socks.every((s) => s.readyState === 1), "the second waiter after two refills");
+    expect(Date.now() - t0).toBeLessThan(2_800);
+  }, 30000);
+
+  it("the burst grows to the lobby's maxPlayers (capped at MAX_SESSION_BURST)", async () => {
+    expect(newSessionBurst(undefined)).toBe(NEW_SESSION_BURST);
+    expect(newSessionBurst(4)).toBe(NEW_SESSION_BURST);
+    expect(newSessionBurst(24)).toBe(24);
+    expect(newSessionBurst(1000)).toBe(MAX_SESSION_BURST);
+    const relays = new FakeRelays();
+    const URLS = ["wss://r1.test"];
+    const frozen = systemClock.now(); // no refill: only the burst admits
+    const clock: Clock = { ...systemClock, now: () => frozen, setInterval: systemClock.setInterval, setTimeout: systemClock.setTimeout };
+    const hub = new SignalingHub({ ...directHubOptions(40, null), rateScale: 50 });
+    const code = encodeRoomCode();
+    const bridge = await NostrHostBridge.start(hub, { code, relays: URLS, connect: relays.connect, clock, maxPlayers: 24 });
+    cleanup.push(() => bridge.close());
+    const socks = Array.from({ length: 24 }, () => {
+      const s = new NostrSocket({ code, relays: URLS, connect: relays.connect, clock: systemClock, openEveryMs: 100, openTimeoutMs: 60_000 });
+      cleanup.push(() => s.close());
+      return s;
+    });
+    await until(() => socks.every((s) => s.readyState === 1), "a 24-player party at once");
+    expect(bridge.peerCount).toBe(24);
+  }, 30000);
+});
+
+describe("Nostr joiner: a relay that connects late gets an open at once", () => {
+  it("the joiner resends open when another relay comes up, not only at its next resend", async () => {
+    const relays = new FakeRelays();
+    const hub = new SignalingHub({ ...directHubOptions(4, null), rateScale: 50 });
+    const code = encodeRoomCode();
+    const bridge = await NostrHostBridge.start(hub, { code, relays: ["wss://r1.test"], connect: relays.connect, clock: systemClock });
+    cleanup.push(() => bridge.close());
+    await bridge.whenUp(2_000);
+    relays.down.add("wss://r1.test"); // the joiner's first try at the host's relay fails; r2 (no host there) comes up first
+    const s = new NostrSocket({ code, relays: ["wss://r2.test", "wss://r1.test"], connect: relays.connect, clock: systemClock, openEveryMs: 60_000, openTimeoutMs: 60_000 });
+    cleanup.push(() => s.close());
+    await until(() => s.relaysConnected === 1, "r2 up");
+    relays.down.delete("wss://r1.test"); // r1 reconnects after its 1 s backoff
+    const t0 = Date.now();
+    await until(() => s.readyState === 1, "open over r1 once it connects");
+    expect(Date.now() - t0).toBeLessThan(2_500);
   }, 30000);
 });
 

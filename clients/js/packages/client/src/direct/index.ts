@@ -215,6 +215,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
         connect: env.connect,
         clock: env.clock,
         wall: env.wall,
+        maxPlayers,
         onChange: () => onRelays?.(),
       });
       hub.nostr = bridge;

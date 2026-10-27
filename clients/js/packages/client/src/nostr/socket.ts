@@ -36,6 +36,8 @@ export class NostrSocket implements SocketLike {
   private hostPub = "";
   private cancelOpen: (() => void) | null = null;
   private cancelDeadline: (() => void) | null = null;
+  private sendOpen: (() => void) | null = null;
+  private relaysSeen = 0;
 
   constructor(private readonly o: NostrSocketOptions) {
     void this.start();
@@ -75,7 +77,8 @@ export class NostrSocket implements SocketLike {
   private async start(): Promise<void> {
     const { clock } = this.o;
     try {
-      this.room = await NostrRoom.open(this.o);
+      // a relay that comes up after the first `open` gets one at once, not at the next resend (spec s.4)
+      this.room = await NostrRoom.open({ ...this.o, onChange: () => this.relaysChanged() });
     } catch (e) {
       this.fail(String(e));
       return;
@@ -93,8 +96,16 @@ export class NostrSocket implements SocketLike {
     }
     if (this.readyState !== 0) return;
     const open = () => void room.send("", { type: "open", seq: 0, ack: 0 });
+    this.relaysSeen = room.relaysConnected;
+    this.sendOpen = open;
     open();
     this.cancelOpen = clock.setInterval(open, this.o.openEveryMs ?? 2000);
+  }
+
+  private relaysChanged(): void {
+    const up = this.room?.relaysConnected ?? 0;
+    if (up > this.relaysSeen && this.readyState === 0) this.sendOpen?.();
+    this.relaysSeen = up;
   }
 
   private onFrame(f: Frame): void {
@@ -102,6 +113,7 @@ export class NostrSocket implements SocketLike {
     if (this.readyState === 0) {
       if (f.type !== "open") return;
       this.hostPub = f.from;
+      this.sendOpen = null;
       this.cancelOpen?.();
       this.cancelDeadline?.();
       this.cancelOpen = this.cancelDeadline = null;

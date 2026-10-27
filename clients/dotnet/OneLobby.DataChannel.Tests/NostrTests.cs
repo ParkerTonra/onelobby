@@ -19,11 +19,14 @@ internal sealed class FakeRelayNet
     public Func<string, bool>? Keep;
     public bool Duplicate;
     public int Published;
+    /// <summary>The pool created last (tests change its relay count).</summary>
+    public FakeRelays? Last;
 
     public INostrRelays Create(string topic)
     {
         var r = new FakeRelays(this, topic);
         lock (_all) _all.Add(r);
+        Last = r;
         return r;
     }
 
@@ -498,11 +501,11 @@ public sealed class NostrBridgeTests
         public readonly Hub Hub;
         public readonly NostrHostBridge Bridge;
 
-        public Rig(int maxPlayers = 4)
+        public Rig(int maxPlayers = 4, int bridgeMaxPlayers = 0)
         {
             Hub = new Hub(HubOptions.ForDirect(maxPlayers, null));
             Options = new NostrOptions { RelayFactory = Net.Create, AutoTick = false, NowMs = () => Now, UnixSeconds = () => 1_700_000_000 + Now / 1000 };
-            Bridge = new NostrHostBridge(Hub, Code, Options);
+            Bridge = new NostrHostBridge(Hub, Code, Options, bridgeMaxPlayers);
         }
 
         public NostrSignalingSocket Join() => new(Code, Options);
@@ -785,13 +788,57 @@ public sealed class NostrBridgeTests
         var rig = new Rig(maxPlayers: 40);
         var n = NostrHostBridge.NewSessionBurst + 2;
         var socks = Enumerable.Range(0, n).Select(_ => rig.Join()).ToArray();
-        rig.Run(1000, socks); // before the joiners repeat their open (every 2 s)
+        rig.Run(800, socks); // before the first token refills
         Assert.Equal(NostrHostBridge.NewSessionBurst, socks.Count(s => s.State == SocketState.Open));
         Assert.Equal(2, socks.Count(s => s.State == SocketState.Connecting));
-        rig.Run(3000, socks); // two tokens have refilled; the repeated opens are answered, long before any ready timeout
+        rig.Run(3000, socks); // two tokens have refilled; the waiting joiners are answered, long before any ready timeout
         Assert.All(socks, s => Assert.Equal(SocketState.Open, s.State));
         Assert.Equal(n, rig.Bridge.PeerCount);
         foreach (var s in socks) s.Dispose();
+    }
+
+    [Fact]
+    public void Refused_joiners_wait_in_line_and_are_answered_as_tokens_refill_not_at_their_next_open()
+    {
+        var rig = new Rig(maxPlayers: 40);
+        var n = NostrHostBridge.NewSessionBurst + 2;
+        var socks = Enumerable.Range(0, n).Select(_ => rig.Join()).ToArray();
+        rig.Run(1400, socks); // one token refilled at ~1 s; the joiners' own resend is not due until 2 s
+        Assert.Equal(NostrHostBridge.NewSessionBurst + 1, socks.Count(s => s.State == SocketState.Open));
+        rig.Run(1000, socks); // the second token
+        Assert.All(socks, s => Assert.Equal(SocketState.Open, s.State));
+        foreach (var s in socks) s.Dispose();
+    }
+
+    [Fact]
+    public void The_burst_grows_to_the_lobby_s_max_players()
+    {
+        Assert.Equal(NostrHostBridge.NewSessionBurst, NostrHostBridge.SessionBurstFor(0));
+        Assert.Equal(NostrHostBridge.NewSessionBurst, NostrHostBridge.SessionBurstFor(4));
+        Assert.Equal(24, NostrHostBridge.SessionBurstFor(24));
+        Assert.Equal(NostrHostBridge.MaxSessionBurst, NostrHostBridge.SessionBurstFor(1000));
+        var rig = new Rig(maxPlayers: 40, bridgeMaxPlayers: 24);
+        var socks = Enumerable.Range(0, 24).Select(_ => rig.Join()).ToArray();
+        rig.Run(500, socks); // no refill needed: a 24-player party at once
+        Assert.All(socks, s => Assert.Equal(SocketState.Open, s.State));
+        foreach (var s in socks) s.Dispose();
+    }
+
+    [Fact]
+    public void A_joiner_resends_open_when_another_relay_comes_up()
+    {
+        var rig = new Rig();
+        rig.Net.Keep = _ => false; // the joiner's first relay cannot reach the host
+        var s = rig.Join();
+        var mine = rig.Net.Last!;
+        mine.Total = 1;
+        rig.Run(200, s);
+        Assert.Equal(SocketState.Connecting, s.State);
+        rig.Net.Keep = null;
+        mine.Total = 2; // a second relay connects (one the host is on)
+        rig.Run(300, s); // well before the 2 s resend
+        Assert.Equal(SocketState.Open, s.State);
+        s.Dispose();
     }
 
     private static JsonElement Last(List<string> inbox, string t) =>

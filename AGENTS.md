@@ -154,7 +154,7 @@ Full reference (generated): `docs/api/`.
   an SDP offer only from the host, so one player cannot open a link to another (and learn its address).
 - Hub limits a game can meet (direct host, same numbers in C# and JS): 32 open signaling sockets per address, loopback
   included (`rate_limited` with reason `max_sockets`, closed 1008); a joiner that stops reading is closed 1008
-  `backpressure` once 1 MiB is waiting; Nostr joiners: 16 new sessions at once, then 1 per second (the rest keep retrying their `open`),
+  `backpressure` once 1 MiB is waiting; Nostr joiners: `maxPlayers` new sessions at once (at least 16, at most 64), then 1 per second (the rest wait in line and are answered as soon as a token refills),
   10 signals/s per target. `kick` on a Nostr joiner bans its key and, when the host knows it, the address behind it.
 - Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
   `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
