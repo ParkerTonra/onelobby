@@ -39,6 +39,9 @@ namespace OneLobby
         private IDisposable? _owned;
         /// <summary>Direct-IP joiner: no WebSocket answer within this long means direct_unreachable (0 = off).</summary>
         internal const long DirectConnectTimeoutMs = 5000;
+
+        /// <summary>The wait above for a Nostr joiner (spec/nostr-signaling.md s.4: the socket gives up itself after 15 s).</summary>
+        internal long DirectConnectTimeout { get; set; } = DirectConnectTimeoutMs;
         internal IReadOnlyList<IceServer> Ice { get; private set; } = Array.Empty<IceServer>();
         internal ISignalingSocket? Socket { get; private set; }
 
@@ -65,7 +68,7 @@ namespace OneLobby
         /// to the constructor, <paramref name="hub"/> replaces the lobby server, <paramref name="owned"/> is disposed when
         /// the lobby closes. Fails if a lobby or request is active.
         /// </summary>
-        internal void UseDirect(Func<ITransport, ITransport> wrap, Uri hub, IDisposable? owned)
+        internal void UseDirect(Func<ITransport, ITransport> wrap, Uri hub, IDisposable? owned, long connectTimeoutMs = DirectConnectTimeoutMs)
         {
             if (_op != null || _lobby != null) throw new InvalidOperationException("leave the current lobby first");
             Socket?.Dispose();
@@ -75,6 +78,7 @@ namespace OneLobby
             _hubUri = hub;
             _owned = owned;
             Direct = true;
+            DirectConnectTimeout = connectTimeoutMs;
         }
 
         /// <summary>Direct-IP join: the hub runs one lobby, so no code; the optional password is checked by the hub.</summary>
@@ -162,7 +166,7 @@ namespace OneLobby
             if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
             var tcs = new TaskCompletionSource<T>();
             var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
-            if (Direct) op.ConnectDeadlineMs = Transport.NowMs + DirectConnectTimeoutMs;
+            if (Direct) op.ConnectDeadlineMs = Transport.NowMs + DirectConnectTimeout;
             op.Complete = e =>
             {
                 try { tcs.TrySetResult(finish(e)); }
@@ -247,7 +251,7 @@ namespace OneLobby
                 {
                     // docs/direct-ip.md s.3: no answer on the host's TCP port
                     FailOp(new OneLobbyException("direct_unreachable",
-                        "no answer from the host at " + _hubUri.Host + ":" + _hubUri.Port + " (" + (sock.CloseReason ?? "timed out") + ")"));
+                        (_hubUri.Scheme == "onelobby-nostr" ? "no answer from the host over Nostr" : "no answer from the host at " + _hubUri.Host + ":" + _hubUri.Port) + " (" + (sock.CloseReason ?? "timed out") + ")"));
                     if (sock.State != SocketState.Closed) { sock.Dispose(); Socket = null; }
                     return;
                 }

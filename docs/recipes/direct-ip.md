@@ -61,6 +61,7 @@ public sealed class DirectNet
             Lobby.SessionEnded += reason => { Status = "Session ended: " + reason; Lobby = null; };
             return Lobby.JoinCodeKind switch
             {
+                JoinCodeKind.Nostr => "Code (works through any router): " + Lobby.JoinCode, // Lobby.DirectCode keeps the IP code
                 JoinCodeKind.Internet => "Internet code: " + Lobby.JoinCode,
                 JoinCodeKind.SameNetwork => "Same-network code: " + Lobby.JoinCode,
                 _ => "Your address: " + string.Join(", ", Lobby.DirectAddresses),
@@ -129,6 +130,16 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
   code; `joinUrl` is null on a C# host, which serves no page). JS/Node `hostDirect` prints the same startup line as above to `console.log`
   (`lobby.directHostLog`; pass `log: (line) => ...` to redirect it or `log: false` to silence it). Every hub prints
   `OneLobby: <server|direct host> listening on <TCP|TCP+UDP> :<port>; ...`.
+
+**C#: Nostr codes.** `DirectHostOptions.Nostr` (default on) makes `lobby.JoinCode` a version 1 code
+(`JoinCodeKind.Nostr`) that joins through any router over public Nostr relays, and `lobby.DirectCode` /
+`lobby.DirectCodeKind` keep the IP-address code. `new DirectHostOptions { Nostr = new NostrOptions { Enabled = false } }` turns it off;
+`NostrOptions.Relays` and `NostrOptions.Stun` replace the default relay and STUN lists (from a blueprint: `hosting.nostr`,
+`hosting.nostrRelays`). With no relay reachable the host keeps the IP code as `JoinCode` and logs `; nostr: no relay
+reachable`; when one answers later `JoinCodeChanged` fires. `JoinDirectAsync(code)` / `RejoinDirectAsync(code, token)` take either kind
+of code; `JoinDirectAsync(code, password, new NostrOptions { Relays = ... })` picks the relays for a version 1 code (a client built
+from a blueprint uses its `hosting.nostrRelays`). With Nostr on, peer links use the public STUN servers. `GET /joininfo` adds
+`directCode` and `directCodeKind` (`joinCode` is the Nostr code while it works). A relay-only joiner that cannot connect fails with `direct_unreachable` after 15 s.
 
 ## 3. Node: host from a game server
 

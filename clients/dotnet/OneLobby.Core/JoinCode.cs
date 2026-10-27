@@ -31,6 +31,37 @@ namespace OneLobby
             return Group(EncodeRaw(ip, port));
         }
 
+        /// <summary>
+        /// Version 1 (spec/nostr-signaling.md s.1): <c>version:2 = 1 | room:48 | crc:5</c>. <paramref name="room"/> is the
+        /// 48-bit random room; the result is grouped, e.g. <c>XXXX-XXXX-XXX</c>.
+        /// </summary>
+        public static string EncodeRoom(ulong room)
+        {
+            if (room >> 48 != 0) throw new ArgumentOutOfRangeException(nameof(room), "a room is 48 bits");
+            ulong data = (1UL << 48) | room;
+            ulong v = (data << 5) | Crc5(data, 50);
+            var chars = new char[Length];
+            for (var i = Length - 1; i >= 0; i--) { chars[i] = Crockford.Alphabet[(int)(v & 31)]; v >>= 5; }
+            return Group(new string(chars));
+        }
+
+        /// <summary>
+        /// Decodes a version 1 (Nostr) code to its 12 lower-case hex digit room. False for anything else; use
+        /// <see cref="TryDecode"/> for version 0 codes (it answers <c>unknown_version</c> for version 1).
+        /// </summary>
+        public static bool TryDecodeRoom(string? input, out string roomHex)
+        {
+            roomHex = "";
+            var s = Normalize(input);
+            if (s == null) return false;
+            ulong v = 0;
+            foreach (var c in s) v = (v << 5) | (uint)Crockford.Alphabet.IndexOf(c);
+            var data = v >> 5;
+            if (Crc5(data, 50) != (v & 31) || (data >> 48) != 1) return false;
+            roomHex = (data & 0xffffffffffffUL).ToString("x12", CultureInfo.InvariantCulture);
+            return true;
+        }
+
         /// <summary><c>6B01RGFEP2B</c> -> <c>6B01-RGFE-P2B</c>.</summary>
         public static string Group(string raw) => raw.Substring(0, 4) + "-" + raw.Substring(4, 4) + "-" + raw.Substring(8);
 

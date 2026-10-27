@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using OneLobby.Direct.Nostr;
 using OneLobby.Server;
 
 namespace OneLobby.Direct
@@ -14,11 +15,17 @@ namespace OneLobby.Direct
     {
         private readonly ITransport _inner;
         private readonly DirectHubHost _host;
+        private readonly IReadOnlyList<IceServer> _ice;
 
-        public DirectHostTransport(ITransport inner, DirectHubHost host)
+        /// <param name="inner">The game's real transport.</param>
+        /// <param name="host">The embedded hub and listener.</param>
+        /// <param name="stun">STUN URLs for the peer links when Nostr joiners are welcome (they cannot reach a bare host
+        /// address); empty = no ICE servers at all, as direct IP always did.</param>
+        public DirectHostTransport(ITransport inner, DirectHubHost host, IReadOnlyList<string>? stun = null)
         {
             _inner = inner;
             _host = host;
+            _ice = stun is { Count: > 0 } ? new[] { new IceServer(stun) } : Array.Empty<IceServer>();
         }
 
         public long NowMs => _inner.NowMs;
@@ -30,6 +37,7 @@ namespace OneLobby.Direct
             {
                 PortRangeBegin = _host.Port,
                 PortRangeEnd = _host.Port,
+                IceServers = _ice,
                 NoIceServers = true,
             });
 
@@ -88,6 +96,38 @@ namespace OneLobby.Direct
 
         public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
             _inner.CreatePeerLink(options with { ExtraRemoteCandidates = _extra, NoIceServers = true });
+
+        public void Poll() => _inner.Poll();
+    }
+}
+
+namespace OneLobby.Direct
+{
+    /// <summary>
+    /// Joiner side over Nostr (spec/nostr-signaling.md): signaling through <see cref="NostrSignalingSocket"/>, every peer link
+    /// uses the public STUN servers and no extra remote candidate.
+    /// </summary>
+    internal sealed class NostrJoinTransport : ITransport
+    {
+        private readonly ITransport _inner;
+        private readonly string _code;
+        private readonly NostrOptions _options;
+        private readonly IReadOnlyList<IceServer> _ice;
+
+        public NostrJoinTransport(ITransport inner, string normalizedCode, NostrOptions options)
+        {
+            _inner = inner;
+            _code = normalizedCode;
+            _options = options;
+            _ice = new[] { new IceServer(options.EffectiveStun) };
+        }
+
+        public long NowMs => _inner.NowMs;
+
+        public ISignalingSocket ConnectSignaling(Uri url) => new NostrSignalingSocket(_code, _options);
+
+        public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
+            _inner.CreatePeerLink(options with { IceServers = _ice, ExtraRemoteCandidates = null, NoIceServers = true });
 
         public void Poll() => _inner.Poll();
     }

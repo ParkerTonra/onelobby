@@ -344,10 +344,20 @@ public sealed class DirectHubHost : IDisposable
         return Task.Run(() => PortMapper.OpenAsync(ct), ct);
     }
 
+    private readonly List<IDisposable> _owned = new();
+
+    /// <summary>Disposed with this host (another way in to the hub, e.g. the Nostr bridge).</summary>
+    public void Own(IDisposable d)
+    {
+        lock (_owned) { if (!Disposed) { _owned.Add(d); return; } }
+        d.Dispose();
+    }
+
     public void Dispose()
     {
         if (Disposed) return;
         Disposed = true;
+        lock (_owned) { foreach (var d in _owned) { try { d.Dispose(); } catch (Exception) { } } _owned.Clear(); }
         try { PortMapper?.Dispose(); } catch (Exception) { }
         try { _listener.Stop(); } catch (Exception) { }
         foreach (var c in _conns.Keys)
@@ -366,12 +376,16 @@ public sealed class DirectHubHost : IDisposable
 
 /// <summary>What a direct host answers at <c>GET /joininfo</c>: the current join code and where it works (same shape as the JS host).</summary>
 /// <param name="JoinCode">Ungrouped-or-grouped code as shown to players; empty when there is none.</param>
-/// <param name="JoinCodeKind"><c>"internet"</c>, <c>"same_network"</c> or <c>"none"</c>.</param>
+/// <param name="JoinCodeKind"><c>"internet"</c>, <c>"same_network"</c>, <c>"nostr"</c> or <c>"none"</c>.</param>
 /// <param name="JoinUrl">A page link when the host serves pages; null otherwise (C# hosts do not serve pages).</param>
-public sealed record DirectJoinInfo(string JoinCode, string JoinCodeKind, string? JoinUrl, int Port)
+/// <param name="DirectCode">The IP-address code; null = same as <paramref name="JoinCode"/> (Nostr off or no relay reachable).</param>
+/// <param name="DirectCodeKind"><c>"internet"</c>, <c>"same_network"</c> or <c>"none"</c>; null = same as <paramref name="JoinCodeKind"/>.</param>
+public sealed record DirectJoinInfo(string JoinCode, string JoinCodeKind, string? JoinUrl, int Port, string? DirectCode = null, string? DirectCodeKind = null)
 {
     public string ToJson() => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
     {
-        ["joinCode"] = JoinCode, ["joinCodeKind"] = JoinCodeKind, ["joinUrl"] = JoinUrl, ["port"] = Port,
+        ["joinCode"] = JoinCode, ["joinCodeKind"] = JoinCodeKind,
+        ["directCode"] = DirectCode ?? JoinCode, ["directCodeKind"] = DirectCodeKind ?? JoinCodeKind,
+        ["joinUrl"] = JoinUrl, ["port"] = Port,
     });
 }

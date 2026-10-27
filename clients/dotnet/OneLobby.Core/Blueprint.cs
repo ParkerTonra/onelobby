@@ -24,7 +24,11 @@ namespace OneLobby
 
     public sealed record GameSection(string Id, string NetVersion, string? Title);
     public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly,
-        IReadOnlyList<string> AllowedOrigins);
+        IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
+    {
+        /// <summary>The <c>hosting.nostrRelays</c> list; empty means the library default relays.</summary>
+        public IReadOnlyList<string> Relays => NostrRelays ?? Array.Empty<string>();
+    }
     public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin,
         bool JoinLink, IReadOnlyDictionary<string, string> Meta);
     /// <summary><see cref="Mode"/> is "raw", "lockstep" or "replication".</summary>
@@ -137,6 +141,10 @@ namespace OneLobby
                 w.WriteBoolean("openPort", Hosting.OpenPort); w.WriteBoolean("relayOnly", Hosting.RelayOnly);
                 w.WriteStartArray("allowedOrigins");
                 foreach (var o in Hosting.AllowedOrigins) w.WriteStringValue(o);
+                w.WriteEndArray();
+                w.WriteBoolean("nostr", Hosting.Nostr);
+                w.WriteStartArray("nostrRelays");
+                foreach (var o in Hosting.Relays) w.WriteStringValue(o);
                 w.WriteEndArray();
                 w.WriteEndObject();
                 w.WriteStartObject("lobby");
@@ -276,7 +284,7 @@ namespace OneLobby
                         break;
                     case "engine": Enum(v, "engine", "web", "node-browser", "godot-csharp", "unity", "dotnet"); break;
                     case "hosting":
-                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "openPort", "relayOnly", "allowedOrigins" }, (hk, hv) =>
+                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
                         {
                             var hp = "hosting." + hk;
                             switch (hk)
@@ -284,6 +292,7 @@ namespace OneLobby
                                 case "lobbyServer": Str(hv, hp); break;
                                 case "directPort": Int(hv, hp, 1024, 65535); break;
                                 case "allowedOrigins":
+                                case "nostrRelays":
                                     if (hv.ValueKind != JsonValueKind.Array) throw Err(hp, "type", "must be an array");
                                     var i = 0;
                                     foreach (var item in hv.EnumerateArray()) Str(item, hp + "." + i++);
@@ -405,6 +414,8 @@ namespace OneLobby
             var tick = I(sync, "tickRate", 20);
             var origins = new List<string>();
             if (hosting is { } h && h.TryGetProperty("allowedOrigins", out var ao)) foreach (var o in ao.EnumerateArray()) origins.Add(o.GetString()!);
+            var relays = new List<string>();
+            if (hosting is { } h2 && h2.TryGetProperty("nostrRelays", out var nr)) foreach (var o in nr.EnumerateArray()) relays.Add(o.GetString()!);
             var meta = new Dictionary<string, string>();
             if (lobby is { } l && l.TryGetProperty("meta", out var m)) foreach (var kv in m.EnumerateObject()) meta[kv.Name] = kv.Value.GetString()!;
             RateLimit? rate = null;
@@ -433,7 +444,8 @@ namespace OneLobby
                 new GameSection(S(game, "id", ""), S(game, "netVersion", "1"), SN(game, "title")),
                 engine,
                 new HostingSection(B(hosting, "direct", !web), B(hosting, "server", web), S(hosting, "lobbyServer", ""),
-                    I(hosting, "directPort", 47810), B(hosting, "openPort", true), B(hosting, "relayOnly", false), origins),
+                    I(hosting, "directPort", 47810), B(hosting, "openPort", true), B(hosting, "relayOnly", false), origins,
+                    B(hosting, "nostr", true), relays),
                 new LobbySection(I(lobby, "maxPlayers", 4), B(lobby, "listed", false), B(lobby, "approveJoins", false),
                     B(lobby, "password", false), B(lobby, "lateJoin", true), B(lobby, "rejoin", true),
                     B(lobby, "joinLink", web || engine == "node-browser"), meta),

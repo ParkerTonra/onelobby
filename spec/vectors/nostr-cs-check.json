@@ -1,0 +1,26 @@
+{
+  "desc": "Nostr signaling key and topic for fixed codes (spec/nostr-signaling.md s.2): ikm = the 11 normalised code characters as ASCII, salt = ASCII 'onelobby-nostr-v1', HKDF-SHA256 (RFC 5869, 32 bytes) with info 'key' and 'topic'. Computed with Python's hmac/hashlib, checked by the C# tests.",
+  "keys": [
+    {
+      "code": "D1PB-1X9S-FPV",
+      "room": "a1b2c3d4e5f6",
+      "ikm": "D1PB1X9SFPV",
+      "key": "87cc2641dde5fb968561be7dc35a8479946d9953481bf433fd4d46a5a5c7425f",
+      "topic": "2ed7120f37d6ecb57946276a9bff321442b82e00f3235b12f1bee365f1d72a06"
+    },
+    {
+      "code": "8000-0000-00N",
+      "room": "000000000000",
+      "ikm": "8000000000N",
+      "key": "b692bd79159f54ec7181b22ca4ce8211572a2565e76030d4eda63b8c8451f7b7",
+      "topic": "9a6ab2f8a6295efe54b34ce3f3f7c748e2933b2605f22b8b708ea67316937aff"
+    },
+    {
+      "code": "814D-2PF2-DB1",
+      "room": "0123456789ab",
+      "ikm": "814D2PF2DB1",
+      "key": "89adde727fe85bb1ad7a955508729212d96e230cd4b644b22d0075ec3c1326e1",
+      "topic": "aaf80fd62788e8488dd4e1008dd21c637277571e87fee262eef759077f32fc86"
+    }
+  ]
+}

@@ -1,0 +1,609 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using OneLobby.Direct.Nostr;
+using OneLobby.Server;
+using Xunit;
+
+namespace OneLobby.DataChannel.Tests;
+
+/// <summary>An in-memory relay network: every event published by one pool reaches every pool on the same topic (the sender too, like a real relay).</summary>
+internal sealed class FakeRelayNet
+{
+    private readonly List<FakeRelays> _all = new();
+    /// <summary>Return false to drop an event on its way (per delivery), to test the frame layer.</summary>
+    public Func<string, bool>? Keep;
+    public bool Duplicate;
+    public int Published;
+
+    public INostrRelays Create(string topic)
+    {
+        var r = new FakeRelays(this, topic);
+        lock (_all) _all.Add(r);
+        return r;
+    }
+
+    internal void Deliver(FakeRelays from, string ev)
+    {
+        Published++;
+        FakeRelays[] targets;
+        lock (_all) targets = _all.Where(r => r.Topic == from.Topic).ToArray();
+        foreach (var t in targets)
+        {
+            if (Keep != null && !Keep(ev)) continue;
+            t.Raise(ev);
+            if (Duplicate) t.Raise(ev);
+        }
+    }
+}
+
+internal sealed class FakeRelays : INostrRelays
+{
+    private readonly FakeRelayNet _net;
+    public string Topic { get; }
+    public bool Up = true;
+    public int Total { get; set; } = 3;
+    public int Connected => Up ? Total : 0;
+    public bool Settled => true;
+    public bool Disposed { get; private set; }
+    public event Action<string>? EventReceived;
+
+    public FakeRelays(FakeRelayNet net, string topic) { _net = net; Topic = topic; }
+    public void Start() { }
+    public void Publish(string eventJson) { if (Up && !Disposed) _net.Deliver(this, eventJson); }
+    internal void Raise(string ev) { if (!Disposed) EventReceived?.Invoke(ev); }
+    public void Dispose() => Disposed = true;
+}
+
+public sealed class NostrCryptoTests
+{
+    private static byte[] H(string hex) => NostrCrypto.FromHex(hex);
+
+    public static IEnumerable<object[]> SignVectors() => new[]
+    {
+        // BIP340 test-vectors.csv rows 0 and 1: secret key, public key, aux, message, signature
+        new object[] { "0000000000000000000000000000000000000000000000000000000000000003", "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
+            "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000",
+            "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA821525F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0" },
+        new object[] { "B7E151628AED2A6ABF7158809CF4F3C762E7160F38B4DA56A784D9045190CFEF", "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+            "0000000000000000000000000000000000000000000000000000000000000001", "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+            "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE33418906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A" },
+    };
+
+    [Theory]
+    [MemberData(nameof(SignVectors))]
+    public void Bip340_signing_vectors(string sk, string pk, string aux, string msg, string sig)
+    {
+        Assert.Equal(pk.ToLowerInvariant(), NostrCrypto.Hex(Schnorr.PublicKey(H(sk))));
+        Assert.Equal(sig.ToLowerInvariant(), NostrCrypto.Hex(Schnorr.Sign(H(msg), H(sk), H(aux))));
+        Assert.True(Schnorr.Verify(H(msg), H(pk), H(sig)));
+    }
+
+    [Fact]
+    public void Bip340_verify_only_vectors()
+    {
+        // row 4 (valid, message not 0 or sk-derived) and rows with a flipped bit / wrong message must fail
+        var pk = H("D69C3509BB99E412E68B0FE8544E72837DFA30746D8BE2AA65975F29D22DC7B9");
+        var msg = H("4DF3C3F68FCC83B27E9D42C90431A72499F17875C81A599B566C9889B9696703");
+        var sig = H("00000000000000000000003B78CE563F89A0ED9414F5AA28AD0D96D6795F9C6376AFB1548AF603B3EB45C9F8207DEE1060CB71C04E80F593060B07D28308D7F4");
+        Assert.True(Schnorr.Verify(msg, pk, sig));
+        var bad = (byte[])sig.Clone();
+        bad[63] ^= 1;
+        Assert.False(Schnorr.Verify(msg, pk, bad));
+        var other = (byte[])msg.Clone();
+        other[0] ^= 1;
+        Assert.False(Schnorr.Verify(other, pk, sig));
+        Assert.False(Schnorr.Verify(msg, new byte[32], sig));
+    }
+
+    [Fact]
+    public void Random_keys_sign_and_verify_and_even_y_keys_sign_with_one_multiplication()
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            Schnorr.NewKeyPair(out var sk, out var pk);
+            Assert.Equal(NostrCrypto.Hex(Schnorr.PublicKey(sk)), NostrCrypto.Hex(pk));
+            var msg = NostrCrypto.RandomBytes(32);
+            Assert.True(Schnorr.Verify(msg, pk, Schnorr.Sign(msg, sk, null, pk)));
+            Assert.True(Schnorr.Verify(msg, pk, Schnorr.Sign(msg, sk)));
+        }
+    }
+
+    [Fact]
+    public void Hkdf_matches_rfc5869_case_1()
+    {
+        var okm = NostrCrypto.Hkdf(Enumerable.Repeat((byte)0x0b, 22).ToArray(), H("000102030405060708090a0b0c"), H("f0f1f2f3f4f5f6f7f8f9"));
+        Assert.Equal("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf", NostrCrypto.Hex(okm));
+    }
+
+    [Fact]
+    public void Aes_gcm_nist_vector_and_managed_matches_the_platform()
+    {
+        var zeroKey = new byte[32];
+        var zeroIv = new byte[12];
+        var sealedZero = NostrCrypto.ManagedSeal(zeroKey, zeroIv, new byte[16]);
+        Assert.Equal("cea7403d4d606b6e074ec5d3baf39d18", NostrCrypto.Hex(sealedZero.Skip(12).Take(16).ToArray()));
+        Assert.Equal("d0d1c8a799996bf0265b98b5d48ab919", NostrCrypto.Hex(sealedZero.Skip(28).ToArray()));
+        foreach (var len in new[] { 0, 1, 15, 16, 17, 31, 100, 1000 })
+        {
+            var key = NostrCrypto.RandomBytes(32);
+            var iv = NostrCrypto.RandomBytes(12);
+            var plain = NostrCrypto.RandomBytes(len);
+            var managed = NostrCrypto.ManagedSeal(key, iv, plain);
+            var platform = NostrCrypto.GcmSeal(key, iv, plain);
+            Assert.Equal(NostrCrypto.Hex(platform), NostrCrypto.Hex(managed));
+            Assert.Equal(NostrCrypto.Hex(plain), NostrCrypto.Hex(NostrCrypto.GcmOpen(key, managed)!));
+            if (managed.Length > 0) { managed[^1] ^= 1; Assert.Null(NostrCrypto.GcmOpen(key, managed)); }
+        }
+    }
+
+    [Fact]
+    public void Join_code_rooms_match_the_shared_vectors()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(SpecDir(), "joincode.json")));
+        var rooms = doc.RootElement.GetProperty("rooms");
+        Assert.True(rooms.GetArrayLength() >= 3);
+        foreach (var r in rooms.EnumerateArray())
+        {
+            var room = r.GetProperty("room").GetString()!;
+            var code = r.GetProperty("code").GetString()!;
+            Assert.Equal(code, JoinCode.EncodeRoom(Convert.ToUInt64(room, 16)));
+            Assert.True(JoinCode.TryDecodeRoom(code, out var back));
+            Assert.Equal(room, back);
+            Assert.False(JoinCode.TryDecode(code, out _, out _, out var err));
+            Assert.Equal("unknown_version", err);
+        }
+        foreach (var a in doc.RootElement.GetProperty("roomAliases").EnumerateArray())
+        {
+            Assert.True(JoinCode.TryDecodeRoom(a.GetProperty("input").GetString(), out var room));
+            Assert.Equal(a.GetProperty("room").GetString(), room);
+        }
+        // version 0 codes are not rooms; version 2 is unknown; a typo is bad_code
+        Assert.False(JoinCode.TryDecodeRoom("6B01-RGFE-P2B", out _));
+        Assert.False(JoinCode.TryDecodeRoom("PB01-RGFE-P24", out _));
+        Assert.False(JoinCode.TryDecodeRoom("D1PB-1X9S-FPW", out _));
+        Assert.False(JoinCode.TryDecode("PB01-RGFE-P24", out _, out _, out var e2));
+        Assert.Equal("unknown_version", e2);
+    }
+
+    [Fact]
+    public void Key_and_topic_vectors()
+    {
+        foreach (var file in new[] { "nostr-cs-check.json" })
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(SpecDir(), file)));
+            foreach (var k in doc.RootElement.GetProperty("keys").EnumerateArray())
+            {
+                var keys = NostrRoomKeys.Derive(JoinCode.Normalize(k.GetProperty("code").GetString())!);
+                Assert.Equal(k.GetProperty("key").GetString(), NostrCrypto.Hex(keys.Key));
+                Assert.Equal(k.GetProperty("topic").GetString(), keys.Topic);
+                Assert.Equal(k.GetProperty("ikm").GetString(), JoinCode.Normalize(k.GetProperty("code").GetString()));
+            }
+        }
+    }
+
+    [Fact]
+    public void Shared_nostr_vectors_from_the_js_lane_match()
+    {
+        var path = Path.Combine(SpecDir(), "nostr.json");
+        if (!File.Exists(path)) return;
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var root = doc.RootElement;
+        var k = root.GetProperty("keys");
+        var keys = NostrRoomKeys.Derive(k.GetProperty("normalized").GetString()!);
+        Assert.Equal(k.GetProperty("key").GetString(), NostrCrypto.Hex(keys.Key));
+        Assert.Equal(k.GetProperty("topic").GetString(), keys.Topic);
+        Assert.Equal(k.GetProperty("room").GetString(), JoinCode.TryDecodeRoom(k.GetProperty("code").GetString(), out var room) ? room : null);
+
+        var c = root.GetProperty("crypto");
+        var plain = Encoding.UTF8.GetBytes(c.GetProperty("plaintext").GetString()!);
+        var sealedBlob = NostrCrypto.GcmSeal(H(c.GetProperty("key").GetString()!), H(c.GetProperty("iv").GetString()!), plain);
+        Assert.Equal(c.GetProperty("content").GetString(), Convert.ToBase64String(sealedBlob));
+        Assert.Equal(c.GetProperty("plaintext").GetString(), NostrEvents.Open(keys, c.GetProperty("content").GetString()!));
+
+        var e = root.GetProperty("event");
+        var id = NostrCrypto.Hex(NostrCrypto.Sha256(Encoding.UTF8.GetBytes(NostrEvents.Serialize(e.GetProperty("pubkey").GetString()!, e.GetProperty("created_at").GetInt64(),
+            e.GetProperty("tags")[0][1].GetString()!, e.GetProperty("content").GetString()!))));
+        Assert.Equal(e.GetProperty("id").GetString(), id);
+
+        foreach (var v in root.GetProperty("bip340").EnumerateArray())
+        {
+            var sk = H(v.GetProperty("secretKey").GetString()!);
+            var msg = H(v.GetProperty("message").GetString()!);
+            Assert.Equal(v.GetProperty("publicKey").GetString()!.ToLowerInvariant(), NostrCrypto.Hex(Schnorr.PublicKey(sk)));
+            Assert.Equal(v.GetProperty("signature").GetString()!.ToLowerInvariant(), NostrCrypto.Hex(Schnorr.Sign(msg, sk, H(v.GetProperty("auxRand").GetString()!))));
+        }
+    }
+
+    internal static string SpecDir()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d != null && !Directory.Exists(Path.Combine(d.FullName, "spec", "vectors"))) d = d.Parent;
+        return Path.Combine(d!.FullName, "spec", "vectors");
+    }
+}
+
+public sealed class NostrLinkTests
+{
+    /// <summary>Two links wired back to back with a fake clock; the "wire" keeps every frame so a test can drop, delay or reorder them.</summary>
+    private sealed class Pair
+    {
+        public long Now;
+        public readonly NostrLink A, B;
+        public readonly List<NostrFrame> ToB = new(), ToA = new();
+        public readonly List<string> AtA = new(), AtB = new();
+        public string? EndA, EndB;
+        public Func<NostrFrame, bool> DeliverToB = _ => true, DeliverToA = _ => true;
+        public readonly List<NostrFrame> SentByA = new(), SentByB = new();
+
+        public Pair()
+        {
+            A = new NostrLink(() => Now, f => { var c = Clone(f); SentByA.Add(c); if (DeliverToB(c)) ToB.Add(c); }) ;
+            B = new NostrLink(() => Now, f => { var c = Clone(f); SentByB.Add(c); if (DeliverToA(c)) ToA.Add(c); });
+            A.Peer = "b";
+            B.Peer = "a";
+            A.Message += m => AtA.Add(m);
+            B.Message += m => AtB.Add(m);
+            A.Ended += (r, local) => EndA = r + (local ? "/local" : "/peer");
+            B.Ended += (r, local) => EndB = r + (local ? "/local" : "/peer");
+        }
+
+        private static NostrFrame Clone(NostrFrame f) => NostrFrame.Parse(f.ToJson())!;
+
+        public void Run(int ms)
+        {
+            for (var t = 0; t < ms; t += 10)
+            {
+                Now += 10;
+                A.Tick();
+                B.Tick();
+                var toB = ToB.ToArray(); ToB.Clear();
+                var toA = ToA.ToArray(); ToA.Clear();
+                foreach (var f in toB) B.Receive(f);
+                foreach (var f in toA) A.Receive(f);
+            }
+        }
+    }
+
+    [Fact]
+    public void Messages_are_batched_for_30_ms_into_one_frame_and_arrive_in_order()
+    {
+        var p = new Pair();
+        p.Run(100);
+        p.SentByA.Clear();
+        p.A.Queue("one"); p.A.Queue("two"); p.A.Queue("three");
+        p.Run(20);
+        Assert.DoesNotContain(p.SentByA, f => f.Type == "data");
+        p.Run(30);
+        var data = p.SentByA.Where(f => f.Type == "data").ToList();
+        Assert.Single(data);
+        Assert.Equal(1, data[0].Seq);
+        Assert.Equal(new[] { "one", "two", "three" }, data[0].Msgs);
+        Assert.Equal(new[] { "one", "two", "three" }, p.AtB);
+    }
+
+    [Fact]
+    public void Frames_arriving_out_of_order_or_twice_are_delivered_once_in_order()
+    {
+        var p = new Pair();
+        p.DeliverToB = _ => false; // hold everything back, then hand it over reversed and doubled
+        for (var i = 1; i <= 5; i++) { p.A.Queue("m" + i); p.Run(40); }
+        var held = p.SentByA.Where(f => f.Type == "data").ToList();
+        Assert.Equal(5, held.Count);
+        foreach (var f in Enumerable.Reverse(held)) { p.B.Receive(f); p.B.Receive(f); }
+        Assert.Equal(new[] { "m1", "m2", "m3", "m4", "m5" }, p.AtB);
+    }
+
+    [Fact]
+    public void An_unacknowledged_frame_is_resent_after_3_s_and_acked_once_it_lands()
+    {
+        var p = new Pair();
+        var dropped = 0;
+        p.DeliverToB = f => f.Type != "data" || ++dropped > 1; // lose the first copy only
+        p.A.Queue("hello");
+        p.Run(2900);
+        Assert.Empty(p.AtB);
+        p.Run(300);
+        Assert.Equal(new[] { "hello" }, p.AtB);
+        Assert.Equal(2, p.SentByA.Count(f => f.Type == "data"));
+        p.Run(200);
+        Assert.Equal(0, p.A.Unacked);
+    }
+
+    [Fact]
+    public void Silence_closes_the_link_with_timeout_after_five_resends()
+    {
+        var p = new Pair();
+        p.DeliverToB = _ => false;
+        p.DeliverToA = _ => false;
+        p.A.Queue("into the void");
+        p.Run(3000 * 5 + 2900);
+        Assert.Null(p.EndA);
+        Assert.Equal(6, p.SentByA.Count(f => f.Type == "data")); // the first send and five resends
+        p.Run(300);
+        Assert.Equal("timeout/peer", p.EndA);
+        Assert.True(p.A.IsClosed);
+    }
+
+    [Fact]
+    public void Thirty_seconds_without_hearing_anything_closes_the_link()
+    {
+        var p = new Pair();
+        p.DeliverToA = _ => false; // B's beats never reach A
+        p.Run(29_900);
+        Assert.Null(p.EndA);
+        p.Run(200);
+        Assert.Equal("timeout/peer", p.EndA);
+    }
+
+    [Fact]
+    public void A_quiet_link_sends_a_beat_every_10_s_and_stays_open()
+    {
+        var p = new Pair();
+        p.Run(65_000);
+        Assert.Null(p.EndA);
+        Assert.Null(p.EndB);
+        var beats = p.SentByA.Count(f => f.Type == "beat");
+        Assert.InRange(beats, 5, 7);
+        Assert.Equal(0, p.SentByA.Count(f => f.Type == "data"));
+    }
+
+    [Fact]
+    public void Receiving_data_is_acked_promptly_with_a_beat()
+    {
+        var p = new Pair();
+        p.A.Queue("x");
+        p.Run(200);
+        Assert.Equal(0, p.A.Unacked);
+        Assert.Contains(p.SentByB, f => f.Type == "beat" && f.Ack == 1);
+    }
+
+    [Fact]
+    public void A_close_frame_closes_the_other_side_with_its_reason_and_is_sent_once()
+    {
+        var p = new Pair();
+        p.A.Queue("last words");
+        p.A.Close("bye");
+        p.A.Close("again");
+        p.Run(100);
+        Assert.Equal(new[] { "last words" }, p.AtB);
+        Assert.Equal("bye/local", p.EndA);
+        Assert.Equal("bye/peer", p.EndB);
+        Assert.Single(p.SentByA, f => f.Type == "close");
+    }
+
+    [Fact]
+    public void A_burst_over_32_KiB_is_split_over_several_frames_that_each_fit()
+    {
+        var p = new Pair();
+        var sent = new List<string>();
+        for (var i = 0; i < 40; i++) { var m = new string((char)('a' + i % 26), 3000) + i; sent.Add(m); p.A.Queue(m); }
+        p.Run(100);
+        var frames = p.SentByA.Where(f => f.Type == "data").ToList();
+        Assert.True(frames.Count >= 4);
+        Assert.All(frames, f => Assert.True(Encoding.UTF8.GetByteCount(f.ToJson()) < 32 * 1024));
+        Assert.Equal(sent, p.AtB);
+    }
+
+    [Fact]
+    public void More_than_64_frames_ahead_are_not_held()
+    {
+        var p = new Pair();
+        p.DeliverToB = _ => false;
+        for (var i = 0; i < 70; i++) { p.A.Queue("m" + i); p.Run(40); }
+        var frames = p.SentByA.Where(f => f.Type == "data").ToList();
+        Assert.Equal(70, frames.Count);
+        foreach (var f in frames.Skip(1)) p.B.Receive(f); // seq 2..70 while 1 is missing: only 2..64 fit
+        Assert.Empty(p.AtB);
+        p.B.Receive(frames[0]);
+        Assert.Equal(64, p.AtB.Count); // 1 plus the held frames 2..64; the rest wait for a resend
+    }
+}
+
+public sealed class NostrBridgeTests
+{
+    private sealed class Rig
+    {
+        public long Now = 1_000_000;
+        public readonly FakeRelayNet Net = new();
+        public readonly NostrOptions Options;
+        public readonly string Code = JoinCode.Normalize(JoinCode.EncodeRoom(0xa1b2c3d4e5f6))!;
+        public readonly Hub Hub = new(HubOptions.ForDirect(4, null));
+        public readonly NostrHostBridge Bridge;
+
+        public Rig()
+        {
+            Options = new NostrOptions { RelayFactory = Net.Create, AutoTick = false, NowMs = () => Now, UnixSeconds = () => 1_700_000_000 + Now / 1000 };
+            Bridge = new NostrHostBridge(Hub, Code, Options);
+        }
+
+        public NostrSignalingSocket Join() => new(Code, Options);
+
+        public void Run(int ms, params NostrSignalingSocket[] sockets)
+        {
+            for (var t = 0; t < ms; t += 10)
+            {
+                Now += 10;
+                foreach (var s in sockets) s.Tick();
+                Bridge.Tick();
+            }
+        }
+
+        public static IEnumerable<string> Drain(ISignalingSocket s)
+        {
+            while (s.TryReceive(out var t)) yield return t;
+        }
+    }
+
+    private static string Hello(string name) =>
+        "{\"t\":\"hello\",\"proto\":\"lk1\",\"gameId\":\"com.test\",\"netVersion\":\"1\",\"client\":{\"lib\":\"t\",\"ver\":\"1\",\"platform\":\"dotnet\"},\"name\":\"" + name + "\"}";
+
+    [Fact]
+    public void A_joiner_opens_the_socket_and_talks_to_the_hub_over_the_fake_relays() => RunHello();
+
+    private static void RunHello()
+    {
+        var rig = new Rig();
+        using var sock = rig.Join();
+        Assert.Equal(SocketState.Connecting, sock.State);
+        rig.Run(100, sock);
+        Assert.Equal(SocketState.Open, sock.State);
+        sock.Send(Hello("Ann"));
+        rig.Run(300, sock);
+        var got = Rig.Drain(sock).ToList();
+        Assert.Contains(got, t => t.Contains("\"welcome\""));
+        Assert.Equal(1, rig.Hub.SocketCount);
+        // our own ping is answered locally and never crosses (the hub would have answered with a pong over Nostr)
+        sock.Send("{\"t\":\"ping\",\"n\":7}");
+        Assert.Equal("{\"t\":\"pong\",\"n\":7}", Rig.Drain(sock).Single());
+        rig.Run(100, sock);
+        sock.Dispose();
+        rig.Run(300, sock);
+        Assert.Equal(0, rig.Hub.SocketCount);
+        Assert.Equal(0, rig.Bridge.PeerCount);
+    }
+
+    [Fact]
+    public void Survives_a_lossy_duplicating_relay_net() => RunLossy();
+
+    private static void RunLossy()
+    {
+        var rig = new Rig();
+        var rng = new Random(5);
+        rig.Net.Keep = _ => rng.Next(100) >= 35; // a third of the deliveries vanish
+        rig.Net.Duplicate = true;
+        using var sock = rig.Join();
+        rig.Run(20_000, sock);
+        Assert.Equal(SocketState.Open, sock.State);
+        sock.Send(Hello("Ann"));
+        rig.Run(15_000, sock);
+        Assert.Contains(Rig.Drain(sock), t => t.Contains("\"welcome\""));
+    }
+
+    [Fact]
+    public void No_relay_reachable_fails_the_socket_with_connect_failed_after_10_s() => RunNoRelay();
+
+    private static void RunNoRelay()
+    {
+        var rig = new Rig();
+        using var sock = rig.Join();
+        ((FakeRelays)GetRelays(sock)).Up = false;
+        rig.Run(9_900, sock);
+        Assert.Equal(SocketState.Connecting, sock.State);
+        rig.Run(200, sock);
+        Assert.Equal(SocketState.Closed, sock.State);
+        Assert.Equal("connect_failed", sock.CloseReason);
+    }
+
+    [Fact]
+    public void Nobody_home_gives_up_after_15_s() => RunNobody();
+
+    private static void RunNobody()
+    {
+        var rig = new Rig();
+        rig.Bridge.Dispose();
+        using var sock = rig.Join();
+        rig.Run(14_900, sock);
+        Assert.Equal(SocketState.Connecting, sock.State);
+        rig.Run(200, sock);
+        Assert.Equal("connect_failed", sock.CloseReason);
+    }
+
+    [Fact]
+    public void The_host_closing_a_full_hub_answers_then_closes() => RunFull();
+
+    private static void RunFull()
+    {
+        var rig = new Rig();
+        var socks = new List<NostrSignalingSocket>();
+        for (var i = 0; i < rig.Hub.SocketCount + 20; i++)
+        {
+            var s = rig.Join();
+            socks.Add(s);
+            rig.Run(100, socks.ToArray());
+        }
+        // MaxPeers is 12 for four players: later joiners get server_full and a close
+        var closed = socks.Where(s => s.State == SocketState.Closed).ToList();
+        Assert.NotEmpty(closed);
+        Assert.All(closed, s => Assert.NotNull(s.CloseReason));
+        foreach (var s in socks) s.Dispose();
+    }
+
+    [Fact]
+    public void A_foreign_room_key_is_ignored() => RunForeign();
+
+    private static void RunForeign()
+    {
+        var rig = new Rig();
+        // same topic would need the same code: an attacker with a different code lands on another topic and is never heard
+        var other = new NostrSignalingSocket(JoinCode.Normalize(JoinCode.EncodeRoom(1))!, rig.Options);
+        rig.Run(1000, other);
+        Assert.Equal(SocketState.Connecting, other.State);
+        Assert.Equal(0, rig.Bridge.PeerCount);
+        other.Dispose();
+    }
+
+    private static INostrRelays GetRelays(NostrSignalingSocket s) => s.Relays;
+
+    [Fact]
+    public void Event_filter_drops_own_old_foreign_topic_and_garbled_events()
+    {
+        var net = new FakeRelayNet();
+        var keys = NostrRoomKeys.Derive("D1PB1X9SFPV");
+        long unix = 1_700_000_000;
+        var relays = (FakeRelays)net.Create(keys.Topic);
+        var ch = new NostrChannel(relays, keys, () => unix);
+        var other = new NostrChannel((FakeRelays)net.Create(keys.Topic), keys, () => unix);
+        // a frame from "other" arrives
+        other.Publish(new NostrFrame { Type = "open", To = "" });
+        Assert.True(ch.TryTake(out var f));
+        Assert.Equal(other.Pubkey, f.From);
+        Assert.False(other.TryTake(out _)); // its own echo is dropped
+        // an event stamped 200 s ago is too old
+        var old = NostrEvents.Build(Schnorr.NewSecretKey(), "00", unix - 200, keys.Topic, "AAAA");
+        ch.OnEvent(old);
+        Assert.False(ch.TryTake(out _));
+        ch.OnEvent("not json");
+        ch.OnEvent("{}");
+        Assert.False(ch.TryTake(out _));
+        // a frame sealed under another room's key does not open
+        var wrong = NostrRoomKeys.Derive("8000000000N");
+        // build by hand: the same topic tag but the wrong key
+        var ev = NostrEvents.Build(Schnorr.NewSecretKey(), NostrCrypto.Hex(Schnorr.PublicKey(Schnorr.NewSecretKey())), unix, keys.Topic, NostrEvents.Seal(wrong, new NostrFrame { Type = "open", From = "x" }.ToJson()));
+        ch.OnEvent(ev);
+        Assert.False(ch.TryTake(out _));
+    }
+
+    [Fact]
+    public void Event_serialisation_id_is_sha256_of_the_nip01_array_and_the_signature_verifies()
+    {
+        var keys = NostrRoomKeys.Derive("D1PB1X9SFPV");
+        Schnorr.NewKeyPair(out var sk, out var pk);
+        var content = NostrEvents.Seal(keys, "{\"v\":1}");
+        var json = NostrEvents.Build(sk, NostrCrypto.Hex(pk), 1_700_000_000, keys.Topic, content, evenYPublicKey: pk);
+        using var doc = JsonDocument.Parse(json);
+        var e = doc.RootElement;
+        var id = NostrCrypto.Sha256(Encoding.UTF8.GetBytes("[0,\"" + NostrCrypto.Hex(pk) + "\",1700000000,25050,[[\"t\",\"" + keys.Topic + "\"]],\"" + content + "\"]"));
+        Assert.Equal(NostrCrypto.Hex(id), e.GetProperty("id").GetString());
+        Assert.True(Schnorr.Verify(id, pk, NostrCrypto.FromHex(e.GetProperty("sig").GetString()!)));
+        Assert.Equal(25050, e.GetProperty("kind").GetInt32());
+        Assert.Equal("{\"v\":1}", NostrEvents.Open(keys, content));
+    }
+
+    [Fact]
+    public void Host_log_suffix_matches_the_js_wording()
+    {
+        var net = new FakeRelayNet();
+        var r = (FakeRelays)net.Create("t");
+        r.Total = 5;
+        Assert.Equal("; nostr 5/5 relays", OneLobby.Direct.DirectLobby.NostrLogSuffix(r));
+        r.Up = false;
+        Assert.Equal("; nostr: no relay reachable", OneLobby.Direct.DirectLobby.NostrLogSuffix(r));
+        Assert.Equal("", OneLobby.Direct.DirectLobby.NostrLogSuffix(null));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP; nostr 3/5 relays",
+            OneLobby.Direct.DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP", "; nostr 3/5 relays"));
+    }
+}

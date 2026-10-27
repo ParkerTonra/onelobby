@@ -134,7 +134,7 @@ public sealed class DirectIpTests
         }
         var sw = Stopwatch.StartNew();
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw", MaxPlayers = 3, OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", MaxPlayers = 3, OpenPort = false }), Pump, "host");
         Assert.True(host.IsHost);
         Assert.Equal("", host.Code);
         _log.WriteLine("host addresses: " + string.Join(", ", host.DirectAddresses));
@@ -211,7 +211,7 @@ public sealed class DirectIpTests
         }
         void PumpAll() { Pump(); if (old != null) old.Pump(); else oldClient.Pump(); }
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { OpenPort = false }), PumpAll, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), PumpAll, "host");
         var address = "127.0.0.1:" + port;
         old = Await(oldClient.JoinDirectAsync(address), PumpAll, "join");
         PumpUntil(() => old.ReadyAsync.IsCompleted, PumpAll, "old ready");
@@ -254,7 +254,7 @@ public sealed class DirectIpTests
         var joinClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         Lobby? host = null;
         void Pump() { if (host != null) host.Pump(); else hostClient.Pump(); joinClient.Pump(); }
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Password = "pw", OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", OpenPort = false }), Pump, "host");
         var t = joinClient.JoinDirectAsync("127.0.0.1", "PW");
         PumpUntil(() => t.IsCompleted, Pump, "join");
         var e = Assert.IsType<OneLobbyException>(t.Exception!.GetBaseException());
@@ -284,7 +284,7 @@ public sealed class DirectIpTests
             if (b != null) b.Pump(); else bClient.Pump();
         }
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Name = "Test room", LateJoin = lateJoin, OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Name = "Test room", LateJoin = lateJoin, OpenPort = false }), Pump, "host");
         Assert.Equal("Test room", host.Name);
         a = Await(aClient.JoinDirectAsync("127.0.0.1:" + port), Pump, "join a");
         Assert.Equal("Test room", a.Name);
@@ -340,8 +340,8 @@ public sealed class DirectIpTests
         var port = FreePort();
         var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c1.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c1.Pump, "host");
-        var t = c2.HostDirectAsync(new DirectHostOptions { OpenPort = false, FallbackPorts = 0 });
+        var host = Await(c1.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host");
+        var t = c2.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 0 });
         Assert.True(t.IsFaulted);
         Assert.Equal("port_in_use", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
         host.LeaveAsync();
@@ -365,7 +365,7 @@ public sealed class DirectIpTests
     {
         var port = FreePort();
         var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { PublicAddress = "198.51.100.9" }), c.Pump, "host");
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "198.51.100.9" }), c.Pump, "host");
         Assert.Equal(JoinCodeKind.Internet, host.JoinCodeKind);
         Assert.Equal(JoinCode.Encode("198.51.100.9", port), host.JoinCode);
         Assert.Equal("manual", host.PortMapping);
@@ -380,7 +380,7 @@ public sealed class DirectIpTests
     public void PublicAddressMustBeDottedIPv4()
     {
         var c = new LobbyClient(Cfg, new DataChannelTransport());
-        var t = c.HostDirectAsync(new DirectHostOptions { PublicAddress = "my-pc.example.com" });
+        var t = c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "my-pc.example.com" });
         Assert.True(t.IsFaulted);
         Assert.Equal("bad_address", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
     }
@@ -438,7 +438,7 @@ public sealed class DirectIpTests
         using var gw = new SilentThenNatPmp();
         var port = FreePort();
         var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { PortMapping = SilentOpts(gw, 100) }), c.Pump, "host");
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 100) }), c.Pump, "host");
         Assert.NotEqual(JoinCodeKind.Internet, host.JoinCodeKind);
         var changed = new List<(string, JoinCodeKind, int)>();
         host.JoinCodeChanged += (code, kind) => changed.Add((code, kind, Environment.CurrentManagedThreadId));
@@ -461,7 +461,7 @@ public sealed class DirectIpTests
     {
         using var gw = new SilentThenNatPmp();
         var c = new LobbyClient(Cfg with { DirectPort = FreePort() }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { PortMapping = SilentOpts(gw, 0) }), c.Pump, "host");
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 0) }), c.Pump, "host");
         var asked = gw.Requests;
         Assert.True(asked > 0);
         var sw = Stopwatch.StartNew();
@@ -485,8 +485,8 @@ public sealed class DirectIpTests
         var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
         var j = new LobbyClient(Cfg, new DataChannelTransport());
-        var first = Await(c1.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c1.Pump, "host 1");
-        var second = Await(c2.HostDirectAsync(new DirectHostOptions { OpenPort = false }), c2.Pump, "host 2");
+        var first = Await(c1.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host 1");
+        var second = Await(c2.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c2.Pump, "host 2");
         Assert.True(JoinCode.TryDecode(second.JoinCode, out _, out var p2, out _));
         Assert.NotEqual(port, p2);
         Assert.InRange(p2, port + 1, port + DirectLobby.DefaultFallbackPorts);
@@ -556,7 +556,7 @@ public sealed class DirectIpTests
             if (host != null) host.Pump(); else hostClient.Pump();
             if (ann != null) ann.Pump(); else joinClient.Pump();
         }
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Port = port, OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = port, OpenPort = false }), Pump, "host");
         if (host.JoinCode != "") Assert.Equal(JoinCodeKind.SameNetwork, host.JoinCodeKind);
         Assert.Equal("off", host.PortMapping);
         if (host.JoinCode == "") { host.LeaveAsync(); return; } // no IPv4 on this machine

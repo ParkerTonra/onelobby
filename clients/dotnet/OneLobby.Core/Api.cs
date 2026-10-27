@@ -14,8 +14,8 @@ namespace OneLobby
     public enum Channel { Reliable, Fast }
     public enum Visibility { Public, Unlisted, Private }
     public enum LobbyPhase { Lobby, InGame }
-    /// <summary>Direct-IP join codes (docs/direct-ip.md s.2a): "Internet code" or "Same-network code" on the host screen.</summary>
-    public enum JoinCodeKind { None, SameNetwork, Internet }
+    /// <summary>Direct-IP join codes (docs/direct-ip.md s.2a): "Internet code" or "Same-network code" on the host screen; <c>Nostr</c> is a version 1 code (spec/nostr-signaling.md) that works through any router.</summary>
+    public enum JoinCodeKind { None, SameNetwork, Internet, Nostr }
 
     public sealed record OneLobbyConfig(
         string GameId,

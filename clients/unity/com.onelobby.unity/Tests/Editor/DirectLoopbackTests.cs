@@ -57,7 +57,7 @@ namespace OneLobby.Unity.Tests
                 if (joiner != null) joiner.Pump(); else joinClient.Pump();
             }
 
-            var hostTask = hostClient.HostDirectAsync(new DirectHostOptions { Port = Port, MaxPlayers = 2, OpenPort = false });
+            var hostTask = hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = Port, MaxPlayers = 2, OpenPort = false });
             yield return Await(hostTask, Pump, "host direct");
             host = hostTask.Result;
             Assert.IsFalse(string.IsNullOrEmpty(host.JoinCode), "a direct host shows a join code");

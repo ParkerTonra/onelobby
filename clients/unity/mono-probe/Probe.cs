@@ -52,7 +52,7 @@ static class Probe
         var sw = Stopwatch.StartNew();
 
         var ht = direct
-            ? a.HostDirectAsync(new DirectHostOptions { Port = directPort, MaxPlayers = 2, OpenPort = false })
+            ? a.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = directPort, MaxPlayers = 2, OpenPort = false })
             : a.HostAsync(new LobbyOptions("mono probe", 2, Visibility.Public));
         PumpUntil(() => ht.IsCompleted, Pump, "host");
         host = ht.GetAwaiter().GetResult();

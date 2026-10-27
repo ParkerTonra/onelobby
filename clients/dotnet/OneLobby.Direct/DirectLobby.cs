@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using OneLobby.Direct.Nostr;
 using OneLobby.Server;
 
 namespace OneLobby.Direct
@@ -56,6 +57,13 @@ namespace OneLobby.Direct
         /// pages, so this is only for a web game hosted somewhere else that joins players to this host.
         /// </summary>
         public IReadOnlyList<string>? AllowedOrigins { get; set; }
+        /// <summary>
+        /// Nostr signaling (spec/nostr-signaling.md), default on: <see cref="Lobby.JoinCode"/> becomes a version 1 code that
+        /// joins through any router over public relays, and <see cref="Lobby.DirectCode"/> keeps the IP-address code. Set
+        /// <see cref="NostrOptions.Enabled"/> false for IP codes only; <see cref="NostrOptions.Relays"/> and
+        /// <see cref="NostrOptions.Stun"/> replace the defaults.
+        /// </summary>
+        public NostrOptions Nostr { get; set; } = new NostrOptions();
     }
 
     /// <summary>
@@ -108,6 +116,11 @@ namespace OneLobby.Direct
                 Meta = bp.Lobby.Meta.Count == 0 ? null : bp.Lobby.Meta,
                 RateLimit = bp.Session.RateLimit,
                 Name = string.IsNullOrEmpty(name) ? Blueprint.DefaultLobbyName(displayName) : name,
+                Nostr = new NostrOptions
+                {
+                    Enabled = bp.Hosting.Nostr,
+                    Relays = bp.Hosting.Relays.Count == 0 ? null : bp.Hosting.Relays,
+                },
             };
             // set only when off: an untouched OpenPort lets PublicAddress (a hand-forwarded port) skip the router
             if (!bp.Hosting.OpenPort) o.OpenPort = false;
@@ -146,7 +159,23 @@ namespace OneLobby.Direct
                 }
             }
             DirectHostTransport transport = null!;
-            try { client.UseDirect(inner => transport = new DirectHostTransport(inner, hub), new Uri("onelobby-direct://host/"), hub); }
+            var nostr = o.Nostr ?? new NostrOptions();
+            string? nostrCode = null;
+            NostrHostBridge? bridge = null;
+            try
+            {
+                if (nostr.Enabled)
+                {
+                    var roomBytes = new byte[6];
+                    using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create()) rng.GetBytes(roomBytes);
+                    ulong room = 0;
+                    foreach (var b in roomBytes) room = (room << 8) | b;
+                    nostrCode = OneLobby.JoinCode.EncodeRoom(room);
+                    bridge = new NostrHostBridge(hub.Hub, OneLobby.JoinCode.Normalize(nostrCode)!, nostr);
+                    hub.Own(bridge);
+                }
+                client.UseDirect(inner => transport = new DirectHostTransport(inner, hub, nostr.Enabled ? nostr.EffectiveStun : null), new Uri("onelobby-direct://host/"), hub);
+            }
             catch (Exception e)
             {
                 hub.Dispose();
@@ -160,7 +189,7 @@ namespace OneLobby.Direct
                 ? MapAsync(hub, mapOptions)
                 : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit }, ct);
-            return FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs);
+            return FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode);
         }
 
         /// <summary>
@@ -176,16 +205,47 @@ namespace OneLobby.Direct
             : !anyBusy ? "Windows has reserved it (an excluded port range, often from Hyper-V, WSL or Docker); pick another port"
             : "each one is busy or reserved by Windows (an excluded port range); is another copy of the game hosting?";
 
-        internal static string FormatHostLog(int requested, int bound, string code, JoinCodeKind kind, string mapping)
+        internal static string FormatHostLog(int requested, int bound, string code, JoinCodeKind kind, string mapping, string nostr = "")
         {
             var line = "OneLobby: direct host listening on TCP+UDP :" + bound;
             if (bound != requested) line += " (" + (bound - requested == 1 ? requested.ToString() : requested + "-" + (bound - 1)) + " busy)";
             line += string.IsNullOrEmpty(code) ? "; no join code (no IPv4 address)" : "; code " + code + " (" + kind + ")";
-            return line + "; port mapping " + (string.IsNullOrEmpty(mapping) ? "off" : mapping);
+            line += "; port mapping " + (string.IsNullOrEmpty(mapping) ? "off" : mapping);
+            return line + nostr;
+        }
+
+        /// <summary>The log line's Nostr suffix: <c>; nostr 3/5 relays</c>, or <c>; nostr: no relay reachable</c> (empty when Nostr is off).</summary>
+        internal static string NostrLogSuffix(INostrRelays? relays) =>
+            relays == null ? "" : relays.Connected > 0 ? "; nostr " + relays.Connected + "/" + relays.Total + " relays" : "; nostr: no relay reachable";
+
+        /// <summary>Waits (off the game thread) until the relays have answered, or a few seconds, so the first log line is true.</summary>
+        private static async Task SettleRelays(INostrRelays relays)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 4000)
+            {
+                if (relays.Connected >= relays.Total || relays.Settled || (relays.Connected > 0 && sw.ElapsedMilliseconds >= 1500)) return;
+                await Task.Delay(50).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>No relay answered at startup: keep looking, and switch the join code to the Nostr one when one does.</summary>
+        private static void WatchForRelay(NostrHostBridge bridge, DirectHubHost hub, DirectHostTransport transport, Action onUp)
+        {
+            _ = Task.Run(async () =>
+            {
+                while (!hub.Disposed)
+                {
+                    await Task.Delay(500).ConfigureAwait(false);
+                    if (bridge.Relays.Connected == 0) continue;
+                    transport.Post(() => { if (!hub.Disposed) onUp(); });
+                    return;
+                }
+            });
         }
 
         private static string KindName(JoinCodeKind k) =>
-            k == JoinCodeKind.Internet ? "internet" : k == JoinCodeKind.SameNetwork ? "same_network" : "none";
+            k == JoinCodeKind.Internet ? "internet" : k == JoinCodeKind.SameNetwork ? "same_network" : k == JoinCodeKind.Nostr ? "nostr" : "none";
 
         private const int MaxRetryMs = 5 * 60_000;
 
@@ -225,22 +285,35 @@ namespace OneLobby.Direct
             catch (Exception e) { return new PortMapResult { Detail = e.Message }; }
         }
 
-        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort, string? manual, string manualNote, int retryMs)
+        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort, string? manual, string manualNote, int retryMs, NostrHostBridge? bridge, string? nostrCode)
         {
             try
             {
                 var lobby = await create.ConfigureAwait(false);
                 await transport.AfterPump(mapping).ConfigureAwait(false);
+                if (bridge != null) await transport.AfterPump(SettleRelays(bridge.Relays)).ConfigureAwait(false);
                 var map = mapping.Result;
+                var ipCode = "";
+                var ipKind = JoinCodeKind.None;
+                var nostrUp = bridge != null && bridge.Relays.Connected > 0;
                 lobby.DirectAddresses = DirectAddress.Local(hub.Port);
                 // Sets JoinCode / JoinCodeKind / PortMapping / DirectHostLog and what GET /joininfo answers.
                 void Apply(string? ip, JoinCodeKind kind, string note)
                 {
                     lobby.PortMapping = note;
-                    lobby.JoinCode = ip == null ? "" : OneLobby.JoinCode.Encode(ip, hub.Port);
-                    lobby.JoinCodeKind = ip == null ? JoinCodeKind.None : kind;
-                    lobby.DirectHostLog = FormatHostLog(requestedPort, hub.Port, lobby.JoinCode, lobby.JoinCodeKind, lobby.PortMapping);
-                    hub.JoinInfo = new DirectJoinInfo(lobby.JoinCode, KindName(lobby.JoinCodeKind), null, hub.Port);
+                    ipCode = ip == null ? "" : OneLobby.JoinCode.Encode(ip, hub.Port);
+                    ipKind = ip == null ? JoinCodeKind.None : kind;
+                    Publish();
+                }
+                // JoinCode is the Nostr code while a relay is reachable (it works through any router), else the IP code.
+                void Publish()
+                {
+                    lobby.DirectCode = ipCode;
+                    lobby.DirectCodeKind = ipKind;
+                    lobby.JoinCode = nostrUp ? nostrCode! : ipCode;
+                    lobby.JoinCodeKind = nostrUp ? JoinCodeKind.Nostr : ipKind;
+                    lobby.DirectHostLog = FormatHostLog(requestedPort, hub.Port, ipCode, ipKind, lobby.PortMapping, NostrLogSuffix(bridge?.Relays));
+                    hub.JoinInfo = new DirectJoinInfo(lobby.JoinCode, KindName(lobby.JoinCodeKind), null, hub.Port, ipCode, KindName(ipKind));
                 }
                 if (manual != null) Apply(manual, JoinCodeKind.Internet, map is { Mapped: true } ? map.Detail : manualNote);
                 else if (map is { Mapped: true } && PortMapper.IsPublicIPv4(map.ExternalIPv4)) Apply(map.ExternalIPv4, JoinCodeKind.Internet, map.Detail);
@@ -259,6 +332,7 @@ namespace OneLobby.Direct
                             });
                         });
                 }
+                if (bridge != null && !nostrUp) WatchForRelay(bridge, hub, transport, () => { nostrUp = true; Publish(); lobby.RaiseJoinCodeChanged(); });
                 return lobby;
             }
             catch
@@ -272,13 +346,23 @@ namespace OneLobby.Direct
         /// Joins the lobby behind a join code (<c>6B01-RGFE-P2B</c>, from the host's <see cref="Lobby.JoinCode"/>) or an
         /// address (<c>ip</c>, <c>ip:port</c>, <c>[v6]:port</c>; the port defaults to <c>OneLobbyConfig.DirectPort</c>). The
         /// host's address is also offered to ICE as its UDP candidate, so a host behind a forwarded port is reachable.
-        /// A mistyped code fails at once with <c>bad_code</c>.
+        /// A version 1 code (<see cref="JoinCodeKind.Nostr"/>) joins over Nostr relays and public STUN instead
+        /// (the blueprint's <c>hosting.nostrRelays</c>, else the defaults). A mistyped code fails at once with <c>bad_code</c>.
         /// </summary>
         public static Task<Lobby> JoinDirectAsync(this LobbyClient client, string address, string? password = null, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (!TryUseDirect(client, address, out var a, out var fail)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), a!);
+            if (!TryUseDirect(client, address, null, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code);
+        }
+
+        /// <summary>As above, with explicit Nostr relays and STUN servers for a version 1 code.</summary>
+        public static Task<Lobby> JoinDirectAsync(this LobbyClient client, string address, string? password, NostrOptions nostr, CancellationToken ct = default)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (nostr == null) throw new ArgumentNullException(nameof(nostr));
+            if (!TryUseDirect(client, address, nostr, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code);
         }
 
         /// <summary>
@@ -291,16 +375,40 @@ namespace OneLobby.Direct
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (string.IsNullOrEmpty(resumeToken)) throw new ArgumentException("resume token required", nameof(resumeToken));
-            if (!TryUseDirect(client, address, out var a, out var fail)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.RejoinAsync(resumeToken, ct), a!);
+            if (!TryUseDirect(client, address, null, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.RejoinAsync(resumeToken, ct), code);
         }
 
-        private static bool TryUseDirect(LobbyClient client, string address, out DirectAddress? result, out Exception? fail)
+        /// <summary>As above, with explicit Nostr relays and STUN servers for a version 1 code.</summary>
+        public static Task<Lobby> RejoinDirectAsync(this LobbyClient client, string address, string resumeToken, NostrOptions nostr, CancellationToken ct = default)
         {
-            result = null;
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (nostr == null) throw new ArgumentNullException(nameof(nostr));
+            if (string.IsNullOrEmpty(resumeToken)) throw new ArgumentException("resume token required", nameof(resumeToken));
+            if (!TryUseDirect(client, address, nostr, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.RejoinAsync(resumeToken, ct), code);
+        }
+
+        private static bool TryUseDirect(LobbyClient client, string address, NostrOptions? nostr, out string joinCode, out Exception? fail)
+        {
+            joinCode = "";
             fail = null;
             if (OneLobby.JoinCode.LooksLikeCode(address))
             {
+                if (OneLobby.JoinCode.TryDecodeRoom(address, out var roomHex))
+                {
+                    var normalized = OneLobby.JoinCode.Normalize(address)!;
+                    var relays = client.Blueprint?.Hosting.Relays;
+                    var opts = nostr ?? new NostrOptions { Relays = relays is { Count: > 0 } ? relays : null };
+                    try
+                    {
+                        client.UseDirect(inner => new NostrJoinTransport(inner, normalized, opts), new Uri("onelobby-nostr://" + roomHex + "/"), null,
+                            NostrSignalingSocket.GiveUpMs + 1000);
+                    }
+                    catch (Exception e) { fail = e; return false; }
+                    joinCode = OneLobby.JoinCode.Group(normalized);
+                    return true;
+                }
                 if (!OneLobby.JoinCode.TryDecode(address, out var ip, out var port, out var err))
                 {
                     fail = new OneLobbyException(err!, err == "unknown_version"
@@ -318,16 +426,16 @@ namespace OneLobby.Direct
             }
             try { client.UseDirect(inner => new DirectJoinTransport(inner, new[] { a.Candidate }), a.WebSocketUri, null); }
             catch (Exception e) { fail = e; return false; }
-            result = a;
+            try { joinCode = a.IsIPv6 ? a.ToString() : OneLobby.JoinCode.Encode(a.Host, a.Port); }
+            catch (ArgumentException) { joinCode = a.ToString(); } // a host name has no code
             return true;
         }
 
         /// <summary>A joiner's <see cref="Lobby.JoinCode"/> is what it joined with (the code, normalized), so a HUD can show it on both sides.</summary>
-        private static async Task<Lobby> WithJoinCode(Task<Lobby> join, DirectAddress a)
+        private static async Task<Lobby> WithJoinCode(Task<Lobby> join, string code)
         {
             var lobby = await join.ConfigureAwait(false);
-            try { lobby.JoinCode = a.IsIPv6 ? a.ToString() : OneLobby.JoinCode.Encode(a.Host, a.Port); }
-            catch (ArgumentException) { lobby.JoinCode = a.ToString(); } // a host name has no code
+            lobby.JoinCode = code;
             return lobby;
         }
     }

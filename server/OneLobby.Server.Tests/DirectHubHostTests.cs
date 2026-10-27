@@ -125,9 +125,19 @@ public class DirectHubHostTests
         var res = await RawGet(host, "/joininfo?x=1");
         Assert.StartsWith("HTTP/1.1 200", res);
         Assert.Contains("Content-Type: application/json\r\n", res);
-        Assert.EndsWith("\r\n\r\n{\"joinCode\":\"6B01-RGFE-P2B\",\"joinCodeKind\":\"internet\",\"joinUrl\":null,\"port\":" + host.Port + "}", res);
+        Assert.EndsWith("\r\n\r\n{\"joinCode\":\"6B01-RGFE-P2B\",\"joinCodeKind\":\"internet\",\"directCode\":\"6B01-RGFE-P2B\",\"directCodeKind\":\"internet\",\"joinUrl\":null,\"port\":" + host.Port + "}", res);
         host.JoinInfo = new DirectJoinInfo("0A00-0BSE-P3S", "same_network", null, host.Port);
         Assert.Contains("\"same_network\"", await RawGet(host, "/joininfo"));
+    }
+
+    [Fact]
+    public async Task Joininfo_carries_the_nostr_join_code_and_the_ip_code()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        host.JoinInfo = new DirectJoinInfo("D1PB-1X9S-FPV", "nostr", null, host.Port, "6B01-RGFE-P2B", "same_network");
+        var res = await RawGet(host, "/joininfo");
+        Assert.Contains("\"directCode\":\"6B01-RGFE-P2B\",\"directCodeKind\":\"same_network\"", res);
+        Assert.Contains("\"joinCodeKind\":\"nostr\"", res);
     }
 
     [Fact]

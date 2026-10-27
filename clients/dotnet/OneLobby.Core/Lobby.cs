@@ -131,6 +131,15 @@ namespace OneLobby
         /// </summary>
         public string JoinCode { get; internal set; } = "";
 
+        /// <summary>
+        /// Direct-IP host only: the IP-address code (version 0). Equals <see cref="JoinCode"/> when Nostr is off or no relay was
+        /// reachable; with Nostr on, <see cref="JoinCode"/> is the version 1 code and this one is the fallback for LAN or forwarded ports.
+        /// </summary>
+        public string DirectCode { get; internal set; } = "";
+
+        /// <summary>Whether <see cref="DirectCode"/> carries the router's public address or this PC's LAN address.</summary>
+        public JoinCodeKind DirectCodeKind { get; internal set; }
+
         /// <summary>Whether <see cref="JoinCode"/> carries the router's public address (internet) or this PC's LAN address.</summary>
         public JoinCodeKind JoinCodeKind { get; internal set; }
 

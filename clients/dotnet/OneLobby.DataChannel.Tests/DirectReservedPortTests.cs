@@ -24,7 +24,7 @@ public sealed class DirectReservedPortTests
         var port = ReservedPortWithFreeNeighbour();
         if (port == 0) return; // not Windows, or no reserved range with a free port right after it
         var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var lobby = Await(c.HostDirectAsync(new DirectHostOptions { OpenPort = false, FallbackPorts = 1 }), c.Pump);
+        var lobby = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 1 }), c.Pump);
         Assert.True(JoinCode.TryDecode(lobby.JoinCode, out _, out var p, out _));
         Assert.Equal(port + 1, p);
         lobby.LeaveAsync();
