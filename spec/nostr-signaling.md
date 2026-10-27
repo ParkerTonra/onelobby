@@ -61,9 +61,10 @@ Publish every event to every relay in the list (s.6); receivers dedupe by event 
 - **Outbound queue (hardening).** A link holds at most 128 frames and 256 KiB of unacknowledged or queued outbound
   hub texts together; a text that would exceed either is dropped (the link stays open). Relays rate-limit publishes, so
   an unbounded queue only turns into dead resends.
-- **New sessions (hardening).** A host accepts at most 8 new joiner pubkeys per 10 s per lobby; excess `open`s are
-  ignored, not answered. The joiner repeats `open` every 2 s inside its 15 s budget, so it is let in when the window
-  frees. Repeat `open`s from a pubkey already attached are always answered.
+- **New sessions (hardening).** New joiner pubkeys per lobby are a token bucket: 16 at once (a party joining
+  together), refilled at one per second up to 16. When the bucket is empty, `open`s are ignored, not answered. The
+  joiner repeats `open` every 2 s inside its 15 s budget, so a burst past 16 gets in within a few seconds. (A fixed
+  8-per-10 s window let an 11-joiner burst land its last joiners about 1 s before their ready timeout.) Repeat `open`s from a pubkey already attached are always answered.
 - **Bans (hardening).** Kicking a Nostr joiner bans its pubkey and, when the host's WebRTC link to it has a known
   remote address (selected candidate pair, not relayed, not an mDNS name), that IP too. When a later joiner's link
   resolves to a banned IP the host removes it as kicked. A link whose address is unknown cannot be matched.

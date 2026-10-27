@@ -26,15 +26,19 @@ interface Peer {
 
 const PING = '{"t":"ping","n":0}';
 const CLOSED_MEMORY = 512;
-/** At most this many NEW joiner pubkeys per window per lobby; a joiner repeats `open` every 2 s, so excess just waits. */
-export const MAX_NEW_SESSIONS = 8;
-export const NEW_SESSION_WINDOW_MS = 10_000;
+/**
+ * NEW joiner pubkeys per lobby are a token bucket: a burst of NEW_SESSION_BURST at once (a party joining together),
+ * then one more per NEW_SESSION_REFILL_MS. A joiner repeats `open` every 2 s, so the excess just waits.
+ */
+export const NEW_SESSION_BURST = 16;
+export const NEW_SESSION_REFILL_MS = 1_000;
 
 export class NostrHostBridge {
   private readonly peers = new Map<string, Peer>();
   private readonly gone = new Set<string>();
   private stopped = false;
-  private readonly newAt: number[] = [];
+  private newTokens = NEW_SESSION_BURST;
+  private newTokensAt: number | null = null;
 
   private constructor(private readonly hub: SignalingHub, private readonly room: NostrRoom, private readonly clock: Clock) {
     room.onFrame = (f) => this.onFrame(f);
@@ -90,12 +94,15 @@ export class NostrHostBridge {
     if (f.type === "beat" && known.session) this.hub.receive(known.session, PING);
   }
 
-  /** Counts a new session against the per-window cap. */
+  /** Spends one token of the new-session bucket, or false when it is empty. */
   private admitNew(): boolean {
     const now = this.clock.now();
-    while (this.newAt.length > 0 && now - this.newAt[0] >= NEW_SESSION_WINDOW_MS) this.newAt.shift();
-    if (this.newAt.length >= MAX_NEW_SESSIONS) return false;
-    this.newAt.push(now);
+    if (this.newTokensAt !== null) {
+      this.newTokens = Math.min(NEW_SESSION_BURST, this.newTokens + (now - this.newTokensAt) / NEW_SESSION_REFILL_MS);
+    }
+    this.newTokensAt = now;
+    if (this.newTokens < 1 - 1e-6) return false; // fractional clock times can leave a full token at 0.9999999999999999
+    this.newTokens = Math.max(0, this.newTokens - 1);
     return true;
   }
 

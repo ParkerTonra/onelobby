@@ -10,7 +10,7 @@ import { SignalingHub, defaultHubOptions, directHubOptions } from "../src/direct
 import { DirectHubHost } from "../src/direct/hub-host.js";
 import { hostDirect } from "../src/direct/index.js";
 import { ReliableLink, MAX_OUT_BYTES, MAX_OUT_FRAMES, type OutFrame } from "../src/nostr/link.js";
-import { NostrHostBridge, MAX_NEW_SESSIONS, NEW_SESSION_WINDOW_MS } from "../src/nostr/host.js";
+import { NostrHostBridge, NEW_SESSION_BURST, NEW_SESSION_REFILL_MS } from "../src/nostr/host.js";
 import { NostrSocket } from "../src/nostr/socket.js";
 import { encodeRoomCode } from "../src/joincode.js";
 import { encodeMessage } from "../src/codec.js";
@@ -219,29 +219,34 @@ describe("ReliableLink outbound queue", () => {
 
 // ---- Nostr bridge: new sessions per window --------------------------------------------------------------------------
 
-describe("Nostr host bridge: at most 8 new sessions per 10 s", () => {
-  it("excess joiners are left waiting (their open repeats) and get in when the window frees", async () => {
+describe("Nostr host bridge: new sessions are a token bucket (burst 16, then 1 per second)", () => {
+  it("a party bursts straight in; excess joiners wait (their open repeats) and get in as tokens refill", async () => {
     const relays = new FakeRelays();
     const URLS = ["wss://r1.test"];
     let skew = 0;
-    const clock: Clock = { ...systemClock, now: () => systemClock.now() + skew, setInterval: systemClock.setInterval, setTimeout: systemClock.setTimeout };
+    const frozen = systemClock.now(); // the bridge's bucket only refills when the test moves `skew`
+    const clock: Clock = { ...systemClock, now: () => frozen + skew, setInterval: systemClock.setInterval, setTimeout: systemClock.setTimeout };
     const hub = new SignalingHub({ ...directHubOptions(40, null), rateScale: 50 });
     const code = encodeRoomCode();
     const bridge = await NostrHostBridge.start(hub, { code, relays: URLS, connect: relays.connect, clock });
     cleanup.push(() => bridge.close());
-    const socks = Array.from({ length: MAX_NEW_SESSIONS + 3 }, () => {
+    const socks = Array.from({ length: NEW_SESSION_BURST + 3 }, () => {
       const s = new NostrSocket({ code, relays: URLS, connect: relays.connect, clock: systemClock, openEveryMs: 100, openTimeoutMs: 60_000 });
       cleanup.push(() => s.close());
       return s;
     });
-    await until(() => bridge.peerCount === MAX_NEW_SESSIONS, "eight sessions");
+    await until(() => bridge.peerCount === NEW_SESSION_BURST, "a full burst");
     await new Promise((r) => setTimeout(r, 600));
-    expect(bridge.peerCount).toBe(MAX_NEW_SESSIONS);
-    expect(socks.filter((s) => s.readyState === 1)).toHaveLength(MAX_NEW_SESSIONS);
+    expect(bridge.peerCount).toBe(NEW_SESSION_BURST);
+    expect(socks.filter((s) => s.readyState === 1)).toHaveLength(NEW_SESSION_BURST);
     expect(socks.filter((s) => s.readyState === 0)).toHaveLength(3); // still trying, not failed
-    skew = NEW_SESSION_WINDOW_MS + 1;
-    await until(() => socks.every((s) => s.readyState === 1), "the rest get in after the window");
-    expect(bridge.peerCount).toBe(MAX_NEW_SESSIONS + 3);
+    skew = NEW_SESSION_REFILL_MS; // one token
+    await until(() => bridge.peerCount === NEW_SESSION_BURST + 1, "one more after one refill");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(bridge.peerCount).toBe(NEW_SESSION_BURST + 1);
+    skew = 3 * NEW_SESSION_REFILL_MS; // two more tokens
+    await until(() => socks.every((s) => s.readyState === 1), "the rest get in as tokens refill");
+    expect(bridge.peerCount).toBe(NEW_SESSION_BURST + 3);
   }, 30000);
 });
 

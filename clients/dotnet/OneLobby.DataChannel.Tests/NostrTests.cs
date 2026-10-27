@@ -495,11 +495,12 @@ public sealed class NostrBridgeTests
         public readonly FakeRelayNet Net = new();
         public readonly NostrOptions Options;
         public readonly string Code = JoinCode.Normalize(JoinCode.EncodeRoom(0xa1b2c3d4e5f6))!;
-        public readonly Hub Hub = new(HubOptions.ForDirect(4, null));
+        public readonly Hub Hub;
         public readonly NostrHostBridge Bridge;
 
-        public Rig()
+        public Rig(int maxPlayers = 4)
         {
+            Hub = new Hub(HubOptions.ForDirect(maxPlayers, null));
             Options = new NostrOptions { RelayFactory = Net.Create, AutoTick = false, NowMs = () => Now, UnixSeconds = () => 1_700_000_000 + Now / 1000 };
             Bridge = new NostrHostBridge(Hub, Code, Options);
         }
@@ -660,7 +661,7 @@ public sealed class NostrBridgeTests
         {
             var s = rig.Join();
             socks.Add(s);
-            rig.Run(1300, socks.ToArray()); // new sessions are paced: at most 8 per 10 s
+            rig.Run(1300, socks.ToArray()); // one joiner at a time, within the new-session refill rate
         }
         // MaxPeers is 12 for four players: later joiners get server_full and a close
         var closed = socks.Where(s => s.State == SocketState.Closed).ToList();
@@ -779,16 +780,17 @@ public sealed class NostrBridgeTests
     }
 
     [Fact]
-    public void NineJoinersAtOnce_TheNinthWaitsForTheWindowAndGetsInOnItsRepeatedOpen()
+    public void A_burst_past_the_bucket_waits_about_a_second_each_and_gets_in_on_its_repeated_open()
     {
-        var rig = new Rig();
-        var socks = Enumerable.Range(0, 9).Select(_ => rig.Join()).ToArray();
-        rig.Run(1000, socks);
-        Assert.Equal(NostrHostBridge.NewSessionsPerWindow, socks.Count(s => s.State == SocketState.Open));
-        Assert.Equal(1, socks.Count(s => s.State == SocketState.Connecting));
-        rig.Run(NostrHostBridge.NewSessionWindowMs, socks); // the window frees; the joiner's open (every 2 s) is answered
+        var rig = new Rig(maxPlayers: 40);
+        var n = NostrHostBridge.NewSessionBurst + 2;
+        var socks = Enumerable.Range(0, n).Select(_ => rig.Join()).ToArray();
+        rig.Run(1000, socks); // before the joiners repeat their open (every 2 s)
+        Assert.Equal(NostrHostBridge.NewSessionBurst, socks.Count(s => s.State == SocketState.Open));
+        Assert.Equal(2, socks.Count(s => s.State == SocketState.Connecting));
+        rig.Run(3000, socks); // two tokens have refilled; the repeated opens are answered, long before any ready timeout
         Assert.All(socks, s => Assert.Equal(SocketState.Open, s.State));
-        Assert.Equal(9, rig.Bridge.PeerCount);
+        Assert.Equal(n, rig.Bridge.PeerCount);
         foreach (var s in socks) s.Dispose();
     }
 
