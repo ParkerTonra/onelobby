@@ -55,9 +55,13 @@ if (-not (Test-Path $tarball)) {
 }
 $sha = (Get-FileHash -Algorithm SHA256 $tarball).Hash.ToLowerInvariant()
 if ($sha -ne $mbedSha) { throw "mbedtls tarball sha256 $sha does not match $mbedSha" }
-$tar = Join-Path $env:SystemRoot 'System32/tar.exe'
 $mbedSrc = Join-Path $WorkDir "mbedtls-$mbedVer"
-if (-not (Test-Path $mbedSrc)) { Write-Host "extract mbedtls"; & $tar -xjf $tarball -C $WorkDir; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } }
+if (-not (Test-Path $mbedSrc)) {
+    # cmake's own tar: System32 tar.exe hung on this .tar.bz2 on the CI runner until the job timed out
+    Write-Host "extract mbedtls"
+    Push-Location $WorkDir
+    try { & $cmake -E tar xjf $tarball; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } } finally { Pop-Location }
+}
 # libdatachannel's DTLS transport needs DTLS-SRTP key export, off in the default config (Godot enables it too).
 $cfg = Join-Path $mbedSrc 'include/mbedtls/mbedtls_config.h'
 $text = [IO.File]::ReadAllText($cfg)
