@@ -26,8 +26,8 @@ namespace OneLobby
     public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly,
         IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
     {
-        /// <summary>The <c>hosting.nostrRelays</c> list; empty means the library default relays.</summary>
-        public IReadOnlyList<string> Relays => NostrRelays ?? Array.Empty<string>();
+        /// <summary>The <c>hosting.nostrRelays</c> list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).</summary>
+        public IReadOnlyList<string> Relays => NostrRelays ?? Blueprint.DefaultNostrRelays;
     }
     public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin,
         bool JoinLink, IReadOnlyDictionary<string, string> Meta);
@@ -56,6 +56,16 @@ namespace OneLobby
     {
         /// <summary>Stand-in server URL used by <see cref="ToConfig"/> when the file names no lobby server (direct-only games).</summary>
         public static readonly Uri NoServer = new Uri("onelobby-none://no-lobby-server/");
+
+        /// <summary>
+        /// Default public Nostr relays (the JS <c>DEFAULT_NOSTR_RELAYS</c>, same URLs in the same order; probed 2026-10-26,
+        /// docs/design/no-server-fallback.md): all accept and echo ephemeral kind 25050.
+        /// </summary>
+        public static readonly IReadOnlyList<string> DefaultNostrRelays = new[]
+        {
+            "wss://nos.lol", "wss://relay.primal.net", "wss://nostr-pub.wellorder.net", "wss://nostr.oxtr.dev",
+            "wss://nostr.bitcoiner.social", "wss://relay.nostr.net", "wss://nostr.sathoarder.com",
+        };
 
         /// <summary>The JSON Schema (spec/blueprint.schema.json), embedded in this assembly.</summary>
         public static string SchemaJson
@@ -414,8 +424,12 @@ namespace OneLobby
             var tick = I(sync, "tickRate", 20);
             var origins = new List<string>();
             if (hosting is { } h && h.TryGetProperty("allowedOrigins", out var ao)) foreach (var o in ao.EnumerateArray()) origins.Add(o.GetString()!);
-            var relays = new List<string>();
-            if (hosting is { } h2 && h2.TryGetProperty("nostrRelays", out var nr)) foreach (var o in nr.EnumerateArray()) relays.Add(o.GetString()!);
+            List<string>? relays = null;
+            if (hosting is { } h2 && h2.TryGetProperty("nostrRelays", out var nr))
+            {
+                relays = new List<string>();
+                foreach (var o in nr.EnumerateArray()) relays.Add(o.GetString()!);
+            }
             var meta = new Dictionary<string, string>();
             if (lobby is { } l && l.TryGetProperty("meta", out var m)) foreach (var kv in m.EnumerateObject()) meta[kv.Name] = kv.Value.GetString()!;
             RateLimit? rate = null;

@@ -251,7 +251,9 @@ namespace OneLobby
                 {
                     // docs/direct-ip.md s.3: no answer on the host's TCP port
                     FailOp(new OneLobbyException("direct_unreachable",
-                        (_hubUri.Scheme == "onelobby-nostr" ? "no answer from the host over Nostr" : "no answer from the host at " + _hubUri.Host + ":" + _hubUri.Port) + " (" + (sock.CloseReason ?? "timed out") + ")"));
+                        _hubUri.Scheme == "onelobby-nostr"
+                            ? (string.IsNullOrEmpty(sock.CloseReason) ? "no answer through the Nostr relays" : sock.CloseReason!) // the socket says why, as in JS
+                            : "no answer from the host at " + _hubUri.Host + ":" + _hubUri.Port + " (" + (sock.CloseReason ?? "timed out") + ")"));
                     if (sock.State != SocketState.Closed) { sock.Dispose(); Socket = null; }
                     return;
                 }

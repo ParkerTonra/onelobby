@@ -6,6 +6,7 @@ using System.Threading;
 using OneLobby;
 using OneLobby.DataChannel;
 using OneLobby.Direct;
+using OneLobby.Direct.Nostr;
 using OneLobby.Server;
 
 // Direct-IP smoke test (docs/direct-ip.md s.5 step 7): no lobby server anywhere.
@@ -17,6 +18,9 @@ using OneLobby.Server;
 //                                       "fast direct" (fast, repeated), waits for both echoes, prints PASS/FAIL, says bye.
 //     --no-upnp                         (host) do not ask the router; the code is then a same-network code.
 //     --wait=<s>                        (host) how long to wait for a joiner (default 120).
+//     --nostr-relays=<url,url>          (host and join) Nostr relays instead of the default public ones (integration/nostr-interop.mjs
+//                                       passes a local test relay); --stun=none (or <url,url>) sets the STUN list, none = no ICE servers.
+//     --no-nostr                        (host) IP codes only.
 //     --only-typed                      (join) drop every candidate the host offers, so only the typed address can
 //                                       connect: the outside-joiner case on one machine (OnlyTypedTransport).
 // The joiner's "pair" line is the evidence for the s.2 candidate rule: through a forwarded port, its remote candidate
@@ -27,7 +31,12 @@ internal static class DirectSmoke
     {
         var onlyTyped = args.Contains("--only-typed");
         var waitS = int.Parse(args.FirstOrDefault(a => a.StartsWith("--wait=", StringComparison.Ordinal))?.Substring(7) ?? "120");
-        args = args.Where(a => a != "--only-typed" && !a.StartsWith("--wait=", StringComparison.Ordinal)).ToArray();
+        string? Flag(string name) => args.FirstOrDefault(a => a.StartsWith("--" + name + "=", StringComparison.Ordinal))?.Substring(name.Length + 3);
+        var nostr = new NostrOptions { Enabled = !args.Contains("--no-nostr") };
+        if (Flag("nostr-relays") is { Length: > 0 } relayList) nostr.Relays = relayList.Split(',');
+        if (Flag("stun") is { } stunList) nostr.Stun = stunList == "none" ? new string[0] : stunList.Split(',');
+        args = args.Where(a => a != "--only-typed" && a != "--no-nostr" && !a.StartsWith("--wait=", StringComparison.Ordinal)
+            && !a.StartsWith("--nostr-relays=", StringComparison.Ordinal) && !a.StartsWith("--stun=", StringComparison.Ordinal)).ToArray();
         var sw = Stopwatch.StartNew();
         void Say(string s) { Console.WriteLine(s); Console.Out.Flush(); }
         bool Wait(Func<bool> done, Action pump, int timeoutMs)
@@ -53,10 +62,10 @@ internal static class DirectSmoke
                 var port = args.Length > 1 ? int.Parse(args[1]) : DirectLobby.DefaultPort;
                 var t = client.HostDirectAsync(new DirectHostOptions
                 {
-                    Port = port, Password = args.Length > 2 && args[2] != "-" ? args[2] : null, MaxPlayers = 8, OpenPort = !args.Contains("--no-upnp"),
+                    Port = port, Password = args.Length > 2 && args[2] != "-" ? args[2] : null, MaxPlayers = 8, OpenPort = !args.Contains("--no-upnp"), Nostr = nostr,
                     PortMapping = new PortMapperOptions { Description = "OneLobby " + cfg.GameId, Log = Say },
                 });
-                if (!Wait(() => t.IsCompleted, client.Pump, 15000) || t.IsFaulted) { Say("FAIL host: " + (t.Exception?.GetBaseException().ToString() ?? "timed out")); return 1; }
+                if (!Wait(() => t.IsCompleted, client.Pump, 25000) || t.IsFaulted) { Say("FAIL host: " + (t.Exception?.GetBaseException().ToString() ?? "timed out")); return 1; }
                 var lobby = t.Result;
                 Say("addresses " + string.Join(" ", lobby.DirectAddresses));
                 Say($"join code {lobby.JoinCode} ({lobby.JoinCodeKind}); router: {lobby.PortMapping}");
@@ -89,7 +98,7 @@ internal static class DirectSmoke
             else
             {
                 if (args.Length < 2) { Say("usage: join-direct <address> [password]"); return 2; }
-                var t = client.JoinDirectAsync(args[1], args.Length > 2 ? args[2] : null);
+                var t = client.JoinDirectAsync(args[1], args.Length > 2 && args[2] != "--no-upnp" ? args[2] : null, nostr);
                 if (!Wait(() => t.IsCompleted, client.Pump, 15000) || t.IsFaulted)
                 {
                     var e = t.Exception?.GetBaseException();

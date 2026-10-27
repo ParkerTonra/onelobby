@@ -61,20 +61,28 @@ public sealed class DirectHubHost : IDisposable
     /// Browser <c>Origin</c> values allowed to open a signaling socket besides the always-allowed ones (no Origin header,
     /// an Origin equal to the request's Host, loopback origins); exact match, "*" allows every origin.
     /// </param>
-    public DirectHubHost(int port, HubOptions options, ILogger? logger = null, IClock? clock = null, IEnumerable<string>? allowedOrigins = null)
+    public DirectHubHost(int port, HubOptions options, ILogger? logger = null, IClock? clock = null, IEnumerable<string>? allowedOrigins = null, IPAddress? bindAddress = null)
     {
         _o = options;
         _allowedOrigins = allowedOrigins?.ToArray() ?? Array.Empty<string>();
         _log = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         Hub = new Hub(options, clock, _log);
-        _listener = Bind(port);
+        _listener = Bind(port, bindAddress);
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         Task.Run(AcceptLoop);
     }
 
-    private static TcpListener Bind(int port)
+    private static TcpListener Bind(int port, IPAddress? bindAddress)
     {
-        if (port != 0) ProbeIPv4(port);
+        if (bindAddress != null)
+        {
+            // tests: one chosen local address (127.0.0.1) so no firewall prompt for an all-interface listener
+            if (port != 0) ProbeIPv4(port, bindAddress);
+            var one = new TcpListener(bindAddress, port);
+            one.Start();
+            return one;
+        }
+        if (port != 0) ProbeIPv4(port, IPAddress.Any);
         if (Socket.OSSupportsIPv6)
         {
             var l = new TcpListener(IPAddress.IPv6Any, port);
@@ -99,12 +107,12 @@ public sealed class DirectHubHost : IDisposable
     /// dual-stack listener bind over a program on 0.0.0.0 (every IPv4 joiner would then reach that program), and the
     /// peer links need UDP <paramref name="port"/> too, so both are tried and released before the real bind.
     /// </summary>
-    private static void ProbeIPv4(int port)
+    private static void ProbeIPv4(int port, IPAddress address)
     {
         foreach (var (type, proto) in new[] { (SocketType.Stream, ProtocolType.Tcp), (SocketType.Dgram, ProtocolType.Udp) })
         {
             using var s = new Socket(AddressFamily.InterNetwork, type, proto);
-            s.Bind(new IPEndPoint(IPAddress.Any, port));
+            s.Bind(new IPEndPoint(address, port));
         }
     }
 

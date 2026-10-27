@@ -23,8 +23,8 @@ public sealed class DirectReservedPortTests
     {
         var port = ReservedPortWithFreeNeighbour();
         if (port == 0) return; // not Windows, or no reserved range with a free port right after it
-        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var lobby = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 1 }), c.Pump);
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var lobby = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 1 }), c.Pump);
         Assert.True(JoinCode.TryDecode(lobby.JoinCode, out _, out var p, out _));
         Assert.Equal(port + 1, p);
         lobby.LeaveAsync();
@@ -61,7 +61,7 @@ public sealed class DirectReservedPortTests
 
     private static bool Reserved(int port)
     {
-        try { using var t = new TcpListener(IPAddress.Any, port); t.Start(); t.Stop(); return false; }
+        try { using var t = new TcpListener(IPAddress.Loopback, port); t.Start(); t.Stop(); return false; }
         catch (SocketException e) { return e.SocketErrorCode == SocketError.AccessDenied; }
     }
 
@@ -69,10 +69,10 @@ public sealed class DirectReservedPortTests
     {
         try
         {
-            var t = new TcpListener(IPAddress.Any, port);
+            var t = new TcpListener(IPAddress.Loopback, port);
             t.Start();
             t.Stop();
-            using var u = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+            using var u = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
             return true;
         }
         catch (SocketException) { return false; }

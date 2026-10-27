@@ -90,7 +90,8 @@ namespace OneLobby.Direct.Nostr
                 var plain = NostrEvents.Open(_keys, content);
                 if (plain == null) return;
                 var frame = NostrFrame.Parse(plain);
-                if (frame == null || frame.From != pub) return;
+                if (frame == null || frame.From != pub || frame.From == Pubkey) return;
+                if (frame.To.Length != 0 && frame.To != Pubkey) return; // spec s.4: addressed to nobody in particular, or to us
                 _in.Enqueue(frame);
             }
             catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException || ex is FormatException) { /* not ours */ }

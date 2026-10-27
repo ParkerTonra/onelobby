@@ -52,10 +52,10 @@ public sealed class DirectIpTests
         {
             if (udpFirst)
             {
-                using var u = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+                using var u = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
                 return ((IPEndPoint)u.Client.LocalEndPoint!).Port;
             }
-            var t = new TcpListener(IPAddress.Any, 0);
+            var t = new TcpListener(IPAddress.Loopback, 0);
             t.Start();
             try { return ((IPEndPoint)t.LocalEndpoint).Port; } finally { t.Stop(); }
         }
@@ -69,10 +69,10 @@ public sealed class DirectIpTests
         {
             for (var p = first; p < first + span; p++)
             {
-                var t = new TcpListener(IPAddress.Any, p);
+                var t = new TcpListener(IPAddress.Loopback, p);
                 t.Start();
                 held.Add(new Stopper(t));
-                held.Add(new UdpClient(new IPEndPoint(IPAddress.Any, p)));
+                held.Add(new UdpClient(new IPEndPoint(IPAddress.Loopback, p)));
             }
             return true;
         }
@@ -121,10 +121,10 @@ public sealed class DirectIpTests
     private void RunTwoJoiners()
     {
         var port = FreePort();
-        var hostTransport = new DataChannelTransport();
+        var hostTransport = new DataChannelTransport { BindAddress = "127.0.0.1" };
         var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, hostTransport);
-        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
-        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport());
+        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null, a = null, b = null;
         void Pump()
         {
@@ -134,7 +134,7 @@ public sealed class DirectIpTests
         }
         var sw = Stopwatch.StartNew();
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", MaxPlayers = 3, OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", MaxPlayers = 3, OpenPort = false }), Pump, "host");
         Assert.True(host.IsHost);
         Assert.Equal("", host.Code);
         _log.WriteLine("host addresses: " + string.Join(", ", host.DirectAddresses));
@@ -186,7 +186,7 @@ public sealed class DirectIpTests
         // the listener is gone: the port can be hosted again
         PumpUntil(() =>
         {
-            try { using var t = new TcpListener(IPAddress.Any, port); t.Start(); t.Stop(); return true; }
+            try { using var t = new TcpListener(IPAddress.Loopback, port); t.Start(); t.Stop(); return true; }
             catch (SocketException) { return false; }
         }, Pump, "port released", 5000);
         aClient.DisposeAsync().AsTask().Wait();
@@ -200,9 +200,9 @@ public sealed class DirectIpTests
     private void RunRejoin()
     {
         var port = FreePort();
-        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
-        var oldClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
-        var newClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var oldClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var newClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null, old = null, back = null;
         void Pump()
         {
@@ -211,7 +211,7 @@ public sealed class DirectIpTests
         }
         void PumpAll() { Pump(); if (old != null) old.Pump(); else oldClient.Pump(); }
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), PumpAll, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), PumpAll, "host");
         var address = "127.0.0.1:" + port;
         old = Await(oldClient.JoinDirectAsync(address), PumpAll, "join");
         PumpUntil(() => old.ReadyAsync.IsCompleted, PumpAll, "old ready");
@@ -250,11 +250,11 @@ public sealed class DirectIpTests
     public void WrongPasswordIsBadPassword()
     {
         var port = FreePort();
-        var hostClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var joinClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var hostClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var joinClient = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null;
         void Pump() { if (host != null) host.Pump(); else hostClient.Pump(); joinClient.Pump(); }
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Password = "pw", OpenPort = false }), Pump, "host");
         var t = joinClient.JoinDirectAsync("127.0.0.1", "PW");
         PumpUntil(() => t.IsCompleted, Pump, "join");
         var e = Assert.IsType<OneLobbyException>(t.Exception!.GetBaseException());
@@ -273,9 +273,9 @@ public sealed class DirectIpTests
     private void RunStart(bool lateJoin)
     {
         var port = FreePort();
-        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
-        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
-        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport());
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null, a = null, b = null;
         void Pump()
         {
@@ -284,7 +284,7 @@ public sealed class DirectIpTests
             if (b != null) b.Pump(); else bClient.Pump();
         }
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Name = "Test room", LateJoin = lateJoin, OpenPort = false }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Name = "Test room", LateJoin = lateJoin, OpenPort = false }), Pump, "host");
         Assert.Equal("Test room", host.Name);
         a = Await(aClient.JoinDirectAsync("127.0.0.1:" + port), Pump, "join a");
         Assert.Equal("Test room", a.Name);
@@ -325,7 +325,7 @@ public sealed class DirectIpTests
     public void NobodyListeningIsDirectUnreachable()
     {
         var port = FreePort();
-        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         var sw = Stopwatch.StartNew();
         var t = c.JoinDirectAsync("127.0.0.1");
         PumpUntil(() => t.IsCompleted, c.Pump, "join fails", 8000);
@@ -338,10 +338,10 @@ public sealed class DirectIpTests
     public void SecondHostOnTheSamePortIsPortInUse()
     {
         var port = FreePort();
-        var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c1.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host");
-        var t = c2.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 0 });
+        var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var host = Await(c1.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host");
+        var t = c2.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false, FallbackPorts = 0 });
         Assert.True(t.IsFaulted);
         Assert.Equal("port_in_use", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
         host.LeaveAsync();
@@ -364,8 +364,8 @@ public sealed class DirectIpTests
     private void RunPublicAddress()
     {
         var port = FreePort();
-        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "198.51.100.9" }), c.Pump, "host");
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "198.51.100.9" }), c.Pump, "host");
         Assert.Equal(JoinCodeKind.Internet, host.JoinCodeKind);
         Assert.Equal(JoinCode.Encode("198.51.100.9", port), host.JoinCode);
         Assert.Equal("manual", host.PortMapping);
@@ -379,8 +379,8 @@ public sealed class DirectIpTests
     [Fact]
     public void PublicAddressMustBeDottedIPv4()
     {
-        var c = new LobbyClient(Cfg, new DataChannelTransport());
-        var t = c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "my-pc.example.com" });
+        var c = new LobbyClient(Cfg, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var t = c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PublicAddress = "my-pc.example.com" });
         Assert.True(t.IsFaulted);
         Assert.Equal("bad_address", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
     }
@@ -437,8 +437,8 @@ public sealed class DirectIpTests
     {
         using var gw = new SilentThenNatPmp();
         var port = FreePort();
-        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 100) }), c.Pump, "host");
+        var c = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 100) }), c.Pump, "host");
         Assert.NotEqual(JoinCodeKind.Internet, host.JoinCodeKind);
         var changed = new List<(string, JoinCodeKind, int)>();
         host.JoinCodeChanged += (code, kind) => changed.Add((code, kind, Environment.CurrentManagedThreadId));
@@ -460,8 +460,8 @@ public sealed class DirectIpTests
     private void RunNoRetry()
     {
         using var gw = new SilentThenNatPmp();
-        var c = new LobbyClient(Cfg with { DirectPort = FreePort() }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 0) }), c.Pump, "host");
+        var c = new LobbyClient(Cfg with { DirectPort = FreePort() }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, PortMapping = SilentOpts(gw, 0) }), c.Pump, "host");
         var asked = gw.Requests;
         Assert.True(asked > 0);
         var sw = Stopwatch.StartNew();
@@ -482,11 +482,11 @@ public sealed class DirectIpTests
     public void BusyDefaultPortFallsBackToTheNextOneAndTheJoinerKeepsTheCode()
     {
         var port = FreePort(span: 2); // the fallback needs at least port + 1 free too
-        var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport());
-        var j = new LobbyClient(Cfg, new DataChannelTransport());
-        var first = Await(c1.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host 1");
-        var second = Await(c2.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c2.Pump, "host 2");
+        var c1 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var c2 = new LobbyClient(Cfg with { DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var j = new LobbyClient(Cfg, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var first = Await(c1.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c1.Pump, "host 1");
+        var second = Await(c2.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, OpenPort = false }), c2.Pump, "host 2");
         Assert.True(JoinCode.TryDecode(second.JoinCode, out _, out var p2, out _));
         Assert.NotEqual(port, p2);
         Assert.InRange(p2, port + 1, port + DirectLobby.DefaultFallbackPorts);
@@ -540,13 +540,14 @@ public sealed class DirectIpTests
     [Fact]
     public void BadAddressIsReportedNotThrown()
     {
-        var t = new LobbyClient(Cfg, new DataChannelTransport()).JoinDirectAsync("nope nope");
+        var t = new LobbyClient(Cfg, new DataChannelTransport { BindAddress = "127.0.0.1" }).JoinDirectAsync("nope nope");
         Assert.Equal("bad_address", ((OneLobbyException)t.Exception!.GetBaseException()).Code);
     }
 
     [Fact]
     public void JoinByTheSameNetworkCode()
     {
+        // Exception to the loopback-only rule: the code names this machine's LAN address, so this host listens on every interface.
         var port = FreePort();
         var hostClient = new LobbyClient(Cfg with { DisplayName = "Host" }, new DataChannelTransport());
         var joinClient = new LobbyClient(Cfg with { DisplayName = "Ann" }, new DataChannelTransport());
@@ -574,7 +575,7 @@ public sealed class DirectIpTests
     [InlineData("6b01 rgfe p2c", "bad_code")]   // same typo, typed loosely
     public void MistypedCodesFailAtOnce(string input, string code)
     {
-        var t = new LobbyClient(Cfg, new DataChannelTransport()).JoinDirectAsync(input);
+        var t = new LobbyClient(Cfg, new DataChannelTransport { BindAddress = "127.0.0.1" }).JoinDirectAsync(input);
         Assert.True(t.IsFaulted);
         Assert.Equal(code, ((OneLobbyException)t.Exception!.GetBaseException()).Code);
     }

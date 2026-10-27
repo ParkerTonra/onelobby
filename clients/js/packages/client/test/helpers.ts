@@ -145,10 +145,10 @@ const bindable = (port: number): Promise<boolean> =>
   new Promise((resolve) => {
     const tcp = createServer();
     tcp.once("error", () => resolve(false));
-    tcp.listen(port, () => {
+    tcp.listen(port, "127.0.0.1", () => {
       const udp = createSocket("udp4");
       udp.once("error", () => tcp.close(() => resolve(false)));
-      udp.bind(port, () => udp.close(() => tcp.close(() => resolve(true))));
+      udp.bind(port, "127.0.0.1", () => udp.close(() => tcp.close(() => resolve(true))));
     });
   });
 
@@ -171,4 +171,17 @@ export async function freePort(span = 4): Promise<number> {
     if (ok) return p;
   }
   throw new Error("no free TCP+UDP port run found");
+}
+
+/**
+ * An RTCPeerConnection class whose ICE sockets bind to 127.0.0.1 only (libdatachannel bindAddress), so tests that open
+ * real WebRTC links on one machine never listen on every interface (no Windows Firewall prompt for node).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function loopbackRtc<T extends new (config?: any) => any>(Base: T): T {
+  return class extends Base {
+    constructor(config: Record<string, unknown> = {}) {
+      super({ ...config, bindAddress: "127.0.0.1" });
+    }
+  } as unknown as T;
 }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using OneLobby.Direct;
 using OneLobby.Direct.Nostr;
 using OneLobby.Server;
 using Xunit;
@@ -189,7 +190,6 @@ public sealed class NostrCryptoTests
     public void Shared_nostr_vectors_from_the_js_lane_match()
     {
         var path = Path.Combine(SpecDir(), "nostr.json");
-        if (!File.Exists(path)) return;
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var root = doc.RootElement;
         var k = root.GetProperty("keys");
@@ -218,9 +218,9 @@ public sealed class NostrCryptoTests
         }
     }
 
-    internal static string SpecDir()
+    internal static string SpecDir([System.Runtime.CompilerServices.CallerFilePath] string here = "")
     {
-        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        var d = new DirectoryInfo(Path.GetDirectoryName(here)!);
         while (d != null && !Directory.Exists(Path.Combine(d.FullName, "spec", "vectors"))) d = d.Parent;
         return Path.Combine(d!.FullName, "spec", "vectors");
     }
@@ -241,14 +241,14 @@ public sealed class NostrLinkTests
 
         public Pair()
         {
-            A = new NostrLink(() => Now, f => { var c = Clone(f); SentByA.Add(c); if (DeliverToB(c)) ToB.Add(c); }) ;
-            B = new NostrLink(() => Now, f => { var c = Clone(f); SentByB.Add(c); if (DeliverToA(c)) ToA.Add(c); });
-            A.Peer = "b";
-            B.Peer = "a";
+            A = new NostrLink(() => Now, "b", f => { var c = Clone(f); SentByA.Add(c); if (DeliverToB(c)) ToB.Add(c); });
+            B = new NostrLink(() => Now, "a", f => { var c = Clone(f); SentByB.Add(c); if (DeliverToA(c)) ToA.Add(c); });
             A.Message += m => AtA.Add(m);
             B.Message += m => AtB.Add(m);
-            A.Ended += (r, local) => EndA = r + (local ? "/local" : "/peer");
-            B.Ended += (r, local) => EndB = r + (local ? "/local" : "/peer");
+            A.PeerClosed += r => EndA = "closed:" + r;
+            B.PeerClosed += r => EndB = "closed:" + r;
+            A.Dead += r => EndA = "dead:" + r;
+            B.Dead += r => EndB = "dead:" + r;
         }
 
         private static NostrFrame Clone(NostrFrame f) => NostrFrame.Parse(f.ToJson())!;
@@ -306,7 +306,7 @@ public sealed class NostrLinkTests
         p.A.Queue("hello");
         p.Run(2900);
         Assert.Empty(p.AtB);
-        p.Run(300);
+        p.Run(500); // the 250 ms tick sees it due at 3.25 s
         Assert.Equal(new[] { "hello" }, p.AtB);
         Assert.Equal(2, p.SentByA.Count(f => f.Type == "data"));
         p.Run(200);
@@ -322,9 +322,9 @@ public sealed class NostrLinkTests
         p.A.Queue("into the void");
         p.Run(3000 * 5 + 2900);
         Assert.Null(p.EndA);
-        Assert.Equal(6, p.SentByA.Count(f => f.Type == "data")); // the first send and five resends
-        p.Run(300);
-        Assert.Equal("timeout/peer", p.EndA);
+        Assert.Equal(6, p.SentByA.Count(f => f.Type == "data")); // the first send and five resends (250 ms tick: at 3.25 s, 6.25 s ...)
+        p.Run(500);
+        Assert.Equal("dead:timeout", p.EndA);
         Assert.True(p.A.IsClosed);
     }
 
@@ -336,7 +336,7 @@ public sealed class NostrLinkTests
         p.Run(29_900);
         Assert.Null(p.EndA);
         p.Run(200);
-        Assert.Equal("timeout/peer", p.EndA);
+        Assert.Equal("dead:timeout", p.EndA);
     }
 
     [Fact]
@@ -370,9 +370,62 @@ public sealed class NostrLinkTests
         p.A.Close("again");
         p.Run(100);
         Assert.Equal(new[] { "last words" }, p.AtB);
-        Assert.Equal("bye/local", p.EndA);
-        Assert.Equal("bye/peer", p.EndB);
+        Assert.Null(p.EndA); // a local close tells nobody but the peer
+        Assert.True(p.A.IsClosed);
+        Assert.Equal("closed:bye", p.EndB);
         Assert.Single(p.SentByA, f => f.Type == "close");
+        Assert.All(p.SentByA.Where(f => f.Type == "close"), f => Assert.Equal(0, f.Seq));
+    }
+
+    [Fact]
+    public void Beats_and_acks_carry_seq_0_and_an_ack_only_beat_follows_any_data_frame_even_a_duplicate()
+    {
+        var p = new Pair();
+        p.A.Queue("x");
+        p.Run(300);
+        var data = p.SentByA.Single(f => f.Type == "data");
+        Assert.Equal(1, data.Seq);
+        var beats = p.SentByB.Where(f => f.Type == "beat").ToList();
+        Assert.Single(beats);
+        Assert.Equal(0, beats[0].Seq);
+        Assert.Equal(1, beats[0].Ack);
+        Assert.Empty(beats[0].Msgs ?? new List<string>());
+        // the same frame again: not delivered twice, but acked again (within the 30 ms batch window)
+        p.SentByB.Clear();
+        p.B.Receive(data);
+        p.Run(60);
+        Assert.Equal(new[] { "x" }, p.AtB);
+        var again = Assert.Single(p.SentByB, f => f.Type == "beat");
+        Assert.Equal(0, again.Seq);
+        Assert.Equal(1, again.Ack);
+    }
+
+    [Fact]
+    public void A_frame_packs_up_to_30000_utf8_bytes_of_messages()
+    {
+        var p = new Pair();
+        var two = new string('a', 15_000);
+        p.A.Queue(two); p.A.Queue(two); // exactly 30,000 bytes: one frame
+        p.Run(100);
+        Assert.Single(p.SentByA, f => f.Type == "data");
+        p.SentByA.Clear();
+        var multi = new string('é', 8_000); // 16,000 bytes in UTF-8
+        p.A.Queue(multi); p.A.Queue(multi); // 32,000 bytes: two frames
+        p.Run(100);
+        Assert.Equal(2, p.SentByA.Count(f => f.Type == "data"));
+        Assert.Equal(4, p.AtB.Count);
+    }
+
+    [Fact]
+    public void Resends_are_checked_every_250_ms_and_only_once_3_s_have_passed()
+    {
+        var p = new Pair();
+        p.DeliverToB = f => f.Type != "data";
+        p.A.Queue("m");
+        p.Run(3_200);
+        Assert.Single(p.SentByA, f => f.Type == "data"); // sent at 30 ms: not due before 3,030 ms, which the 250 ms tick sees at 3,250
+        p.Run(100);
+        Assert.Equal(2, p.SentByA.Count(f => f.Type == "data"));
     }
 
     [Fact]
@@ -396,10 +449,10 @@ public sealed class NostrLinkTests
         for (var i = 0; i < 70; i++) { p.A.Queue("m" + i); p.Run(40); }
         var frames = p.SentByA.Where(f => f.Type == "data").ToList();
         Assert.Equal(70, frames.Count);
-        foreach (var f in frames.Skip(1)) p.B.Receive(f); // seq 2..70 while 1 is missing: only 2..64 fit
+        foreach (var f in frames.Skip(1)) p.B.Receive(f); // seq 2..70 while 1 is missing: only 2..65 fit (rcvNext + 64)
         Assert.Empty(p.AtB);
         p.B.Receive(frames[0]);
-        Assert.Equal(64, p.AtB.Count); // 1 plus the held frames 2..64; the rest wait for a resend
+        Assert.Equal(65, p.AtB.Count); // 1 plus the held frames 2..65; the rest wait for a resend
     }
 }
 
@@ -484,7 +537,7 @@ public sealed class NostrBridgeTests
     }
 
     [Fact]
-    public void No_relay_reachable_fails_the_socket_with_connect_failed_after_10_s() => RunNoRelay();
+    public void No_relay_reachable_fails_the_socket_after_10_s_with_the_js_message() => RunNoRelay();
 
     private static void RunNoRelay()
     {
@@ -495,7 +548,7 @@ public sealed class NostrBridgeTests
         Assert.Equal(SocketState.Connecting, sock.State);
         rig.Run(200, sock);
         Assert.Equal(SocketState.Closed, sock.State);
-        Assert.Equal("connect_failed", sock.CloseReason);
+        Assert.Equal("no Nostr relay reachable", sock.CloseReason);
     }
 
     [Fact]
@@ -509,7 +562,60 @@ public sealed class NostrBridgeTests
         rig.Run(14_900, sock);
         Assert.Equal(SocketState.Connecting, sock.State);
         rig.Run(200, sock);
-        Assert.Equal("connect_failed", sock.CloseReason);
+        Assert.Equal("the host did not answer through the Nostr relays", sock.CloseReason);
+    }
+
+    [Fact]
+    public void A_host_that_closed_a_pubkey_ignores_its_later_opens()
+    {
+        var rig = new Rig();
+        var keys = NostrRoomKeys.Derive(rig.Code);
+        var ch = new NostrChannel(rig.Net.Create(keys.Topic), keys, () => 1_700_000_000 + rig.Now / 1000, Schnorr.NewSecretKey());
+        ch.Publish(new NostrFrame { Type = "open", To = "" });
+        rig.Run(100);
+        Assert.Equal(1, rig.Bridge.PeerCount);
+        ch.Publish(new NostrFrame { Type = "close", To = rig.Bridge.Pubkey });
+        rig.Run(100);
+        Assert.Equal(0, rig.Bridge.PeerCount);
+        // the same key opens again (a replayed open): not admitted for the rest of the session
+        ch.Publish(new NostrFrame { Type = "open", To = "" });
+        rig.Run(100);
+        Assert.Equal(0, rig.Bridge.PeerCount);
+        // another key is
+        using var sock = rig.Join();
+        rig.Run(100, sock);
+        Assert.Equal(1, rig.Bridge.PeerCount);
+    }
+
+    [Fact]
+    public void Open_frames_with_to_set_to_the_hosts_pubkey_are_accepted_and_frames_for_someone_else_are_not()
+    {
+        var rig = new Rig();
+        var keys = NostrRoomKeys.Derive(rig.Code);
+        var ch = new NostrChannel(rig.Net.Create(keys.Topic), keys, () => 1_700_000_000 + rig.Now / 1000, Schnorr.NewSecretKey());
+        ch.Publish(new NostrFrame { Type = "open", To = new string('a', 64) });
+        rig.Run(100);
+        Assert.Equal(0, rig.Bridge.PeerCount);
+        ch.Publish(new NostrFrame { Type = "open", To = rig.Bridge.Pubkey });
+        rig.Run(100);
+        Assert.Equal(1, rig.Bridge.PeerCount);
+    }
+
+    [Fact]
+    public void The_host_feeds_the_hub_a_ping_on_a_joiner_beat_and_drops_the_hubs_pongs()
+    {
+        var rig = new Rig();
+        using var sock = rig.Join();
+        rig.Run(100, sock);
+        sock.Send(Hello("Ann"));
+        rig.Run(300, sock);
+        Rig.Drain(sock).ToList();
+        // 25 s of quiet: only beats cross; the hub is kept alive by pings the bridge feeds it and its pongs never come back
+        var seen = new List<string>();
+        for (var i = 0; i < 25; i++) { rig.Run(1000, sock); seen.AddRange(Rig.Drain(sock)); }
+        Assert.DoesNotContain(seen, t => t.StartsWith("{\"t\":\"pong\"", StringComparison.Ordinal));
+        Assert.Equal(SocketState.Open, sock.State);
+        Assert.Equal(1, rig.Hub.SocketCount);
     }
 
     [Fact]
@@ -594,16 +700,50 @@ public sealed class NostrBridgeTests
     }
 
     [Fact]
-    public void Host_log_suffix_matches_the_js_wording()
+    public void Host_log_line_matches_the_js_format_host_log()
     {
-        var net = new FakeRelayNet();
-        var r = (FakeRelays)net.Create("t");
-        r.Total = 5;
-        Assert.Equal("; nostr 5/5 relays", OneLobby.Direct.DirectLobby.NostrLogSuffix(r));
-        r.Up = false;
-        Assert.Equal("; nostr: no relay reachable", OneLobby.Direct.DirectLobby.NostrLogSuffix(r));
-        Assert.Equal("", OneLobby.Direct.DirectLobby.NostrLogSuffix(null));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP; nostr 3/5 relays",
-            OneLobby.Direct.DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP", "; nostr 3/5 relays"));
+        // Nostr off: the pre-Nostr line (the same three cases as the JS formatHostLog test)
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP",
+            DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP"));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off",
+            DirectLobby.FormatHostLog(47810, 47811, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off"));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off",
+            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, ""));
+        // Nostr on
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); ip code 6B01-RGFE-P2B (Internet); port mapping UPnP; nostr 4/7 relays",
+            DirectLobby.FormatHostLog(47810, 47810, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "UPnP", new DirectLobby.NostrLogInfo("6B01-RGFE-P2B", JoinCodeKind.Internet, "4/7")));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code D1PB-1X9S-FPV (Nostr); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr 7/7 relays",
+            DirectLobby.FormatHostLog(47810, 47811, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "off", new DirectLobby.NostrLogInfo("0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "7/7")));
+        // no IPv4 address: no ip code
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); no ip code (no IPv4 address); port mapping off; nostr 3/7 relays",
+            DirectLobby.FormatHostLog(47810, 47810, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "", new DirectLobby.NostrLogInfo("", JoinCodeKind.None, "3/7")));
+        // no relay reachable: the IP code is the code
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 0A00-0BSE-P3S (SameNetwork); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr: no relay reachable",
+            DirectLobby.FormatHostLog(47810, 47810, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off", new DirectLobby.NostrLogInfo("0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "")));
+        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); no ip code (no IPv4 address); port mapping off; nostr: no relay reachable",
+            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, "", new DirectLobby.NostrLogInfo("", JoinCodeKind.None, "")));
+    }
+
+    [Fact]
+    public void Default_relays_and_stun_are_the_js_lists_and_blueprints_carry_them()
+    {
+        Assert.Equal(new[]
+        {
+            "wss://nos.lol", "wss://relay.primal.net", "wss://nostr-pub.wellorder.net", "wss://nostr.oxtr.dev",
+            "wss://nostr.bitcoiner.social", "wss://relay.nostr.net", "wss://nostr.sathoarder.com",
+        }, NostrOptions.DefaultRelays);
+        Assert.Equal(new[] { "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478" }, NostrOptions.DefaultStun);
+        Assert.Equal(NostrOptions.DefaultRelays, Blueprint.Parse("{\"game\":{\"id\":\"com.test.x\"}}").Hosting.Relays);
+        // an unset list is the default, an empty list means "the library default" at use time, a set list wins
+        var o = new NostrOptions();
+        Assert.Equal(NostrOptions.DefaultRelays, o.EffectiveRelays);
+        o.Relays = new string[0];
+        Assert.Equal(NostrOptions.DefaultRelays, o.EffectiveRelays);
+        o.Relays = new[] { "ws://127.0.0.1:1" };
+        Assert.Equal(new[] { "ws://127.0.0.1:1" }, o.EffectiveRelays);
+        // STUN: null = defaults, empty = no ICE servers at all
+        Assert.Equal(NostrOptions.DefaultStun, o.EffectiveStun);
+        o.Stun = new string[0];
+        Assert.Empty(o.EffectiveStun);
     }
 }

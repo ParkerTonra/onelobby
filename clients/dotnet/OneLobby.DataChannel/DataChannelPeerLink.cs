@@ -94,10 +94,20 @@ namespace OneLobby.DataChannel
                 }
                 var arr = stackalloc IntPtr[strings.Count];
                 for (var i = 0; i < strings.Count; i++) arr[i] = strings[i];
+                var iceCount = strings.Count;
+                var bindMem = IntPtr.Zero;
+                if (!string.IsNullOrEmpty(transport.BindAddress))
+                {
+                    var bb = Rtc.Utf8z(transport.BindAddress!);
+                    bindMem = Marshal.AllocHGlobal(bb.Length);
+                    Marshal.Copy(bb, 0, bindMem, bb.Length);
+                    strings.Add(bindMem); // freed with the ICE server strings
+                }
                 var config = new Rtc.Configuration
                 {
+                    BindAddress = bindMem,
                     IceServers = (IntPtr)arr,
-                    IceServersCount = strings.Count,
+                    IceServersCount = iceCount,
                     IceTransportPolicy = options.RelayOnly ? 1 : 0,
                     DisableAutoNegotiation = 1,
                     PortRangeBegin = (ushort)options.PortRangeBegin,

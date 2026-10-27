@@ -15,17 +15,17 @@ namespace OneLobby.Direct
     {
         private readonly ITransport _inner;
         private readonly DirectHubHost _host;
-        private readonly IReadOnlyList<IceServer> _ice;
+        private readonly bool _nostr;
 
         /// <param name="inner">The game's real transport.</param>
         /// <param name="host">The embedded hub and listener.</param>
-        /// <param name="stun">STUN URLs for the peer links when Nostr joiners are welcome (they cannot reach a bare host
-        /// address); empty = no ICE servers at all, as direct IP always did.</param>
-        public DirectHostTransport(ITransport inner, DirectHubHost host, IReadOnlyList<string>? stun = null)
+        /// <param name="nostr">Nostr joiners are welcome: the peer links use the ICE servers the hub's <c>welcome</c> carries
+        /// (its STUN list, they cannot reach a bare host address); false = no ICE servers at all, as direct IP always did.</param>
+        public DirectHostTransport(ITransport inner, DirectHubHost host, bool nostr = false)
         {
             _inner = inner;
             _host = host;
-            _ice = stun is { Count: > 0 } ? new[] { new IceServer(stun) } : Array.Empty<IceServer>();
+            _nostr = nostr;
         }
 
         public long NowMs => _inner.NowMs;
@@ -37,7 +37,7 @@ namespace OneLobby.Direct
             {
                 PortRangeBegin = _host.Port,
                 PortRangeEnd = _host.Port,
-                IceServers = _ice,
+                IceServers = _nostr ? options.IceServers : Array.Empty<IceServer>(),
                 NoIceServers = true,
             });
 
@@ -105,7 +105,8 @@ namespace OneLobby.Direct
 {
     /// <summary>
     /// Joiner side over Nostr (spec/nostr-signaling.md): signaling through <see cref="NostrSignalingSocket"/>, every peer link
-    /// uses the public STUN servers and no extra remote candidate.
+    /// uses the STUN servers the host's <c>welcome</c> offers, else the options' (default: the public ones; an empty list
+    /// means none), and no extra remote candidate.
     /// </summary>
     internal sealed class NostrJoinTransport : ITransport
     {
@@ -119,7 +120,8 @@ namespace OneLobby.Direct
             _inner = inner;
             _code = normalizedCode;
             _options = options;
-            _ice = new[] { new IceServer(options.EffectiveStun) };
+            var stun = options.EffectiveStun;
+            _ice = stun.Count > 0 ? new[] { new IceServer(stun) } : Array.Empty<IceServer>();
         }
 
         public long NowMs => _inner.NowMs;
@@ -127,7 +129,7 @@ namespace OneLobby.Direct
         public ISignalingSocket ConnectSignaling(Uri url) => new NostrSignalingSocket(_code, _options);
 
         public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
-            _inner.CreatePeerLink(options with { IceServers = _ice, ExtraRemoteCandidates = null, NoIceServers = true });
+            _inner.CreatePeerLink(options with { IceServers = options.IceServers.Count > 0 ? options.IceServers : _ice, ExtraRemoteCandidates = null, NoIceServers = true });
 
         public void Poll() => _inner.Poll();
     }

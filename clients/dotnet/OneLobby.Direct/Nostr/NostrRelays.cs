@@ -161,7 +161,12 @@ namespace OneLobby.Direct.Nostr
                         if (a.GetArrayLength() >= 3 && a[2].ValueKind == JsonValueKind.Object) EventReceived?.Invoke(a[2].GetRawText());
                         break;
                     case "OK":
-                        if (a.GetArrayLength() >= 3 && a[2].ValueKind == JsonValueKind.False) Skip(r);
+                        // refused (not a plain duplicate): this relay does not take our events, skip it for the session
+                        if (a.GetArrayLength() >= 3 && a[2].ValueKind == JsonValueKind.False)
+                        {
+                            var why = a.GetArrayLength() >= 4 && a[3].ValueKind == JsonValueKind.String ? a[3].GetString()! : "";
+                            if (!why.StartsWith("duplicate", StringComparison.Ordinal)) Skip(r);
+                        }
                         break;
                     case "CLOSED":
                         Skip(r);

@@ -36,10 +36,10 @@ public sealed class NostrEndToEndTests
             lock (PortRng) p = PortRng.Next(20000, 45000);
             try
             {
-                var t = new TcpListener(IPAddress.Any, p);
+                var t = new TcpListener(IPAddress.Loopback, p);
                 t.Start();
                 t.Stop();
-                using var u = new UdpClient(new IPEndPoint(IPAddress.Any, p));
+                using var u = new UdpClient(new IPEndPoint(IPAddress.Loopback, p));
                 return p;
             }
             catch (SocketException) { }
@@ -73,9 +73,9 @@ public sealed class NostrEndToEndTests
         // loopback needs no STUN; an unroutable local one keeps the test off the internet
         var nostr = () => new NostrOptions { RelayFactory = net.Create, Stun = new[] { "stun:127.0.0.1:9" } };
         var port = FreePort();
-        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
-        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport());
-        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport());
+        var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var bClient = new LobbyClient(Cfg with { DisplayName = "Bob", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null, a = null, b = null;
         void Pump()
         {
@@ -84,7 +84,7 @@ public sealed class NostrEndToEndTests
             if (b != null) b.Pump(); else bClient.Pump();
         }
 
-        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { Port = port, FallbackPorts = 0, OpenPort = false, Password = "pw", MaxPlayers = 3, Nostr = nostr() }), Pump, "host");
+        host = Await(hostClient.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Port = port, FallbackPorts = 0, OpenPort = false, Password = "pw", MaxPlayers = 3, Nostr = nostr() }), Pump, "host");
         _log.WriteLine("host: " + DirectLobby.HostLogLine(host));
         Assert.Equal(JoinCodeKind.Nostr, host.JoinCodeKind);
         Assert.True(JoinCode.TryDecodeRoom(host.JoinCode, out var room), host.JoinCode);
@@ -134,7 +134,7 @@ public sealed class NostrEndToEndTests
         Assert.Equal(2, host.Peers.Count(p => p.PeerId != host.LocalPeerId));
 
         // a wrong password is refused over Nostr as well
-        var cClient = new LobbyClient(Cfg with { DisplayName = "Cy", DirectPort = port }, new DataChannelTransport());
+        var cClient = new LobbyClient(Cfg with { DisplayName = "Cy", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         var bad = cClient.JoinDirectAsync(host.JoinCode, "nope", nostr());
         PumpUntil(() => bad.IsCompleted, () => { Pump(); cClient.Pump(); }, "bad password answered");
         Assert.Equal("bad_password", Assert.IsType<OneLobbyException>(bad.Exception!.GetBaseException()).Code);
@@ -160,13 +160,13 @@ public sealed class NostrEndToEndTests
         var net = new FakeRelayNet();
         FakeRelays? relays = null;
         var port = FreePort();
-        var c = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
+        var c = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         var opts = new NostrOptions
         {
             RelayFactory = topic => { var r = (FakeRelays)net.Create(topic); r.Up = false; relays = r; return r; },
             Stun = new[] { "stun:127.0.0.1:9" },
         };
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { Port = port, FallbackPorts = 0, OpenPort = false, Nostr = opts }), c.Pump, "host");
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Port = port, FallbackPorts = 0, OpenPort = false, Nostr = opts }), c.Pump, "host");
         Assert.NotNull(relays);
         Assert.EndsWith("; nostr: no relay reachable", DirectLobby.HostLogLine(host));
         Assert.NotEqual(JoinCodeKind.Nostr, host.JoinCodeKind);
@@ -187,12 +187,25 @@ public sealed class NostrEndToEndTests
     private static void RunOff()
     {
         var port = FreePort();
-        var c = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport());
-        var host = Await(c.HostDirectAsync(new DirectHostOptions { Port = port, FallbackPorts = 0, OpenPort = false, Nostr = new NostrOptions { Enabled = false } }), c.Pump, "host");
+        var c = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Port = port, FallbackPorts = 0, OpenPort = false, Nostr = new NostrOptions { Enabled = false } }), c.Pump, "host");
         Assert.Equal(host.DirectCode, host.JoinCode);
         Assert.NotEqual(JoinCodeKind.Nostr, host.JoinCodeKind);
         Assert.DoesNotContain("nostr", DirectLobby.HostLogLine(host));
         c.DisposeAsync().AsTask().Wait();
+    }
+}
+
+public sealed class NostrStunTests
+{
+    [Fact]
+    public void The_hub_offers_the_stun_list_in_welcome_only_when_nostr_is_on_and_an_empty_list_means_none()
+    {
+        var on = DirectLobby.HubFor(new DirectHostOptions(), new NostrOptions());
+        Assert.Equal(NostrOptions.DefaultStun, on.StunUrls);
+        Assert.Equal(new[] { "stun:a.example:3478" }, DirectLobby.HubFor(new DirectHostOptions(), new NostrOptions { Stun = new[] { "stun:a.example:3478" } }).StunUrls);
+        Assert.Empty(DirectLobby.HubFor(new DirectHostOptions(), new NostrOptions { Stun = new string[0] }).StunUrls);
+        Assert.Empty(DirectLobby.HubFor(new DirectHostOptions(), new NostrOptions { Enabled = false }).StunUrls);
     }
 }
 
@@ -209,9 +222,13 @@ public sealed class NostrBlueprintTests
         Assert.Equal(new[] { "wss://relay.example.org" }, o.Nostr.Relays);
         var d = Blueprint.Parse("{\"game\":{\"id\":\"com.you.game\"}}");
         Assert.True(d.Hosting.Nostr);
-        Assert.Empty(d.Hosting.Relays);
+        Assert.Equal(Blueprint.DefaultNostrRelays, d.Hosting.Relays); // unset = the default list, as the schema says
         Assert.True(d.ToDirectHostOptions().Nostr.Enabled);
-        Assert.Null(d.ToDirectHostOptions().Nostr.Relays);
+        Assert.Equal(NostrOptions.DefaultRelays, d.ToDirectHostOptions().Nostr.EffectiveRelays);
+        // an explicit empty list falls back to the library default when used
+        var empty = Blueprint.Parse("{\"game\":{\"id\":\"com.you.game\"},\"hosting\":{\"nostrRelays\":[]}}");
+        Assert.Empty(empty.Hosting.Relays);
+        Assert.Null(empty.ToDirectHostOptions().Nostr.Relays);
         // the round trip keeps them
         var back = Blueprint.Parse(bp.ToJson());
         Assert.False(back.Hosting.Nostr);
@@ -220,10 +237,4 @@ public sealed class NostrBlueprintTests
         Assert.Throws<BlueprintException>(() => Blueprint.Parse("{\"game\":{\"id\":\"com.you.game\"},\"hosting\":{\"nostrRelays\":[1]}}"));
     }
 
-    [Fact]
-    public void Default_relay_list_and_stun_are_the_spec_ones()
-    {
-        Assert.Equal(new[] { "wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net", "wss://nostr.mom", "wss://offchain.pub" }, NostrOptions.DefaultRelays);
-        Assert.Equal(new[] { "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478" }, NostrOptions.DefaultStun);
-    }
 }

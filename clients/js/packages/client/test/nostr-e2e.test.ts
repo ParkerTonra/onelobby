@@ -8,11 +8,11 @@ import { SignalingHub, directHubOptions } from "../src/direct/hub.js";
 import { NostrHostBridge } from "../src/nostr/host.js";
 import { NostrSocket } from "../src/nostr/socket.js";
 import { hostDirect } from "../src/direct/index.js";
-import { freePort } from "./helpers.js";
+import { freePort, loopbackRtc } from "./helpers.js";
 import { FakeRelays } from "./fake-relay.js";
 
 const URLS = ["wss://r1.test", "wss://r2.test"];
-const links = webRtcLinkFactoryFor(RTCPeerConnection as unknown as typeof globalThis.RTCPeerConnection);
+const links = webRtcLinkFactoryFor(loopbackRtc(RTCPeerConnection) as unknown as typeof globalThis.RTCPeerConnection);
 
 const until = async (cond: () => boolean, what: string, ms = 10000) => {
   const t0 = Date.now();
@@ -133,7 +133,7 @@ describe("hostDirect + joinDirect with a Nostr code (real WebRTC on loopback, fa
     const relays = new FakeRelays();
     const port = await freePort();
     const lines: string[] = [];
-    const host = await hostDirect(mk("Host", relays), { port, openPort: false, nostr: { relays: URLS, stun: [] }, log: (l) => lines.push(l), maxPlayers: 3 });
+    const host = await hostDirect(mk("Host", relays), { bindHost: "127.0.0.1", port, openPort: false, nostr: { relays: URLS, stun: [] }, log: (l) => lines.push(l), maxPlayers: 3 });
     cleanup.push(() => host.leave());
     expect(host.joinCodeKind).toBe("nostr");
     expect("room" in decodeJoinCode(host.joinCode)).toBe(true);
@@ -168,7 +168,7 @@ describe("hostDirect + joinDirect with a Nostr code (real WebRTC on loopback, fa
 
   it("rejoinDirect with the Nostr code takes the seat back", async () => {
     const relays = new FakeRelays();
-    const host = await hostDirect(mk("Host", relays), { port: await freePort(), openPort: false, nostr: { relays: URLS, stun: [] }, log: false });
+    const host = await hostDirect(mk("Host", relays), { bindHost: "127.0.0.1", port: await freePort(), openPort: false, nostr: { relays: URLS, stun: [] }, log: false });
     cleanup.push(() => host.leave());
     const old = await mk("Ann", relays).joinDirect(host.joinCode, { nostrRelays: URLS, stun: [] });
     await old.ready;
@@ -183,7 +183,7 @@ describe("hostDirect + joinDirect with a Nostr code (real WebRTC on loopback, fa
   it("nostr: false keeps IP codes only", async () => {
     const relays = new FakeRelays();
     const lines: string[] = [];
-    const host = await hostDirect(mk("Host", relays), { port: await freePort(), openPort: false, nostr: false, log: (l) => lines.push(l) });
+    const host = await hostDirect(mk("Host", relays), { bindHost: "127.0.0.1", port: await freePort(), openPort: false, nostr: false, log: (l) => lines.push(l) });
     cleanup.push(() => host.leave());
     expect(host.joinCode).toBe(host.directCode);
     expect(host.joinCodeKind).toBe(host.directCodeKind);
@@ -197,14 +197,15 @@ describe("hostDirect + joinDirect with a Nostr code (real WebRTC on loopback, fa
     for (const u of URLS) relays.down.add(u);
     const lines: string[] = [];
     const t0 = Date.now();
-    const host = await hostDirect(mk("Host", relays), { port: await freePort(), openPort: false, nostr: { relays: URLS }, log: (l) => lines.push(l) });
+    const hostPort = await freePort();
+    const host = await hostDirect(mk("Host", relays), { bindHost: "127.0.0.1", port: hostPort, openPort: false, nostr: { relays: URLS }, log: (l) => lines.push(l) });
     cleanup.push(() => host.leave());
     expect(Date.now() - t0).toBeGreaterThan(9000); // waited the 10 s for a relay
     expect(lines[0]).toMatch(/; nostr: no relay reachable$/);
     // the IP code is the code meanwhile
     expect(host.joinCode).toBe(host.directCode);
     expect(host.joinCodeKind).toBe(host.directCodeKind);
-    const bob = await mk("Bob", relays).joinDirect(host.directCode, {});
+    const bob = await mk("Bob", relays).joinDirect(`127.0.0.1:${hostPort}`, {});
     cleanup.push(() => bob.leave());
     await bob.ready;
     // a relay comes back: the Nostr code takes over and joinCodeChanged fires

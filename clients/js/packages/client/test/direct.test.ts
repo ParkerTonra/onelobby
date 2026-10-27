@@ -10,18 +10,18 @@ import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, defaultHubOptions, directHubOptions, formatHostLog, hostDirect, originAllowed } from "../src/direct/index.js";
 import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
-import { freePort } from "./helpers.js";
+import { freePort, loopbackRtc } from "./helpers.js";
 import { directJoinInfo } from "../src/friendly.js";
 
 /** The IP-code tests: Nostr is off so no test talks to a public relay (test/nostr-e2e.test.ts covers Nostr). */
-const hostIp = (k: OneLobby, o: Parameters<typeof hostDirect>[1] = {}) => hostDirect(k, { nostr: false, ...o });
+const hostIp = (k: OneLobby, o: Parameters<typeof hostDirect>[1] = {}) => hostDirect(k, { nostr: false, bindHost: "127.0.0.1", ...o });
 
 /**
  * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
  * WebRTC through node-datachannel (libdatachannel) on loopback. No server anywhere.
  */
 
-const links = webRtcLinkFactoryFor(RTCPeerConnection as unknown as typeof globalThis.RTCPeerConnection);
+const links = webRtcLinkFactoryFor(loopbackRtc(RTCPeerConnection) as unknown as typeof globalThis.RTCPeerConnection);
 const kit = (name: string) =>
   new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", displayName: name, rememberSeat: false, advanced: { linkFactory: links } });
 
@@ -424,7 +424,8 @@ describe("direct host startup line", () => {
 describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
   it("joins by the same-network code, carries both channels, ends with host_left", async () => {
     const port = await freePort();
-    const host = await hostIp(kit("Host"), { port, password: "pw", maxPlayers: 3, openPort: false });
+    // exception to the loopback-only rule: the LAN code names this machine, so this host listens on every interface
+    const host = await hostIp(kit("Host"), { bindHost: undefined, port, password: "pw", maxPlayers: 3, openPort: false });
     cleanup.push(() => host.leave());
     expect(host.portMapping).toBe("off");
     expect(host.directAddresses.length).toBeGreaterThan(0);
@@ -548,7 +549,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     const port = await freePort();
     // capture the host's peer connections to read their local candidates
     const hostPcs: RTCPeerConnection[] = [];
-    class Spy extends (RTCPeerConnection as unknown as typeof globalThis.RTCPeerConnection) {
+    class Spy extends (loopbackRtc(RTCPeerConnection) as unknown as typeof globalThis.RTCPeerConnection) {
       constructor(c?: RTCConfiguration) {
         super(c);
         hostPcs.push(this as unknown as RTCPeerConnection);

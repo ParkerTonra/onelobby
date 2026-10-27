@@ -39,7 +39,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Websocket_joiner_reaches_the_embedded_hub()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, "pw"));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, "pw"), bindAddress: System.Net.IPAddress.Loopback);
         Assert.True(host.Port > 0);
         using var h = await Hello(host.Port, "Host");
         await Send(h, "{\"t\":\"create\",\"name\":\"L\",\"maxPlayers\":4,\"visibility\":\"unlisted\",\"mode\":\"raw\"}");
@@ -62,7 +62,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Dispose_closes_joiner_sockets()
     {
-        var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         using var j = await Hello(host.Port, "Joe");
         host.Dispose();
         var buf = new byte[256];
@@ -78,7 +78,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Plain_http_gets_400_and_no_session()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         using var tcp = new TcpClient();
         await tcp.ConnectAsync("127.0.0.1", host.Port);
         var s = tcp.GetStream();
@@ -105,7 +105,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Healthz_answers_ok_and_other_paths_keep_the_400()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         var res = await RawGet(host, "/healthz");
         Assert.StartsWith("HTTP/1.1 200", res);
         Assert.Contains("Content-Type: text/plain\r\n", res);
@@ -117,7 +117,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Joininfo_is_404_until_the_host_sets_it_then_JSON()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         var none = await RawGet(host, "/joininfo");
         Assert.StartsWith("HTTP/1.1 404", none);
         Assert.EndsWith("no join code yet", none);
@@ -133,7 +133,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Joininfo_carries_the_nostr_join_code_and_the_ip_code()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         host.JoinInfo = new DirectJoinInfo("D1PB-1X9S-FPV", "nostr", null, host.Port, "6B01-RGFE-P2B", "same_network");
         var res = await RawGet(host, "/joininfo");
         Assert.Contains("\"directCode\":\"6B01-RGFE-P2B\",\"directCodeKind\":\"same_network\"", res);
@@ -143,7 +143,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Metrics_from_loopback_render_the_hub_counters()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null));
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
         var before = await RawGet(host, "/metrics");
         Assert.StartsWith("HTTP/1.1 200", before);
         Assert.Contains("Content-Type: text/plain; version=0.0.4\r\n", before);
@@ -196,7 +196,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Origin_must_be_absent_the_hosts_own_page_loopback_or_allowed()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), allowedOrigins: new[] { "https://play.example" });
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback, allowedOrigins: new[] { "https://play.example" });
         Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, null));                                  // native client
         Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://game.example:47810"));           // the page this host serves
         Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "http://localhost:5173"));
@@ -213,7 +213,7 @@ public class DirectHubHostTests
     [Fact]
     public async Task Star_allows_every_origin()
     {
-        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), allowedOrigins: new[] { "*" });
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback, allowedOrigins: new[] { "*" });
         Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "https://evil.example"));
     }
 

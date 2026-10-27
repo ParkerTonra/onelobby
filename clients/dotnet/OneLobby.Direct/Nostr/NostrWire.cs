@@ -16,10 +16,7 @@ namespace OneLobby.Direct.Nostr
     public sealed class NostrOptions
     {
         /// <summary>Library default relays (anonymous, free, public).</summary>
-        public static readonly IReadOnlyList<string> DefaultRelays = new[]
-        {
-            "wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net", "wss://nostr.mom", "wss://offchain.pub",
-        };
+        public static IReadOnlyList<string> DefaultRelays => Blueprint.DefaultNostrRelays;
 
         /// <summary>Public STUN servers used by Nostr peers (spec s.5).</summary>
         public static readonly IReadOnlyList<string> DefaultStun = new[]
@@ -31,11 +28,11 @@ namespace OneLobby.Direct.Nostr
         public bool Enabled { get; set; } = true;
         /// <summary><c>wss://</c> relay URLs; null or empty = <see cref="DefaultRelays"/> (the blueprint's <c>hosting.nostrRelays</c>).</summary>
         public IReadOnlyList<string>? Relays { get; set; }
-        /// <summary>STUN URLs for the peer links; null or empty = <see cref="DefaultStun"/>.</summary>
+        /// <summary>STUN URLs for the peer links; null = <see cref="DefaultStun"/>, an empty list = no ICE servers.</summary>
         public IReadOnlyList<string>? Stun { get; set; }
 
         internal IReadOnlyList<string> EffectiveRelays => Relays is { Count: > 0 } ? Relays : DefaultRelays;
-        internal IReadOnlyList<string> EffectiveStun => Stun is { Count: > 0 } ? Stun : DefaultStun;
+        internal IReadOnlyList<string> EffectiveStun => Stun ?? DefaultStun;
 
         /// <summary>Test seam: builds the relay pool for a topic; null = real WebSockets.</summary>
         internal Func<string, INostrRelays>? RelayFactory { get; set; }
@@ -103,9 +100,6 @@ namespace OneLobby.Direct.Nostr
             return Encoding.UTF8.GetString(ms.ToArray());
         }
 
-        /// <summary>Bytes a message adds to a frame's JSON (quotes, escapes and the comma).</summary>
-        public static int MsgSize(string msg) => JsonEncodedText.Encode(msg, JavaScriptEncoder.UnsafeRelaxedJsonEscaping).EncodedUtf8Bytes.Length + 3;
-
         public static NostrFrame? Parse(string json)
         {
             try
@@ -114,11 +108,13 @@ namespace OneLobby.Direct.Nostr
                 var e = doc.RootElement;
                 if (e.ValueKind != JsonValueKind.Object) return null;
                 if (!e.TryGetProperty("v", out var v) || v.ValueKind != JsonValueKind.Number || v.GetInt32() != 1) return null;
+                var to = Str(e, "to");
+                if (to == null) return null; // spec s.4: `to` is always present, "" for a broadcast
                 var f = new NostrFrame
                 {
                     Type = Str(e, "type") ?? "",
                     From = Str(e, "from") ?? "",
-                    To = Str(e, "to") ?? "",
+                    To = to,
                     Seq = Num(e, "seq"),
                     Ack = Num(e, "ack"),
                     Reason = Str(e, "reason"),
@@ -128,10 +124,7 @@ namespace OneLobby.Direct.Nostr
                 {
                     f.Msgs = new List<string>();
                     foreach (var x in m.EnumerateArray())
-                    {
-                        if (x.ValueKind != JsonValueKind.String) return null;
-                        f.Msgs.Add(x.GetString()!);
-                    }
+                        if (x.ValueKind == JsonValueKind.String) f.Msgs.Add(x.GetString()!); // others are dropped, like the JS filter
                 }
                 return f;
             }

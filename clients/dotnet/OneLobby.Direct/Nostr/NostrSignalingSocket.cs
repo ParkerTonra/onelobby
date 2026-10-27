@@ -9,26 +9,32 @@ using System.Threading.Tasks;
 namespace OneLobby.Direct.Nostr
 {
     /// <summary>
-    /// The joiner's signaling socket over Nostr relays (spec/nostr-signaling.md): the same <see cref="ISignalingSocket"/> the
-    /// direct joiner uses over TCP. <c>Connecting</c> until the host answers an <c>open</c>; hub texts then travel in
-    /// reliable ordered <c>data</c> frames. Work happens on a small timer thread; texts for the game wait in a queue that
-    /// <see cref="TryReceive"/> drains on the pumping thread.
+    /// The joiner's signaling socket over Nostr relays (spec/nostr-signaling.md), the counterpart of the JS
+    /// <c>NostrSocket</c>: the same <see cref="ISignalingSocket"/> the direct joiner uses over TCP. <c>Connecting</c> until the
+    /// host answers an <c>open</c>; hub texts then travel in reliable ordered <c>data</c> frames. Work happens on a small
+    /// timer thread; texts for the game wait in a queue that <see cref="TryReceive"/> drains on the pumping thread. A failed
+    /// connect ends with <see cref="CloseReason"/> <see cref="NoRelayReason"/> or <see cref="NoHostReason"/>.
     /// </summary>
     internal sealed class NostrSignalingSocket : ISignalingSocket
     {
         public const int OpenEveryMs = 2000;
+        /// <summary>The host's first <c>open</c> did not arrive within this long (counted from the start).</summary>
         public const int GiveUpMs = 15_000;
+        /// <summary>No relay connected within this long.</summary>
         public const int NoRelayMs = 10_000;
+        public const string NoRelayReason = "no Nostr relay reachable";
+        public const string NoHostReason = "the host did not answer through the Nostr relays";
 
         private readonly object _gate = new object();
         private readonly NostrChannel _channel;
-        private readonly NostrLink _link;
         private readonly Func<long> _now;
         private readonly ConcurrentQueue<string> _inbox = new ConcurrentQueue<string>();
         private readonly Timer? _timer;
         private readonly long _startedAt;
+        private NostrLink? _link;
         private long _lastOpen;
         private bool _opened;
+        private bool _everUp;
         private volatile int _state = (int)SocketState.Connecting;
         private volatile string? _closeReason;
         private bool _disposed;
@@ -46,9 +52,6 @@ namespace OneLobby.Direct.Nostr
             var sw = Stopwatch.StartNew();
             _now = options.NowMs ?? (() => sw.ElapsedMilliseconds);
             _channel = new NostrChannel(relays, keys, options.UnixSeconds ?? (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-            _link = new NostrLink(_now, f => _channel.Publish(f));
-            _link.Message += m => _inbox.Enqueue(m);
-            _link.Ended += (reason, local) => EndLocked(reason);
             _startedAt = _now();
             _channel.Start();
             if (options.AutoTick) _timer = new Timer(_ => Tick(), null, 10, 10);
@@ -58,21 +61,23 @@ namespace OneLobby.Direct.Nostr
         {
             lock (_gate)
             {
-                if (State == SocketState.Closed) return;
-                if (IsPing(text, out var n)) { _inbox.Enqueue("{\"t\":\"pong\",\"n\":" + n + "}"); return; } // never crosses Nostr
+                if (State != SocketState.Open || _link == null) return;
+                // The keep-alive ping never crosses Nostr: answer it here (spec s.4)
+                if (text.Length < 64 && text.StartsWith("{\"t\":\"ping\"", StringComparison.Ordinal) && TryPong(text, out var pong)) { _inbox.Enqueue(pong); return; }
                 _link.Queue(text);
             }
         }
 
-        private static bool IsPing(string text, out long n)
+        private static bool TryPong(string text, out string pong)
         {
-            n = 0;
-            if (text.IndexOf("\"ping\"", StringComparison.Ordinal) < 0 || text.Length > 200) return false;
+            pong = "";
             try
             {
                 using var doc = JsonDocument.Parse(text);
                 var e = doc.RootElement;
-                return e.TryGetProperty("t", out var t) && t.GetString() == "ping" && e.TryGetProperty("n", out var nn) && nn.TryGetInt64(out n);
+                if (e.ValueKind != JsonValueKind.Object) return false;
+                pong = e.TryGetProperty("n", out var n) ? "{\"t\":\"pong\",\"n\":" + n.GetRawText() + "}" : "{\"t\":\"pong\"}";
+                return true;
             }
             catch (JsonException) { return false; }
         }
@@ -91,43 +96,53 @@ namespace OneLobby.Direct.Nostr
             try
             {
                 if (State == SocketState.Closed) return;
-                while (_channel.TryTake(out var f)) Handle(f);
-                if (State == SocketState.Closed) return;
+                while (_channel.TryTake(out var f)) { Handle(f); if (State == SocketState.Closed) return; }
                 var now = _now();
                 if (State == SocketState.Connecting)
                 {
                     var elapsed = now - _startedAt;
-                    if (elapsed >= GiveUpMs || (elapsed >= NoRelayMs && _channel.Relays.Connected == 0)) { EndLocked("connect_failed"); return; }
-                    if (_channel.Relays.Connected > 0 && (!_opened || now - _lastOpen >= OpenEveryMs))
+                    if (_channel.Relays.Connected > 0) _everUp = true;
+                    if (elapsed >= GiveUpMs) { Fail(NoHostReason); return; }
+                    if (!_everUp && elapsed >= NoRelayMs) { Fail(NoRelayReason); return; }
+                    if (_everUp && (!_opened || now - _lastOpen >= OpenEveryMs))
                     {
                         _lastOpen = now;
                         _opened = true;
-                        _channel.Publish(new NostrFrame { Type = "open", To = "" });
+                        _channel.Publish(new NostrFrame { Type = "open", To = "", Seq = 0, Ack = 0 });
                     }
                 }
-                _link.Tick();
+                else _link?.Tick();
             }
             finally { Monitor.Exit(_gate); }
         }
 
         private void Handle(NostrFrame f)
         {
+            if (State == SocketState.Closed || f.To != _channel.Pubkey) return;
             if (State == SocketState.Connecting)
             {
-                if (f.Type != "open" || f.To != _channel.Pubkey) return;
-                _link.Peer = f.From;
+                if (f.Type != "open") return;
+                var link = new NostrLink(_now, f.From, fr => _channel.Publish(fr));
+                link.Message += m => _inbox.Enqueue(m);
+                link.PeerClosed += reason => Finish(reason.Length > 0 ? reason : "closed");
+                link.Dead += reason => Finish(reason);
+                _link = link;
                 _state = (int)SocketState.Open;
                 return;
             }
-            if (f.From != _link.Peer || f.To != _channel.Pubkey) return;
+            if (f.From != _link!.Peer) return;
+            if (f.Type == "open") { _link.Heard(); return; }
             _link.Receive(f);
         }
 
-        private void EndLocked(string reason)
+        private void Fail(string why) => Finish(why);
+
+        private void Finish(string reason)
         {
             if (State == SocketState.Closed) return;
             _closeReason = reason;
             _state = (int)SocketState.Closed;
+            _link?.Stop();
             _timer?.Dispose();
             var relays = _channel.Relays;
             Task.Delay(500).ContinueWith(_ => relays.Dispose()); // let a close frame leave
@@ -141,8 +156,8 @@ namespace OneLobby.Direct.Nostr
                 _disposed = true;
                 if (State != SocketState.Closed)
                 {
-                    _link.Close("closed locally");
-                    EndLocked("closed locally");
+                    if (State == SocketState.Open) _link?.Close("");
+                    Finish("closed locally");
                 }
             }
         }

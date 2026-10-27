@@ -36,6 +36,8 @@ export interface DirectHostOptions {
    * following `fallbackPorts` is used; the join code carries the port, so friends never type it.
    */
   port?: number;
+  /** Test seam: listen on this one local address (e.g. "127.0.0.1") instead of every interface. Default: every interface. */
+  bindHost?: string;
   /** How many ports after `port` to try when it is busy; default 9 with `port` left out, else 0. */
   fallbackPorts?: number;
   /** Optional; joiners must send the same one or get `bad_password`. */
@@ -148,7 +150,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   let anyReserved = false;
   for (let p = port; !hub; p++) {
     try {
-      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password), stunUrls });
+      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password), stunUrls }, o.bindHost ? { host: o.bindHost } : undefined);
     } catch (e) {
       if (!(e instanceof PortInUseError)) throw e;
       if (e.reserved) anyReserved = true;

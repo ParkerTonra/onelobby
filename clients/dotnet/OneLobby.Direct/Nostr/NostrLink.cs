@@ -1,14 +1,18 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 
 namespace OneLobby.Direct.Nostr
 {
     /// <summary>
-    /// The reliable, ordered layer over Nostr's unreliable fan-out (spec s.4) for one pair of keys: 30 ms batching, 32 KiB
-    /// frames, seq/ack, resend after 3 s (5 times), beats after 10 s of quiet, a 30 s silence timeout. Not thread-safe (the
-    /// owner locks) and clock-driven: everything happens in <see cref="Receive"/>, <see cref="Queue"/>, <see cref="Close"/>
-    /// and <see cref="Tick"/>, so tests drive it with a fake clock.
+    /// The reliable, ordered layer over Nostr's unreliable fan-out (spec s.4) for one pair of keys. It mirrors the JS
+    /// <c>ReliableLink</c> (clients/js/packages/client/src/nostr/link.ts) rule for rule: 30 ms batching, up to 30,000 UTF-8
+    /// bytes of messages per frame, seq/ack, a 250 ms housekeeping tick that resends after 3 s (6 sends in all, then
+    /// <c>timeout</c>), beats after 10 s of quiet, ack-only beats within the batch window, a 30 s silence timeout. Not
+    /// thread-safe (the owner locks) and clock-driven: everything happens in <see cref="Receive"/>, <see cref="Queue"/>,
+    /// <see cref="Close"/> and <see cref="Tick"/>, so tests drive it with a fake clock.
     /// </summary>
     internal sealed class NostrLink
     {
@@ -17,9 +21,10 @@ namespace OneLobby.Direct.Nostr
         public const int MaxResends = 5;
         public const int BeatMs = 10_000;
         public const int SilenceMs = 30_000;
-        public const int MaxFrameBytes = 32 * 1024;
         public const int MaxHeld = 64;
-        private const int FrameOverhead = 256;
+        /// <summary>UTF-8 bytes of messages per frame: under the 32 KiB content limit, room for the JSON envelope.</summary>
+        public const int MaxFrameBytes = 30_000;
+        public const int TickMs = 250;
 
         private sealed class Sent
         {
@@ -29,190 +34,188 @@ namespace OneLobby.Direct.Nostr
         }
 
         private readonly Func<long> _now;
+        private readonly string _peer;
         private readonly Action<NostrFrame> _emit;
-        private readonly List<string> _out = new List<string>();
+        private readonly List<string> _queue = new List<string>();
         private readonly SortedDictionary<long, Sent> _unacked = new SortedDictionary<long, Sent>();
         private readonly Dictionary<long, List<string>> _held = new Dictionary<long, List<string>>();
-        private long _sendSeq;
-        private long _delivered;
+        private long _nextSeq = 1;
+        private long _rcvNext = 1; // next seq to deliver
+        private bool _ackOwed;
         private long _flushAt = -1;
-        private long _ackAt = -1;
-        private long _lastSend;
+        private long _tickAt;
+        private long _lastSent;
         private long _lastHeard;
-        private string _peer = "";
+        private bool _done;
 
-        /// <summary>The other side's pubkey, set once known; nothing is sent before.</summary>
-        public string Peer
-        {
-            get => _peer;
-            set { _peer = value; _lastHeard = _now(); _lastSend = _now(); }
-        }
-
-        public bool IsClosed { get; private set; }
-        /// <summary>Why it closed: the other side's reason, or <c>timeout</c>, or what <see cref="Close"/> was given.</summary>
-        public string? CloseReason { get; private set; }
-        /// <summary>True when the other side closed it or it timed out (the socket reads as lost); false for a local close.</summary>
-        public bool ClosedByPeerOrTimeout { get; private set; }
-
-        public event Action<string>? Message;
-        /// <summary>(reason, local): fires once, from <see cref="Receive"/>, <see cref="Tick"/> or <see cref="Close"/>.</summary>
-        public event Action<string, bool>? Ended;
-
-        public NostrLink(Func<long> now, Action<NostrFrame> emit)
-        {
-            _now = now;
-            _emit = emit;
-            _lastHeard = now();
-            _lastSend = now();
-        }
-
+        /// <summary>The other side's pubkey; every frame this link emits is addressed to it.</summary>
+        public string Peer => _peer;
+        /// <summary>True once the peer closed it, it timed out, or <see cref="Close"/> / <see cref="Stop"/> ran.</summary>
+        public bool IsClosed => _done;
         public int Unacked => _unacked.Count;
 
-        /// <summary>Queues a hub text; it leaves within 30 ms, packed with the others.</summary>
+        /// <summary>An in-order hub protocol text from the peer.</summary>
+        public event Action<string>? Message;
+        /// <summary>The peer sent <c>close</c> (its reason, possibly empty). Fires once, from <see cref="Receive"/>.</summary>
+        public event Action<string>? PeerClosed;
+        /// <summary>Gave up: five resends unanswered, or 30 s of silence (reason <c>timeout</c>). Fires once, from <see cref="Tick"/>.</summary>
+        public event Action<string>? Dead;
+
+        public NostrLink(Func<long> now, string peer, Action<NostrFrame> emit)
+        {
+            _now = now;
+            _peer = peer;
+            _emit = emit;
+            _lastSent = _lastHeard = now();
+            _tickAt = _lastSent + TickMs;
+        }
+
+        /// <summary>Queues a hub text; it leaves within 30 ms, packed with its neighbours.</summary>
         public void Queue(string msg)
         {
-            if (IsClosed) return;
-            _out.Add(msg);
-            if (_flushAt < 0) _flushAt = _now() + BatchMs;
+            if (_done) return;
+            _queue.Add(msg);
+            ScheduleFlush();
         }
 
-        /// <summary>Sends what is queued and a close frame (once), then the link is closed.</summary>
-        public void Close(string? reason)
-        {
-            if (IsClosed) return;
-            if (_peer.Length > 0)
-            {
-                Flush();
-                Send(new NostrFrame { Type = "close", To = _peer, Seq = _sendSeq, Ack = _delivered, Reason = reason });
-            }
-            Finish(reason ?? "closed", true, false);
-        }
+        /// <summary>Any frame arrived from the peer (including <c>open</c>, which only proves it is alive).</summary>
+        public void Heard() => _lastHeard = _now();
 
+        /// <summary><c>data</c>, <c>beat</c> and <c>close</c> frames from the peer.</summary>
         public void Receive(NostrFrame f)
         {
-            if (IsClosed) return;
-            _lastHeard = _now();
-            switch (f.Type)
+            if (_done) return;
+            Heard();
+            if (f.Type == "close")
             {
-                case "close":
-                    Finish(string.IsNullOrEmpty(f.Reason) ? "closed" : f.Reason!, false, true);
-                    return;
-                case "beat":
-                    Acked(f.Ack);
-                    return;
-                case "data":
-                    Acked(f.Ack);
-                    OnData(f);
-                    return;
-            }
-        }
-
-        private void OnData(NostrFrame f)
-        {
-            _ackAt = _now() + BatchMs; // answer with an ack unless a data frame goes out first
-            var msgs = f.Msgs ?? new List<string>();
-            if (f.Seq <= _delivered) return; // a repeat: the ack above tells the sender
-            if (f.Seq == _delivered + 1)
-            {
-                Deliver(msgs);
-                _delivered = f.Seq;
-                while (!IsClosed && _held.TryGetValue(_delivered + 1, out var next))
-                {
-                    _held.Remove(_delivered + 1);
-                    Deliver(next);
-                    _delivered++;
-                }
+                Stop();
+                PeerClosed?.Invoke(f.Reason ?? "");
                 return;
             }
-            if (f.Seq - _delivered > MaxHeld || _held.Count >= MaxHeld) return;
-            if (!_held.ContainsKey(f.Seq)) _held[f.Seq] = msgs;
+            if (f.Type != "data" && f.Type != "beat") return;
+            foreach (var k in _unacked.Keys.Where(k => k <= f.Ack).ToList()) _unacked.Remove(k);
+            if (f.Type == "beat") return;
+            var msgs = f.Msgs ?? new List<string>();
+            if (f.Seq < 1) return;
+            _ackOwed = true;
+            if (f.Seq == _rcvNext)
+            {
+                _rcvNext++;
+                Deliver(msgs);
+                while (!_done && _held.TryGetValue(_rcvNext, out var next))
+                {
+                    _held.Remove(_rcvNext);
+                    _rcvNext++;
+                    Deliver(next);
+                }
+            }
+            else if (f.Seq > _rcvNext && f.Seq <= _rcvNext + MaxHeld) _held[f.Seq] = msgs;
+            // f.Seq < _rcvNext: a duplicate; the ack below tells the sender to stop resending
+            ScheduleFlush();
         }
 
         private void Deliver(List<string> msgs)
         {
             foreach (var m in msgs)
             {
-                if (IsClosed) return;
+                if (_done) return;
                 Message?.Invoke(m);
             }
         }
 
-        private void Acked(long ack)
+        /// <summary>Sends what is queued, then <c>close</c> (once), and stops.</summary>
+        public void Close(string? reason = "")
         {
-            if (_unacked.Count == 0) return;
-            var done = new List<long>();
-            foreach (var k in _unacked.Keys) { if (k <= ack) done.Add(k); else break; }
-            foreach (var k in done) _unacked.Remove(k);
+            if (_done) return;
+            Flush();
+            Emit(new NostrFrame { Type = "close", Seq = 0, Ack = _rcvNext - 1, Reason = string.IsNullOrEmpty(reason) ? null : reason });
+            Stop();
         }
 
-        public void Tick()
+        /// <summary>Stops without telling the peer.</summary>
+        public void Stop()
         {
-            if (IsClosed || _peer.Length == 0) return;
-            var now = _now();
-            if (now - _lastHeard >= SilenceMs) { Finish("timeout", false, true); return; }
-            if (_flushAt >= 0 && now >= _flushAt) Flush();
-            foreach (var s in _unacked.Values)
-            {
-                if (now - s.LastSend < ResendMs) continue;
-                if (s.Resends >= MaxResends) { Finish("timeout", false, true); return; }
-                s.Resends++;
-                s.LastSend = now;
-                s.Frame.Ack = _delivered;
-                Send(s.Frame);
-            }
-            if (_ackAt >= 0 && now >= _ackAt) SendBeat();
-            else if (now - _lastSend >= BeatMs) SendBeat();
+            _done = true;
+            _flushAt = -1;
+            _unacked.Clear();
+            _held.Clear();
+            _queue.Clear();
         }
 
-        private void SendBeat() => Send(new NostrFrame { Type = "beat", To = _peer, Seq = _sendSeq, Ack = _delivered });
-
-        private void Send(NostrFrame f)
+        private void ScheduleFlush()
         {
-            _lastSend = _now();
-            _ackAt = -1;
-            f.Ack = _delivered;
-            _emit(f);
+            if (_flushAt >= 0 || _done) return;
+            _flushAt = _now() + BatchMs;
         }
 
         private void Flush()
         {
+            if (_done) return;
             _flushAt = -1;
-            if (_out.Count == 0) return;
-            var batch = new List<string>();
-            var size = FrameOverhead;
-            foreach (var m in _out)
+            var now = _now();
+            if (_queue.Count == 0)
             {
-                var s = NostrFrame.MsgSize(m);
-                if (batch.Count > 0 && size + s > MaxFrameBytes)
-                {
-                    SendData(batch);
-                    batch = new List<string>();
-                    size = FrameOverhead;
-                }
-                batch.Add(m);
-                size += s;
+                if (_ackOwed) Emit(new NostrFrame { Type = "beat", Seq = 0, Ack = _rcvNext - 1 });
+                return;
             }
-            if (batch.Count > 0) SendData(batch);
-            _out.Clear();
+            var batch = new List<string>();
+            var bytes = 0;
+            void Ship()
+            {
+                if (batch.Count == 0) return;
+                var frame = new NostrFrame { Type = "data", Seq = _nextSeq++, Ack = _rcvNext - 1, Msgs = batch };
+                _unacked[frame.Seq] = new Sent { Frame = frame, LastSend = now };
+                Emit(frame);
+                batch = new List<string>();
+                bytes = 0;
+            }
+            var all = _queue.ToArray();
+            _queue.Clear();
+            foreach (var m in all)
+            {
+                var n = Encoding.UTF8.GetByteCount(m);
+                if (batch.Count > 0 && bytes + n > MaxFrameBytes) Ship();
+                batch.Add(m);
+                bytes += n;
+            }
+            Ship();
         }
 
-        private void SendData(List<string> msgs)
+        private void Emit(NostrFrame f)
         {
-            var f = new NostrFrame { Type = "data", To = _peer, Seq = ++_sendSeq, Msgs = msgs };
-            _unacked[f.Seq] = new Sent { Frame = f, LastSend = _now() };
-            Send(f);
+            _lastSent = _now();
+            _ackOwed = false;
+            f.To = _peer;
+            _emit(f);
         }
 
-        private void Finish(string reason, bool local, bool byPeerOrTimeout)
+        /// <summary>Runs the flush timer (30 ms) and, every 250 ms, resends, beats and the silence check.</summary>
+        public void Tick()
         {
-            if (IsClosed) return;
-            IsClosed = true;
-            CloseReason = reason;
-            ClosedByPeerOrTimeout = byPeerOrTimeout;
-            _out.Clear();
-            _unacked.Clear();
-            _held.Clear();
-            Ended?.Invoke(reason, local);
+            if (_done) return;
+            var now = _now();
+            if (_flushAt >= 0 && now >= _flushAt) Flush();
+            if (_done || now < _tickAt) return;
+            _tickAt = now + TickMs;
+            if (now - _lastHeard >= SilenceMs) { Die(); return; }
+            foreach (var s in _unacked.Values.ToArray())
+            {
+                if (now - s.LastSend < ResendMs) continue;
+                if (s.Resends >= MaxResends) { Die(); return; }
+                s.Resends++;
+                s.LastSend = now;
+                s.Frame.Ack = _rcvNext - 1;
+                s.Frame.To = _peer;
+                _emit(s.Frame);
+                _lastSent = now;
+            }
+            if (now - _lastSent >= BeatMs) Emit(new NostrFrame { Type = "beat", Seq = 0, Ack = _rcvNext - 1 });
+        }
+
+        private void Die()
+        {
+            Stop();
+            Dead?.Invoke("timeout");
         }
     }
 }

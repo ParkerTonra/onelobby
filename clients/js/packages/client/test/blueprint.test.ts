@@ -186,7 +186,7 @@ describe("hostDirect defaults from the blueprint", () => {
       { game: { id: "g" }, engine: "node-browser", hosting: { directPort: Math.max(port, 1024), openPort: false, nostr: false }, lobby: { meta: { map: "m" } } },
       { displayName: "Ann", rememberSeat: false },
     );
-    const lobby = await hostDirect(kit);
+    const lobby = await hostDirect(kit, { bindHost: "127.0.0.1" });
     try {
       expect(lobby.directHub.port).toBe(Math.max(port, 1024));
       expect(lobby.portMapping).toBe("off");
