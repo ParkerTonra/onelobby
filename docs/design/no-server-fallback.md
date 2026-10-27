@@ -1,10 +1,15 @@
-# Design note: playing when the router will not open a port (draft, undecided)
+# Design note: playing when the router will not open a port (decided: Option B, Nostr relays)
 
 Direct-IP hosting needs the host's port reachable: UPnP / NAT-PMP, or a port forwarded by hand. When neither works
 (UPnP off, a router that stopped answering, a player who will not forward ports), friends outside the host's network
-cannot join. This note weighs a fallback that needs no server of ours.
+cannot join. This note weighed a fallback that needs no server of ours, and records what was built.
 
-Both options below share these facts:
+**Decision (designer, 2026-10-26):** Option B. A direct host hands out a Nostr code (a `dc1` version 1 code) by default;
+joiners reach the host through public Nostr relays and then connect over WebRTC with public STUN. The wire protocol is
+`spec/nostr-signaling.md`; settings are `hosting.nostr` / `hosting.nostrRelays` (blueprint) and the `nostr` option of
+`hostDirect` / `HostDirectAsync`. Option A stays an emergency path only if the relays prove unreliable.
+
+Both options share these facts:
 
 - **NAT traversal is WebRTC with public STUN** (e.g. `stun:stun.l.google.com:19302`, `stun:stun.cloudflare.com:3478`):
   each side learns its public address and both send at once to punch through. Works for most home routers; fails on
@@ -21,7 +26,7 @@ Chromium (Edge) after **15 s**, libdatachannel (Node host) after **~40 s** (prob
 unreachable candidate). Whoever applies the other side's info first must have the other side apply its info within
 that window.
 
-## Option A: two codes, pasted by hand (what was asked)
+## Option A: two codes, pasted by hand (not built)
 
 The host sends an invite code, the joiner pastes it and gets a reply code, sends it back, the host pastes it.
 
@@ -34,19 +39,59 @@ The host sends an invite code, the joiner pastes it and gets a reply code, sends
 - Codes are about 110 characters (ICE password and DTLS fingerprint cannot be shortened), one pair per joiner.
 - Depends on nothing but STUN.
 
-## Option B: one code, public signaling relays
+## Option B: one code, public signaling relays (built)
 
-The join code (short, like today) names a meeting point; host and joiner exchange their WebRTC offer, answer and
-candidates through free public relays (Nostr relays or WebTorrent trackers, the approach Trystero uses), encrypted
-with a key derived from the code so relays see nothing useful.
+The join code (short, like today) names a meeting point; host and joiner exchange the signaling protocol through free
+public Nostr relays, encrypted with a key derived from the code so relays see nothing useful.
 
 - Same UX as a normal join: the host shows one code, the joiner types it. No timing window: both sides are live and
   trickle candidates as they appear.
 - Depends on third-party public relays (several, redundant, free) in addition to STUN. If all are down, the fallback
-  is down; the direct-IP path is unaffected.
-- More code than A's simple variant, much less than A's robust variant.
+  is down; the IP code is unaffected.
+- It is the existing signaling socket carried over relays, so the lobby, the hub and the WebRTC code are unchanged, and
+  an IP joiner and a Nostr joiner sit in the same lobby.
 
-## Recommendation
+What the relays see: a random key per session, the topic (a hash of the code), timestamps, sizes. Never the code, the
+hub messages, SDP or addresses. Anonymous: no account, no login, no personal information leaves the machine.
 
-B, as an opt-in fallback the host turns on (or that switches on when the code would be same-network only), with A's
-request-then-reply order kept as an emergency path only if B's relays prove unreliable.
+### Order the host offers things
+
+1. The Nostr code is always available (default on) and is the `joinCode`.
+2. UPnP / NAT-PMP keeps running in the background; a mapping makes the IP code an `internet` code and, because the
+   host pins its peer links to the direct UDP port, also gives Nostr joiners a reachable candidate (hard NATs).
+3. A manual forward (`publicAddress`) wins for the IP code the same way. The IP code is `lobby.directCode`.
+4. `nostr: false` (or `hosting.nostr: false`) turns Nostr off; `joinCode === directCode` as before.
+
+### Relay probe, 2026-10-26
+
+`checkNostrRelays` (connect, subscribe, publish one kind 25050 event under a random topic with a random key, see it
+echoed), from a home connection in the Pacific time zone, anonymous. Ok means accepted and echoed.
+
+| relay | result |
+|---|---|
+| wss://nos.lol | ok, 1.1 s |
+| wss://relay.primal.net | ok, 1.1 s |
+| wss://nostr-pub.wellorder.net | ok, 0.5 s |
+| wss://nostr.oxtr.dev | ok, 1.1 s |
+| wss://nostr.bitcoiner.social | ok, 0.5 s |
+| wss://relay.nostr.net | ok, 1.5 s |
+| wss://nostr.sathoarder.com | ok, 1.2 s |
+| wss://nostr-01.yakihonne.com | ok, 2.2 s (not kept: one per operator is enough) |
+| wss://nostr.data.haus | ok, 2.2 s (not kept) |
+| wss://relay.damus.io | refused: "banned: too many rate-limit violations" (an address ban at probe time, not a policy against the kind) |
+| wss://nostr.mom | connection failed |
+| wss://relay.nostr.band | timeout |
+| wss://offchain.pub | refused: not in web of trust |
+| wss://relay.snort.social | timeout |
+| wss://nostr.wine | refused: paid relay (expected) |
+| wss://relay.nostr.bg | connection failed |
+| wss://relay.noswhere.com | refused: "no one was listening" (mute) |
+| wss://nostr.einundzwanzig.space | refused: NIP-05 needed |
+| wss://relay.nostrplebs.com | refused: NIP-05 needed |
+| wss://relay.coinos.io | refused: kind 25050 not allowed |
+| wss://relay.current.fyi, relay.0xchat.com, strfry.iris.to, relay.orangepill.dev, relay.mostr.pub, nostr-relay.nokotaro.com, relay.stoner.com | connection failed |
+| wss://relay.nsec.app, yabu.me | timeout |
+
+The default list is the seven that passed first. A live run through all seven (host, joiner, one message over a real
+WebRTC link) joined in about 0.5 s. Relays come and go: when a blueprint is created, the `onelobby` skill runs
+`checkNostrRelays` again and writes the working ones to `hosting.nostrRelays`.

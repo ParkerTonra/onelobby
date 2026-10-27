@@ -44,6 +44,7 @@ GitHub URL at that release tag).
 | `sync.mode` | `lockstep` only when the loop is fixed-tick AND the RNG is seeded in state AND the sim reads no wall clock and iterates nothing unordered. `replication` for a real-time C# game whose host owns physics or AI. Otherwise `raw`. |
 | `sync.tickRate` | the game's own tick if it has one, else 20 |
 | `hosting` | `direct: true` wherever the engine can listen (everything but `web`): that is what outlives the servers. `server: true` for `web`, or when the user has a lobby server URL. Both is fine. |
+| `hosting.nostr`, `hosting.nostrRelays` | `nostr: true` (the default) when `hosting.direct`: the Nostr code works with no port forwarded. **Refresh the relay list now:** run `checkNostrRelays` (JS: `import { checkNostrRelays } from "onelobby"`, e.g. `node -e "import('onelobby').then(async m => console.log(JSON.stringify(await m.checkNostrRelays([...m.DEFAULT_NOSTR_RELAYS, 'wss://relay.example'], 8000))))"` with the candidates you want; anonymous, random keys, no personal information) and write the `ok` URLs, fastest first, to `hosting.nostrRelays` (5-8 of them) with a `$comment` naming the date. Keep the default list when the probe cannot run (offline). |
 | `lobby.maxPlayers` | from the survey, else 4 |
 | `lobby.listed` | `false` (join by code or link) unless the game wants strangers to find each other |
 | `chat.text` | `true` |

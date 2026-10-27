@@ -164,14 +164,14 @@ const firstRaw = jc.encodeRaw('203.0.113.7', 47810);
 const typos = [];
 for (let i = 0; i < jc.LENGTH; i++)
   for (const c of ALPHABET) if (c !== firstRaw[i]) typos.push(firstRaw.slice(0, i) + c + firstRaw.slice(i + 1));
-const v1 = (() => { // a well-formed code with version 01: must decode as unknown_version, not as an address
-  const data = (1n << 48n) | (BigInt(0xcb007107) << 16n) | 47810n;
+const v2 = (() => { // a well-formed code with version 10: must decode as unknown_version, not as an address
+  const data = (2n << 48n) | (BigInt(0xcb007107) << 16n) | 47810n;
   let v = (data << 5n) | BigInt(jc.crc5(data, 50)), s = '';
   for (let i = 0; i < jc.LENGTH; i++) { s = ALPHABET[Number(v & 31n)] + s; v >>= 5n; }
   return s;
 })();
 write('joincode.json', {
-  desc: 'dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens.',
+  desc: 'dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens. Version 1 (rooms) is version:2 = 1 | room:48 | crc5 (spec/nostr-signaling.md s.1); decode gives { room } as 12 lower-case hex digits.',
   valid: jcValid,
   aliases: [
     { input: jcValid[3].code.toLowerCase(), ip: '203.0.113.7', port: 47810, note: 'lower case' },
@@ -184,9 +184,36 @@ write('joincode.json', {
     { input: firstRaw.slice(0, 10), error: 'bad_code', note: 'too short' },
     { input: firstRaw + '0', error: 'bad_code', note: 'too long' },
     { input: firstRaw.slice(0, 10) + 'U', error: 'bad_code', note: 'U is not in the alphabet' },
-    { input: group(v1), error: 'unknown_version', note: 'version bits 01, valid crc' },
+    { input: group(v2), error: 'unknown_version', note: 'version bits 10, valid crc' },
+  ],
+  rooms: ['000000000000', '0123456789ab', 'ffffffffffff', 'a1b2c3d4e5f6', '7fffffffffff'].map((room) => ({ room, code: jc.encodeRoom(room) })),
+  roomAliases: [
+    { input: jc.encodeRoom('a1b2c3d4e5f6').toLowerCase(), room: 'a1b2c3d4e5f6', note: 'lower case' },
+    { input: jc.encodeRoom('a1b2c3d4e5f6').replace(/-/g, ' '), room: 'a1b2c3d4e5f6', note: 'spaces instead of hyphens' },
   ],
   singleTypos: { of: jc.group(firstRaw), error: 'bad_code', count: typos.length, inputs: typos },
 });
+
+// ---- nostr.json: Nostr signaling (spec/nostr-signaling.md) ----
+{
+  const nostr = await import('./nostr.mjs');
+  const room = 'a1b2c3d4e5f6';
+  const shown = jc.encodeRoom(room);
+  const raw = jc.encodeRoomRaw(room);
+  const { key, topic } = nostr.deriveKeys(raw);
+  const frame = { v: 1, type: 'data', from: 'dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659', to: 'f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9', seq: 1, ack: 0, msgs: ['{"t":"hello"}', '{"t":"ping","n":1}'] };
+  const plaintext = JSON.stringify(frame);
+  const iv = '000102030405060708090a0b';
+  const content = nostr.encrypt(key, plaintext, iv);
+  const created = 1700000000;
+  const tags = [['t', topic]];
+  write('nostr.json', {
+    desc: 'Nostr signaling vectors (spec/nostr-signaling.md). keys: HKDF-SHA256 of the 11 normalised code characters. crypto: AES-256-GCM with the given iv (a real sender draws a fresh one); content = base64(iv || ciphertext || tag). event: NIP-01 id of a kind 25050 event (sig is any valid BIP340 signature over the id). bip340: official BIP340 signing vectors (secretKey, auxRand, message -> signature).',
+    keys: { code: shown, normalized: raw, room, ikm: raw, salt: 'onelobby-nostr-v1', key, topic },
+    crypto: { key, iv, plaintext, content },
+    event: { pubkey: frame.from, created_at: created, kind: 25050, tags, content, id: nostr.eventId(frame.from, created, 25050, tags, content) },
+    bip340: nostr.BIP340,
+  });
+}
 
 console.log('vectors written:', frames.length, 'frames');

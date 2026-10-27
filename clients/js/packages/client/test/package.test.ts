@@ -77,6 +77,7 @@ describe("export surface", () => {
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "directJoinInfo", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
       "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
+      "checkNostrRelays", "DEFAULT_NOSTR_RELAYS", "DEFAULT_NOSTR_STUN", "encodeRoomCode",
       "parseBlueprint", "defineBlueprint", "BlueprintError", "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
     ].sort());
   });

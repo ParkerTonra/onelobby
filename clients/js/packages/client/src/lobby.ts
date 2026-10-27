@@ -38,6 +38,9 @@ export interface KickOptions {
 }
 export type Peer = PeerInfo;
 
+/** What a direct host's `joinCode` is: see {@link Lobby.joinCodeKind}. */
+export type JoinCodeKind = "nostr" | "internet" | "same_network" | "none";
+
 export type LobbyEvents = {
   peerJoined: [Peer];
   /** The peer's data channels are open and the handshake is done: reliable sends reach it now (earlier ones were queued and flushed). */
@@ -59,7 +62,7 @@ export type LobbyEvents = {
    * Direct-IP host only: the join code changed after `hostDirect` resolved, e.g. the router answered a later port-mapping
    * retry and the code went from "same_network" to "internet". Show the new code (and `joinUrl`).
    */
-  joinCodeChanged: [code: string, kind: "internet" | "same_network" | "none"];
+  joinCodeChanged: [code: string, kind: JoinCodeKind];
 };
 
 export interface LobbyConfig {
@@ -146,8 +149,18 @@ export class Lobby extends Emitter<LobbyEvents> {
    * s.2a). Show it with joinCodeKind. Empty when the machine has no IPv4 address, and on joiners.
    */
   joinCode = "";
-  /** "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN address. */
-  joinCodeKind: "internet" | "same_network" | "none" = "none";
+  /**
+   * "nostr": a version 1 code that works through public Nostr relays (spec/nostr-signaling.md; the default for a direct
+   * host). "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN
+   * address. "none": no code.
+   */
+  joinCodeKind: JoinCodeKind = "none";
+  /**
+   * Direct-IP host only: the IP code (address and port, version 0), with `directCodeKind` "internet" or "same_network".
+   * Equal to `joinCode` when Nostr is off; otherwise the code to hand out for LAN play or when the router port is open.
+   */
+  directCode = "";
+  directCodeKind: "internet" | "same_network" | "none" = "none";
   /** Direct-IP host only: this machine's addresses with the port, for an "Advanced" fold-out. */
   directAddresses: string[] = [];
   /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */

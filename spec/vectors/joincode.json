@@ -1,5 +1,5 @@
 {
-  "desc": "dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens.",
+  "desc": "dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens. Version 1 (rooms) is version:2 = 1 | room:48 | crc5 (spec/nostr-signaling.md s.1); decode gives { room } as 12 lower-case hex digits.",
   "valid": [
     {
       "ip": "127.0.0.1",
@@ -89,9 +89,43 @@
       "note": "U is not in the alphabet"
     },
     {
-      "input": "EB01-RGFE-P2Y",
+      "input": "PB01-RGFE-P24",
       "error": "unknown_version",
-      "note": "version bits 01, valid crc"
+      "note": "version bits 10, valid crc"
+    }
+  ],
+  "rooms": [
+    {
+      "room": "000000000000",
+      "code": "8000-0000-00N"
+    },
+    {
+      "room": "0123456789ab",
+      "code": "814D-2PF2-DB1"
+    },
+    {
+      "room": "ffffffffffff",
+      "code": "FZZZ-ZZZZ-ZZ6"
+    },
+    {
+      "room": "a1b2c3d4e5f6",
+      "code": "D1PB-1X9S-FPV"
+    },
+    {
+      "room": "7fffffffffff",
+      "code": "BZZZ-ZZZZ-ZZY"
+    }
+  ],
+  "roomAliases": [
+    {
+      "input": "d1pb-1x9s-fpv",
+      "room": "a1b2c3d4e5f6",
+      "note": "lower case"
+    },
+    {
+      "input": "D1PB 1X9S FPV",
+      "room": "a1b2c3d4e5f6",
+      "note": "spaces instead of hyphens"
     }
   ],
   "singleTypos": {

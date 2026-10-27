@@ -112,7 +112,8 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
   `"*"` allows every origin, which lets any web page the host visits probe the host's network, so only for testing.
 - A joiner whose peer link does not open within `OneLobbyConfig.ReadyTimeout` (15 s) gives up like on the hosted
   server: `ReadyAsync` throws code `ice_failed` and `SessionEnded("ice_failed")` fires (no relay retry: no TURN here).
-- No STUN or TURN: the game only ever talks to the other players and the player's own router.
+- No STUN or TURN with IP codes: the game only ever talks to the other players and the player's own router. A Nostr code
+  (s.3b) uses public STUN as well.
 - A joiner that drops or restarts takes its seat back within 60 s with `client.RejoinDirectAsync(code, resumeToken)`
   (Unity: `runner.RejoinDirectAsync`; JS: `kit.rejoinDirect(code, resumeToken)`): same peer id, the host sees
   `PeerJoined` for it again. Save `lobby.ResumeToken` after every join (it changes on each resume). A seat that is gone
@@ -157,7 +158,7 @@ const kit = new OneLobby({
   advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },
 });
 const lobby = await hostDirect(kit, { maxPlayers: 8, openPort: true });   // 47810, or the next free port up to 47819; else port_in_use
-console.log(lobby.joinCodeKind === "internet" ? "Internet code:" : "Same-network code:", lobby.joinCode);
+console.log(lobby.joinCodeKind, "code:", lobby.joinCode);   // "nostr" by default; lobby.directCode is the IP code (see s.3b)
 lobby.on("message", (from, bytes, channel) => { /* the host is truth: validate, then broadcast */ });
 // lobby.leave() closes the listener and removes the router mapping; joiners get sessionEnded("host_left")
 // the router may answer later (still booting, UPnP switched back on): the code then turns "internet" by itself
@@ -176,6 +177,45 @@ with `bad_address`); the router is then asked only if `OpenPort` is set to true 
 47810 (libdatachannel's ICE UDP mux) and asks the router to forward both. Lower-level pieces: `DirectHubHost` (hub +
 listener, `connectLocal()`, `openPort()`), `PortMapper`, `SignalingHub`. A browser cannot host: it cannot listen on a
 port.
+
+## 3b. The Nostr code (default): works with no port forwarded
+
+A host whose router will not open a port still takes joiners. By default `hostDirect` also joins a Nostr room: the code
+it hands out (`lobby.joinCode`, `joinCodeKind` "nostr", a `dc1` version 1 code such as `D1PB-1X9S-FPV`) names a meeting
+point on public Nostr relays. The joiner's signaling socket runs over the relays, encrypted with a key derived from the
+code (the relays see random keys and a hash of the code, never the code or the messages), and the game connects over
+WebRTC with public STUN. Anonymous: no account, no login, nothing about the player leaves the machine.
+Wire protocol: [spec/nostr-signaling.md](../../spec/nostr-signaling.md); the decision and the relay probe:
+[docs/design/no-server-fallback.md](../design/no-server-fallback.md).
+
+What the host offers, in order:
+
+1. **The Nostr code, always** (unless `nostr: false`). Show it as the code; `kit.joinDirect(code)` takes it like any other.
+2. **UPnP / NAT-PMP keeps running in the background.** A mapping turns the IP code into an internet code, and since the
+   host pins its peer links to the direct UDP port, the mapping also gives Nostr joiners a reachable address on hard NATs.
+3. **A manual forward wins:** a player who forwarded the port passes `publicAddress` and gets an internet IP code the same way.
+4. The IP code is `lobby.directCode` (`directCodeKind` "internet" or "same_network"): hand it out for a LAN or when the
+   port is open (it needs no relay and no STUN); it is also `GET /joininfo`'s `directCode`.
+
+```js
+const lobby = await hostDirect(kit, { maxPlayers: 4 });               // Nostr on
+showCode(lobby.joinCode, lobby.joinCodeKind);                         // "nostr"
+showLanCode(lobby.directCode, lobby.directCodeKind);                  // under "Advanced"
+const ipOnly = await hostDirect(kit, { nostr: false });               // joinCode === directCode, as before
+const mine = await hostDirect(kit, { nostr: { relays: ["wss://nos.lol"], stun: ["stun:stun.l.google.com:19302"] } });
+```
+
+- **Startup line.** With Nostr on it reads `OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); ip
+  code 0A00-0BSJ-BYQ (SameNetwork); port mapping off; nostr 7/7 relays`; the end is `; nostr: no relay reachable` when none
+  answered within 10 s, and then `joinCode` is the IP code until a relay connects (`joinCodeChanged` fires, the line prints again).
+- **Relays.** `hosting.nostrRelays` in the blueprint (else the library's seven, probed 2026-10-26). All relays are used at once;
+  one is enough. `checkNostrRelays(urls, timeoutMs)` returns `{ url, ok, ms, error? }` per relay (connect, subscribe, publish one
+  kind 25050 event, see it echoed); the `onelobby` skill runs it when it writes a blueprint. `kit.joinDirect(code, { nostrRelays, stun })` overrides per join.
+- **Joiners.** `joinDirect` / `rejoinDirect` take either kind of code. A Nostr joiner that reaches no relay or gets no answer in 15 s fails with
+  `direct_unreachable`; if both players are behind symmetric NAT the link fails as `ice_failed` and the fix is a forwarded port.
+- **Node versions.** Relays are reached with the runtime's `WebSocket` (browsers, Node 22+). On older Node pass
+  `advanced: { nostrConnect: (url) => new WebSocket(url) }` with the `ws` package.
+- **Off.** `nostr: false`, or `hosting.nostr: false` in the blueprint: no relay is contacted, the code is the IP code.
 
 ## 4. JS: join (Node or a browser page)
 

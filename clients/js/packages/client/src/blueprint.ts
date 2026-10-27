@@ -4,6 +4,7 @@
  * object. Errors carry the dotted `path` and the `rule` id the shared vectors (spec/vectors/blueprint.json) expect.
  */
 import { OneLobbyError } from "./signaling.js";
+import { DEFAULT_NOSTR_RELAYS } from "./nostr/relays.js";
 
 export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
 
@@ -17,6 +18,8 @@ export interface Blueprint {
     readonly lobbyServer: string;
     readonly directPort: number;
     readonly openPort: boolean;
+    readonly nostr: boolean;
+    readonly nostrRelays: readonly string[];
     readonly relayOnly: boolean;
     readonly allowedOrigins: readonly string[];
   };
@@ -67,6 +70,8 @@ export interface BlueprintInput {
     lobbyServer?: string;
     directPort?: number;
     openPort?: boolean;
+    nostr?: boolean;
+    nostrRelays?: string[];
     relayOnly?: boolean;
     allowedOrigins?: string[];
   };
@@ -149,6 +154,8 @@ const ROOT: Node = obj(
       lobbyServer: str(),
       directPort: int(1024, 65535),
       openPort: bool,
+      nostr: bool,
+      nostrRelays: { k: "strarr" },
       relayOnly: bool,
       allowedOrigins: { k: "strarr" },
     }),
@@ -297,6 +304,8 @@ function fill(input: Record<string, unknown>): Blueprint {
       lobbyServer: hosting.lobbyServer ?? "",
       directPort: hosting.directPort ?? 47810,
       openPort: hosting.openPort ?? true,
+      nostr: hosting.nostr ?? true,
+      nostrRelays: hosting.nostrRelays ?? [...DEFAULT_NOSTR_RELAYS],
       relayOnly: hosting.relayOnly ?? false,
       allowedOrigins: hosting.allowedOrigins ?? [],
     },

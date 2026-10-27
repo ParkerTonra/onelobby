@@ -130,6 +130,10 @@ Full reference (generated): `docs/api/`.
   OneLobby's own 2 s pings (minimum 6000), so games need no heartbeat of their own.
 - `rateLimit: { messages, perMs }` on `host()` / `hostDirect()` caps each joiner's incoming raw messages; the excess is
   dropped before `message` fires or is relayed.
+- `hostDirect` (Node) starts Nostr signaling by default: the startup line gains `; ip code ...` and ends `; nostr 5/7 relays`
+  (or `; nostr: no relay reachable`, and then `joinCode` is the IP code until a relay connects, when `joinCodeChanged`
+  fires). `hostDirect` waits up to 10 s for the first relay (and the router, in parallel) before it resolves.
+  `joinDirect` with a version 1 code and no relay or no answer fails with `direct_unreachable`.
 - Direct lobbies have no migration and never emit `hostChanged`: when the host goes, joiners get `sessionEnded("host_left")`.
 - Sockets close with 1000 (you closed, or the host's `disconnect()`), 1001 (the other end left, `host_left`,
   `host_changed`), 4000 (kicked) or 1006 (`timeout`, `ice_failed`, ...); `e.reason` is the lobby's reason. A code and
@@ -238,8 +242,13 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 - Test two players headless (playwright-core): `docs/recipes/testing.md`
 - Host with a join code, no server (.NET desktop, Unity, Node): `docs/recipes/direct-ip.md` (C#: `client.HostDirectAsync`
   / `JoinDirectAsync` / `RejoinDirectAsync(code, token)` from `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync`; Node: `hostDirect(kit)` from `onelobby/direct`; JS joiners:
-  `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`. The code `6B01-RGFE-P2B` is the host's address; the router is asked to open port 47810 TCP+UDP
-  (or the next free port up to 47819 when another program holds it; the code carries the port); a joiner's `joinCode`
+  `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`. `lobby.joinCode` is a Nostr code by default (`joinCodeKind`
+  "nostr", `dc1` version 1, e.g. `D1PB-1X9S-FPV`): joiners reach the host through public Nostr relays (anonymous, encrypted)
+  and then WebRTC with public STUN, so it works with no port forwarded; the IP code `6B01-RGFE-P2B` (the host's address; the
+  router is asked to open port 47810 TCP+UDP, or the next free port up to 47819; the code carries the port) is
+  `lobby.directCode` and keeps working for LAN play and open ports. `hostDirect(kit, { nostr: false })` or blueprint
+  `hosting.nostr: false` is IP codes only (`joinCode === directCode`); `hosting.nostrRelays` / `nostr: { relays, stun }`
+  pick relays; `checkNostrRelays(urls, ms)` probes them (spec `spec/nostr-signaling.md`); a joiner's `joinCode`
   is the code it joined with; host leaving ends the session)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
   adapter): `docs/recipes/browser-game.md`

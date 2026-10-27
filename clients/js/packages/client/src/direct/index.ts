@@ -12,7 +12,9 @@
 import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
-import { encodeJoinCode } from "../joincode.js";
+import { encodeJoinCode, encodeRoomCode } from "../joincode.js";
+import { NostrHostBridge } from "../nostr/host.js";
+import { DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "../nostr/relays.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
 import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from "./hub-host.js";
 import { directHubOptions } from "./hub.js";
@@ -26,6 +28,7 @@ export type { HubOptions, HubDeps } from "./hub.js";
 export { PortMapper, isPublicIPv4, lanIPv4, localAddresses } from "./portmap.js";
 export type { PortMapResult, PortMapperOptions, PortMapMethod } from "./portmap.js";
 export { webRtcLinkFactoryFor } from "../webrtc.js";
+export { NostrHostBridge } from "../nostr/host.js";
 
 export interface DirectHostOptions {
   /**
@@ -44,6 +47,13 @@ export interface DirectHostOptions {
   meta?: Record<string, string>;
   /** Ask the router to forward the port so the code works from the internet (s.2a). The host-menu toggle; default on. */
   openPort?: boolean;
+  /**
+   * Nostr signaling (spec/nostr-signaling.md), default on: `lobby.joinCode` is a version 1 code that joiners reach through
+   * public Nostr relays, so it works with no port forwarded; the IP code moves to `lobby.directCode`. `false`: IP codes
+   * only (`joinCode === directCode`). An object picks the relays (default: the blueprint's `hosting.nostrRelays`, else the
+   * library list) and the STUN servers (default Google's and Cloudflare's public ones).
+   */
+  nostr?: boolean | { relays?: string[]; stun?: string[] };
   /**
    * This machine's public IPv4 address when the player forwarded the port by hand (no UPnP): the join code and
    * `joinUrl` carry it and `joinCodeKind` is "internet". Default: the `ONELOBBY_PUBLIC_IP` environment variable (then `portMapping` reads "manual (ONELOBBY_PUBLIC_IP)"). With it
@@ -73,12 +83,23 @@ export interface DirectHostOptions {
  * The one startup line for a direct host, character for character as C#'s `DirectLobby.FormatHostLog`, e.g.
  * `OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off`.
  */
-export function formatHostLog(requested: number, bound: number, code: string, kind: "internet" | "same_network" | "none", mapping: string): string {
+export function formatHostLog(
+  requested: number,
+  bound: number,
+  code: string,
+  kind: "nostr" | "internet" | "same_network" | "none",
+  mapping: string,
+  /** With Nostr on: the IP code and how many relays are connected ("4/5", or "" for none reachable). */
+  nostr?: { directCode: string; directCodeKind: "internet" | "same_network" | "none"; relays: string },
+): string {
   let line = `OneLobby: direct host listening on TCP+UDP :${bound}`;
   if (bound !== requested) line += ` (${bound - requested === 1 ? requested : `${requested}-${bound - 1}`} busy)`;
-  const kindName = kind === "internet" ? "Internet" : kind === "same_network" ? "SameNetwork" : "None";
-  line += code ? `; code ${code} (${kindName}); port mapping ` : "; no join code (no IPv4 address); port mapping ";
-  return line + (mapping || "off");
+  const name = (k: string) => (k === "internet" ? "Internet" : k === "same_network" ? "SameNetwork" : k === "nostr" ? "Nostr" : "None");
+  line += code ? `; code ${code} (${name(kind)})` : "; no join code (no IPv4 address)";
+  if (nostr) line += nostr.directCode ? `; ip code ${nostr.directCode} (${name(nostr.directCodeKind)})` : "; no ip code (no IPv4 address)";
+  line += `; port mapping ${mapping || "off"}`;
+  if (nostr) line += nostr.relays ? `; nostr ${nostr.relays} relays` : "; nostr: no relay reachable";
+  return line;
 }
 
 /** A direct host lobby: the normal Lobby, plus the hub behind it. Leaving or ending the lobby stops the hub. */
@@ -106,6 +127,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     ? {
         port: bp.hosting.directPort,
         openPort: bp.hosting.openPort,
+        nostr: bp.hosting.nostr ? { relays: [...bp.hosting.nostrRelays] } : false,
         allowedOrigins: [...bp.hosting.allowedOrigins],
         maxPlayers: bp.lobby.maxPlayers,
         lateJoin: bp.lobby.lateJoin,
@@ -118,12 +140,15 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   // busy (another program holds it): try the next fallbackPorts; the join code carries the port
   const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));
   const maxPlayers = o.maxPlayers ?? 4;
+  const nostrOn = o.nostr !== false;
+  const nostrCfg = typeof o.nostr === "object" ? o.nostr : {};
+  const stunUrls = nostrOn ? (nostrCfg.stun ?? [...DEFAULT_NOSTR_STUN]) : [];
   let hub: DirectHubHost | undefined;
   let anyBusy = false;
   let anyReserved = false;
   for (let p = port; !hub; p++) {
     try {
-      hub = await DirectHubHost.listen(p, directHubOptions(maxPlayers, o.password));
+      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password), stunUrls });
     } catch (e) {
       if (!(e instanceof PortInUseError)) throw e;
       if (e.reserved) anyReserved = true;
@@ -148,7 +173,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
           mapped: false, method: "none" as const, externalIPv4: null, localIPv4: null, detail: e.message,
         }));
   const wrapLinks = (inner: LinkFactory): LinkFactory => ({
-    create: (lo) => inner.create({ ...lo, iceServers: [], portRange: { begin: hub.port, end: hub.port } }),
+    // Nostr joiners have no address to dial: the host needs STUN too (the UDP port pin stays)
+    create: (lo) => inner.create({ ...lo, iceServers: nostrOn ? lo.iceServers : [], portRange: { begin: hub.port, end: hub.port } }),
   });
   let lobby: Lobby;
   try {
@@ -171,18 +197,53 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       await hub.close();
     }
   };
+  // Nostr: the room code is ready at once; relays connect while the router answers
+  let relaysNote = "";
+  let nostrUp = false;
+  let nostrCode = "";
+  let onRelays: (() => void) | null = null;
+  if (nostrOn) {
+    const env = kit.nostrHostEnv();
+    nostrCode = encodeRoomCode();
+    try {
+      const bridge = await NostrHostBridge.start(hub.hub, {
+        code: nostrCode,
+        relays: nostrCfg.relays && nostrCfg.relays.length > 0 ? nostrCfg.relays : [...DEFAULT_NOSTR_RELAYS],
+        connect: env.connect,
+        clock: env.clock,
+        wall: env.wall,
+        onChange: () => onRelays?.(),
+      });
+      hub.nostr = bridge;
+      lobby.on("sessionEnded", () => bridge.close());
+      nostrUp = await settleRelays(bridge);
+      relaysNote = nostrUp ? `${bridge.relaysConnected}/${bridge.relaysTotal}` : "";
+    } catch {
+      nostrCode = ""; // no WebSocket in this runtime, say: the host keeps hosting by IP
+    }
+  }
   const map = await mapping;
   const direct = Object.assign(lobby, { directHub: hub, joinUrl: null as string | null });
   direct.directAddresses = localAddresses(hub.port);
   const log = o.log === false ? null : (o.log ?? console.log);
-  // Sets joinCode / joinCodeKind / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
+  // Sets joinCode / joinCodeKind / directCode / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
+  let lastIp: [string | null, "internet" | "same_network", string] = [null, "same_network", "off"];
   const applyCode = (ip: string | null, kind: "internet" | "same_network", mappingNote: string) => {
+    lastIp = [ip, kind, mappingNote];
     direct.portMapping = mappingNote;
-    direct.joinCode = ip ? encodeJoinCode(ip, hub.port) : "";
-    direct.joinCodeKind = ip ? kind : "none";
+    direct.directCode = ip ? encodeJoinCode(ip, hub.port) : "";
+    direct.directCodeKind = ip ? kind : "none";
+    if (nostrOn && nostrCode && nostrUp) {
+      direct.joinCode = nostrCode;
+      direct.joinCodeKind = "nostr";
+    } else {
+      // Nostr off, or no relay reachable (yet): the IP code is the code; it turns Nostr when a relay connects
+      direct.joinCode = direct.directCode;
+      direct.joinCodeKind = direct.directCodeKind;
+    }
     direct.joinUrl = o.http && ip ? `http://${ip}:${hub.port}/` : null;
-    direct.directHostLog = formatHostLog(port, hub.port, direct.joinCode, direct.joinCodeKind, direct.portMapping);
-    hub.joinInfo = { joinCode: direct.joinCode, joinCodeKind: direct.joinCodeKind, joinUrl: direct.joinUrl, port: hub.port };
+    direct.directHostLog = formatHostLog(port, hub.port, direct.joinCode, direct.joinCodeKind, direct.portMapping, nostrOn ? { directCode: direct.directCode, directCodeKind: direct.directCodeKind, relays: relaysNote } : undefined);
+    hub.joinInfo = { joinCode: direct.joinCode, joinCodeKind: direct.joinCodeKind, directCode: direct.directCode, directCodeKind: direct.directCodeKind, joinUrl: direct.joinUrl, port: hub.port };
     log?.(direct.directHostLog);
   };
   if (manual) applyCode(manual, "internet", map?.mapped ? map.detail : o.publicAddress ? "manual" : "manual (ONELOBBY_PUBLIC_IP)");
@@ -195,6 +256,15 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       direct.notifyJoinCodeChanged();
     });
   }
+  // a relay answering after the 10 s wait: the Nostr code becomes the joinCode
+  onRelays = () => {
+    const b = hub.nostr;
+    if (!b || b.relaysConnected === 0 || nostrUp) return;
+    nostrUp = true;
+    relaysNote = `${b.relaysConnected}/${b.relaysTotal}`;
+    applyCode(...lastIp);
+    direct.notifyJoinCodeChanged();
+  };
   return direct;
 }
 
@@ -218,6 +288,13 @@ function retryMapping(mapper: PortMapper, firstMs: number, onMapped: (r: PortMap
     t.unref?.();
   };
   round();
+}
+
+/** Waits for the relays to connect: true once at least one has (then up to 1.5 s more for the rest), false after 10 s. */
+async function settleRelays(bridge: NostrHostBridge): Promise<boolean> {
+  if (!(await bridge.whenUp(10_000))) return false;
+  for (let i = 0; i < 30 && bridge.relaysConnected < bridge.relaysTotal; i++) await new Promise((r) => setTimeout(r, 50));
+  return true;
 }
 
 function isIPv4(s: string): boolean {

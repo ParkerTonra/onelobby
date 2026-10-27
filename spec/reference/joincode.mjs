@@ -11,6 +11,7 @@ import { ALPHABET } from './codes.mjs';
 
 export const LENGTH = 11;
 export const VERSION_IPV4 = 0;
+export const VERSION_ROOM = 1; // Nostr room, spec/nostr-signaling.md s.1
 
 /** CRC-5 (poly 0x05) over the low `bits` bits of `value`, most significant first. */
 export function crc5(value, bits) {
@@ -41,6 +42,16 @@ export function encodeRaw(ip, port) {
   return s;
 }
 
+/** Canonical 11-character version-1 code (a Nostr room, spec/nostr-signaling.md s.1) for 12 hex digits. */
+export function encodeRoomRaw(roomHex) {
+  if (!/^[0-9a-fA-F]{12}$/.test(roomHex)) throw new Error(`room must be 12 hex digits: ${roomHex}`);
+  const data = (BigInt(VERSION_ROOM) << 48n) | BigInt('0x' + roomHex);
+  let v = (data << 5n) | BigInt(crc5(data, 50));
+  let s = '';
+  for (let i = 0; i < LENGTH; i++) { s = ALPHABET[Number(v & 31n)] + s; v >>= 5n; }
+  return s;
+}
+
 /** Display form: K3J7-X9QA-2MT. */
 export const group = (raw) => `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}`;
 export const encode = (ip, port) => group(encodeRaw(ip, port));
@@ -63,8 +74,10 @@ export function decode(input) {
   const data = v >> 5n;
   if (crc5(data, 50) !== Number(v & 31n)) return { error: 'bad_code' };
   const version = Number(data >> 48n);
+  if (version === VERSION_ROOM) return { room: (data & 0xffffffffffffn).toString(16).padStart(12, '0') };
   if (version !== VERSION_IPV4) return { error: 'unknown_version' };
   const port = Number(data & 0xffffn);
   if (port === 0) return { error: 'bad_code' };
   return { ip: intToIp(Number((data >> 16n) & 0xffffffffn)), port };
 }
+export const encodeRoom = (roomHex) => group(encodeRoomRaw(roomHex));

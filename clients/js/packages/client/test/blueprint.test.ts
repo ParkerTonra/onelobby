@@ -183,7 +183,7 @@ describe("hostDirect defaults from the blueprint", () => {
   it("takes the port, maxPlayers and meta from the file", async () => {
     const port = await freePort();
     const kit = OneLobby.fromConfig(
-      { game: { id: "g" }, engine: "node-browser", hosting: { directPort: Math.max(port, 1024), openPort: false }, lobby: { meta: { map: "m" } } },
+      { game: { id: "g" }, engine: "node-browser", hosting: { directPort: Math.max(port, 1024), openPort: false, nostr: false }, lobby: { meta: { map: "m" } } },
       { displayName: "Ann", rememberSeat: false },
     );
     const lobby = await hostDirect(kit);

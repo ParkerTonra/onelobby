@@ -13,6 +13,9 @@ import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-h
 import { freePort } from "./helpers.js";
 import { directJoinInfo } from "../src/friendly.js";
 
+/** The IP-code tests: Nostr is off so no test talks to a public relay (test/nostr-e2e.test.ts covers Nostr). */
+const hostIp = (k: OneLobby, o: Parameters<typeof hostDirect>[1] = {}) => hostDirect(k, { nostr: false, ...o });
+
 /**
  * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
  * WebRTC through node-datachannel (libdatachannel) on loopback. No server anywhere.
@@ -290,7 +293,7 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
     const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
     cleanup.push(() => host.close());
     expect((await fetch(`http://127.0.0.1:${host.port}/joininfo`)).status).toBe(404);
-    host.joinInfo = { joinCode: "6B01-RGFE-P2B", joinCodeKind: "internet", joinUrl: "http://203.0.113.7:47810/", port: host.port };
+    host.joinInfo = { joinCode: "6B01-RGFE-P2B", joinCodeKind: "internet", directCode: "6B01-RGFE-P2B", directCodeKind: "internet", joinUrl: "http://203.0.113.7:47810/", port: host.port };
     const res = await fetch(`http://127.0.0.1:${host.port}/joininfo?t=1`);
     expect(res.headers.get("content-type")).toBe("application/json");
     expect(await res.json()).toEqual(host.joinInfo);
@@ -300,7 +303,7 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
 describe("hostDirect join code: manual public address and router retry", () => {
   it("publicAddress makes an internet code and joinUrl without asking the router; /joininfo and directJoinInfo match", async () => {
     const port = await freePort();
-    const host = await hostDirect(kit("Host"), {
+    const host = await hostIp(kit("Host"), {
       port, publicAddress: "203.0.113.7", log: false, http: () => ({ type: "text/html", body: "page" }),
       portMapping: { ssdp: { address: "127.0.0.1", port: 9 }, natPmp: { address: "127.0.0.1", port: 9 } },
     });
@@ -312,14 +315,14 @@ describe("hostDirect join code: manual public address and router retry", () => {
     expect(host.joinUrl).toBe(`http://203.0.113.7:${port}/`);
     // a page opened at a LAN or loopback address learns the public link
     expect(await directJoinInfo(`http://127.0.0.1:${port}/game?x=1`)).toEqual({
-      joinCode: host.joinCode, joinCodeKind: "internet", joinUrl: host.joinUrl, port,
+      joinCode: host.joinCode, joinCodeKind: "internet", directCode: host.joinCode, directCodeKind: "internet", joinUrl: host.joinUrl, port,
     });
     expect(await directJoinInfo(`http://127.0.0.1:${await freePort()}/`)).toBeNull();
-    await expect(hostDirect(kit("Bad"), { port: await freePort(), publicAddress: "my.host.example", log: false }))
+    await expect(hostIp(kit("Bad"), { port: await freePort(), publicAddress: "my.host.example", log: false }))
       .rejects.toMatchObject({ code: "bad_address" });
     process.env.ONELOBBY_PUBLIC_IP = "203.0.113.8";
     try {
-      const fromEnv = await hostDirect(kit("Env"), { port: await freePort(), log: false });
+      const fromEnv = await hostIp(kit("Env"), { port: await freePort(), log: false });
       cleanup.push(() => fromEnv.leave());
       expect(fromEnv.joinCodeKind).toBe("internet");
       expect(fromEnv.portMapping).toBe("manual (ONELOBBY_PUBLIC_IP)");
@@ -349,7 +352,7 @@ describe("hostDirect join code: manual public address and router retry", () => {
     });
     const port = await freePort();
     const lines: string[] = [];
-    const host = await hostDirect(kit("Host"), {
+    const host = await hostIp(kit("Host"), {
       port, log: (l) => lines.push(l), http: () => ({ type: "text/html", body: "page" }),
       portMapping: { natPmp: { address: "127.0.0.1", port: gw.address().port }, tryUpnp: false, retryMs: 100 },
     });
@@ -376,7 +379,7 @@ describe("hostDirect join code: manual public address and router retry", () => {
     cleanup.push(() => {
       gw.close();
     });
-    const host = await hostDirect(kit("Host"), {
+    const host = await hostIp(kit("Host"), {
       port: await freePort(), log: false,
       portMapping: { natPmp: { address: "127.0.0.1", port: gw.address().port }, tryUpnp: false, retryMs: 0 },
     });
@@ -401,7 +404,7 @@ describe("direct host startup line", () => {
   it("hostDirect calls the log option once with lobby.directHostLog; log: false prints nothing", async () => {
     const lines: string[] = [];
     const port = await freePort();
-    const host = await hostDirect(kit("Host"), { port, openPort: false, log: (l) => lines.push(l) });
+    const host = await hostIp(kit("Host"), { port, openPort: false, log: (l) => lines.push(l) });
     cleanup.push(() => host.leave());
     expect(lines).toEqual([host.directHostLog]);
     expect(host.directHostLog).toMatch(new RegExp(`^OneLobby: direct host listening on TCP\\+UDP :${port}; (code \\S+ \\((Internet|SameNetwork)\\)|no join code \\(no IPv4 address\\)); port mapping off$`));
@@ -409,7 +412,7 @@ describe("direct host startup line", () => {
     const real = console.log;
     console.log = (...a: unknown[]) => void seen.push(a);
     try {
-      const quiet = await hostDirect(kit("Quiet"), { port: await freePort(), openPort: false, log: false });
+      const quiet = await hostIp(kit("Quiet"), { port: await freePort(), openPort: false, log: false });
       cleanup.push(() => quiet.leave());
     } finally {
       console.log = real;
@@ -421,7 +424,7 @@ describe("direct host startup line", () => {
 describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
   it("joins by the same-network code, carries both channels, ends with host_left", async () => {
     const port = await freePort();
-    const host = await hostDirect(kit("Host"), { port, password: "pw", maxPlayers: 3, openPort: false });
+    const host = await hostIp(kit("Host"), { port, password: "pw", maxPlayers: 3, openPort: false });
     cleanup.push(() => host.leave());
     expect(host.portMapping).toBe("off");
     expect(host.directAddresses.length).toBeGreaterThan(0);
@@ -503,7 +506,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     };
     const mk = (name: string, linkFactory: LinkFactory) =>
       new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", displayName: name, rememberSeat: false, advanced: { linkFactory } });
-    const host = await hostDirect(mk("Host", reorder), { port, openPort: false });
+    const host = await hostIp(mk("Host", reorder), { port, openPort: false });
     cleanup.push(() => host.leave());
     const ann = await mk("Ann", recording).joinDirect(`127.0.0.1:${port}`);
     cleanup.push(() => ann.leave());
@@ -514,7 +517,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
 
   it("rejoinDirect takes a seat back with the resume token (same peer id); a dead token is invalid_token", async () => {
     const port = await freePort();
-    const host = await hostDirect(kit("Host"), { port, openPort: false });
+    const host = await hostIp(kit("Host"), { port, openPort: false });
     cleanup.push(() => host.leave());
     const old = await kit("Ann").joinDirect(`127.0.0.1:${port}`);
     await old.ready;
@@ -553,7 +556,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     }
     const hostKit = new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", rememberSeat: false,
       advanced: { linkFactory: webRtcLinkFactoryFor(Spy) } });
-    const host = await hostDirect(hostKit, { port, openPort: false });
+    const host = await hostIp(hostKit, { port, openPort: false });
     cleanup.push(() => host.leave());
     const a = await kit("A").joinDirect(`127.0.0.1:${port}`);
     const b = await kit("B").joinDirect(`127.0.0.1:${port}`);
@@ -581,7 +584,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
 
   it("sockets over a direct lobby: onConnection + asWebSocket, rateLimit, host leaving is 1001 host_left, never hostChanged", async () => {
     const port = await freePort();
-    const host = await hostDirect(kit("Host"), { port, openPort: false, rateLimit: { messages: 5, perMs: 60_000 } });
+    const host = await hostIp(kit("Host"), { port, openPort: false, rateLimit: { messages: 5, perMs: 60_000 } });
     cleanup.push(() => host.leave());
     const got: string[] = [];
     host.onConnection((c) => (c.onmessage = (e) => { got.push(String(e.data)); c.send(`ok ${e.data}`); }));
@@ -607,16 +610,16 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
 
   it("second host on the same port is port_in_use", async () => {
     const port = await freePort();
-    const a = await hostDirect(kit("A"), { port, openPort: false });
+    const a = await hostIp(kit("A"), { port, openPort: false });
     cleanup.push(() => a.leave());
-    await expect(hostDirect(kit("B"), { port, openPort: false })).rejects.toMatchObject({ code: "port_in_use" });
+    await expect(hostIp(kit("B"), { port, openPort: false })).rejects.toMatchObject({ code: "port_in_use" });
   });
 
   it("a busy port falls back to a later one (the code carries it); a joiner's joinCode is what it joined with", async () => {
     const port = await freePort();
-    const a = await hostDirect(kit("A"), { port, openPort: false });
+    const a = await hostIp(kit("A"), { port, openPort: false });
     cleanup.push(() => a.leave());
-    const b = await hostDirect(kit("B"), { port, openPort: false, fallbackPorts: 3 });
+    const b = await hostIp(kit("B"), { port, openPort: false, fallbackPorts: 3 });
     cleanup.push(() => b.leave());
     expect(b.directHub.port).toBeGreaterThan(port);
     expect(b.directHub.port).toBeLessThanOrEqual(port + 3);
@@ -651,7 +654,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     });
     const port = await freePort();
     const log: string[] = [];
-    const host = await hostDirect(kit("Host"), {
+    const host = await hostIp(kit("Host"), {
       port,
       portMapping: {
         ssdp: { address: "127.0.0.1", port: 9 }, natPmp: { address: "127.0.0.1", port: gw.address().port },

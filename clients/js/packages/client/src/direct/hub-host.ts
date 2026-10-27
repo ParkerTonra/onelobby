@@ -5,6 +5,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import type { SocketLike } from "../transport.js";
 import { SignalingHub, directHubOptions, type HubDeps, type HubOptions, type Session } from "./hub.js";
 import { PortMapper, type PortMapperOptions, type PortMapResult } from "./portmap.js";
+import type { NostrHostBridge } from "../nostr/host.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_HEADER_BYTES = 8192;
@@ -99,8 +100,12 @@ export interface HttpReply {
 
 /** `GET /joininfo` on a direct host: what a page served from the host shows as its share link (`directJoinInfo()`). */
 export interface DirectJoinInfo {
+  /** What to hand out: the Nostr code (version 1) by default, else the IP code. */
   joinCode: string;
-  joinCodeKind: "internet" | "same_network" | "none";
+  joinCodeKind: "nostr" | "internet" | "same_network" | "none";
+  /** The IP code (address and port); equals `joinCode` when Nostr is off. */
+  directCode: string;
+  directCodeKind: "internet" | "same_network" | "none";
   /** With `http`: `http://<the code's address>:<port>/`; else null. */
   joinUrl: string | null;
   port: number;
@@ -140,6 +145,8 @@ export class DirectHubHost {
   /** The bound TCP port (the requested one, or the one the OS picked for 0). */
   readonly port: number;
   portMapper: PortMapper | null = null;
+  /** Nostr signaling for joiners that cannot reach the port (spec/nostr-signaling.md); set by `hostDirect`. */
+  nostr: NostrHostBridge | null = null;
   private readonly server: Server;
   private readonly sockets = new Set<Socket>();
   private readonly ticker: ReturnType<typeof setInterval>;
@@ -221,6 +228,7 @@ export class DirectHubHost {
   private async closeOnce(): Promise<void> {
     this.closed = true;
     clearInterval(this.ticker);
+    this.nostr?.close();
     const unmap = this.portMapper?.close();
     for (const s of this.sockets) s.end(closeFrame(1001, "host left"));
     await new Promise<void>((resolve) => this.server.close(() => resolve()));

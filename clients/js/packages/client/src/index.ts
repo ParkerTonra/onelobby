@@ -43,3 +43,7 @@ export type { FriendlyError, ErrorCode, JoinInfo } from "./friendly.js";
 // Pre-rename names, kept for one version so existing games keep working.
 export { Keepalive, KeepaliveError } from "./deprecated.js";
 export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
+// Nostr signaling for direct hosts (spec/nostr-signaling.md): relay probe for picking hosting.nostrRelays.
+export { checkNostrRelays, DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "./nostr/relays.js";
+export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
+export { encodeRoomCode } from "./joincode.js";

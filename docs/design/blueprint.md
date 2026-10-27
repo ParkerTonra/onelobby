@@ -169,6 +169,8 @@ the transport (`DataChannelTransport`, `GodotTransport`, `UnityTransport`, brows
 | `hosting.lobbyServer` | URL string | `""` | R | exists (`lobbyServer`) | AGENTS.md rule 5: a setting, never a constant |
 | `hosting.directPort` | int 1024-65535 | 47810 | R | exists (`DirectPort`, `port`) | Godot `create_server(port, ...)`; Factorio documents its port |
 | `hosting.openPort` | bool | `true` | R | exists (`OpenPort`) | direct-ip recipe s.5 toggle |
+| `hosting.nostr` | bool | `true` | R | exists (`nostr` option of `hostDirect` / `DirectHostOptions.Nostr`) | Trystero-style signaling over public relays (docs/design/no-server-fallback.md); off = IP codes only |
+| `hosting.nostrRelays` | string[] of `wss://` URLs | the library's seven (probed 2026-10-26) | R | exists (`nostr.relays` / `NostrOptions.Relays`; JS `checkNostrRelays` probes them) | public Nostr relays that accept ephemeral kind 25050; the `onelobby` skill re-probes and writes the working ones |
 | `hosting.relayOnly` | bool | `false` | R | exists (`relayOnly`) | Steam SDR's IP-hiding rationale (DESIGN.md s.10) |
 | `hosting.allowedOrigins` | string[] | `[]` | R | exists (`AllowedOrigins`) | direct host origin check (0.4.1) |
 
@@ -264,7 +266,7 @@ what makes the hand-edit path real: the file wins even over code that still call
   "version": 1,
   "game": { "id": "com.example.antcolony", "netVersion": "1", "title": "Ant Colony" },
   "engine": "node-browser",
-  "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47810, "openPort": true },
+  "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47810, "openPort": true, "nostr": true },
   "lobby": { "maxPlayers": 4, "listed": false, "approveJoins": false, "password": false, "lateJoin": true, "rejoin": true, "joinLink": true },
   "sync": { "mode": "lockstep", "tickRate": 20, "hashEveryTicks": 20 },
   "players": { "identity": "name" },

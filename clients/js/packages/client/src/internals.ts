@@ -36,3 +36,10 @@ export { encodeJoinCode, decodeJoinCode, normalizeJoinCode, looksLikeJoinCode, J
 export { parseDirectAddress, DEFAULT_DIRECT_PORT } from "./direct-address.js";
 export type { DirectAddress } from "./direct-address.js";
 export { webRtcLinkFactoryFor } from "./webrtc.js";
+export { NostrSocket } from "./nostr/socket.js";
+export { NostrRoom } from "./nostr/room.js";
+export { ReliableLink } from "./nostr/link.js";
+export { RelayPool, makeEvent, NOSTR_KIND } from "./nostr/relays.js";
+export { schnorrSign, schnorrVerify, schnorrPublicKey } from "./nostr/secp256k1.js";
+export { deriveRoomKeys } from "./nostr/crypto.js";
+export { encodeRoomCodeFor } from "./joincode.js";

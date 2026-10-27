@@ -55,6 +55,13 @@
         },
         "directPort": { "description": "Port a direct host listens on (falls back up to +9 when taken).", "type": "integer", "minimum": 1024, "maximum": 65535, "default": 47810 },
         "openPort": { "description": "Ask the router to open the direct port (UPnP / NAT-PMP / PCP).", "type": "boolean", "default": true },
+        "nostr": { "description": "Direct host: also hand out a Nostr code (version 1) that works through public Nostr relays, no port forwarding needed. Off: IP codes only.", "type": "boolean", "default": true },
+        "nostrRelays": {
+          "description": "Nostr relay URLs (wss://) for the Nostr code. Default: the library's list, probed with checkNostrRelays when the blueprint was written.",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["wss://nos.lol", "wss://relay.primal.net", "wss://nostr-pub.wellorder.net", "wss://nostr.oxtr.dev", "wss://nostr.bitcoiner.social", "wss://relay.nostr.net", "wss://nostr.sathoarder.com"]
+        },
         "relayOnly": { "description": "Server lobbies only: force TURN so players never see each other's IP.", "type": "boolean", "default": false },
         "allowedOrigins": {
           "description": "Extra page origins a direct host accepts browser joiners from.",
