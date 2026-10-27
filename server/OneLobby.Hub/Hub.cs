@@ -86,7 +86,6 @@ public sealed class Hub
                 Send = send,
                 Close = close,
                 LastSeen = _clock.NowMs,
-                SignalRate = new RateWindow(_o.SignalPerSec * Scale, 1000),
             };
             Metrics.Inc("onelobby_connections_total");
             if (_sessions.Count >= _o.MaxPeers)
@@ -496,17 +495,26 @@ public sealed class Hub
     private void Signal(Session s, JsonObject m)
     {
         if (s.Lobby is not { } lobby || s.Member is not { } me) { Error(s, "bad_request", "not in a lobby"); return; }
-        long now = _clock.NowMs;
-        if (!_o.DisableIpLimits && !s.SignalRate!.TryHit(now)) { RateLimited(s, "signal", s.SignalRate.RetryAfterMs(now), null); return; }
         int? to = Int(m, "to");
         if (to is null || lobby.Find(to.Value) is not { Session: not null } target || target == me)
         { Error(s, "bad_request", "unknown signal target", Field("to")); return; }
+        long now = _clock.NowMs;
+        if (!_o.DisableIpLimits && SignalRate(s, target.PeerId, now) is var rate && !rate.TryHit(now))
+        { RateLimited(s, "signal", rate.RetryAfterMs(now), null); return; }
         if (m["sdp"] is null && m["ice"] is null) { Error(s, "bad_request", "signal needs sdp or ice", Field("sdp")); return; }
         var o = new JsonObject { ["t"] = "signal", ["from"] = me.PeerId };
         if (m["sdp"] is { } sdp) o["sdp"] = sdp.DeepClone();
         if (m["ice"] is { } ice) o["ice"] = ice.DeepClone();
         Send(target.Session!, o);
         Metrics.Inc("onelobby_signals_relayed_total");
+    }
+
+    /// <summary>spec/signaling.md rate limits: <c>signal</c> is counted per sender and target, so the host's budget grows with its joiners.</summary>
+    private RateWindow SignalRate(Session s, int to, long now)
+    {
+        if (s.SignalRates.TryGetValue(to, out var w)) return w;
+        foreach (var k in s.SignalRates.Where(e => e.Value.IsIdle(now)).Select(e => e.Key).ToList()) s.SignalRates.Remove(k);
+        return s.SignalRates[to] = new RateWindow(_o.SignalPerSec * Scale, 1000);
     }
 
     private bool RequireHost(Session s, out Lobby lobby)

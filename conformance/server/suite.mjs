@@ -624,6 +624,16 @@ export function buildSuite(opts) {
     assert.ok(errs.length > 0 && errs.every((e) => e.code === 'rate_limited'), 'rate_limited errors');
     assert.ok(got >= n - 1 && got <= n + Math.ceil(n / 4), `forwarded ${got}, expected about ${n}`);
   }, { rateLimitOnly: true });
+  T('ratelimit', 'signal: the limit is per target, so a host answering several joiners at once is not throttled', async (t) => {
+    const n = lim().rateSignal;
+    const h = await t.host();
+    const js = [];
+    for (let i = 0; i < 3; i++) js.push(await t.join(h.lobby.code, {}, h));
+    for (const j of js) for (let i = 0; i < n; i++) h.send({ t: 'signal', to: j.lobby.you, ice: { candidate: `c${i}`, sdpMid: '0', sdpMLineIndex: 0 } });
+    await sleep(400);
+    assert.deepEqual(h.drain().filter((m) => m.t === 'error'), [], 'no errors');
+    for (const j of js) assert.equal(j.drain().filter((m) => m.t === 'signal').length, n, 'every joiner got all its signals');
+  }, { rateLimitOnly: true });
 
   return tests;
 }

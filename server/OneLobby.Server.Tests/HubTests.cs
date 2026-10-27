@@ -487,6 +487,21 @@ public class HubTests
     }
 
     [Fact]
+    public void Rate_limit_signal_is_per_target_so_a_host_can_answer_many_joiners_at_once()
+    {
+        var (hub, _) = T.NewHub();
+        var (h, j2, code) = T.Pair(hub);
+        var j3 = T.Ready(hub, "10.0.0.3", "Jim").Join(code);
+        var j4 = T.Ready(hub, "10.0.0.4", "Jo").Join(code);
+        foreach (var to in new[] { 2, 3, 4 })
+            for (int i = 0; i < 20; i++) h.Send($"{{\"t\":\"signal\",\"to\":{to},\"ice\":{{}}}}");
+        Assert.Null(h.LastError);
+        foreach (var j in new[] { j2, j3, j4 }) Assert.Equal(20, j.Inbox.Count(m => (string?)m["t"] == "signal"));
+        h.Send("{\"t\":\"signal\",\"to\":3,\"ice\":{}}");
+        Assert.Equal("rate_limited", h.LastError);
+    }
+
+    [Fact]
     public void Disable_ip_limits_for_load_tests()
     {
         var (hub, _) = T.NewHub(o => o.DisableIpLimits = true);

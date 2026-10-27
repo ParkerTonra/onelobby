@@ -162,10 +162,10 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
       }
       case 'signal': {
         if (!l) return bad('not in a lobby');
-        const wait = hit(`signal:${conn.id}`, lim.signal, 1000);
-        if (wait) return err(conn, 'rate_limited', 'too many signals', { retryAfterMs: wait });
         const target = l.peers.get(m.to);
         if (!Number.isInteger(m.to) || !target?.conn || m.to === me.peerId) return bad('to', 'to');
+        const wait = hit(`signal:${conn.id}:${m.to}`, lim.signal, 1000);
+        if (wait) return err(conn, 'rate_limited', 'too many signals', { retryAfterMs: wait });
         if (!m.sdp && !m.ice) return bad('sdp or ice');
         return sendTo(target.conn, { t: 'signal', from: me.peerId, ...(m.sdp ? { sdp: m.sdp } : {}), ...(m.ice ? { ice: m.ice } : {}) });
       }

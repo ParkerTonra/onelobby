@@ -20,7 +20,8 @@ public sealed class Session
     /// <summary>Private lobby this session has asked to join and awaits approval for.</summary>
     public Lobby? PendingIn;
     public Member? PendingMember;
-    public RateWindow? SignalRate;
+    /// <summary>One window per target peer: a host answering many joiners at once gets the full budget for each of them.</summary>
+    public readonly Dictionary<int, RateWindow> SignalRates = new();
 }
 
 public sealed class Member

@@ -114,8 +114,12 @@ else `bad_request`. A signal with neither `sdp` nor `ice`: `bad_request`. Not in
 |---|---|---|
 | `create` per IP | 10 per minute | `rate_limited` |
 | `join` per IP (every attempt counts) | 60 per minute | `rate_limited` |
-| `signal` per peer | 20 per second | `rate_limited` |
+| `signal` per sender and target peer **(decision)** | 20 per second | `rate_limited` |
 | open lobbies per IP | 8 | `rate_limited`, `data:{reason:"max_lobbies"}` **(decision)** |
+
+The `signal` limit is counted for each (sender, `to`) pair, not for the sender alone: the host signals every joiner,
+so a host answering several joiners at once would otherwise run out and leave one of them unanswered. A signal to an
+invalid target is refused with `bad_request` before the limit is counted.
 
 `rate_limited` carries `data:{retryAfterMs}`. A rate-limited message is not processed. `server_full` is returned for
 `create` and `join` when the global `maxLobbies` / `maxPeers` is reached. `game_not_allowed`: reply to `hello` when the

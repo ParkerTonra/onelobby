@@ -9,6 +9,7 @@ import { decodeJoinCode, encodeJoinCode } from "../src/joincode.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, defaultHubOptions, directHubOptions, formatHostLog, hostDirect, originAllowed } from "../src/direct/index.js";
+import { SignalingHub } from "../src/direct/hub.js";
 import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
 import { freePort, loopbackRtc } from "./helpers.js";
 import { directJoinInfo } from "../src/friendly.js";
@@ -58,6 +59,25 @@ async function raw(port: number) {
 }
 
 describe("hub in direct mode (C# DirectHubTests, ported)", () => {
+  it("the signal limit is per target: the host answers many joiners at once, one target still caps at 20/s", () => {
+    const hub = new SignalingHub(directHubOptions(8, null), { now: () => 1_700_000_000_000 });
+    const inbox = new Map<number, any[]>();
+    const sock = (n: number) => {
+      inbox.set(n, []);
+      const s = hub.connect(`10.0.0.${n}`, (t) => inbox.get(n)!.push(JSON.parse(t)), () => {})!;
+      hub.receive(s, JSON.stringify({ t: "hello", proto: "lk1", gameId: "g", netVersion: "1", name: `p${n}` }));
+      return s;
+    };
+    const h = sock(1);
+    hub.receive(h, JSON.stringify({ t: "create", name: "L", maxPlayers: 8, visibility: "unlisted", mode: "raw", tickRate: 20, lateJoin: true, meta: {} }));
+    for (const n of [2, 3, 4]) hub.receive(sock(n), JSON.stringify({ t: "join" }));
+    for (const to of [2, 3, 4]) for (let i = 0; i < 20; i++) hub.receive(h, JSON.stringify({ t: "signal", to, ice: {} }));
+    expect(inbox.get(1)!.filter((m) => m.t === "error")).toEqual([]);
+    for (const n of [2, 3, 4]) expect(inbox.get(n)!.filter((m) => m.t === "signal")).toHaveLength(20);
+    hub.receive(h, JSON.stringify({ t: "signal", to: 3, ice: {} }));
+    expect(inbox.get(1)!.at(-1)).toMatchObject({ t: "error", code: "rate_limited" });
+  });
+
   it("join without a code joins the one lobby; codes hidden; no ICE servers", async () => {
     const host = await DirectHubHost.listen(0, directHubOptions(4, null), { host: "127.0.0.1" });
     cleanup.push(() => host.close());

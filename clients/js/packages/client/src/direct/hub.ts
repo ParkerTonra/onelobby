@@ -146,8 +146,9 @@ export class Session {
     readonly connId: string,
     readonly send: (text: string) => void,
     readonly close: () => void,
-    readonly signalRate: RateWindow,
   ) {}
+  /** One window per target peer: a host answering many joiners at once gets the full budget for each of them. */
+  readonly signalRates = new Map<number, RateWindow>();
 }
 
 class Member {
@@ -281,7 +282,7 @@ export class SignalingHub {
 
   /** Registers a socket. Returns null (after sending server_full and closing) when over maxPeers. */
   connect(ip: string, send: (text: string) => void, close: () => void): Session | null {
-    const s = new Session(++this.nextSession, ip, hex(6), send, close, new RateWindow(this.o.signalPerSec * this.scale, 1000));
+    const s = new Session(++this.nextSession, ip, hex(6), send, close);
     s.lastSeen = this.now();
     this.metrics.inc("onelobby_connections_total");
     if (this.sessions.size >= this.o.maxPeers) {
@@ -655,17 +656,31 @@ export class SignalingHub {
     const lobby = s.lobby;
     const me = s.member;
     if (!lobby || !me) return this.error(s, "bad_request", "not in a lobby");
-    const now = this.now();
-    if (!this.o.disableIpLimits && !s.signalRate.tryHit(now)) return this.rateLimited(s, "signal", s.signalRate.retryAfterMs(now), null);
     const to = int(m, "to");
     const target = to === null ? undefined : lobby.find(to);
     if (!target || !target.session || target === me) return this.error(s, "bad_request", "unknown signal target", field("to"));
+    const now = this.now();
+    if (!this.o.disableIpLimits) {
+      const rate = this.signalRate(s, target.peerId, now);
+      if (!rate.tryHit(now)) return this.rateLimited(s, "signal", rate.retryAfterMs(now), null);
+    }
     if (!has(m, "sdp") && !has(m, "ice")) return this.error(s, "bad_request", "signal needs sdp or ice", field("sdp"));
     const o: Json = { t: "signal", from: me.peerId };
     if (has(m, "sdp")) o.sdp = m.sdp;
     if (has(m, "ice")) o.ice = m.ice;
     this.send(target.session, o);
     this.metrics.inc("onelobby_signals_relayed_total");
+  }
+
+  /** spec/signaling.md rate limits: `signal` is counted per sender and target, so the host's budget grows with its joiners. */
+  private signalRate(s: Session, to: number, now: number): RateWindow {
+    let w = s.signalRates.get(to);
+    if (!w) {
+      for (const [k, v] of s.signalRates) if (v.isIdle(now)) s.signalRates.delete(k);
+      w = new RateWindow(this.o.signalPerSec * this.scale, 1000);
+      s.signalRates.set(to, w);
+    }
+    return w;
   }
 
   private requireHost(s: Session): HubLobby | null {
