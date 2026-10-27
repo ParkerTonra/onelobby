@@ -252,6 +252,13 @@ describe("relay pool", () => {
   });
 });
 
+describe("default relay list", () => {
+  it("is the default in spec/blueprint.schema.json (hosting.nostrRelays)", () => {
+    const schema = specJson("blueprint.schema.json");
+    expect([...DEFAULT_NOSTR_RELAYS]).toEqual(schema.properties.hosting.properties.nostrRelays.default);
+  });
+});
+
 describe("relay pool settled", () => {
   it("is true once every relay has connected or failed, not before; a dead relay counts", async () => {
     const relays = new FakeRelays();

@@ -792,11 +792,12 @@ public sealed class NostrBridgeTests
     [Fact]
     public void Default_relays_and_stun_are_the_js_lists_and_blueprints_carry_them()
     {
-        Assert.Equal(new[]
+        // one source of truth: spec/blueprint.schema.json hosting.nostrRelays.default
+        using (var schema = JsonDocument.Parse(File.ReadAllText(Path.Combine(NostrCryptoTests.SpecDir(), "..", "blueprint.schema.json"))))
         {
-            "wss://nos.lol", "wss://relay.primal.net", "wss://nostr-pub.wellorder.net", "wss://nostr.oxtr.dev",
-            "wss://nostr.bitcoiner.social", "wss://relay.nostr.net", "wss://nostr.sathoarder.com",
-        }, NostrOptions.DefaultRelays);
+            var def = schema.RootElement.GetProperty("properties").GetProperty("hosting").GetProperty("properties").GetProperty("nostrRelays").GetProperty("default");
+            Assert.Equal(def.EnumerateArray().Select(e => e.GetString()!).ToArray(), NostrOptions.DefaultRelays);
+        }
         Assert.Equal(new[] { "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478" }, NostrOptions.DefaultStun);
         Assert.Equal(NostrOptions.DefaultRelays, Blueprint.Parse("{\"game\":{\"id\":\"com.test.x\"}}").Hosting.Relays);
         // an unset list is the default, an empty list means "the library default" at use time, a set list wins
