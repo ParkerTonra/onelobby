@@ -96,9 +96,9 @@ public sealed class Hub
                 return null;
             }
             var ipState = IpOf(ip);
-            if (!_o.DisableIpLimits && ipState.Sockets >= _o.MaxSocketsPerIp)
+            if (!_o.DisableIpLimits && ipState.Sockets >= _o.MaxSocketsPerIp * Scale)
             {
-                RateLimited(s, "sockets", 1000, "max_sockets");
+                RateLimited(s, "sockets", 5000, "max_sockets");
                 s.CloseWith(1008, "too_many_sockets");
                 return null;
             }
