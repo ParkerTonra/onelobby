@@ -582,8 +582,30 @@ public sealed class Hub
         if (ban == false) data["ban"] = false;
         if (code is not null) data["closeCode"] = code;
         if (closeReason is not null) data["closeReason"] = closeReason;
-        if (ban != false) lobby.Kicked.Add(target.Ip);
+        if (ban != false)
+        {
+            lobby.Kicked.Add(target.Ip);
+            try { MemberBanned?.Invoke(target.Session, target.PeerId, target.Ip); } catch (Exception) { /* a listener never breaks the kick */ }
+        }
         RemoveMember(lobby, target, ban == false ? "disconnected" : "kicked", data.Count > 0 ? data : null);
+    }
+
+    /// <summary>
+    /// A host-side kick with a ban: <paramref name="session"/>'s address is added to the lobby's ban list, and the session
+    /// is removed as kicked (the Nostr bridge uses it when a joiner's link resolves to a banned IP). The handler runs inside the
+    /// hub's lock, so it must not call back into the hub.
+    /// </summary>
+    public event Action<Session?, int, string>? MemberBanned;
+
+    public bool KickSession(Session session)
+    {
+        lock (_gate)
+        {
+            if (session.Closed || session.Lobby is not { } lobby || session.Member is not { } mem) return false;
+            lobby.Kicked.Add(session.Ip);
+            RemoveMember(lobby, mem, "kicked");
+            return true;
+        }
     }
 
     private void Approve(Session s, JsonObject m)

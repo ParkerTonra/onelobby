@@ -17,7 +17,7 @@ namespace OneLobby.DataChannel
     /// finds nothing and is dropped. No GCHandle is needed: native code only ever holds ids, never managed pointers.
     /// </para>
     /// </summary>
-    internal sealed unsafe class DataChannelPeerLink : IPeerLink, IBufferedPeerLink
+    internal sealed unsafe class DataChannelPeerLink : IPeerLink, IBufferedPeerLink, IRemoteAddressPeerLink
     {
         private const int DisconnectGraceMs = 4000;
         private static readonly string[] Labels = { "reliable", "fast", "voice" };
@@ -52,6 +52,18 @@ namespace OneLobby.DataChannel
         /// <summary>The selected ICE pair once known (diagnostics and tests), e.g. "a=candidate:... 47810 typ host".</summary>
         internal string? LocalCandidate { get; private set; }
         internal string? RemoteCandidate { get; private set; }
+
+        /// <summary>The remote end of the selected candidate pair, when it is a direct path with a literal IP address.</summary>
+        public string? RemoteAddress => ParseRemoteAddress(RemoteCandidate);
+
+        /// <summary>The address field of a candidate line (<c>candidate:1 1 UDP 2122 203.0.113.5 54321 typ srflx</c>); null for relay, mDNS names and junk.</summary>
+        internal static string? ParseRemoteAddress(string? candidate)
+        {
+            if (string.IsNullOrEmpty(candidate) || candidate!.Contains(" typ relay")) return null;
+            var parts = candidate.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 6) return null;
+            return System.Net.IPAddress.TryParse(parts[4], out var ip) ? (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).ToString() : null;
+        }
         internal PeerLinkOptions Options => _opts;
 
         public bool Disposed { get; private set; }

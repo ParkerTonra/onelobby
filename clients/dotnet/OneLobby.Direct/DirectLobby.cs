@@ -179,6 +179,7 @@ namespace OneLobby.Direct
                     hub.Own(bridge);
                 }
                 client.UseDirect(inner => transport = new DirectHostTransport(inner, hub, nostr.Enabled), new Uri("onelobby-direct://host/"), hub);
+                if (bridge != null) bridge.RemoteAddressOf = id => transport?.RemoteAddressOf(id);
             }
             catch (Exception e)
             {

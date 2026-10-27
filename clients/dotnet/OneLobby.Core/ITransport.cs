@@ -49,6 +49,15 @@ namespace OneLobby
     }
 
     /// <summary>
+    /// Optional on an <see cref="IPeerLink"/>: the other end's IP address once the connection's selected path is known and
+    /// is a direct one (not relayed, not an mDNS name); null while unknown. Used to ban an address, not only a signaling identity.
+    /// </summary>
+    public interface IRemoteAddressPeerLink
+    {
+        string? RemoteAddress { get; }
+    }
+
+    /// <summary>
     /// Optional on an <see cref="IPeerLink"/>: how many bytes of <see cref="PeerChannel.Reliable"/> frames are queued and
     /// not yet handed to the network stack (WebRTC <c>bufferedAmount</c>). <see cref="Lobby.FlushAsync"/> waits for 0;
     /// a link without it counts as always flushed.

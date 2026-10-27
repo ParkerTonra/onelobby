@@ -20,6 +20,12 @@ namespace OneLobby.Direct.Nostr
     {
         /// <summary>A pubkey that closed is ignored for the rest of the session; this many are remembered.</summary>
         public const int ClosedMemory = 512;
+        /// <summary>New joiner pubkeys admitted per <see cref="NewSessionWindowMs"/>; excess <c>open</c>s are ignored (the joiner repeats them).</summary>
+        public const int NewSessionsPerWindow = 8;
+        public const int NewSessionWindowMs = 10_000;
+        /// <summary>Banned IPs remembered for the session (a kick adds one).</summary>
+        public const int MaxBannedIps = 256;
+        private const int AddressCheckMs = 250;
         private const string Ping = "{\"t\":\"ping\",\"n\":0}";
         private const string PongPrefix = "{\"t\":\"pong\"";
 
@@ -30,6 +36,8 @@ namespace OneLobby.Direct.Nostr
             public Session? Session;
             public readonly ConcurrentQueue<string> FromHub = new ConcurrentQueue<string>();
             public volatile bool HubClosed;
+            public bool AddressChecked;
+            public long NextAddressCheck;
         }
 
         private readonly object _gate = new object();
@@ -42,7 +50,17 @@ namespace OneLobby.Direct.Nostr
         private readonly Queue<string> _goneOrder = new Queue<string>();
         private readonly List<Peer> _detached = new List<Peer>();
         private readonly List<(Peer Peer, string Text)> _toHub = new List<(Peer, string)>();
+        private readonly Queue<long> _admitted = new Queue<long>();
+        private readonly object _banGate = new object();
+        private readonly HashSet<string> _bannedIps = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Queue<string> _bannedOrder = new Queue<string>();
         private bool _disposed;
+
+        /// <summary>
+        /// The remote IP of the WebRTC link to the hub peer with this id, once known (null: unknown, relayed or an mDNS name).
+        /// Set by the direct host; called from the bridge's timer thread and from the hub's lock, so it must not block.
+        /// </summary>
+        public Func<int, string?>? RemoteAddressOf { get; set; }
 
         public INostrRelays Relays => _channel.Relays;
         public string Pubkey => _channel.Pubkey;
@@ -58,6 +76,7 @@ namespace OneLobby.Direct.Nostr
             _now = options.NowMs ?? (() => sw.ElapsedMilliseconds);
             _channel = new NostrChannel(relays, keys, options.UnixSeconds ?? (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
             _channel.Start();
+            _hub.MemberBanned += OnBanned;
             if (options.AutoTick) _timer = new Timer(_ => Tick(), null, 10, 10);
         }
 
@@ -65,6 +84,7 @@ namespace OneLobby.Direct.Nostr
         {
             List<(Peer Peer, string Text)>? toHub = null;
             List<Peer>? detached = null;
+            List<Peer>? banned = null;
             if (!Monitor.TryEnter(_gate)) return;
             try
             {
@@ -81,6 +101,8 @@ namespace OneLobby.Direct.Nostr
                         continue;
                     }
                     p.Link.Tick();
+                    if (!p.AddressChecked && p.Session != null && !p.HubClosed && _now() >= p.NextAddressCheck && CheckAddress(p))
+                        (banned ??= new List<Peer>()).Add(p);
                 }
                 if (_toHub.Count > 0)
                 {
@@ -99,7 +121,38 @@ namespace OneLobby.Direct.Nostr
                     if (p.Session != null && !p.HubClosed) _hub.Receive(p.Session, text);
             if (detached != null)
                 foreach (var p in detached) if (p.Session != null) _hub.Disconnect(p.Session);
+            if (banned != null)
+                foreach (var p in banned) if (p.Session != null) _hub.KickSession(p.Session); // a link from a banned IP: removed as kicked
         }
+
+        /// <summary>True when the peer's link resolved to a banned IP. Unknown addresses are asked again every 250 ms.</summary>
+        private bool CheckAddress(Peer p)
+        {
+            p.NextAddressCheck = _now() + AddressCheckMs;
+            var id = p.Session?.Member?.PeerId ?? 0;
+            var ip = id == 0 ? null : RemoteAddressOf?.Invoke(id);
+            if (ip == null) return false;
+            p.AddressChecked = true;
+            lock (_banGate) return _bannedIps.Contains(ip);
+        }
+
+        /// <summary>A host kick with a ban: remember the link's remote IP of a Nostr joiner (its pubkey is kept out when its session closes).</summary>
+        private void OnBanned(Session? session, int peerId, string address)
+        {
+            if (!address.StartsWith("nostr:", StringComparison.Ordinal)) return;
+            string? ip = null;
+            try { ip = RemoteAddressOf?.Invoke(peerId); } catch (Exception) { }
+            if (string.IsNullOrEmpty(ip)) return;
+            lock (_banGate)
+            {
+                if (!_bannedIps.Add(ip!)) return;
+                _bannedOrder.Enqueue(ip!);
+                if (_bannedIps.Count > MaxBannedIps) _bannedIps.Remove(_bannedOrder.Dequeue());
+            }
+        }
+
+        /// <summary>The IPs banned so far (tests).</summary>
+        public bool IsIpBanned(string ip) { lock (_banGate) return _bannedIps.Contains(ip); }
 
 
         private void Handle(NostrFrame f)
@@ -126,6 +179,10 @@ namespace OneLobby.Direct.Nostr
 
         private void Admit(string joiner)
         {
+            var now = _now();
+            while (_admitted.Count > 0 && now - _admitted.Peek() >= NewSessionWindowMs) _admitted.Dequeue();
+            if (_admitted.Count >= NewSessionsPerWindow) return; // too many new pubkeys at once: not answered, the joiner repeats its open
+            _admitted.Enqueue(now);
             var p = new Peer { Pub = joiner };
             p.Link = new NostrLink(_now, joiner, fr => _channel.Publish(fr));
             p.Link.Message += m => _toHub.Add((p, m));
@@ -168,6 +225,7 @@ namespace OneLobby.Direct.Nostr
                 foreach (var p in peers) p.Link.Close("host left");
                 _peers.Clear();
             }
+            _hub.MemberBanned -= OnBanned;
             _timer?.Dispose();
             var relays = _channel.Relays;
             Task.Delay(500).ContinueWith(_ => { _channel.Dispose(); relays.Dispose(); }); // let the close frames leave

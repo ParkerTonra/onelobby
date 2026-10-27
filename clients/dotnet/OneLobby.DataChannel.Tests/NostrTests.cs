@@ -656,11 +656,11 @@ public sealed class NostrBridgeTests
     {
         var rig = new Rig();
         var socks = new List<NostrSignalingSocket>();
-        for (var i = 0; i < rig.Hub.SocketCount + 20; i++)
+        for (var i = 0; i < 20; i++)
         {
             var s = rig.Join();
             socks.Add(s);
-            rig.Run(100, socks.ToArray());
+            rig.Run(1300, socks.ToArray()); // new sessions are paced: at most 8 per 10 s
         }
         // MaxPeers is 12 for four players: later joiners get server_full and a close
         var closed = socks.Where(s => s.State == SocketState.Closed).ToList();
@@ -776,5 +776,56 @@ public sealed class NostrBridgeTests
         Assert.Equal(NostrOptions.DefaultStun, o.EffectiveStun);
         o.Stun = new string[0];
         Assert.Empty(o.EffectiveStun);
+    }
+
+    [Fact]
+    public void NineJoinersAtOnce_TheNinthWaitsForTheWindowAndGetsInOnItsRepeatedOpen()
+    {
+        var rig = new Rig();
+        var socks = Enumerable.Range(0, 9).Select(_ => rig.Join()).ToArray();
+        rig.Run(1000, socks);
+        Assert.Equal(NostrHostBridge.NewSessionsPerWindow, socks.Count(s => s.State == SocketState.Open));
+        Assert.Equal(1, socks.Count(s => s.State == SocketState.Connecting));
+        rig.Run(NostrHostBridge.NewSessionWindowMs, socks); // the window frees; the joiner's open (every 2 s) is answered
+        Assert.All(socks, s => Assert.Equal(SocketState.Open, s.State));
+        Assert.Equal(9, rig.Bridge.PeerCount);
+        foreach (var s in socks) s.Dispose();
+    }
+
+    private static JsonElement Last(List<string> inbox, string t) =>
+        inbox.Select(x => JsonDocument.Parse(x).RootElement).Last(e => e.GetProperty("t").GetString() == t);
+
+    [Fact]
+    public void KickingANostrJoinerBansTheLinksIpAndALaterJoinerFromThatIpIsRemovedAsKicked()
+    {
+        var rig = new Rig();
+        var host = new List<string>();
+        var hs = rig.Hub.Connect("127.0.0.1", host.Add, () => { })!;
+        rig.Hub.Receive(hs, Hello("Host"));
+        rig.Hub.Receive(hs, "{\"t\":\"create\",\"name\":\"L\",\"maxPlayers\":4,\"visibility\":\"unlisted\",\"mode\":\"raw\"}");
+        var ips = new Dictionary<int, string> { [2] = "203.0.113.7", [3] = "203.0.113.7" };
+        rig.Bridge.RemoteAddressOf = id => ips.TryGetValue(id, out var ip) ? ip : null;
+
+        using var bad = rig.Join();
+        rig.Run(100, bad);
+        bad.Send(Hello("Bad"));
+        rig.Run(200, bad);
+        bad.Send("{\"t\":\"join\"}");
+        rig.Run(300, bad);
+        Assert.Equal(2, Last(host, "peer_joined").GetProperty("peer").GetProperty("peerId").GetInt32());
+        rig.Hub.Receive(hs, "{\"t\":\"kick\",\"peerId\":2}");
+        rig.Run(300, bad);
+        Assert.True(rig.Bridge.IsIpBanned("203.0.113.7"));
+
+        using var again = rig.Join(); // a fresh pubkey, same address
+        rig.Run(100, again);
+        again.Send(Hello("Again"));
+        rig.Run(200, again);
+        again.Send("{\"t\":\"join\"}");
+        rig.Run(1000, again);
+        var got = Rig.Drain(again).ToList();
+        Assert.Contains(got, t => t.Contains("\"kicked\""));
+        Assert.Equal("kicked", Last(host, "peer_left").GetProperty("reason").GetString());
+        Assert.Equal(3, Last(host, "peer_left").GetProperty("peerId").GetInt32());
     }
 }

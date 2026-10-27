@@ -32,14 +32,28 @@ namespace OneLobby.Direct
 
         public ISignalingSocket ConnectSignaling(Uri url) => new HubSignalingSocket(_host.Hub);
 
-        public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
-            _inner.CreatePeerLink(options with
+        public IPeerLink CreatePeerLink(PeerLinkOptions options)
+        {
+            var link = _inner.CreatePeerLink(options with
             {
                 PortRangeBegin = _host.Port,
                 PortRangeEnd = _host.Port,
                 IceServers = _nostr ? options.IceServers : Array.Empty<IceServer>(),
                 NoIceServers = true,
             });
+            lock (_links) _links[options.RemotePeerId] = link; // the newest link to a peer id (ids are never reused in a lobby)
+            return link;
+        }
+
+        private readonly Dictionary<int, IPeerLink> _links = new Dictionary<int, IPeerLink>();
+
+        /// <summary>The remote IP of the link to <paramref name="peerId"/> once its path is known and direct; else null. Any thread.</summary>
+        public string? RemoteAddressOf(int peerId)
+        {
+            IPeerLink? link;
+            lock (_links) _links.TryGetValue(peerId, out link);
+            return (link as IRemoteAddressPeerLink)?.RemoteAddress;
+        }
 
         public void Poll()
         {
