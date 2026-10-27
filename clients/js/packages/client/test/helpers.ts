@@ -178,10 +178,11 @@ export async function freePort(span = 4): Promise<number> {
  * real WebRTC links on one machine never listen on every interface (no Windows Firewall prompt for node).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function loopbackRtc<T extends new (config?: any) => any>(Base: T): T {
+export function loopbackRtc<T extends new (...args: any[]) => any>(Base: T): T {
   return class extends Base {
-    constructor(config: Record<string, unknown> = {}) {
-      super({ ...config, bindAddress: "127.0.0.1" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(...args: any[]) {
+      super({ ...(args[0] as Record<string, unknown> | undefined), bindAddress: "127.0.0.1" });
     }
   } as unknown as T;
 }

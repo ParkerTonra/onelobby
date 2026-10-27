@@ -10,7 +10,7 @@ import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import type { LinkFactory, PeerLink, SignalPayload } from "../src/transport.js";
 import { DirectHubHost, defaultHubOptions, directHubOptions, formatHostLog, hostDirect, originAllowed } from "../src/direct/index.js";
 import { SignalingHub } from "../src/direct/hub.js";
-import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
+import { PortInUseError, isLoopback, portFailureHint, type HttpReply } from "../src/direct/hub-host.js";
 import { freePort, loopbackRtc } from "./helpers.js";
 import { directJoinInfo } from "../src/friendly.js";
 import { specJson } from "./spec.js";
@@ -311,7 +311,7 @@ describe("hub in direct mode (C# DirectHubTests, ported)", () => {
   it("an http reply's headers are sent (Cache-Control replaces no-store); the hub keeps Content-Length; a line break is 500", async () => {
     const host = await DirectHubHost.listen(0, undefined, { host: "127.0.0.1" });
     cleanup.push(() => host.close());
-    host.http = (path) =>
+    host.http = (path): HttpReply =>
       path === "/app.js"
         ? { type: "text/javascript", body: "x", headers: { "Cache-Control": "max-age=60", "Content-Length": "999", "X-Game": "1" } }
         : path === "/bad"
