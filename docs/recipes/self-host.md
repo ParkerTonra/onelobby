@@ -1,7 +1,7 @@
 # Recipe: run your own server
 
 > **Later.** The hosted backend (this server: join codes, public list, TURN relay) is parked; the first backend that
-> ships is [host by IP](direct-ip.md), with no server at all (docs/direct-ip.md s.7). Everything below still works.
+> ships is [host by IP](direct-ip.md), with no server at all (docs/design/direct-ip.md s.7). Everything below still works.
 
 You can host the lobby server and relay yourself, on a 1 vCPU VM or a Raspberry Pi 4. Your game never depends on
 anyone else's server: the lobby server URL is a setting. The full walkthrough is `deploy/RUN_YOUR_OWN.md`; this is the short version.
