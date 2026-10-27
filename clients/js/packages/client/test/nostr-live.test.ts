@@ -46,4 +46,29 @@ describe.skipIf(!live)("live Nostr signaling", () => {
       await host.leave();
     }
   }, 60_000);
+
+  it("kit.hostNostr (no port, hub in-process) and joinDirect meet through real relays and exchange a message", async () => {
+    const lines: string[] = [];
+    const host = await mk("Host").hostNostr({ maxPlayers: 2, log: (l) => lines.push(l), document: null });
+    try {
+      console.log(lines[0]);
+      expect(host.joinCodeKind).toBe("nostr");
+      const t0 = Date.now();
+      const ann = await mk("Ann").joinDirect(host.joinCode);
+      try {
+        await ann.ready;
+        console.log(`joined in ${Date.now() - t0} ms`);
+        const got: string[] = [];
+        host.on("message", (_f, b) => got.push(new TextDecoder().decode(b)));
+        ann.send(host.localPeerId, new TextEncoder().encode("hello from a browser host"));
+        const start = Date.now();
+        while (got.length === 0 && Date.now() - start < 10_000) await new Promise((r) => setTimeout(r, 20));
+        expect(got).toEqual(["hello from a browser host"]);
+      } finally {
+        await ann.leave();
+      }
+    } finally {
+      await host.leave();
+    }
+  }, 60_000);
 });
