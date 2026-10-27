@@ -768,29 +768,26 @@ public sealed class NostrBridgeTests
     }
 
     [Fact]
-    public void Host_log_line_matches_the_js_format_host_log()
+    public void Host_log_line_matches_the_shared_vectors()
     {
-        // Nostr off: the pre-Nostr line (the same three cases as the JS formatHostLog test)
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP",
-            DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP"));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off",
-            DirectLobby.FormatHostLog(47810, 47811, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off"));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off",
-            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, ""));
-        // Nostr on
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); ip code 6B01-RGFE-P2B (Internet); port mapping UPnP; nostr 4/7 relays",
-            DirectLobby.FormatHostLog(47810, 47810, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "UPnP", new DirectLobby.NostrLogInfo("6B01-RGFE-P2B", JoinCodeKind.Internet, "4/7")));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code D1PB-1X9S-FPV (Nostr); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr 7/7 relays",
-            DirectLobby.FormatHostLog(47810, 47811, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "off", new DirectLobby.NostrLogInfo("0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "7/7")));
-        // no IPv4 address: no ip code
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); no ip code (no IPv4 address); port mapping off; nostr 3/7 relays",
-            DirectLobby.FormatHostLog(47810, 47810, "D1PB-1X9S-FPV", JoinCodeKind.Nostr, "", new DirectLobby.NostrLogInfo("", JoinCodeKind.None, "3/7")));
-        // no relay reachable: the IP code is the code
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 0A00-0BSE-P3S (SameNetwork); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr: no relay reachable",
-            DirectLobby.FormatHostLog(47810, 47810, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off", new DirectLobby.NostrLogInfo("0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "")));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); no ip code (no IPv4 address); port mapping off; nostr: no relay reachable",
-            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, "", new DirectLobby.NostrLogInfo("", JoinCodeKind.None, "")));
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(NostrCryptoTests.SpecDir(), "host-log.json")));
+        var n = 0;
+        foreach (var v in doc.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            DirectLobby.NostrLogInfo? nostr = null;
+            if (v.TryGetProperty("nostr", out var ni))
+                nostr = new DirectLobby.NostrLogInfo(ni.GetProperty("directCode").GetString()!, KindFromJs(ni.GetProperty("directCodeKind").GetString()!), ni.GetProperty("relays").GetString()!);
+            var line = DirectLobby.FormatHostLog(v.GetProperty("requested").GetInt32(), v.GetProperty("bound").GetInt32(), v.GetProperty("code").GetString()!,
+                KindFromJs(v.GetProperty("kind").GetString()!), v.GetProperty("mapping").GetString()!, nostr);
+            Assert.Equal(v.GetProperty("line").GetString(), line);
+            n++;
+        }
+        Assert.True(n >= 8);
     }
+
+    /// <summary>The JS kind name ("same_network") as the enum (<c>SameNetwork</c>).</summary>
+    private static JoinCodeKind KindFromJs(string js) =>
+        Enum.Parse<JoinCodeKind>(string.Concat(js.Split('_').Select(w => char.ToUpperInvariant(w[0]) + w.Substring(1))));
 
     [Fact]
     public void Default_relays_and_stun_are_the_js_lists_and_blueprints_carry_them()

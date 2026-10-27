@@ -13,6 +13,7 @@ import { SignalingHub } from "../src/direct/hub.js";
 import { PortInUseError, isLoopback, portFailureHint } from "../src/direct/hub-host.js";
 import { freePort, loopbackRtc } from "./helpers.js";
 import { directJoinInfo } from "../src/friendly.js";
+import { specJson } from "./spec.js";
 
 /** The IP-code tests: Nostr is off so no test talks to a public relay (test/nostr-e2e.test.ts covers Nostr). */
 const hostIp = (k: OneLobby, o: Parameters<typeof hostDirect>[1] = {}) => hostDirect(k, { nostr: false, bindHost: "127.0.0.1", ...o });
@@ -429,14 +430,10 @@ describe("hostDirect join code: manual public address and router retry", () => {
 });
 
 describe("direct host startup line", () => {
-  it("matches C# FormatHostLog character for character", () => {
-    // the three strings are copied from clients/dotnet/OneLobby.DataChannel.Tests/DirectIpTests.cs
-    expect(formatHostLog(47810, 47810, "6B01-RGFE-P2B", "internet", "UPnP"))
-      .toBe("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP");
-    expect(formatHostLog(47810, 47811, "0A00-0BSE-P3S", "same_network", "off"))
-      .toBe("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off");
-    expect(formatHostLog(47810, 47813, "", "none", ""))
-      .toBe("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off");
+  it("matches C# FormatHostLog character for character (spec/vectors/host-log.json)", () => {
+    const vectors = specJson("vectors/host-log.json").vectors;
+    expect(vectors.length).toBeGreaterThanOrEqual(8);
+    for (const v of vectors) expect(formatHostLog(v.requested, v.bound, v.code, v.kind, v.mapping, v.nostr), v.name).toBe(v.line);
   });
 
   it("hostDirect calls the log option once with lobby.directHostLog; log: false prints nothing", async () => {

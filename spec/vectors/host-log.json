@@ -1,0 +1,50 @@
+{
+  "$comment": "The direct host startup line, character for character in both clients. JS: formatHostLog(requested, bound, code, kind, mapping, nostr?) in src/direct/index.ts. C#: DirectLobby.FormatHostLog. Kinds use the JS names (nostr, internet, same_network, none); an absent 'nostr' means Nostr is off. Replayed by test/direct.test.ts and NostrTests.cs.",
+  "vectors": [
+    {
+      "name": "internet code, UPnP",
+      "requested": 47810, "bound": 47810, "code": "6B01-RGFE-P2B", "kind": "internet", "mapping": "UPnP",
+      "line": "OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP"
+    },
+    {
+      "name": "one port busy",
+      "requested": 47810, "bound": 47811, "code": "0A00-0BSE-P3S", "kind": "same_network", "mapping": "off",
+      "line": "OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off"
+    },
+    {
+      "name": "three ports busy, no IPv4 address, empty mapping reads off",
+      "requested": 47810, "bound": 47813, "code": "", "kind": "none", "mapping": "",
+      "line": "OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off"
+    },
+    {
+      "name": "nostr on, internet ip code",
+      "requested": 47810, "bound": 47810, "code": "D1PB-1X9S-FPV", "kind": "nostr", "mapping": "UPnP",
+      "nostr": { "directCode": "6B01-RGFE-P2B", "directCodeKind": "internet", "relays": "4/7" },
+      "line": "OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); ip code 6B01-RGFE-P2B (Internet); port mapping UPnP; nostr 4/7 relays"
+    },
+    {
+      "name": "nostr on, port busy, lan ip code",
+      "requested": 47810, "bound": 47811, "code": "D1PB-1X9S-FPV", "kind": "nostr", "mapping": "off",
+      "nostr": { "directCode": "0A00-0BSE-P3S", "directCodeKind": "same_network", "relays": "7/7" },
+      "line": "OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code D1PB-1X9S-FPV (Nostr); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr 7/7 relays"
+    },
+    {
+      "name": "nostr on, no IPv4 address: no ip code",
+      "requested": 47810, "bound": 47810, "code": "D1PB-1X9S-FPV", "kind": "nostr", "mapping": "",
+      "nostr": { "directCode": "", "directCodeKind": "none", "relays": "3/7" },
+      "line": "OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); no ip code (no IPv4 address); port mapping off; nostr 3/7 relays"
+    },
+    {
+      "name": "no relay reachable: the ip code is the code",
+      "requested": 47810, "bound": 47810, "code": "0A00-0BSE-P3S", "kind": "same_network", "mapping": "off",
+      "nostr": { "directCode": "0A00-0BSE-P3S", "directCodeKind": "same_network", "relays": "" },
+      "line": "OneLobby: direct host listening on TCP+UDP :47810; code 0A00-0BSE-P3S (SameNetwork); ip code 0A00-0BSE-P3S (SameNetwork); port mapping off; nostr: no relay reachable"
+    },
+    {
+      "name": "no relay reachable and no IPv4 address",
+      "requested": 47810, "bound": 47813, "code": "", "kind": "none", "mapping": "",
+      "nostr": { "directCode": "", "directCodeKind": "none", "relays": "" },
+      "line": "OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); no ip code (no IPv4 address); port mapping off; nostr: no relay reachable"
+    }
+  ]
+}

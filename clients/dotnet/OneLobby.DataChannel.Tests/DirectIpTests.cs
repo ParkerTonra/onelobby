@@ -501,17 +501,6 @@ public sealed class DirectIpTests
         first.LeaveAsync();
     }
 
-    [Fact]
-    public void HostLogLineNamesTheBoundPortAndWhichPortsWereBusy()
-    {
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47810; code 6B01-RGFE-P2B (Internet); port mapping UPnP",
-            DirectLobby.FormatHostLog(47810, 47810, "6B01-RGFE-P2B", JoinCodeKind.Internet, "UPnP"));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off",
-            DirectLobby.FormatHostLog(47810, 47811, "0A00-0BSE-P3S", JoinCodeKind.SameNetwork, "off"));
-        Assert.Equal("OneLobby: direct host listening on TCP+UDP :47813 (47810-47812 busy); no join code (no IPv4 address); port mapping off",
-            DirectLobby.FormatHostLog(47810, 47813, "", JoinCodeKind.None, ""));
-    }
-
     [Theory]
     [InlineData("192.168.1.20", "192.168.1.20:47810", false)]
     [InlineData(" 192.168.1.20:5000 ", "192.168.1.20:5000", false)]
