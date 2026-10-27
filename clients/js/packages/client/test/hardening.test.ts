@@ -15,7 +15,7 @@ import { NostrSocket } from "../src/nostr/socket.js";
 import { encodeRoomCode } from "../src/joincode.js";
 import { encodeMessage } from "../src/codec.js";
 import { systemClock, type Clock } from "../src/clock.js";
-import { settle } from "../src/testing.js";
+import { MemoryNetwork, settle } from "../src/testing.js";
 import { OneLobby } from "../src/onelobby.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
 import { FakeRelays } from "./fake-relay.js";
@@ -444,7 +444,8 @@ describe("lobby: SDP offers and host traffic", () => {
 
 describe("direct lobby: a joiner is never dialled by another joiner", () => {
   it("an offer from a non-host peer is dropped and its link count stays", async () => {
-    const inner = webRtcLinkFactoryFor(loopbackRtc(RTCPeerConnection) as unknown as typeof globalThis.RTCPeerConnection);
+    // in-memory links: the check is about signaling, and real ICE on a loaded CI runner timed out (ice_failed)
+    const inner = new MemoryNetwork().factory;
     const created: number[] = [];
     const rtc = { create: (o: Parameters<typeof inner.create>[0]) => (created.push(o.remoteId), inner.create(o)) };
     const mkKit = (n: string) => new OneLobby({ gameId: "com.onelobby.hardening", netVersion: "1", lobbyServer: "", mode: "raw", displayName: n, rememberSeat: false, advanced: { linkFactory: rtc } });
