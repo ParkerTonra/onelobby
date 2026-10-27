@@ -4,10 +4,10 @@ Game-agnostic multiplayer lobbies, transport, voice and text chat for indie game
 **Host lobby** and **Join lobby**; the host's own game is the server; browser and desktop players share a lobby;
 everything needed to keep playing after the author is gone ships in this repo.
 
-Status: design, 2026-10-23. No code yet. The protocol in sections 7-9 is frozen for the first build so the work streams
-in section 14 can run in parallel. Working name during drafting: lobbykit.
+Status: design, 2026-10-23. No code yet. The protocol in sections 7-9 is frozen for the first build so the work could
+run in parallel. Working name during drafting: lobbykit.
 
-**Name.** `OneLobby` (Parker, 2026-10-24; first drafted as Keepalive). Packages: `onelobby` (npm, unscoped),
+**Name.** `OneLobby` (the designer, 2026-10-24; first drafted as Keepalive). Packages: `onelobby` (npm, unscoped),
 `OneLobby.Core` + `OneLobby.Godot` (.NET, namespace `OneLobby`), server binary and image `onelobby-server`. Env vars
 are `ONELOBBY_*`; the server still reads the old `KEEPALIVE_*` names for one version. The JS package keeps deprecated
 `Keepalive` / `KeepaliveError` aliases for one version. The wire protocol id (`lk1`) never contained the name.
@@ -109,7 +109,7 @@ mentioned as colour, never as a rule.
 **Topology: star through the host.** Each joiner holds one WebRTC connection to the host; peer-to-peer messages route
 through the host (one `route` byte, s.8). Reasons: one ICE negotiation per joiner (a 4-player lobby is 3, a mesh is 6);
 the host is already the authority for frame ordering; browser hosts stay cheap. Godot's `WebRTCMultiplayerPeer` offers the
-same server/client shape (id 1 = server). Mesh is a later option for games that want it (s.15).
+same server/client shape (id 1 = server). Mesh is a later option for games that want it (s.14.2).
 
 **Sync modes** (one per lobby, set by the host's config):
 
@@ -172,7 +172,7 @@ invariant-globalization-only; the engine forum shows no shipped release through 
 | Consequence | Decision |
 |---|---|
 | A Godot C# game cannot run in a browser today | The first target game's multiplayer is desktop ⇄ desktop over WebRTC through `onelobby-server` + coturn. Browser cross-play for Godot C# games waits on Godot; nothing in this design changes when it arrives (the browser supplies the WebRTC classes Godot already uses) |
-| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.14, stream E's `spec/demo-game.md`) |
+| "Browser + desktop in one lobby" must still be proven now | The cross-play proof is the JS demo (browser) with the Godot C# demo (desktop) playing the same deterministic demo game (s.14.1, `spec/demo-game.md`) |
 | Godot web exports need COOP/COEP headers for threads | `deploy/` ships a Caddy snippet that sets them for any game page it serves |
 | A game sim built with `InvariantGlobalization` | Matches the prototype's invariant-only constraint; keep it |
 
@@ -389,7 +389,7 @@ API additions: `lobby.pause.request(bool)`, `.state` `{ paused, byPeer, pauserLe
 | creds | `onelobby-server` mints `username = expiry:peerId`, `credential = base64(HMAC-SHA1(secret, username))`, TTL 1 h, sent in `welcome`. coturn runs `use-auth-secret` + `static-auth-secret` with the same secret | draft-uberti-behave-turn-rest; coturn conf |
 | policy | `iceTransportPolicy` stays `all`; a lobby can be created `relayOnly` to hide IPs from strangers (public lobbies default on, friends lobbies default off) | Steam SDR's IP-hiding rationale |
 | ports | coturn relay range `min-port`/`max-port` narrowed to 49160-49400 in the shipped config (one port per relayed peer) | coturn conf |
-| telemetry | `onelobby-server` counts `relayed` vs `direct` from a `path` field each peer reports after ICE completes, so Parker can see the real relay share | Twilio's 15% is a vendor figure; measure |
+| telemetry | `onelobby-server` counts `relayed` vs `direct` from a `path` field each peer reports after ICE completes, so the designer can see the real relay share | Twilio's 15% is a vendor figure; measure |
 
 ---
 
@@ -537,10 +537,10 @@ import { OneLobby } from "onelobby";
 const kit = new OneLobby({
   gameId: "dev.example.gridpaint", netVersion: "1",
   lobbyServer: "wss://lobby.onelobby.example",          // a setting; the demo reads it from a <meta> tag
-  mode: "lockstep", tickRate: 20, hashEveryTicks: 20, displayName: "Parker", relayOnly: false,
+  mode: "lockstep", tickRate: 20, hashEveryTicks: 20, displayName: "Ann", relayOnly: false,
 });
 
-const lobby = await kit.host({ name: "Parker's game", maxPlayers: 4, visibility: "public", lateJoin: true, meta: {} });
+const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public", lateJoin: true, meta: {} });
 const lobby = await kit.join("7HQ 4K2");
 const lobby = await kit.rejoin(resumeToken);
 const list: LobbySummary[] = await kit.list({ meta: { map: "farm" } });
@@ -590,7 +590,7 @@ conformance harness read alike.
 | Hostile peers | The host validates everything a game cares about; the library validates framing only. The sim's own command validation is the anti-cheat for lockstep (e.g. the command's apply step returns a rejection). The library never executes client data |
 | Impersonation | `peerId` is assigned by `onelobby-server` and stamped by the host on relay; a client cannot pick its id or forge `route` |
 | Eavesdropping | WebRTC is DTLS-encrypted by spec; signaling is `wss://`; the shipped compose has Caddy with automatic TLS |
-| Unwanted games on a public instance | Optional `allowedGameIds` list + per-`gameId` quotas in `onelobby-server` config (taste call 2 decides the default for Parker's instance) |
+| Unwanted games on a public instance | Optional `allowedGameIds` list + per-`gameId` quotas in `onelobby-server` config (default for a public instance: open, with per-game quotas and the relay set to `relayOnly: false` so most traffic never touches your coturn) |
 | Names and metadata | Length caps, control characters stripped, server treats them as opaque strings; profanity policy is the game's |
 | Chat spam / voice flooding | Host enforces 5 msgs per 5 s and 256 bytes (`chat_reject`), 30 voice packets/s and ≤ 8 speakers; anything else is dropped silently; host mute and kick for people |
 | Harassment | Local mute (voice + text) always available and instant; host mute; block lists live in the game (no accounts in v1) |
@@ -607,33 +607,18 @@ conformance harness read alike.
 | TLS | Caddy with automatic certificates in front of both (`compose.yaml`); COOP/COEP snippet for serving a Godot web build |
 | One command | `git clone … && cp .env.example .env && docker compose up -d` on a 1 vCPU VM or a Raspberry Pi 4 |
 | In the game | `lobby_server` is a setting shown under Multiplayer → Advanced with the default pre-filled; a game can also take a `--lobby-server=` flag. Games ship fully playable offline; multiplayer is the only part that touches the network |
-| Default instance | Parker hosts `wss://lobby.onelobby.example` (name TBD) with the same images; the domain is the only thing a self-hoster changes |
+| Default instance | The designer hosts `wss://lobby.onelobby.example` (name TBD) with the same images; the domain is the only thing a self-hoster changes |
 | Docs | `deploy/RUN_YOUR_OWN.md`: five steps, a port table (8080, 3478 udp/tcp, 443, relay range), a smoke test |
 | Agent docs | Root `AGENTS.md` (what the repo is, the API surface in one screen, the rules) and `llms.txt` (links to every recipe and the API reference in plain text); `docs/recipes/{godot-csharp,js-web,dotnet-generic,raw-mode,voice-and-chat,self-host}.md`, each a copy-paste integration under 150 lines with a "done when" check. Plain files, nothing in the protocol |
 | Release | Every tag publishes `onelobby-server` binaries + images; the game's "About → Multiplayer" screen links this repo. Satisfies "an offline mode or the ability to host private servers" (SKG) |
 
-Why C# for `onelobby-server` (taste call 1, decided 2026-10-23 by the desk under Parker's go-ahead): .NET 10 is already on
+Why C# for `onelobby-server` (decided 2026-10-23; Go was the alternative, not installed on the dev machine): .NET 10 is already on
 the dev machine and Go is not; one language across server, `OneLobby.Core` and the first target game; ASP.NET Core WebSockets +
 single-file/AOT publish still give one file to run, and the Docker image is the self-host default.
 
 ---
 
-## 14. Work split
-
-Seven streams for Sonnet agents, in parallel, against the frozen protocol (s.7-s.9b). No two streams edit the same files;
-root files `README.md`, `LICENSE` (MIT), `.github/` belong to the desk; `AGENTS.md` and `llms.txt` belong to stream G.
-`spec/` is the single machine-readable copy of sections 6-9b; only stream E edits it, every stream consumes it. Voice and
-chat are protocol (E), JS implementation (C) and .NET implementation (D); they add no stream.
-
-| # | Stream | Owns | Consumes | Provides | Done when |
-|---|---|---|---|---|---|
-| A | Signaling / lobby server | `server/` (.NET 10 ASP.NET Core minimal app `OneLobby.Server` + `OneLobby.Server.Tests`) | `spec/signaling.schema.json`, `spec/codes.json`, `spec/turn-rest.md` | A `onelobby-server` binary + `ghcr` image; `/healthz`; TURN REST creds | `dotnet test server/` green; `conformance/server` suite (stream E) passes 100%; two `wscat` sessions can create/list/join and exchange a `signal`; 1,000 lobbies / 5,000 sockets on one core in the load script |
-| B | Relay + self-host packaging | `deploy/` (`compose.yaml`, `Caddyfile`, `turnserver.conf`, `.env.example`, `RUN_YOUR_OWN.md`, `scripts/smoke.sh`, systemd unit) | Stream A's image name and flags (from DESIGN s.13) | A working `docker compose up` stack | `docker compose config` validates; `scripts/smoke.sh` written for a clean Ubuntu VM (`/healthz` 200 over TLS, `turnutils_uclient` allocation with REST creds minted by `onelobby-server`, TCP 443 TURN with UDP blocked) and run locally when Docker is up; a `scripts/turn-creds-check` proves the server's HMAC creds match coturn's `use-auth-secret` algorithm |
-| C | JS client + browser demo | `clients/js/` (`packages/client`, `demo/`) | `spec/*`, `spec/demo-game.md` | `onelobby` ESM + `.d.ts` including `voice` (WebCodecs/WASM Opus, AudioWorklet) and `chat`; `demo/` = gridpaint (s.14.1) with a chat line and push-to-talk | `vitest` with the in-memory transport covers the lockstep scheduler, chunking, Crockford decode, migration rule, chat limits, voice packetization; two tabs on `localhost` host/join via a local `onelobby-server` and play gridpaint 60 s with equal hashes; a third tab late-joins via snapshot and receives `chat_history`; closing the host tab migrates within 5 s; a tone played into tab A's mic input is heard in tab B |
-| D | .NET core + Godot client + demo | `clients/dotnet/` (`OneLobby.Core`, `OneLobby.Core.Tests`, `OneLobby.Godot`, `demo-godot/` with webrtc-native addon) | `spec/*`, `spec/demo-game.md` | NuGet-shaped `OneLobby.Core` (incl. `TextChat`, `VoiceChannel`, `IVoiceCodec`), `OneLobby.Godot` (transport, Godot audio capture/playback, Opus codec with a verified-licence managed port) + demo scene | `dotnet test` green (same cases as C against the in-memory transport); two headless Godot instances host/join through a local `onelobby-server` and play gridpaint 60 s with equal hashes; **cross-play**: the Godot demo hosts, stream C's browser demo joins, hashes equal for 60 s, a chat line crosses both ways, a voice test tone from Godot decodes in the browser |
-| E | Protocol spec + conformance harness | `spec/` (JSON schemas, binary test vectors incl. `voice`/`chat` frames, `codes.json`, `demo-game.md`), `conformance/` (Node) | DESIGN.md s.6-s.9b only | The frozen spec as files; `conformance/server` (drives any `onelobby-server` over WebSocket: every message, every error code, rate limits); `conformance/peer` (a scripted fake host/joiner that drives any client lib: frames, desync, snapshot, migration, chat limits, voice forwarding) | Vectors round-trip in both C and D's codecs; `conformance/server` red against an empty server, green against stream A; `conformance/peer` runs against C and D |
-| F | Game integration notes (kept with the game) | Nothing in this repo: notes, measurements and codec tests live in the game's own repo | `OneLobby.Core` API (s.11.1) | A per-game change list, a measured state-hash cost, a command codec round-trip test | Notes reviewed by the desk |
-| G | Agent-friendly docs | `AGENTS.md`, `llms.txt`, `examples/tictactoe/` (single-player JS skeleton, no networking), `docs/` (`recipes/`, `api/` generated from C's `.d.ts` and D's XML docs by `docs/build.mjs`) | The public API of C and D (s.11), `deploy/RUN_YOUR_OWN.md` | Plain-file docs an agent reads first: one-screen API surface, the rules (ids not names, bytes not objects, host is truth), six recipes ≤ 150 lines each with a "done when", copy-paste snippets that compile | `docs/build.mjs` regenerates `docs/api/` with no diff on a clean tree; the **agent test**: a fresh Sonnet agent given only `AGENTS.md` and the sentence "add OneLobby raw-mode multiplayer with chat to `examples/tictactoe`" ships a passing `conformance/peer` run in one session without opening `clients/`; every snippet in `docs/recipes/` is extracted and compiled by `docs/check-snippets.mjs` in CI |
+## 14. Demo game and what is not built yet
 
 ### 14.1 Shared demo game: gridpaint (`spec/demo-game.md`, owned by E)
 
@@ -641,29 +626,15 @@ A 16×16 grid; each peer owns a colour; command = `paint x y` (3 bytes); tick 20
 spreads to one neighbour chosen by an xorshift32 RNG seeded from the lobby code; hash = FNV-1a 64 over the grid bytes.
 Small enough to port in an hour in JS and C#, random enough to catch ordering bugs, and the only game the harness needs.
 
-### 14.2 Order
+### 14.2 Not built yet
 
-A, B, C, D, E start together against this document; E's files land within the first day so C and D swap their hand-typed
-vectors for the real ones; F and G start when D has `OneLobby.Core` compiling and C has its `.d.ts` (G drafts the recipes
-from s.11 before that and reconciles). The cross-play "done when" in D plus G's agent test are the MVP exit.
-
----
-
-## 15. MVP scope vs later
-
-| MVP (this build) | Later |
-|---|---|
-| `onelobby-server`, coturn config, compose, docs | Prometheus dashboards, multi-region server tags |
-| JS + .NET/Godot/Unity clients, lockstep + raw; `OneLobby.DataChannel` WebRTC for any .NET | GDScript wrapper, Unity WebGL transport (jslib or datachannel-wasm), iOS static build, mesh topology |
-| Codes, public list, unlisted/private, kick, approve | Invites via platform adapters (Steam / Discord / Epic lobbies as an optional `ILobbyDirectory`) |
-| Host migration in lockstep; `raw` with game snapshot | Dedicated headless host (a client with no renderer) |
-| Snapshot late join, desync resync | Deterministic replay recording/playback as a library feature |
-| Rate limits, TURN REST creds, TLS | Accounts/authentication adapter, allowlisted instances with API keys |
-| Text chat with history, local and host mute | Persistent block lists through platform adapters |
-| Voice: `voice` channel, Opus 20 ms, PTT + VAD, mute, per-peer volume, JS and Godot codecs | Mesh voice for lobbies > 8 speakers, noise suppression, spatial audio hooks |
-| `AGENTS.md`, `llms.txt`, six recipes, generated API reference, snippet CI | Hosted docs site |
-| Cross-play demo (browser ⇄ Godot desktop) with chat and a voice tone | Godot C# browser play (waits on Godot C# web export) |
-| Replicated state on raw mode (`OneLobby.Replication`, s.18): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers | Replication JS port, priority/interest management, host migration for replicated sessions |
+Ideas that are real design directions but have no code: Prometheus dashboards and multi-region server tags; a GDScript
+wrapper, a Unity WebGL transport (jslib or datachannel-wasm), an iOS static build and a mesh topology; invites through
+platform adapters (Steam, Discord, Epic lobbies as an optional `ILobbyDirectory`); a dedicated headless host (a client with
+no renderer); deterministic replay recording and playback as a library feature; an accounts/authentication adapter and
+allowlisted instances with API keys; persistent block lists through platform adapters; mesh voice for lobbies over 8
+speakers, noise suppression and spatial audio hooks; a hosted docs site; Godot C# browser play (waits on Godot C# web
+export); a Replication JS port, priority/interest management and host migration for replicated sessions.
 
 ---
 
@@ -688,22 +659,6 @@ from s.11 before that and reconciles). The cross-play "done when" in D plus G's 
 | Voice frame size and rate | 20 ms Opus, 2 per packet, ~24 kbit/s | RFC 6716, Mumble, Steam poll rate |
 | Who relays voice? | The host, unmixed, like game data; server never sees it | PeerJS model, non-goal: SFU |
 | Chat through the server? | No: host-relayed on `reliable`; history from the host | SKG (no server dependency), privacy |
-
----
-
-## 17. Taste calls for Parker (2)
-
-**1. Write the lobby server in Go?**
-Today: nothing exists. Yes: `onelobby-server` is a Go static binary (one file, cross-compiles to a Raspberry Pi, matches the coturn/Nakama
-ecosystem; ~1,500 lines, no game logic). No: C# with `dotnet publish --self-contained -p:PublishSingleFile=true` (one language
-across the repo; ~70 MB binary, slower start, ARM builds still fine).
-`Default:` Go. **Decided: C#** (Go is not installed; one language across the repo; see s.13).
-
-**2. Should your public lobby server accept any game?**
-Today: the design supports both. Yes: any developer can point their game at `lobby.onelobby.example` with no sign-up; per-game quotas
-(say 200 lobbies / 2,000 peers each) cap the damage, and the relay bill is yours. No: your instance serves an allowlist (only
-games you add by hand); others self-host or ask.
-`Default:` yes, open with per-game quotas, and the relay set to `relayOnly: false` so most traffic never touches your coturn.
 
 ---
 
