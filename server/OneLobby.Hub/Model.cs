@@ -8,6 +8,9 @@ public sealed class Session
     public string ConnId { get; init; } = "";
     public Action<string> Send { get; init; } = _ => { };
     public Action Close { get; init; } = () => { };
+    /// <summary>Closes the socket with a WebSocket close code and reason, when the host of the socket can; else a plain <see cref="Close"/>.</summary>
+    public Action<int, string>? CloseWithCode { get; init; }
+    public void CloseWith(int code, string reason) { if (CloseWithCode is { } c) c(code, reason); else Close(); }
 
     public bool Closed;
     public long LastSeen;

@@ -542,6 +542,47 @@ public class HubTests
     }
 
     [Fact]
+    public void The_33rd_socket_from_one_ip_gets_rate_limited_max_sockets_and_is_closed_1008()
+    {
+        var (hub, _) = T.NewHub();
+        var closes = new List<(int, string)>();
+        for (int i = 0; i < 32; i++) Assert.NotNull(hub.Connect("10.9.9.9", _ => { }, () => { }));
+        JsonObject? err = null;
+        var over = hub.Connect("10.9.9.9", t => err = (JsonObject)JsonNode.Parse(t)!, () => closes.Add((1000, "")), (c, r) => closes.Add((c, r)));
+        Assert.Null(over);
+        Assert.Equal("rate_limited", (string?)err!["code"]);
+        Assert.Equal("max_sockets", (string?)err["data"]!["reason"]);
+        Assert.Equal((1008, "too_many_sockets"), Assert.Single(closes));
+        Assert.NotNull(hub.Connect("10.9.9.8", _ => { }, () => { })); // another address is unaffected
+        Assert.Equal(33, hub.SocketCount);
+    }
+
+    [Fact]
+    public void Disable_ip_limits_lifts_the_socket_cap_but_not_the_signal_limit()
+    {
+        var (hub, _) = T.NewHub(o => o.DisableIpLimits = true);
+        for (int i = 0; i < 40; i++) Assert.NotNull(hub.Connect("10.9.9.9", _ => { }, () => { }));
+        var h = T.Ready(hub, "10.0.0.1", "Host").Create();
+        var j = T.Ready(hub, "10.0.0.2", "Joe").Join(h.Code);
+        for (int i = 0; i < 21; i++) j.Send("{\"t\":\"signal\",\"to\":1,\"ice\":{}}");
+        Assert.Equal("rate_limited", j.LastError);
+        Assert.Equal(20, h.Inbox.Count(m => (string?)m["t"] == "signal"));
+    }
+
+    [Fact]
+    public void Signals_to_a_nostr_session_are_limited_to_10_per_second()
+    {
+        var (hub, _) = T.NewHub();
+        var h = T.Ready(hub, "10.0.0.1", "Host").Create();
+        var n = new Client(hub, "nostr:abcdef0123456789").Hello("g", "1", "Nina").Join(h.Code);
+        for (int i = 0; i < 10; i++) h.Send($"{{\"t\":\"signal\",\"to\":{n.PeerId},\"ice\":{{}}}}");
+        Assert.Null(h.LastError);
+        h.Send($"{{\"t\":\"signal\",\"to\":{n.PeerId},\"ice\":{{}}}}");
+        Assert.Equal("rate_limited", h.LastError);
+        Assert.Equal(10, n.Inbox.Count(m => (string?)m["t"] == "signal"));
+    }
+
+    [Fact]
     public void Global_lobby_peer_and_game_quota_caps()
     {
         var (hub, _) = T.NewHub(o => { o.MaxLobbies = 2; o.CreatePerMin = 100; o.OpenLobbiesPerIp = 100; });

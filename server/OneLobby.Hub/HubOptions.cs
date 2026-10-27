@@ -25,6 +25,12 @@ public class HubOptions
     public int CreatePerMin { get; set; } = 10;
     public int JoinPerMin { get; set; } = 60;
     public int SignalPerSec { get; set; } = 20;
+    /// <summary><c>signal</c> per second to one Nostr-bridged joiner (address <c>nostr:...</c>); the relays refuse more.</summary>
+    public int NostrSignalPerSec { get; set; } = 10;
+    /// <summary>Open sockets per IP address, loopback included (<see cref="DisableIpLimits"/> switches it off).</summary>
+    public int MaxSocketsPerIp { get; set; } = 32;
+    /// <summary>A socket with more unsent bytes than this is closed with 1008 <c>backpressure</c> (hosts that own the socket).</summary>
+    public int MaxPendingWriteBytes { get; set; } = 1 << 20;
     public int OpenLobbiesPerIp { get; set; } = 8;
     public long IdleTimeoutMs { get; set; } = 30_000;
     public long ResumeWindowMs { get; set; } = 60_000;

@@ -59,6 +59,61 @@ public class DirectHubHostTests
         Assert.Equal(2, host.Hub.SocketCount);
     }
 
+    private static async Task<(WebSocketCloseStatus? Status, string? Reason)> WaitClosed(ClientWebSocket ws)
+    {
+        var buf = new byte[65536];
+        using var cts = new CancellationTokenSource(8000);
+        while (true)
+        {
+            var r = await ws.ReceiveAsync(buf, cts.Token);
+            if (r.MessageType == WebSocketMessageType.Close) return (r.CloseStatus, r.CloseStatusDescription);
+        }
+    }
+
+    [Fact]
+    public async Task The_33rd_loopback_socket_is_told_max_sockets_and_closed_with_1008()
+    {
+        using var host = new DirectHubHost(0, HubOptions.ForDirect(40, null), bindAddress: System.Net.IPAddress.Loopback);
+        var open = new List<ClientWebSocket>();
+        for (int i = 0; i < 32; i++)
+        {
+            var w = new ClientWebSocket();
+            await w.ConnectAsync(new Uri($"ws://127.0.0.1:{host.Port}/"), CancellationToken.None);
+            open.Add(w);
+        }
+        for (int i = 0; i < 100 && host.Hub.SocketCount < 32; i++) await Task.Delay(50);
+        Assert.Equal(32, host.Hub.SocketCount);
+        using var over = new ClientWebSocket();
+        await over.ConnectAsync(new Uri($"ws://127.0.0.1:{host.Port}/"), CancellationToken.None);
+        var err = await Next(over);
+        Assert.Equal("rate_limited", (string?)err["code"]);
+        Assert.Equal("max_sockets", (string?)err["data"]!["reason"]);
+        var (status, reason) = await WaitClosed(over);
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, status);
+        Assert.Equal("too_many_sockets", reason);
+        foreach (var w in open) w.Dispose();
+    }
+
+    [Fact]
+    public async Task A_socket_that_does_not_drain_is_closed_1008_backpressure()
+    {
+        var o = HubOptions.ForDirect(4, null);
+        o.MaxPendingWriteBytes = 8000;
+        using var host = new DirectHubHost(0, o, bindAddress: System.Net.IPAddress.Loopback);
+        using var h = await Hello(host.Port, "Host");
+        await Send(h, "{\"t\":\"create\",\"name\":\"L\",\"maxPlayers\":4,\"visibility\":\"unlisted\",\"mode\":\"raw\"}");
+        await Next(h);
+        using var j = await Hello(host.Port, "Joe");
+        await Send(j, "{\"t\":\"join\"}");
+        await Next(j);
+        await Next(h);
+        // the host signals the joiner with a 12 KB description: more than the joiner's socket may hold unsent
+        await Send(h, "{\"t\":\"signal\",\"to\":2,\"sdp\":{\"type\":\"offer\",\"sdp\":\"" + new string('a', 12000) + "\"}}");
+        var (status, reason) = await WaitClosed(j);
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, status);
+        Assert.Equal("backpressure", reason);
+    }
+
     [Fact]
     public async Task Dispose_closes_joiner_sockets()
     {

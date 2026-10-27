@@ -53,6 +53,38 @@ public sealed class DirectHubHost : IDisposable
         public readonly ConcurrentQueue<string> Out = new();
         public readonly SemaphoreSlim OutSignal = new(0);
         public volatile bool Closing;
+        /// <summary>Set before <see cref="Closing"/>: the close frame's code and reason (default 1000 "bye").</summary>
+        public volatile string? CloseReason;
+        public int CloseCode = (int)WebSocketCloseStatus.NormalClosure;
+        /// <summary>Texts queued for the writer and not yet written (bytes): the write buffer the 1008 backpressure rule bounds.</summary>
+        public long PendingBytes;
+        /// <summary>A socket closed for backpressure drops what it still holds instead of draining it.</summary>
+        public volatile bool Abort;
+    }
+
+    private void CloseConn(Conn c, int code, string reason)
+    {
+        if (c.Closing) return;
+        c.CloseCode = code;
+        c.CloseReason = reason;
+        c.Closing = true;
+        c.OutSignal.Release();
+    }
+
+    private void Enqueue(Conn c, string text)
+    {
+        if (c.Closing) return;
+        var n = Interlocked.Add(ref c.PendingBytes, Encoding.UTF8.GetByteCount(text));
+        if (n > _o.MaxPendingWriteBytes)
+        {
+            // the peer is not reading: stop buffering for it, and cut the TCP stream if the writer is stuck in a send
+            c.Abort = true;
+            CloseConn(c, 1008, "backpressure");
+            _ = Task.Delay(1000).ContinueWith(_ => { try { c.Tcp.Dispose(); } catch (Exception) { } });
+            return;
+        }
+        c.Out.Enqueue(text);
+        c.OutSignal.Release();
     }
 
     /// <summary>Binds TCP <paramref name="port"/> on every interface (IPv6 dual-stack where available) and starts accepting.</summary>
@@ -171,8 +203,9 @@ public sealed class DirectHubHost : IDisposable
             var addr = ep?.Address;
             if (addr is not null && addr.IsIPv4MappedToIPv6) addr = addr.MapToIPv4();
             session = Hub.Connect(addr?.ToString() ?? "unknown",
-                send: text => { if (!c.Closing) { c.Out.Enqueue(text); c.OutSignal.Release(); } },
-                close: () => { c.Closing = true; c.OutSignal.Release(); });
+                send: text => Enqueue(c, text),
+                close: () => { c.Closing = true; c.OutSignal.Release(); },
+                closeWith: (code, reason) => CloseConn(c, code, reason));
             writer = Task.Run(() => WriteLoop(c));
             if (session is not null) await ReadLoop(c, session).ConfigureAwait(false);
         }
@@ -227,14 +260,18 @@ public sealed class DirectHubHost : IDisposable
             while (true)
             {
                 await c.OutSignal.WaitAsync(_cts.Token).ConfigureAwait(false);
-                while (c.Out.TryDequeue(out var text))
-                    await ws.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(text)), WebSocketMessageType.Text, true, _cts.Token).ConfigureAwait(false);
+                while (!c.Abort && c.Out.TryDequeue(out var text))
+                {
+                    var bytes = Encoding.UTF8.GetBytes(text);
+                    try { await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token).ConfigureAwait(false); }
+                    finally { Interlocked.Add(ref c.PendingBytes, -bytes.Length); }
+                }
                 if (c.Closing) break;
             }
             if (ws.State == WebSocketState.Open)
             {
                 using var t = new CancellationTokenSource(1000);
-                await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "bye", t.Token).ConfigureAwait(false);
+                await ws.CloseOutputAsync((WebSocketCloseStatus)c.CloseCode, c.CloseReason ?? "bye", t.Token).ConfigureAwait(false);
             }
         }
         catch (Exception) { /* socket gone; the read loop ends too */ }

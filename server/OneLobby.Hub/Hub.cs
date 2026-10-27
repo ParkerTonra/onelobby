@@ -74,7 +74,7 @@ public sealed class Hub
     // ---------------------------------------------------------------- connection lifecycle
 
     /// <summary>Registers a socket. Returns null (after sending server_full and closing) when over maxPeers.</summary>
-    public Session? Connect(string ip, Action<string> send, Action close)
+    public Session? Connect(string ip, Action<string> send, Action close, Action<int, string>? closeWith = null)
     {
         lock (_gate)
         {
@@ -85,6 +85,7 @@ public sealed class Hub
                 ConnId = Compat.Hex(Compat.RandomBytes(6)).ToLowerInvariant(),
                 Send = send,
                 Close = close,
+                CloseWithCode = closeWith,
                 LastSeen = _clock.NowMs,
             };
             Metrics.Inc("onelobby_connections_total");
@@ -94,8 +95,15 @@ public sealed class Hub
                 s.Close();
                 return null;
             }
+            var ipState = IpOf(ip);
+            if (!_o.DisableIpLimits && ipState.Sockets >= _o.MaxSocketsPerIp)
+            {
+                RateLimited(s, "sockets", 1000, "max_sockets");
+                s.CloseWith(1008, "too_many_sockets");
+                return null;
+            }
             _sessions[s.Id] = s;
-            IpOf(ip).Sockets++;
+            ipState.Sockets++;
             return s;
         }
     }
@@ -498,17 +506,14 @@ public sealed class Hub
         int? to = Int(m, "to");
         if (to is null || lobby.Find(to.Value) is not { Session: not null } target || target == me)
         { Error(s, "bad_request", "unknown signal target", Field("to")); return; }
-        // direct lobbies have no migration: only the host and a joiner ever need each other, so two joiners cannot dial one another
+        // direct lobbies have no migration: only host<->joiner links are legitimate, so a joiner cannot dial another joiner
         if (_o.SingleLobby && me.PeerId != lobby.HostId && target.PeerId != lobby.HostId)
-        { Error(s, "bad_request", "joiners signal only the host", Field("to")); return; }
+        { Error(s, "bad_request", "signals go to or from the host only", Field("to")); return; }
         long now = _clock.NowMs;
-        if (!_o.DisableIpLimits)
-        {
-            var rate = SignalRate(s, target, now);
-            if (!rate.TryHit(now)) { RateLimited(s, "signal", rate.RetryAfterMs(now), null); return; }
-            var total = s.SignalTotal ??= new RateWindow(_o.SignalPerSec * SignalFanout * Scale, 1000);
-            if (!total.TryHit(now)) { RateLimited(s, "signal", total.RetryAfterMs(now), null); return; }
-        }
+        var rate = SignalRate(s, target, now);
+        if (!rate.TryHit(now)) { RateLimited(s, "signal", rate.RetryAfterMs(now), null); return; }
+        var total = s.SignalTotal ??= new RateWindow(_o.SignalPerSec * SignalFanout * Scale, 1000);
+        if (!total.TryHit(now)) { RateLimited(s, "signal", total.RetryAfterMs(now), null); return; }
         if (m["sdp"] is null && m["ice"] is null) { Error(s, "bad_request", "signal needs sdp or ice", Field("sdp")); return; }
         var o = new JsonObject { ["t"] = "signal", ["from"] = me.PeerId };
         if (m["sdp"] is { } sdp) o["sdp"] = sdp.DeepClone();
@@ -528,7 +533,9 @@ public sealed class Hub
     {
         if (s.SignalRates.TryGetValue(to, out var w)) return w;
         foreach (var k in s.SignalRates.Where(e => e.Value.IsIdle(now)).Select(e => e.Key).ToList()) s.SignalRates.Remove(k);
-        return s.SignalRates[to] = new RateWindow(_o.SignalPerSec * Scale, 1000);
+        // a Nostr joiner's signals are published to public relays, which refuse high rates: half the budget
+        var perSec = to.Session is { Ip: var ip } && ip.StartsWith("nostr:", StringComparison.Ordinal) ? _o.NostrSignalPerSec : _o.SignalPerSec;
+        return s.SignalRates[to] = new RateWindow(perSec * Scale, 1000);
     }
 
     private bool RequireHost(Session s, out Lobby lobby)
