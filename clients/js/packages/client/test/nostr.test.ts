@@ -6,11 +6,29 @@ import { eventId, makeEvent, checkNostrRelays, RelayPool, DEFAULT_NOSTR_RELAYS }
 import { ReliableLink, type Frame, type OutFrame } from "../src/nostr/link.js";
 import { ManualClock } from "../src/testing.js";
 import { systemClock } from "../src/clock.js";
+import * as L from "../src/nostr/limits.js";
 import { FakeRelays } from "./fake-relay.js";
 import { specJson } from "./spec.js";
 
 const vec = specJson("vectors/nostr.json");
 const jc = specJson("vectors/joincode.json");
+
+describe("limits and timers (spec/vectors/nostr-limits.json)", () => {
+  const lim = specJson("vectors/nostr-limits.json");
+  const expected: Record<string, Record<string, number>> = {
+    link: { batchMs: L.BATCH_MS, resendMs: L.RESEND_MS, maxResends: L.MAX_RESENDS, beatMs: L.BEAT_MS, silenceMs: L.SILENCE_MS, maxHeld: L.MAX_HELD,
+      maxOutFrames: L.MAX_OUT_FRAMES, maxOutBytes: L.MAX_OUT_BYTES, maxFrameBytes: L.MAX_FRAME_BYTES, tickMs: L.TICK_MS },
+    host: { newSessionBurst: L.NEW_SESSION_BURST, maxSessionBurst: L.MAX_SESSION_BURST, newSessionRefillMs: L.NEW_SESSION_REFILL_MS,
+      waitingMax: L.WAITING_MAX, waitingStaleMs: L.WAITING_STALE_MS },
+    socket: { openEveryMs: L.OPEN_EVERY_MS, giveUpMs: L.GIVE_UP_MS },
+    relays: { hostFirstRelayMs: L.HOST_FIRST_RELAY_MS, hostNostrFirstRelayMs: L.HOST_NOSTR_FIRST_RELAY_MS, joinerFirstRelayMs: L.JOINER_FIRST_RELAY_MS,
+      restWaitMs: L.RELAY_REST_WAIT_MS, restPollMs: L.RELAY_REST_POLL_MS },
+  };
+  it("the code's constants equal the vector, key for key", () => {
+    for (const group of Object.keys(expected)) expect(expected[group], group).toEqual(lim[group]);
+    expect(Object.keys(lim).filter((k) => k !== "$comment").sort()).toEqual(Object.keys(expected).sort());
+  });
+});
 
 describe("version 1 join codes (spec/vectors/joincode.json)", () => {
   it("rooms encode and decode", () => {

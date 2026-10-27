@@ -261,10 +261,10 @@ namespace OneLobby.Direct
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (relays.Connected == 0)
             {
-                if (sw.ElapsedMilliseconds >= 10_000) return false;
+                if (sw.ElapsedMilliseconds >= NostrLimits.HostFirstRelayMs) return false;
                 await Task.Delay(50).ConfigureAwait(false);
             }
-            for (var i = 0; i < 30 && relays.Connected < relays.Total; i++) await Task.Delay(50).ConfigureAwait(false);
+            for (var i = 0; i < NostrLimits.RestWaitMs / NostrLimits.RestPollMs && relays.Connected < relays.Total; i++) await Task.Delay(NostrLimits.RestPollMs).ConfigureAwait(false);
             return true;
         }
 

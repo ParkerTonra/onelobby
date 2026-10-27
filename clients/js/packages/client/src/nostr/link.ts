@@ -4,6 +4,7 @@
  * relays, keys or encryption: the owner stamps and ships the frames it emits.
  */
 import type { Clock } from "../clock.js";
+import { BATCH_MS, RESEND_MS, MAX_RESENDS, BEAT_MS, SILENCE_MS, MAX_HELD, MAX_OUT_FRAMES, MAX_OUT_BYTES, MAX_FRAME_BYTES, TICK_MS } from "./limits.js";
 
 export type FrameType = "open" | "data" | "beat" | "close";
 
@@ -22,17 +23,7 @@ export interface Frame {
 /** What a link emits; the owner adds v / from / to. */
 export type OutFrame = Pick<Frame, "type" | "seq" | "ack"> & { msgs?: string[]; reason?: string };
 
-export const BATCH_MS = 30;
-export const RESEND_MS = 3000;
-export const MAX_RESENDS = 5;
-export const BEAT_MS = 10_000;
-export const SILENCE_MS = 30_000;
-export const MAX_HELD = 64;
-/** Outbound: queued texts plus unacknowledged frames, at most this many frames and bytes; excess texts are dropped. */
-export const MAX_OUT_FRAMES = 128;
-export const MAX_OUT_BYTES = 256 * 1024;
-export const MAX_FRAME_BYTES = 30_000; // under the 32 KiB content limit, room for the JSON envelope
-const TICK_MS = 250;
+export { BATCH_MS, RESEND_MS, MAX_RESENDS, BEAT_MS, SILENCE_MS, MAX_HELD, MAX_OUT_FRAMES, MAX_OUT_BYTES, MAX_FRAME_BYTES };
 
 const utf8 = new TextEncoder();
 const byteLen = (s: string) => utf8.encode(s).length;

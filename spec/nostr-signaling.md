@@ -79,6 +79,9 @@ Publish every event to every relay in the list (s.6); receivers dedupe by event 
 - Keep-alive `ping` / `pong` hub messages never cross Nostr: the joiner's socket answers its own outgoing `ping` with
   a local `pong`, and the host bridge drops the hub's `pong`s; any frame from a joiner counts as activity for the hub.
 
+All numbers in this section (and the relay waits in s.6) are pinned in `spec/vectors/nostr-limits.json`; both clients
+read them from named constants and a test per language compares them with that file.
+
 ## 5. WebRTC
 
 Both sides use public STUN (`stun:stun.l.google.com:19302`, `stun:stun.cloudflare.com:3478`; a setting) and no
@@ -93,3 +96,6 @@ reconnect each with backoff (1 s doubling to 30 s), and treat the transport as u
 connected. A relay answering `["OK", id, false, ...]` or `["CLOSED", ...]` is skipped for the session. No relay
 reachable within 10 s: `connect_failed` for joiners, and the host reports `nostr: no relay reachable` in its log
 line and keeps hosting by IP.
+
+The waits are in `spec/vectors/nostr-limits.json` (`relays`): `hostFirstRelayMs` (`hostDirect`), `hostNostrFirstRelayMs`
+(`hostNostr`), `joinerFirstRelayMs`, then at most `restWaitMs` for the remaining relays.

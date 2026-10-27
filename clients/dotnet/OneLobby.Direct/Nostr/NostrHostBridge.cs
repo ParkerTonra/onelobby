@@ -26,11 +26,11 @@ namespace OneLobby.Direct.Nostr
         /// <see cref="WaitingMax"/>, oldest first) and are answered on the tick a token refills; a waiting pubkey whose
         /// <c>open</c> (repeated every 2 s) has not been heard for <see cref="WaitingStaleMs"/> has given up and is dropped.
         /// </summary>
-        public const int NewSessionBurst = 16;
-        public const int MaxSessionBurst = 64;
-        public const int NewSessionRefillMs = 1_000;
-        public const int WaitingMax = 64;
-        public const int WaitingStaleMs = 5_000;
+        public const int NewSessionBurst = NostrLimits.NewSessionBurst;
+        public const int MaxSessionBurst = NostrLimits.MaxSessionBurst;
+        public const int NewSessionRefillMs = NostrLimits.NewSessionRefillMs;
+        public const int WaitingMax = NostrLimits.WaitingMax;
+        public const int WaitingStaleMs = NostrLimits.WaitingStaleMs;
 
         /// <summary>A lobby sized for more than <see cref="NewSessionBurst"/> players gets a burst that fits it (up to <see cref="MaxSessionBurst"/>).</summary>
         public static int SessionBurstFor(int maxPlayers) => Math.Max(NewSessionBurst, Math.Min(MaxSessionBurst, maxPlayers));

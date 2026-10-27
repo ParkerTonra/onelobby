@@ -6,6 +6,7 @@ import type { Clock } from "../clock.js";
 import type { SocketLike } from "../transport.js";
 import { ReliableLink, type Frame } from "./link.js";
 import { NostrRoom } from "./room.js";
+import { GIVE_UP_MS, JOINER_FIRST_RELAY_MS, OPEN_EVERY_MS } from "./limits.js";
 import type { RelayConnect } from "./relays.js";
 
 export interface NostrSocketOptions {
@@ -89,8 +90,8 @@ export class NostrSocket implements SocketLike {
       return;
     }
     room.onFrame = (f) => this.onFrame(f);
-    this.cancelDeadline = clock.setTimeout(() => this.fail("the host did not answer through the Nostr relays"), this.o.openTimeoutMs ?? 15_000);
-    if (!(await room.whenUp(this.o.relayTimeoutMs ?? 10_000))) {
+    this.cancelDeadline = clock.setTimeout(() => this.fail("the host did not answer through the Nostr relays"), this.o.openTimeoutMs ?? GIVE_UP_MS);
+    if (!(await room.whenUp(this.o.relayTimeoutMs ?? JOINER_FIRST_RELAY_MS))) {
       this.fail("no Nostr relay reachable");
       return;
     }
@@ -99,7 +100,7 @@ export class NostrSocket implements SocketLike {
     this.relaysSeen = room.relaysConnected;
     this.sendOpen = open;
     open();
-    this.cancelOpen = clock.setInterval(open, this.o.openEveryMs ?? 2000);
+    this.cancelOpen = clock.setInterval(open, this.o.openEveryMs ?? OPEN_EVERY_MS);
   }
 
   private relaysChanged(): void {

@@ -16,18 +16,18 @@ namespace OneLobby.Direct.Nostr
     /// </summary>
     internal sealed class NostrLink
     {
-        public const int BatchMs = 30;
-        public const int ResendMs = 3000;
-        public const int MaxResends = 5;
-        public const int BeatMs = 10_000;
-        public const int SilenceMs = 30_000;
-        public const int MaxHeld = 64;
+        public const int BatchMs = NostrLimits.BatchMs;
+        public const int ResendMs = NostrLimits.ResendMs;
+        public const int MaxResends = NostrLimits.MaxResends;
+        public const int BeatMs = NostrLimits.BeatMs;
+        public const int SilenceMs = NostrLimits.SilenceMs;
+        public const int MaxHeld = NostrLimits.MaxHeld;
         /// <summary>UTF-8 bytes of messages per frame: under the 32 KiB content limit, room for the JSON envelope.</summary>
-        public const int MaxFrameBytes = 30_000;
-        public const int TickMs = 250;
+        public const int MaxFrameBytes = NostrLimits.MaxFrameBytes;
+        public const int TickMs = NostrLimits.TickMs;
         /// <summary>Outbound cap (spec s.4 "Outbound queue"): unacknowledged frames, and bytes queued or unacknowledged. Over either, a text is dropped.</summary>
-        public const int MaxOutFrames = 128;
-        public const int MaxOutBytes = 256 * 1024;
+        public const int MaxOutFrames = NostrLimits.MaxOutFrames;
+        public const int MaxOutBytes = NostrLimits.MaxOutBytes;
 
         private sealed class Sent
         {

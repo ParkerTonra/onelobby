@@ -8,6 +8,7 @@ import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
 import { encodeRoomCode } from "../joincode.js";
 import { NostrHostBridge } from "../nostr/host.js";
+import { HOST_NOSTR_FIRST_RELAY_MS } from "../nostr/limits.js";
 import { DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "../nostr/relays.js";
 import { OneLobbyError } from "../signaling.js";
 import { SignalingHub, directHubOptions } from "./hub.js";
@@ -53,8 +54,6 @@ export function formatBrowserHostLog(code: string, relays: string): string {
   return `OneLobby: browser host (no port); code ${code} (Nostr); nostr ${relays} relays`;
 }
 
-const RELAY_WAIT_MS = 10_000;
-
 export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): Promise<BrowserHostLobby> {
   const bp = kit.blueprint;
   if (bp && !bp.hosting.nostr) {
@@ -91,10 +90,9 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
     } catch (e) {
       throw new OneLobbyError("direct_unreachable", `cannot reach any Nostr relay (${e instanceof Error ? e.message : String(e)}); a browser host has no other way to be reached`);
     }
-    if (!(await bridge.whenUp(o.relayTimeoutMs ?? RELAY_WAIT_MS))) {
+    if (!(await bridge.settle(o.relayTimeoutMs ?? HOST_NOSTR_FIRST_RELAY_MS))) {
       throw new OneLobbyError("direct_unreachable", `no Nostr relay reachable (tried ${bridge.relaysTotal}); a browser host has no IP fallback, check the connection or pass other relays`);
     }
-    for (let i = 0; i < 30 && bridge.relaysConnected < bridge.relaysTotal; i++) await new Promise((r) => setTimeout(r, 50));
 
     const name = o.name ?? `${kit.options.displayName || "Player"}'s game`;
     const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit };

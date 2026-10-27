@@ -17,11 +17,11 @@ namespace OneLobby.Direct.Nostr
     /// </summary>
     internal sealed class NostrSignalingSocket : ISignalingSocket
     {
-        public const int OpenEveryMs = 2000;
+        public const int OpenEveryMs = NostrLimits.OpenEveryMs;
         /// <summary>The host's first <c>open</c> did not arrive within this long (counted from the start).</summary>
-        public const int GiveUpMs = 15_000;
+        public const int GiveUpMs = NostrLimits.GiveUpMs;
         /// <summary>No relay connected within this long.</summary>
-        public const int NoRelayMs = 10_000;
+        public const int NoRelayMs = NostrLimits.JoinerFirstRelayMs;
         public const string NoRelayReason = "no Nostr relay reachable";
         public const string NoHostReason = "the host did not answer through the Nostr relays";
 

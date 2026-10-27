@@ -14,6 +14,7 @@ import type { Lobby, RateLimit } from "../lobby.js";
 import type { LinkFactory } from "../transport.js";
 import { encodeJoinCode, encodeRoomCode } from "../joincode.js";
 import { NostrHostBridge } from "../nostr/host.js";
+import { HOST_FIRST_RELAY_MS } from "../nostr/limits.js";
 import { DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "../nostr/relays.js";
 import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
 import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from "./hub-host.js";
@@ -295,10 +296,8 @@ function retryMapping(mapper: PortMapper, firstMs: number, onMapped: (r: PortMap
 }
 
 /** Waits for the relays to connect: true once at least one has (then up to 1.5 s more for the rest), false after 10 s. */
-async function settleRelays(bridge: NostrHostBridge): Promise<boolean> {
-  if (!(await bridge.whenUp(10_000))) return false;
-  for (let i = 0; i < 30 && bridge.relaysConnected < bridge.relaysTotal; i++) await new Promise((r) => setTimeout(r, 50));
-  return true;
+function settleRelays(bridge: NostrHostBridge): Promise<boolean> {
+  return bridge.settle(HOST_FIRST_RELAY_MS);
 }
 
 function isIPv4(s: string): boolean {

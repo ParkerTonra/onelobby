@@ -190,6 +190,39 @@ public sealed class NostrCryptoTests
     }
 
     [Fact]
+    public void Limits_and_timers_match_the_shared_vector()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(SpecDir(), "nostr-limits.json")));
+        var expected = new Dictionary<string, Dictionary<string, int>>
+        {
+            ["link"] = new()
+            {
+                ["batchMs"] = NostrLimits.BatchMs, ["resendMs"] = NostrLimits.ResendMs, ["maxResends"] = NostrLimits.MaxResends, ["beatMs"] = NostrLimits.BeatMs,
+                ["silenceMs"] = NostrLimits.SilenceMs, ["maxHeld"] = NostrLimits.MaxHeld, ["maxOutFrames"] = NostrLimits.MaxOutFrames,
+                ["maxOutBytes"] = NostrLimits.MaxOutBytes, ["maxFrameBytes"] = NostrLimits.MaxFrameBytes, ["tickMs"] = NostrLimits.TickMs,
+            },
+            ["host"] = new()
+            {
+                ["newSessionBurst"] = NostrLimits.NewSessionBurst, ["maxSessionBurst"] = NostrLimits.MaxSessionBurst,
+                ["newSessionRefillMs"] = NostrLimits.NewSessionRefillMs, ["waitingMax"] = NostrLimits.WaitingMax, ["waitingStaleMs"] = NostrLimits.WaitingStaleMs,
+            },
+            ["socket"] = new() { ["openEveryMs"] = NostrLimits.OpenEveryMs, ["giveUpMs"] = NostrLimits.GiveUpMs },
+            ["relays"] = new()
+            {
+                ["hostFirstRelayMs"] = NostrLimits.HostFirstRelayMs, ["hostNostrFirstRelayMs"] = NostrLimits.HostNostrFirstRelayMs,
+                ["joinerFirstRelayMs"] = NostrLimits.JoinerFirstRelayMs, ["restWaitMs"] = NostrLimits.RestWaitMs, ["restPollMs"] = NostrLimits.RestPollMs,
+            },
+        };
+        var groups = doc.RootElement.EnumerateObject().Where(p => p.Name != "$comment").ToList();
+        Assert.Equal(expected.Keys.OrderBy(k => k), groups.Select(g => g.Name).OrderBy(k => k));
+        foreach (var g in groups)
+        {
+            var vec = g.Value.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetInt32());
+            Assert.Equal(expected[g.Name].OrderBy(p => p.Key), vec.OrderBy(p => p.Key));
+        }
+    }
+
+    [Fact]
     public void Shared_nostr_vectors_from_the_js_lane_match()
     {
         var path = Path.Combine(SpecDir(), "nostr.json");

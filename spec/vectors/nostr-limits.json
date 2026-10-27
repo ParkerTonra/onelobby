@@ -1,0 +1,33 @@
+{
+  "$comment": "Every Nostr limit and timer both clients share (spec/nostr-signaling.md s.4 and s.6). JS: src/nostr/limits.ts. C#: OneLobby.Direct/Nostr/NostrLimits.cs. A pin test in each language reads this file; change a number here and in both.",
+  "link": {
+    "batchMs": 30,
+    "resendMs": 3000,
+    "maxResends": 5,
+    "beatMs": 10000,
+    "silenceMs": 30000,
+    "maxHeld": 64,
+    "maxOutFrames": 128,
+    "maxOutBytes": 262144,
+    "maxFrameBytes": 30000,
+    "tickMs": 250
+  },
+  "host": {
+    "newSessionBurst": 16,
+    "maxSessionBurst": 64,
+    "newSessionRefillMs": 1000,
+    "waitingMax": 64,
+    "waitingStaleMs": 5000
+  },
+  "socket": {
+    "openEveryMs": 2000,
+    "giveUpMs": 15000
+  },
+  "relays": {
+    "hostFirstRelayMs": 10000,
+    "hostNostrFirstRelayMs": 10000,
+    "joinerFirstRelayMs": 10000,
+    "restWaitMs": 1500,
+    "restPollMs": 50
+  }
+}

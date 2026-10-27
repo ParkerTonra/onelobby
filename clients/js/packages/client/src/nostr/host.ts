@@ -7,6 +7,7 @@ import type { SignalingHub, Session } from "../direct/hub.js";
 import { ReliableLink, type Frame } from "./link.js";
 import { NostrRoom } from "./room.js";
 import type { RelayConnect } from "./relays.js";
+import { NEW_SESSION_BURST, MAX_SESSION_BURST, NEW_SESSION_REFILL_MS, WAITING_MAX, WAITING_STALE_MS, RELAY_REST_WAIT_MS, RELAY_REST_POLL_MS } from "./limits.js";
 
 export interface NostrHostOptions {
   /** The version 1 join code this host publishes. */
@@ -39,11 +40,7 @@ const CLOSED_MEMORY = 512;
  * first) and are answered the moment a token refills; a waiting pubkey whose `open` (repeated every 2 s) has not
  * been heard for WAITING_STALE_MS has given up and is dropped.
  */
-export const NEW_SESSION_BURST = 16;
-export const MAX_SESSION_BURST = 64;
-export const NEW_SESSION_REFILL_MS = 1_000;
-const WAITING_MAX = 64;
-const WAITING_STALE_MS = 5_000;
+export { NEW_SESSION_BURST, MAX_SESSION_BURST, NEW_SESSION_REFILL_MS };
 
 export class NostrHostBridge {
   private readonly peers = new Map<string, Peer>();
@@ -76,6 +73,13 @@ export class NostrHostBridge {
   /** Resolves true once one relay is connected, false after `timeoutMs`. */
   whenUp(timeoutMs: number): Promise<boolean> {
     return this.room.whenUp(timeoutMs);
+  }
+
+  /** Waits for the relays: true once one is connected (then up to RELAY_REST_WAIT_MS more for the rest), false after `firstRelayMs`. */
+  async settle(firstRelayMs: number): Promise<boolean> {
+    if (!(await this.whenUp(firstRelayMs))) return false;
+    for (let i = 0; i < RELAY_REST_WAIT_MS / RELAY_REST_POLL_MS && this.relaysConnected < this.relaysTotal; i++) await new Promise((r) => setTimeout(r, RELAY_REST_POLL_MS));
+    return true;
   }
 
   /** Joiners currently attached. */
