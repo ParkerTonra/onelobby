@@ -141,8 +141,8 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
 `FromBlueprint` (or `OneLobbyRunner` with a Blueprint), else the library's default list. The startup line's
 `nostr n/m relays` shows how many of the relays in use answered. With no relay reachable the host keeps the IP code as `JoinCode` and logs `; nostr: no relay
 reachable`; when one answers later `JoinCodeChanged` fires. C#: `Lobby.JoinCodeFinal` says whether the code can still change,
-and `await lobby.FinalJoinCodeAsync(TimeSpan.FromSeconds(20))` (keep pumping) gives the final code, or the current one when the
-time runs out, for a game that writes the code once (a file, a share link). `JoinDirectAsync(code)` / `RejoinDirectAsync(code, token)` take either kind
+and `var (code, final) = await lobby.FinalJoinCodeAsync(TimeSpan.FromSeconds(20))` (keep pumping) gives the final code, or the
+current one with `final` false when the time runs out, for a game that writes the code once (a file, a share link). `JoinDirectAsync(code)` / `RejoinDirectAsync(code, token)` take either kind
 of code; `JoinDirectAsync(code, password, new NostrOptions { Relays = ... })` picks the relays for a version 1 code (a client built
 from a blueprint uses its `hosting.nostrRelays`). With Nostr on, peer links use the public STUN servers. `GET /joininfo` adds
 `directCode` and `directCodeKind` (`joinCode` is the Nostr code while it works). A relay-only joiner that cannot connect fails with `direct_unreachable` after 15 s.

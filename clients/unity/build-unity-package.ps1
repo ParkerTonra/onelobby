@@ -112,6 +112,17 @@ foreach ($d in $docs) {
     $src = Join-Path $repo $d
     if (Test-Path $src) { Copy-Item $src $docDir -Force } else { Write-Host "doc ${d}: not in this checkout (skipped)" }
 }
+# Repo paths inside the copies point where a package user can open them: a shipped doc at Documentation~/<name>,
+# any other docs/ or spec/ file at its GitHub page.
+$shipped = @{}; foreach ($d in $docs) { $shipped[$d] = 'Documentation~/' + (Split-Path $d -Leaf) }
+foreach ($f in Get-ChildItem $docDir -Filter *.md) {
+    $text = [IO.File]::ReadAllText($f.FullName)
+    $fixed = [regex]::Replace($text, '(?<![\w/.~-])(?:docs|spec)/[\w./-]+?\.(?:md|json)', {
+        param($m)
+        if ($shipped.ContainsKey($m.Value)) { $shipped[$m.Value] } else { 'https://github.com/ParkerTonra/onelobby/blob/main/' + $m.Value }
+    })
+    if ($fixed -ne $text) { [IO.File]::WriteAllText($f.FullName, $fixed, (New-Object Text.UTF8Encoding $false)) }
+}
 Write-Host "plugins:"; Get-ChildItem $plugins -Recurse -Filter *.dll | ForEach-Object { Write-Host "  $($_.FullName.Substring($pkg.Length + 1))" }
 
 if ($Pack) {
