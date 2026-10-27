@@ -28,7 +28,7 @@ export type { VoiceMode } from "./voice-core.js";
 export type { VoiceCodec, VoiceEncoderHandle, VoiceDecoderHandle, FrameSource, AudioSink, VoiceError } from "./voice-types.js";
 export { webCodecsOpusAvailable } from "./voice-browser.js";
 export { normalizeCode, formatCode } from "./crockford.js";
-// Direct IP (docs/direct-ip.md): kit.joinDirect(code); the code is the host's address in disguise. Hosting is in
+// Direct IP (docs/design/direct-ip.md): kit.joinDirect(code); the code is the host's address in disguise. Hosting is in
 // onelobby/direct (Node). webRtcLinkFactoryFor gives Node joiners a WebRTC stack (node-datachannel/polyfill).
 export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";

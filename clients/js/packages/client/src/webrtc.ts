@@ -119,7 +119,7 @@ export class WebRtcLink implements PeerLink {
         this.haveRemote = true;
         for (const c of this.pendingIce.splice(0)) await this.pc.addIceCandidate(c);
         if (this.extra.length) {
-          // docs/direct-ip.md s.2: the address the joiner typed is the host's reachable candidate
+          // docs/design/direct-ip.md s.2: the address the joiner typed is the host's reachable candidate
           const mid = /^a=mid:(\S+)/m.exec(s.sdp.sdp)?.[1] ?? "0";
           for (const candidate of this.extra.splice(0)) await this.pc.addIceCandidate({ candidate, sdpMid: mid, sdpMLineIndex: 0 });
         }

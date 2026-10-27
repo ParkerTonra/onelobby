@@ -3,7 +3,7 @@ using Xunit;
 
 namespace OneLobby.Server.Tests;
 
-/// <summary>The hub options a game hosting by IP uses (docs/direct-ip.md s.2, s.5 step 2).</summary>
+/// <summary>The hub options a game hosting by IP uses (docs/design/direct-ip.md s.2, s.5 step 2).</summary>
 public class DirectHubTests
 {
     private static (Hub Hub, FakeClock Clock) Direct(string? password = null) => T.NewHub(o =>

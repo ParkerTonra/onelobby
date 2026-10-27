@@ -3,7 +3,7 @@ using Xunit;
 
 namespace OneLobby.Tests
 {
-    /// <summary>dc1 join codes against spec/vectors/joincode.json (docs/direct-ip.md s.2a).</summary>
+    /// <summary>dc1 join codes against spec/vectors/joincode.json (docs/design/direct-ip.md s.2a).</summary>
     public class JoinCodeTests
     {
         private static JsonDocument Vectors() => Spec.Load("vectors/joincode.json");

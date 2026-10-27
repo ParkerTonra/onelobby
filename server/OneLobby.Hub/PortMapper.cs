@@ -50,7 +50,7 @@ public sealed class PortMapperOptions
 }
 
 /// <summary>
-/// Opens TCP and UDP <c>P</c> on the home router for a direct-IP host (docs/direct-ip.md s.2a): UPnP IGD (SSDP, then
+/// Opens TCP and UDP <c>P</c> on the home router for a direct-IP host (docs/design/direct-ip.md s.2a): UPnP IGD (SSDP, then
 /// <c>GetExternalIPAddress</c> + <c>AddPortMapping</c>), then NAT-PMP (RFC 6886; most PCP routers answer it too).
 /// These are requests from inside the home to the player's own router; CERT VU#357851 is about routers that accept
 /// them from the WAN. Same external and internal port or nothing: a join code carries one port number. Leases renew

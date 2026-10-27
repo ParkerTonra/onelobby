@@ -10,7 +10,7 @@ namespace OneLobby.Server;
 
 /// <summary>
 /// Runs a <see cref="Hub"/> inside the host's game and listens for joiners' signaling WebSockets on TCP <see cref="Port"/>
-/// (docs/direct-ip.md s.2, s.5 step 3). Managed only: a <see cref="TcpListener"/>, a minimal HTTP/1.1 upgrade (RFC 6455
+/// (docs/design/direct-ip.md s.2, s.5 step 3). Managed only: a <see cref="TcpListener"/>, a minimal HTTP/1.1 upgrade (RFC 6455
 /// s.4.2) and <see cref="WebSocket.CreateFromStream(Stream, bool, string, TimeSpan)"/>. Not HttpListener (a non-localhost
 /// prefix needs a URL ACL on Windows) and not libdatachannel's WebSocket server (the natives are built with NO_WEBSOCKET).
 /// <para>
@@ -379,7 +379,7 @@ public sealed class DirectHubHost : IDisposable
     public PortMapper? PortMapper { get; private set; }
 
     /// <summary>
-    /// Asks the home router to forward TCP and UDP <see cref="Port"/> here (UPnP, then NAT-PMP; docs/direct-ip.md s.2a).
+    /// Asks the home router to forward TCP and UDP <see cref="Port"/> here (UPnP, then NAT-PMP; docs/design/direct-ip.md s.2a).
     /// Runs off the game thread; the mapping is renewed while hosting and deleted on <see cref="Dispose"/>.
     /// </summary>
     public Task<PortMapResult> OpenPortAsync(PortMapperOptions? options = null, CancellationToken ct = default)

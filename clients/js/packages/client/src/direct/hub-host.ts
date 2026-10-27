@@ -83,7 +83,7 @@ export function portFailureHint(anyBusy: boolean, anyReserved: boolean): string 
 
 /**
  * Runs a {@link SignalingHub} inside a Node process and listens for joiners' signaling WebSockets on TCP `port`: the
- * Node twin of C#'s `DirectHubHost` (docs/direct-ip.md s.2, s.5 step 3). A plain `net` server with a minimal HTTP/1.1
+ * Node twin of C#'s `DirectHubHost` (docs/design/direct-ip.md s.2, s.5 step 3). A plain `net` server with a minimal HTTP/1.1
  * upgrade and RFC 6455 framing (text, close, ping/pong, fragments; client frames must be masked), so the package keeps
  * zero runtime dependencies. Any path upgrades; `GET /healthz` answers `ok` and `GET /metrics` the hub's Prometheus text
  * (loopback callers only), as onelobby-server does, ahead of the `http` callback. The host's own client talks to the hub in
@@ -216,7 +216,7 @@ export class DirectHubHost {
     return new LocalHubSocket(this.hub);
   }
 
-  /** Asks the home router to forward TCP and UDP `port` here (UPnP, then NAT-PMP; docs/direct-ip.md s.2a). */
+  /** Asks the home router to forward TCP and UDP `port` here (UPnP, then NAT-PMP; docs/design/direct-ip.md s.2a). */
   openPort(options?: PortMapperOptions): Promise<PortMapResult> {
     if (this.portMapper) throw new Error("the port is already being opened");
     this.portMapper = new PortMapper(this.port, options);

@@ -129,7 +129,7 @@ namespace OneLobby
         public IReadOnlyList<string> DirectAddresses { get; internal set; } = Array.Empty<string>();
 
         /// <summary>
-        /// Direct-IP host only: the code friends paste to join, e.g. <c>6B01-RGFE-P2B</c> (docs/direct-ip.md s.2a). Show it
+        /// Direct-IP host only: the code friends paste to join, e.g. <c>6B01-RGFE-P2B</c> (docs/design/direct-ip.md s.2a). Show it
         /// with <see cref="JoinCodeKind"/>. Empty when this machine has no IPv4 address.
         /// </summary>
         public string JoinCode { get; internal set; } = "";
@@ -161,7 +161,7 @@ namespace OneLobby
 
         internal void RaiseJoinCodeChanged() => JoinCodeChanged?.Invoke(JoinCode, JoinCodeKind);
 
-        /// <summary>Direct IP has no migration: the hub lives in the host (docs/direct-ip.md s.2).</summary>
+        /// <summary>Direct IP has no migration: the hub lives in the host (docs/design/direct-ip.md s.2).</summary>
         private bool DirectJoiner => _c.Direct && !IsHost;
 
         /// <summary>True once the data channel to the host is up and welcomed (always true on the host).</summary>

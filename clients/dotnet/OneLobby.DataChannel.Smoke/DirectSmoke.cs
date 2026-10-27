@@ -9,7 +9,7 @@ using OneLobby.Direct;
 using OneLobby.Direct.Nostr;
 using OneLobby.Server;
 
-// Direct-IP smoke test (docs/direct-ip.md s.5 step 7): no lobby server anywhere.
+// Direct-IP smoke test (docs/design/direct-ip.md s.5 step 7): no lobby server anywhere.
 //   host-direct [port] [password|-]     hosts on TCP+UDP port (default 47810), asks the router to open it (UPnP/NAT-PMP),
 //                                       prints "addresses ..." and "join code ...", echoes every
 //                                       message back as "echo:<text>", prints each joiner's selected ICE pair, exits

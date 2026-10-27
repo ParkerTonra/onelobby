@@ -16,7 +16,7 @@ using Xunit.Abstractions;
 namespace OneLobby.DataChannel.Tests;
 
 /// <summary>
-/// Direct IP (docs/direct-ip.md) with real libdatachannel over loopback, all in one process: the host runs the hub and
+/// Direct IP (docs/design/direct-ip.md) with real libdatachannel over loopback, all in one process: the host runs the hub and
 /// listens on TCP P, its peer links share UDP P (ICE UDP mux), joiners dial the typed address. No server anywhere.
 /// </summary>
 public sealed class DirectIpTests
@@ -146,7 +146,7 @@ public sealed class DirectIpTests
         Assert.True(a.ReadyAsync.IsCompletedSuccessfully, a.ReadyAsync.Exception?.GetBaseException().Message);
         _log.WriteLine($"a ready after {sw.ElapsedMilliseconds} ms");
 
-        // the host's side of the selected ICE pair is on UDP P (docs/direct-ip.md s.2: one port number, both protocols)
+        // the host's side of the selected ICE pair is on UDP P (docs/design/direct-ip.md s.2: one port number, both protocols)
         PumpUntil(() => hostTransport.Links.Count == 1 && hostTransport.Links[0].LocalCandidate != null, Pump, "host reads its selected pair");
         _log.WriteLine("host pair: " + hostTransport.Links[0].LocalCandidate + " <-> " + hostTransport.Links[0].RemoteCandidate);
         Assert.Contains(" " + port + " typ ", hostTransport.Links[0].LocalCandidate);

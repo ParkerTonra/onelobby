@@ -73,7 +73,7 @@ namespace OneLobby
     /// <param name="IceServers">STUN/TURN servers from the hub's <c>welcome</c>.</param>
     /// <param name="RelayOnly">Only relay candidates (TURN).</param>
     /// <param name="PortRangeBegin">First local UDP port ICE may bind (0 = any). Direct-IP hosts pin
-    /// <c>PortRangeBegin = PortRangeEnd = P</c> so one forwarded port carries every peer (docs/direct-ip.md s.2).</param>
+    /// <c>PortRangeBegin = PortRangeEnd = P</c> so one forwarded port carries every peer (docs/design/direct-ip.md s.2).</param>
     /// <param name="PortRangeEnd">Last local UDP port ICE may bind (0 = any).</param>
     /// <param name="ExtraRemoteCandidates">ICE candidate lines the link adds for the remote side once the remote
     /// description is set, e.g. <c>candidate:1 1 UDP 2122317823 203.0.113.7 47810 typ host</c>: a direct-IP joiner adds

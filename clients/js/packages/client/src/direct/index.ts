@@ -1,7 +1,7 @@
 /// <reference types="node" />
 /**
  * `onelobby/direct` (Node only): host a direct-IP lobby from a Node process, with no server of anyone's
- * (docs/direct-ip.md). The process runs the signaling hub, listens on TCP `port`, binds its peer links to UDP `port`,
+ * (docs/design/direct-ip.md). The process runs the signaling hub, listens on TCP `port`, binds its peer links to UDP `port`,
  * asks the router to forward both (UPnP, then NAT-PMP) and hands out a join code. Joiners use `kit.joinDirect(code)`
  * from `onelobby` (Node or browser) or `JoinDirectAsync` in C#; the wire protocol is the same, so they mix.
  *
@@ -114,7 +114,7 @@ export type DirectLobby = Lobby & {
 };
 
 /**
- * Hosts a direct-IP lobby (docs/direct-ip.md s.3): starts the hub and listener on `port`, opens the router port
+ * Hosts a direct-IP lobby (docs/design/direct-ip.md s.3): starts the hub and listener on `port`, opens the router port
  * (unless `openPort: false`), connects `kit` to the hub in memory and creates the lobby. Resolves with the lobby;
  * show `lobby.joinCode` with `lobby.joinCodeKind` ("internet" or "same_network"). Rejects with `port_in_use`.
  * When the lobby ends (leave, or the process exits) the listener closes and the router mapping is removed; joiners

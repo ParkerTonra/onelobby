@@ -6,7 +6,7 @@ using Xunit;
 
 namespace OneLobby.Server.Tests;
 
-/// <summary>The in-game listener (docs/direct-ip.md s.5 step 3) over real loopback TCP.</summary>
+/// <summary>The in-game listener (docs/design/direct-ip.md s.5 step 3) over real loopback TCP.</summary>
 public class DirectHubHostTests
 {
     [Fact]

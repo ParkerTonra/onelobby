@@ -1,7 +1,7 @@
 import { CROCKFORD_ALPHABET } from "./crockford.js";
 
 /**
- * `dc1` join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in
+ * `dc1` join codes (docs/design/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in
  * 11 Crockford characters, shown `6B01-RGFE-P2B`. The code is the address in disguise, so decoding asks nobody.
  * Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5 (CRC-5, polynomial 0x05, over the 50
  * bits before it). One mistyped character always fails the check.

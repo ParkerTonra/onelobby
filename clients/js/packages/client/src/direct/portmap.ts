@@ -61,7 +61,7 @@ class UpnpError extends Error {
 }
 
 /**
- * Opens TCP and UDP `port` on the home router for a direct-IP host (docs/direct-ip.md s.2a): UPnP IGD (SSDP, then
+ * Opens TCP and UDP `port` on the home router for a direct-IP host (docs/design/direct-ip.md s.2a): UPnP IGD (SSDP, then
  * GetExternalIPAddress + AddPortMapping), then NAT-PMP (RFC 6886). Node twin of C#'s `PortMapper`, same order and rules:
  * same external and internal port or nothing (a join code carries one port), leases renew at half-life, {@link close}
  * deletes the mappings. Windows Firewall drops SSDP replies on a network marked Public; the result is then unmapped.

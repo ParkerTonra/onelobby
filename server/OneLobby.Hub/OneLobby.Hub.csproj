@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The signaling hub: onelobby-server runs it behind Kestrel, a game hosting by IP runs it in-process
-       (DirectHubHost, docs/direct-ip.md). netstandard2.1 so Unity and other engines can load it. -->
+       (DirectHubHost, docs/design/direct-ip.md). netstandard2.1 so Unity and other engines can load it. -->
   <PropertyGroup>
     <TargetFramework></TargetFramework>
     <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>

@@ -6,7 +6,7 @@ namespace OneLobby.Direct
 {
     /// <summary>
     /// The direct-IP host's own signaling socket: talks to the embedded <see cref="Hub"/> in memory, no network
-    /// (docs/direct-ip.md s.5 step 4). Sends go straight into the hub; the hub's replies queue until
+    /// (docs/design/direct-ip.md s.5 step 4). Sends go straight into the hub; the hub's replies queue until
     /// <see cref="TryReceive"/> drains them on the pumping thread.
     /// </summary>
     public sealed class HubSignalingSocket : ISignalingSocket

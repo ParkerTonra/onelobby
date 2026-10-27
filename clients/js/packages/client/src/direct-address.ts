@@ -1,5 +1,5 @@
 /**
- * A direct-IP host address as a player types it (docs/direct-ip.md s.3): `ip`, `ip:port`, `[v6]:port`, a bare IPv6
+ * A direct-IP host address as a player types it (docs/design/direct-ip.md s.3): `ip`, `ip:port`, `[v6]:port`, a bare IPv6
  * address or a host name (a virtual-LAN name, say). Same rules as OneLobby.Direct's `DirectAddress` in C#.
  */
 export interface DirectAddress {
@@ -12,7 +12,7 @@ export interface DirectAddress {
   url: string;
   /**
    * The address as a remote ICE host candidate (UDP, same port number as the TCP listener). Without it a joiner on the
-   * internet only learns the host's private LAN addresses (docs/direct-ip.md s.2).
+   * internet only learns the host's private LAN addresses (docs/design/direct-ip.md s.2).
    */
   candidate: string;
 }

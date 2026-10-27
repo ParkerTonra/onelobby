@@ -1,6 +1,6 @@
 /**
  * The signaling hub (protocol lk1) in TypeScript, for a Node process or a browser tab that hosts direct lobbies
- * (docs/direct-ip.md s.2): a line-by-line port of `server/OneLobby.Hub/Hub.cs`, held to the same rules by
+ * (docs/design/direct-ip.md s.2): a line-by-line port of `server/OneLobby.Hub/Hub.cs`, held to the same rules by
  * `conformance/server`. Transport-agnostic: feed it text frames with `receive`, call `tick` about once a second.
  * Metrics (same names, labels and help text as C#, rendered by `metrics.render()`) are counted too, so every hub shape
  * looks the same from outside; everything else (codes, list, resume, private lobbies, kicks, migration claims, TURN
@@ -64,7 +64,7 @@ export function defaultHubOptions(): HubOptions {
   };
 }
 
-/** Settings for a hub inside the host's game (docs/direct-ip.md s.2): no codes, no list, no ICE servers. */
+/** Settings for a hub inside the host's game (docs/design/direct-ip.md s.2): no codes, no list, no ICE servers. */
 export function directHubOptions(maxPlayers: number, password?: string | null): HubOptions {
   const n = Math.min(250, Math.max(2, maxPlayers));
   return {

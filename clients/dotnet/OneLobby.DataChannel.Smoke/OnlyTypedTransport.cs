@@ -5,7 +5,7 @@ using OneLobby;
 // join-direct --only-typed: the joiner throws away every ICE candidate the host offers (SDP a=candidate lines and
 // trickled ice), so the typed address (added inside the link as ExtraRemoteCandidates) is the only way to reach the host.
 // That is what a joiner on the internet sees when the host is behind a forwarded port: the host's own candidates are
-// private and unreachable. One machine can then prove the docs/direct-ip.md s.2 candidate rule without a second network.
+// private and unreachable. One machine can then prove the docs/design/direct-ip.md s.2 candidate rule without a second network.
 internal sealed class OnlyTypedTransport : ITransport
 {
     private readonly ITransport _inner;

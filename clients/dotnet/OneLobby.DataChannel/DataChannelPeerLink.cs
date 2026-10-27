@@ -308,7 +308,7 @@ namespace OneLobby.DataChannel
                 fixed (byte* ps = sdp) fixed (byte* pt = tb) r = Rtc.rtcSetRemoteDescription(_pc, ps, pt);
                 if (r < 0) { Fail("rtcSetRemoteDescription " + type + " " + r); return; }
                 _remoteSet = true;
-                // e.g. the address a direct-IP joiner typed (docs/direct-ip.md s.2), tagged with the remote's media id
+                // e.g. the address a direct-IP joiner typed (docs/design/direct-ip.md s.2), tagged with the remote's media id
                 if (_opts.ExtraRemoteCandidates != null)
                     foreach (var extra in _opts.ExtraRemoteCandidates) AddIce(extra, MidOf(s.Sdp));
                 while (_pendingIce.Count > 0) { var (c, m) = _pendingIce.Dequeue(); AddIce(c, m); }

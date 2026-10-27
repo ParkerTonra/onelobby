@@ -155,7 +155,7 @@ write('gridpaint.json', {
   snapshotAtTick100_code_7HQ4K2: { tick: 100, bytes: hex(snap100), hash: g.hash().toString() },
 });
 
-// ---- joincode.json: dc1 join codes (docs/direct-ip.md s.2a) ----
+// ---- joincode.json: dc1 join codes (docs/design/direct-ip.md s.2a) ----
 const jcValid = [
   ['127.0.0.1', 47810], ['192.168.1.20', 47810], ['10.0.0.188', 47810], ['203.0.113.7', 47810],
   ['0.0.0.0', 1], ['255.255.255.255', 65535], ['100.101.102.103', 41641], ['8.8.8.8', 34197],
@@ -171,7 +171,7 @@ const v2 = (() => { // a well-formed code with version 10: must decode as unknow
   return s;
 })();
 write('joincode.json', {
-  desc: 'dc1 join codes (docs/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens. Version 1 (rooms) is version:2 = 1 | room:48 | crc5 (spec/nostr-signaling.md s.1); decode gives { room } as 12 lower-case hex digits.',
+  desc: 'dc1 join codes (docs/design/direct-ip.md s.2a): version:2 | ipv4:32 | port:16 | crc5(poly 0x05, init 0, MSB first, over the 50 bits before it). Display 4-4-3 with hyphens. Version 1 (rooms) is version:2 = 1 | room:48 | crc5 (spec/nostr-signaling.md s.1); decode gives { room } as 12 lower-case hex digits.',
   valid: jcValid,
   aliases: [
     { input: jcValid[3].code.toLowerCase(), ip: '203.0.113.7', port: 47810, note: 'lower case' },

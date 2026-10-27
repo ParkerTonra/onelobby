@@ -4,7 +4,7 @@
     <RootNamespace>OneLobby.Direct</RootNamespace>
     <AssemblyName>OneLobby.Direct</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Host and join OneLobby lobbies by IP address: the host's game runs the signaling hub, no server of anyone's (docs/direct-ip.md).</Description>
+    <Description>Host and join OneLobby lobbies by IP address: the host's game runs the signaling hub, no server of anyone's (docs/design/direct-ip.md).</Description>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OneLobby.DataChannel.Tests" />

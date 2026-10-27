@@ -2,7 +2,7 @@ namespace OneLobby.Server;
 
 /// <summary>
 /// The settings <see cref="Hub"/> reads. <c>onelobby-server</c> fills them from flags (<c>ServerOptions</c>); a game
-/// hosting by IP fills them in code (<see cref="ForDirect"/>, docs/direct-ip.md s.2).
+/// hosting by IP fills them in code (<see cref="ForDirect"/>, docs/design/direct-ip.md s.2).
 /// </summary>
 public class HubOptions
 {
@@ -47,7 +47,7 @@ public class HubOptions
     /// <summary>False: lobbies still get an internal code, but <c>lobby</c> messages carry <c>code: ""</c> and <c>list</c> is empty.</summary>
     public bool IssueCodes { get; set; } = true;
 
-    /// <summary>Settings for a hub that runs inside the host's game (docs/direct-ip.md s.2): no codes, no list, no ICE servers.</summary>
+    /// <summary>Settings for a hub that runs inside the host's game (docs/design/direct-ip.md s.2): no codes, no list, no ICE servers.</summary>
     public static HubOptions ForDirect(int maxPlayers, string? password) => new()
     {
         SingleLobby = true,

@@ -96,7 +96,7 @@ export interface LobbyConfig {
    */
   readyTimeoutMs?: number;
   /**
-   * Direct IP (docs/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
+   * Direct IP (docs/design/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
    * (link, peer_left, a host_changed from the hub as it shuts down, or the signaling socket) ends with "host_left".
    */
   direct?: boolean;
@@ -160,7 +160,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   /** Last measured round trip to the host in ms (joiners), or 0. */
   rtt = 0;
   /**
-   * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/direct-ip.md
+   * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/design/direct-ip.md
    * s.2a). Show it with joinCodeKind. Empty when the machine has no IPv4 address, and on joiners.
    */
   joinCode = "";

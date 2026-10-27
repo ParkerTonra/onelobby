@@ -72,7 +72,7 @@ namespace OneLobby
         }
 
         public static string Join(string code) => Build(w => { w.WriteString("t", "join"); w.WriteString("code", code); });
-        /// <summary>Direct IP: the hub runs one lobby, so no code (docs/direct-ip.md s.2).</summary>
+        /// <summary>Direct IP: the hub runs one lobby, so no code (docs/design/direct-ip.md s.2).</summary>
         public static string JoinDirect(string? password) => Build(w =>
         {
             w.WriteString("t", "join");

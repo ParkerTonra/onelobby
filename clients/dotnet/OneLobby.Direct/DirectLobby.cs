@@ -32,7 +32,7 @@ namespace OneLobby.Direct
         public RateLimit? RateLimit { get; set; }
         /// <summary>
         /// Ask the home router to forward TCP + UDP P (UPnP, then NAT-PMP) so the join code works from the internet
-        /// (docs/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on, except with
+        /// (docs/design/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on, except with
         /// <see cref="PublicAddress"/> set: then the router is asked only when this is set to true explicitly.
         /// </summary>
         public bool OpenPort
@@ -71,7 +71,7 @@ namespace OneLobby.Direct
     }
 
     /// <summary>
-    /// Host or join by IP address, with no server of anyone's (docs/direct-ip.md). The host's game runs the signaling
+    /// Host or join by IP address, with no server of anyone's (docs/design/direct-ip.md). The host's game runs the signaling
     /// hub and listens on TCP <c>P</c>; peer links use UDP <c>P</c>; the host forwards that one port for friends outside
     /// its network. Everything after host/join is the normal <see cref="Lobby"/> API. Like <c>HostAsync</c>, these
     /// complete from inside <see cref="LobbyClient.Pump"/>.

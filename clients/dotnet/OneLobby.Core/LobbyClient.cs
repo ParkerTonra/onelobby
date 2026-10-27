@@ -31,7 +31,7 @@ namespace OneLobby
         internal OneLobbyConfig Config { get; }
         internal ITransport Transport { get; private set; }
         private readonly ITransport _baseTransport;
-        /// <summary>Where the hub is: the config's lobby server, or a direct-IP host (docs/direct-ip.md).</summary>
+        /// <summary>Where the hub is: the config's lobby server, or a direct-IP host (docs/design/direct-ip.md).</summary>
         private Uri _hubUri;
         /// <summary>Direct IP: the hub lives in the host, so the host leaving ends the session (no migration).</summary>
         internal bool Direct { get; private set; }
@@ -249,7 +249,7 @@ namespace OneLobby
                 if (Direct && _op != null && !_welcomed && (sock.State == SocketState.Closed
                     || (sock.State == SocketState.Connecting && _op.ConnectDeadlineMs > 0 && now > _op.ConnectDeadlineMs)))
                 {
-                    // docs/direct-ip.md s.3: no answer on the host's TCP port
+                    // docs/design/direct-ip.md s.3: no answer on the host's TCP port
                     FailOp(new OneLobbyException("direct_unreachable",
                         _hubUri.Scheme == "onelobby-nostr"
                             ? (string.IsNullOrEmpty(sock.CloseReason) ? "no answer through the Nostr relays" : sock.CloseReason!) // the socket says why, as in JS

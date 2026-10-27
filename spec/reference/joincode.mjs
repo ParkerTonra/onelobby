@@ -1,4 +1,4 @@
-// Reference `dc1` join code (docs/direct-ip.md s.2a): the direct-IP host's IPv4 address and port in 11 Crockford
+// Reference `dc1` join code (docs/design/direct-ip.md s.2a): the direct-IP host's IPv4 address and port in 11 Crockford
 // characters, so a friend pastes a code instead of an address and nothing outside the two games is asked.
 //
 //   bits (MSB first): version:2 (00 = IPv4) | ipv4:32 | port:16 | crc:5   = 55 bits = 11 characters

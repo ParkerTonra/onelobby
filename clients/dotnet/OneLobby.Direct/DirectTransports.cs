@@ -90,7 +90,7 @@ namespace OneLobby.Direct
 
     /// <summary>
     /// Joiner side: signaling over the real transport's WebSocket to <c>ws://ip:P/</c>; every peer link offers no ICE
-    /// servers and adds the typed address as a remote host candidate (docs/direct-ip.md s.2: without it a joiner on the
+    /// servers and adds the typed address as a remote host candidate (docs/design/direct-ip.md s.2: without it a joiner on the
     /// internet only learns the host's private LAN addresses).
     /// </summary>
     internal sealed class DirectJoinTransport : ITransport

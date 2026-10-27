@@ -4,7 +4,7 @@ using System.Globalization;
 namespace OneLobby
 {
     /// <summary>
-    /// <c>dc1</c> join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and
+    /// <c>dc1</c> join codes (docs/design/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and
     /// port in 11 Crockford characters, shown <c>K3J7-X9QA-2MT</c>. The code is the address in disguise, so decoding
     /// needs nothing outside the game. Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5,
     /// CRC-5 with polynomial 0x05 over the 50 bits before it, which catches every single mistyped character.

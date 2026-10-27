@@ -4,7 +4,7 @@ The host's game is the server, like Terraria "Host & Play" or Minecraft "Open to
 and listens on one port, **47810** by default (TCP for signaling, UDP for the game). It asks the home router to open that
 port (UPnP, then NAT-PMP) and shows a **join code** such as `6B01-RGFE-P2B`. Friends paste the code. The code *is* the
 host's address in disguise, decoded by the joiner's game, so nobody runs a lobby server and nothing can go offline.
-Design and sources: [docs/direct-ip.md](../direct-ip.md) (s.2a for codes and the router).
+Design and sources: [docs/design/direct-ip.md](../design/direct-ip.md) (s.2a for codes and the router).
 
 Hosts: .NET desktop through `OneLobby.DataChannel` (any .NET app), **Unity** desktop (`com.onelobby.unity` 0.2.0+:
 `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync`, see the [Unity recipe](unity.md)), and **Node** through `onelobby/direct`
@@ -210,7 +210,7 @@ const mine = await hostDirect(kit, { nostr: { relays: ["wss://nos.lol"], stun: [
 
 - **Startup line.** With Nostr on it reads `OneLobby: direct host listening on TCP+UDP :47810; code D1PB-1X9S-FPV (Nostr); ip
   code 0A00-0BSJ-BYQ (SameNetwork); port mapping off; nostr 7/7 relays`; the end is `; nostr: no relay reachable` when none
-  answered within 10 s, and then `joinCode` is the IP code until a relay connects (`joinCodeChanged` fires, the line prints again).
+  answered within 3 s, and then `joinCode` is the IP code until a relay connects (`joinCodeChanged` fires, the line prints again).
 - **Relays.** `hosting.nostrRelays` in the blueprint (else the library's seven, probed 2026-10-26). All relays are used at once;
   one is enough. `checkNostrRelays(urls, timeoutMs)` returns `{ url, ok, ms, error? }` per relay (connect, subscribe, publish one
   kind 25050 event, see it echoed); the `onelobby` skill runs it when it writes a blueprint. `kit.joinDirect(code, { nostrRelays, stun })` overrides per join.
@@ -316,7 +316,7 @@ Facts a game can run into with `hostDirect` / `hostNostr` (same numbers in C# an
 
 - **Startup line and codes.** `hostDirect` starts Nostr signaling by default: the startup line gains `; ip code ...` and
   ends `; nostr 5/7 relays` (or `; nostr: no relay reachable`, and then `joinCode` is the IP code until a relay connects,
-  when `joinCodeChanged` fires). `hostDirect` waits up to 10 s for the first relay (and the router, in parallel) before it
+  when `joinCodeChanged` fires). `hostDirect` waits up to 3 s for the first relay (and the router, in parallel) before it
   resolves. `joinDirect` with a version 1 code and no relay or no answer fails with `direct_unreachable`.
 - **`hostNostr`: host from a browser tab.** `kit.hostNostr(options?)` (main entry, browser or Node) hosts a direct lobby
   with no Node process and no port: the hub runs in the page and joiners find it through Nostr relays with a version 1

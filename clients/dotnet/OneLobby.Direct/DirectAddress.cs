@@ -24,7 +24,7 @@ namespace OneLobby.Direct
 
         /// <summary>
         /// The typed address as a remote ICE host candidate (UDP, same port number as the TCP listener), for
-        /// <c>PeerLinkOptions.ExtraRemoteCandidates</c> (docs/direct-ip.md s.2). Host names are resolved by the transport.
+        /// <c>PeerLinkOptions.ExtraRemoteCandidates</c> (docs/design/direct-ip.md s.2). Host names are resolved by the transport.
         /// </summary>
         public string Candidate => "candidate:1 1 UDP 2122317823 " + Host + " " + Port.ToString(CultureInfo.InvariantCulture) + " typ host";
 

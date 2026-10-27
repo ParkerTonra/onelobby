@@ -8,7 +8,7 @@ using Xunit;
 
 namespace OneLobby.Server.Tests;
 
-/// <summary>PortMapper against fake gateways on loopback (docs/direct-ip.md s.5 step 8).</summary>
+/// <summary>PortMapper against fake gateways on loopback (docs/design/direct-ip.md s.5 step 8).</summary>
 public class PortMapperTests
 {
     /// <summary>SSDP responder + IGD description + WANIPConnection SOAP control, all on 127.0.0.1.</summary>

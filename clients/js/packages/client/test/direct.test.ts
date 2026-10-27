@@ -19,7 +19,7 @@ import { specJson } from "./spec.js";
 const hostIp = (k: OneLobby, o: Parameters<typeof hostDirect>[1] = {}) => hostDirect(k, { nostr: false, bindHost: "127.0.0.1", ...o });
 
 /**
- * Direct IP in Node (docs/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
+ * Direct IP in Node (docs/design/direct-ip.md): a Node process hosts with onelobby/direct, joiners use kit.joinDirect, real
  * WebRTC through node-datachannel (libdatachannel) on loopback. No server anywhere.
  */
 

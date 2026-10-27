@@ -1,4 +1,4 @@
-// Direct-IP smoke in Node (docs/direct-ip.md), the twin of `OneLobby.DataChannel.Smoke host-direct / join-direct`:
+// Direct-IP smoke in Node (docs/design/direct-ip.md), the twin of `OneLobby.DataChannel.Smoke host-direct / join-direct`:
 // same echo protocol, so a Node host and a .NET joiner (or the other way round) prove the two stacks interoperate.
 // Needs a build (npm run build) and node-datachannel (a devDependency of onelobby).
 //   node e2e/direct-smoke.mjs host [port] [password|-] [--no-upnp]   prints "join code ...", echoes, exits after "bye"

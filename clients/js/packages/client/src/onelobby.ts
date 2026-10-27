@@ -135,7 +135,7 @@ export interface ListOptions {
 export interface JoinDirectOptions {
   /** The host's password, if it set one; a wrong one fails with `bad_password`. */
   password?: string;
-  /** Port for an address typed without one (default 47810, docs/direct-ip.md s.2). */
+  /** Port for an address typed without one (default 47810, docs/design/direct-ip.md s.2). */
   defaultPort?: number;
   /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
   connectTimeoutMs?: number;
@@ -478,7 +478,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   }
 
   /**
-   * Join a direct-IP host (docs/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
+   * Join a direct-IP host (docs/design/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
    * or hyphens) or, advanced, an address (`ip`, `ip:port`, `[v6]:port`). No lobby server is involved: the code is
    * the host's address. A mistyped code fails at once with `bad_code`; nobody listening is `direct_unreachable`.
    * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
