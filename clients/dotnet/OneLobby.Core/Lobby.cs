@@ -26,7 +26,7 @@ namespace OneLobby
             public readonly ChunkAssembler Chunks = new(); // per sender: every sender numbers its own chunk ids
             /// <summary>The server said this peer is gone while its link was open: finish when the link closes or at <see cref="DepartAtMs"/>.</summary>
             public Action? Departure;
-            public long DepartAtMs;
+            public long DepartAtMs, DepartCapMs;
             /// <summary>Host: joined but not ready yet (PeerFailed pending); <see cref="WatchDeadlineMs"/> 0 = no timer.</summary>
             public bool Watching;
             public long WatchDeadlineMs;
@@ -40,10 +40,13 @@ namespace OneLobby
         public const int ClaimWaitMs = 6000;
         public const int MigrationGraceMs = 1500;
         /// <summary>
-        /// A departure the server announces (peer left, direct host gone) waits up to this long for the peer's open link
-        /// to close, reading it meanwhile, so the last messages it flushed before leaving still arrive.
+        /// A departure the server announces (peer left, direct host gone) waits for the peer's open link to close, reading
+        /// it meanwhile, so the last messages it flushed before leaving still arrive: until this long passes with nothing
+        /// received from it, and never past <see cref="LeaveMaxMs"/>.
         /// </summary>
         public const int LeaveGraceMs = 500;
+        /// <summary>The longest a departure waits while the leaving peer's last messages keep arriving.</summary>
+        public const int LeaveMaxMs = 5000;
 
         private readonly LobbyClient _c;
         private readonly ITransport _t;
@@ -168,19 +171,20 @@ namespace OneLobby
         public bool JoinCodeFinal { get; internal set; } = true;
 
         /// <summary>
-        /// The join code once <see cref="JoinCodeFinal"/>, or whatever <see cref="JoinCode"/> is when <paramref name="timeout"/>
-        /// runs out (keep showing it and follow <see cref="JoinCodeChanged"/>), so a game need not hold the code itself.
-        /// Completes inside <see cref="Pump"/>, so keep pumping while you await it.
+        /// The join code once <see cref="JoinCodeFinal"/> (<c>Final</c> true), or whatever <see cref="JoinCode"/> is when
+        /// <paramref name="timeout"/> runs out or the lobby ends (<c>Final</c> false: keep showing it and follow
+        /// <see cref="JoinCodeChanged"/>), so a game need not hold the code itself. Completes inside <see cref="Pump"/>, so
+        /// keep pumping while you await it.
         /// </summary>
-        public Task<string> FinalJoinCodeAsync(TimeSpan timeout)
+        public Task<(string Code, bool Final)> FinalJoinCodeAsync(TimeSpan timeout)
         {
-            if (JoinCodeFinal || _closed) return Task.FromResult(JoinCode);
-            var tcs = new TaskCompletionSource<string>();
+            if (JoinCodeFinal || _closed) return Task.FromResult((JoinCode, JoinCodeFinal));
+            var tcs = new TaskCompletionSource<(string Code, bool Final)>();
             _codeWaits.Add((tcs, timeout < TimeSpan.Zero ? long.MaxValue : NowMs + (long)timeout.TotalMilliseconds));
             return tcs.Task;
         }
 
-        private readonly List<(TaskCompletionSource<string> Tcs, long Until)> _codeWaits = new();
+        private readonly List<(TaskCompletionSource<(string Code, bool Final)> Tcs, long Until)> _codeWaits = new();
 
         private void CheckCodeWaits(long now)
         {
@@ -189,7 +193,7 @@ namespace OneLobby
                 var (tcs, until) = _codeWaits[i];
                 if (!JoinCodeFinal && now < until) continue;
                 _codeWaits.RemoveAt(i);
-                tcs.TrySetResult(JoinCode);
+                tcs.TrySetResult((JoinCode, JoinCodeFinal));
             }
         }
 
@@ -549,6 +553,8 @@ namespace OneLobby
                 while (rec.Link != null && rec.Link.TryReceive(out var ch, out var data))
                 {
                     rec.LastRxMs = now;
+                    // still delivering what it flushed (SCTP's own buffer drains after bufferedAmount hit 0): wait on
+                    if (rec.Departure != null) rec.DepartAtMs = Math.Min(now + LeaveGraceMs, rec.DepartCapMs);
                     try { HandleFrame(rec, ch, data); }
                     catch (FormatException) { /* malformed frame: drop */ }
                     if (_closed) return;
@@ -1166,6 +1172,7 @@ namespace OneLobby
             if (rec.Link == null) { finish(); return; }
             rec.Departure = finish;
             rec.DepartAtMs = NowMs + LeaveGraceMs;
+            rec.DepartCapMs = NowMs + LeaveMaxMs;
             if (!rec.Link.IsOpen) FinishDeparture(rec);       // already closed: read what it delivered, then finish
         }
 
@@ -1300,7 +1307,7 @@ namespace OneLobby
             _lingering.Clear();
             foreach (var (tcs, _) in _flushes) tcs.TrySetResult(false);
             _flushes.Clear();
-            foreach (var (tcs, _) in _codeWaits) tcs.TrySetResult(JoinCode);
+            foreach (var (tcs, _) in _codeWaits) tcs.TrySetResult((JoinCode, false));
             _codeWaits.Clear();
             Voice.Enabled = false;
             _c.LobbyClosed(this);

@@ -173,7 +173,7 @@ Full reference (generated): `docs/api/`.
 - Unity `OneLobbyRunner` sets `Application.runInBackground = true` from Host/Join until the lobby ends (then restores
   it), so an unfocused window keeps pumping; opt out with `KeepRunningInBackground = false`.
 - A peer that leaves on purpose is not cut off: when the server (or a direct host's socket) says it is gone, the lobby
-  keeps reading its link until that closes (at most `Lobby.LeaveGraceMs`, 500 ms), so messages it sent before
+  keeps reading its link until that closes (C#: while frames keep arriving, until 500 ms pass with none, at most 5 s: `Lobby.LeaveGraceMs`, `LeaveMaxMs`), so messages it sent before
   `LeaveAsync` arrive before `PeerLeft` / `HostChanged` / `SessionEnded`. `FlushAsync` makes sure they left its machine.
   The same grace applies when the server times a peer out or its seat is taken over; `KickAsync` / `DisconnectAsync`
   cut it off at once.
