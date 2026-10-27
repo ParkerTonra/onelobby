@@ -385,12 +385,21 @@ namespace OneLobby.DataChannel
             // unregister first: callbacks racing with the delete below find nothing and return
             for (var i = 0; i < 3; i++) if (_dc[i] >= 0) ById.TryRemove(_dc[i], out _);
             if (_pc >= 0) ById.TryRemove(_pc, out _);
-            try
+            // A zero bufferedAmount only means libdatachannel handed the bytes to SCTP; deleting the peer connection now
+            // would drop what SCTP has not delivered yet. Close the channels (each stream reset goes out after its queued
+            // data, so the far side sees the link close after the last message) and delete everything a moment later.
+            var dc = (int[])_dc.Clone();
+            var pc = _pc;
+            try { for (var i = 0; i < 3; i++) if (dc[i] >= 0) Rtc.rtcClose(dc[i]); }
+            catch (DllNotFoundException) { return; /* never loaded */ }
+            System.Threading.Tasks.Task.Delay(CloseGraceMs).ContinueWith(_ =>
             {
-                for (var i = 0; i < 3; i++) if (_dc[i] >= 0) Rtc.rtcDeleteDataChannel(_dc[i]);
-                if (_pc >= 0) Rtc.rtcDeletePeerConnection(_pc);
-            }
-            catch (DllNotFoundException) { /* never loaded */ }
+                for (var i = 0; i < 3; i++) if (dc[i] >= 0) Rtc.rtcDeleteDataChannel(dc[i]);
+                if (pc >= 0) Rtc.rtcDeletePeerConnection(pc);
+            }, System.Threading.Tasks.TaskScheduler.Default);
         }
+
+        /// <summary>How long a disposed link's peer connection stays up so SCTP can deliver what was already sent.</summary>
+        public const int CloseGraceMs = 2000;
     }
 }

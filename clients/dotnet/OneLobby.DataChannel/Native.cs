@@ -87,6 +87,7 @@ namespace OneLobby.DataChannel
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcGetSelectedCandidatePair(int pc, byte* local, int localSize, byte* remote, int remoteSize);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcCreateDataChannelEx(int pc, byte* label, ref DataChannelInit init);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcDeleteDataChannel(int dc);
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcClose(int id);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetOpenCallback(int id, OpenCallback cb);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetClosedCallback(int id, ClosedCallback cb);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetErrorCallback(int id, ErrorCallback cb);
