@@ -58,6 +58,8 @@ interface Relay {
   url: string;
   ws: SocketLike | null;
   open: boolean;
+  /** The first connect to this relay has succeeded or failed (a dead relay is known to be dead). */
+  attempted: boolean;
   skipped: boolean;
   backoff: number;
   cancelRetry: (() => void) | null;
@@ -75,7 +77,7 @@ export class RelayPool {
   private waiters: (() => void)[] = [];
 
   constructor(private readonly o: RelayPoolOptions) {
-    this.relays = o.urls.map((url) => ({ url, ws: null, open: false, skipped: false, backoff: 1000, cancelRetry: null }));
+    this.relays = o.urls.map((url) => ({ url, ws: null, open: false, attempted: false, skipped: false, backoff: 1000, cancelRetry: null }));
   }
 
   get total(): number {
@@ -85,6 +87,11 @@ export class RelayPool {
   /** Relays connected right now (and not skipped). */
   get connected(): number {
     return this.relays.filter((r) => r.open && !r.skipped).length;
+  }
+
+  /** Every relay has either connected, failed a connect, or been skipped: waiting longer for the rest is pointless. */
+  get settled(): boolean {
+    return this.relays.every((r) => r.attempted || r.skipped);
   }
 
   start(): void {
@@ -143,6 +150,7 @@ export class RelayPool {
     try {
       ws = this.o.connect(r.url);
     } catch {
+      r.attempted = true;
       this.retryLater(r);
       return;
     }
@@ -150,6 +158,7 @@ export class RelayPool {
     ws.onopen = () => {
       if (r.ws !== ws) return;
       r.open = true;
+      r.attempted = true;
       r.backoff = 1000;
       const since = Math.floor(this.o.wall() / 1000) - SINCE_SLACK_S;
       this.trySend(r, JSON.stringify(["REQ", this.sub, { kinds: [NOSTR_KIND], "#t": [this.o.topic], since }]));
@@ -163,6 +172,7 @@ export class RelayPool {
       const wasOpen = r.open;
       r.ws = null;
       r.open = false;
+      r.attempted = true;
       if (wasOpen) this.changed();
       this.retryLater(r);
     };

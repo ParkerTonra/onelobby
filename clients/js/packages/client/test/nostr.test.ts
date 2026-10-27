@@ -252,6 +252,21 @@ describe("relay pool", () => {
   });
 });
 
+describe("relay pool settled", () => {
+  it("is true once every relay has connected or failed, not before; a dead relay counts", async () => {
+    const relays = new FakeRelays();
+    relays.down.add("wss://c.test");
+    const pool = new RelayPool({ urls: ["wss://a.test", "wss://b.test", "wss://c.test"], topic: "tt", connect: relays.connect, clock: systemClock, wall: Date.now, onEvent: () => {} });
+    expect(pool.settled).toBe(false);
+    pool.start();
+    expect(pool.settled).toBe(false); // nothing has answered yet
+    await new Promise((r) => setTimeout(r, 50));
+    expect(pool.settled).toBe(true);
+    expect(pool.connected).toBe(2); // c is dead but known to be
+    pool.close();
+  });
+});
+
 describe("checkNostrRelays", () => {
   it("reports ok for an echoing relay, and the reason for the others", async () => {
     const relays = new FakeRelays();

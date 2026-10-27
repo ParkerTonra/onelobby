@@ -62,6 +62,11 @@ export class NostrRoom {
     return this.pool.total;
   }
 
+  /** Every relay has connected, failed or been skipped. */
+  get relaysSettled(): boolean {
+    return this.pool.settled;
+  }
+
   whenUp(timeoutMs: number): Promise<boolean> {
     return this.pool.whenUp(timeoutMs);
   }

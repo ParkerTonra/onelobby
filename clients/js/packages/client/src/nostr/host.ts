@@ -75,6 +75,10 @@ export class NostrHostBridge {
     return this.room.whenUp(timeoutMs);
   }
 
+  get relaysSettled(): boolean {
+    return this.room.relaysSettled;
+  }
+
   /** Waits for the relays: true once one is connected (then up to RELAY_REST_WAIT_MS more for the rest), false after `firstRelayMs`. */
   async settle(firstRelayMs: number): Promise<boolean> {
     if (!(await this.whenUp(firstRelayMs))) return false;
