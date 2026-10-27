@@ -63,10 +63,9 @@ namespace OneLobby.Direct
         /// Nostr signaling (spec/nostr-signaling.md), default on: <see cref="Lobby.JoinCode"/> becomes a version 1 code that
         /// joins through any router over public relays, and <see cref="Lobby.DirectCode"/> keeps the IP-address code. Set
         /// <see cref="NostrOptions.Enabled"/> false for IP codes only; <see cref="NostrOptions.Relays"/> and
-        /// <see cref="NostrOptions.Stun"/> replace the defaults. Relay precedence when hosting: this property's
-        /// <see cref="NostrOptions.Relays"/> if set; else the default list. The blueprint's <c>hosting.nostrRelays</c> is used only
-        /// by <c>HostDirectAsync(client)</c> without options (or via <c>Blueprint.ToDirectHostOptions()</c>), which copies it here.
-        /// The host startup line's <c>nostr n/m relays</c> shows the count in use.
+        /// <see cref="NostrOptions.Stun"/> replace the defaults. Relay precedence (hosting and joining alike): this
+        /// property's <see cref="NostrOptions.Relays"/> if set; else the client's blueprint <c>hosting.nostrRelays</c>; else the
+        /// default list. The host startup line's <c>nostr n/m relays</c> shows the count in use.
         /// </summary>
         public NostrOptions Nostr { get; set; } = new NostrOptions();
     }
@@ -147,7 +146,7 @@ namespace OneLobby.Direct
             if (manual.Length > 0 && !IsDottedIPv4(manual))
                 return Task.FromException<Lobby>(new OneLobbyException("bad_address",
                     "PublicAddress must be an IPv4 address like 203.0.113.7, got \"" + manual + "\""));
-            var nostr = o.Nostr ?? new NostrOptions();
+            var nostr = HostNostr(client, o.Nostr);
             DirectHubHost? hub = null;
             bool anyBusy = false, anyReserved = false;
             for (var p = port; hub == null; p++)
@@ -209,6 +208,18 @@ namespace OneLobby.Direct
             !anyReserved ? "is another copy of the game hosting?"
             : !anyBusy ? "Windows has reserved it (an excluded port range, often from Hyper-V, WSL or Docker); pick another port"
             : "each one is busy or reserved by Windows (an excluded port range); is another copy of the game hosting?";
+
+        /// <summary>The host's Nostr options, relays resolved like joining: the options' list, else the blueprint's, else the defaults.</summary>
+        internal static NostrOptions HostNostr(LobbyClient client, NostrOptions? options)
+        {
+            var nostr = options ?? new NostrOptions();
+            if (nostr.Relays is { Count: > 0 } || client.Blueprint is not { Hosting: { Relays: { Count: > 0 } bpRelays } }) return nostr;
+            return new NostrOptions
+            {
+                Enabled = nostr.Enabled, Relays = bpRelays, Stun = nostr.Stun,
+                RelayFactory = nostr.RelayFactory, NowMs = nostr.NowMs, UnixSeconds = nostr.UnixSeconds, AutoTick = nostr.AutoTick,
+            };
+        }
 
         /// <summary>The Nostr part of the host log line (JS <c>formatHostLog</c>'s <c>nostr</c> argument).</summary>
         /// <param name="DirectCode">The IP code, or empty when there is no IPv4 address.</param>

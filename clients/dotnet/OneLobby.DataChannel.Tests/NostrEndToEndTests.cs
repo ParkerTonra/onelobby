@@ -196,6 +196,25 @@ public sealed class NostrEndToEndTests
     }
 }
 
+public sealed class NostrRelayPrecedenceTests
+{
+    [Fact]
+    public void A_host_with_its_own_options_uses_the_blueprint_relays_unless_the_options_name_some()
+    {
+        var bp = Blueprint.Parse("{\"game\":{\"id\":\"com.you.game\"},\"hosting\":{\"nostrRelays\":[\"wss://relay.example.org\"]}}");
+        var withBp = LobbyClient.FromBlueprint(bp, new DataChannelTransport());
+        var plain = new LobbyClient(new OneLobbyConfig("com.you.game", "1", new Uri("ws://127.0.0.1:1/ws"), SyncMode.Raw), new DataChannelTransport());
+        Assert.Equal(new[] { "wss://relay.example.org" }, DirectLobby.HostNostr(withBp, new DirectHostOptions().Nostr).EffectiveRelays);
+        Assert.Equal(new[] { "wss://relay.example.org" }, DirectLobby.HostNostr(withBp, null).EffectiveRelays);
+        var mine = new NostrOptions { Relays = new[] { "wss://mine.example.org" }, Stun = new string[0] };
+        Assert.Same(mine, DirectLobby.HostNostr(withBp, mine));
+        Assert.Equal(NostrOptions.DefaultRelays, DirectLobby.HostNostr(plain, new NostrOptions()).EffectiveRelays);
+        var off = DirectLobby.HostNostr(withBp, new NostrOptions { Enabled = false, Stun = new string[0] });
+        Assert.False(off.Enabled);
+        Assert.Empty(off.Stun!);
+    }
+}
+
 public sealed class NostrStunTests
 {
     [Fact]
