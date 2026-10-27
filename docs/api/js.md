@@ -41,10 +41,14 @@ export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
-export { describeError, shareUrl, codeFromUrl, ErrorCodes } from "./friendly.js";
-export type { FriendlyError, ErrorCode } from "./friendly.js";
+export { describeError, shareUrl, codeFromUrl, directJoinInfo, ErrorCodes } from "./friendly.js";
+export type { FriendlyError, ErrorCode, JoinInfo } from "./friendly.js";
 export { Keepalive, KeepaliveError } from "./deprecated.js";
 export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
+export { checkNostrRelays, DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "./nostr/relays.js";
+export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
+export { encodeRoomCode } from "./joincode.js";
+export type { BrowserHostOptions, VisibilityDoc } from "./direct/browser-host.js";
 ```
 
 ## onelobby
@@ -56,7 +60,9 @@ import { Lobby, type RateLimit } from "./lobby.js";
 import { type LobbySummary } from "./signaling.js";
 import { type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
+import { type RelayConnect } from "./nostr/relays.js";
 import { type Blueprint } from "./blueprint.js";
+import { type BrowserHostOptions } from "./direct/browser-host.js";
 export declare const LIB_NAME = "onelobby";
 export declare const LIB_VERSION = "0.5.0";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
@@ -78,6 +84,8 @@ export interface AdvancedOptions {
     createSink?: (() => AudioSink) | null;
     /** Storage for `rememberSeat`; defaults to `sessionStorage` when the page has one. null disables it. */
     storage?: SeatStorage | null;
+    /** WebSocket to a Nostr relay (default: the runtime's `WebSocket`); for Node older than 22 or tests. */
+    nostrConnect?: RelayConnect;
 }
 export interface OneLobbyOptions {
     gameId: string;
@@ -157,10 +165,14 @@ export interface ListOptions {
 export interface JoinDirectOptions {
     /** The host's password, if it set one; a wrong one fails with `bad_password`. */
     password?: string;
-    /** Port for an address typed without one (default 47810, docs/direct-ip.md s.2). */
+    /** Port for an address typed without one (default 47810, docs/design/direct-ip.md s.2). */
     defaultPort?: number;
     /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
     connectTimeoutMs?: number;
+    /** Nostr relays for a Nostr code (version 1); default the blueprint's `hosting.nostrRelays`, else the library list. */
+    nostrRelays?: string[];
+    /** STUN servers for a Nostr code when the host offers none; default Google's and Cloudflare's public ones. */
+    stun?: string[];
 }
 /** @internal How onelobby/direct makes a host lobby: its own socket and link factory, and direct mode. */
 export interface DirectLobbyHooks {
@@ -198,7 +210,7 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     host(opts?: Partial<HostOptions>): Promise<Lobby>;
     join(code: string): Promise<Lobby>;
     /**
-     * Join a direct-IP host (docs/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
+     * Join a direct-IP host (docs/design/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
      * or hyphens) or, advanced, an address (`ip`, `ip:port`, `[v6]:port`). No lobby server is involved: the code is
      * the host's address. A mistyped code fails at once with `bad_code`; nobody listening is `direct_unreachable`.
      * The address is also given to ICE as the host's UDP candidate. When the host leaves, `sessionEnded("host_left")`.
@@ -210,8 +222,24 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      * same peer id comes back. Rejects with `invalid_token` when the seat is gone: offer `joinDirect` then.
      */
     rejoinDirect(codeOrAddress: string, resumeToken: string, opts?: JoinDirectOptions): Promise<Lobby>;
+    /** Opens the signaling socket of a direct target: TCP to the host's address, or Nostr relays for a version 1 code. */
+    /** A Nostr joiner needs STUN; take the host's list (it comes in `welcome`), else the public defaults. */
+    /** @internal onelobby/direct's Nostr host: the relay seam and the kit's clocks. */
+    nostrHostEnv(): {
+        connect: RelayConnect | undefined;
+        clock: Clock;
+        wall: () => number;
+    };
     /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
     hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby>;
+    /**
+     * Host a direct lobby from this browser tab (or any runtime with WebSocket and WebRTC): no Node process, no port.
+     * The hub runs in the page and joiners find it through Nostr relays with `lobby.joinCode` (a dc1 version 1 code,
+     * `joinCodeKind` "nostr"); they use `kit.joinDirect(code)`. Rejects with `direct_unreachable` when no relay answers
+     * within 10 s (a browser has no IP fallback) and `nostr_disabled` when the blueprint has `hosting.nostr` false.
+     * Keep the tab visible: hidden tabs are throttled (`lobby.hostHidden`, event `hostHiddenChanged`).
+     */
+    hostNostr(opts?: BrowserHostOptions): Promise<Lobby>;
     rejoin(resumeToken: string): Promise<Lobby>;
     list(opts?: ListOptions): Promise<LobbySummary[]>;
 }
@@ -241,6 +269,8 @@ export interface Blueprint {
         readonly lobbyServer: string;
         readonly directPort: number;
         readonly openPort: boolean;
+        readonly nostr: boolean;
+        readonly nostrRelays: readonly string[];
         readonly relayOnly: boolean;
         readonly allowedOrigins: readonly string[];
     };
@@ -313,6 +343,8 @@ export interface BlueprintInput {
         lobbyServer?: string;
         directPort?: number;
         openPort?: boolean;
+        nostr?: boolean;
+        nostrRelays?: string[];
         relayOnly?: boolean;
         allowedOrigins?: string[];
     };
@@ -392,6 +424,7 @@ export declare function parseBlueprint(json: unknown): Blueprint;
 
 ```ts
 import { Chat } from "./chat.js";
+import type { IpCodeKind, JoinCodeKind } from "./join-code-kind.js";
 import type { Clock } from "./clock.js";
 import { PROTO } from "./codec.js";
 import { Emitter } from "./emitter.js";
@@ -417,6 +450,8 @@ export interface KickOptions {
     reason?: string;
 }
 export type Peer = PeerInfo;
+/** What a direct host's `joinCode` is: see {@link Lobby.joinCodeKind}. */
+export type { JoinCodeKind };
 export type LobbyEvents = {
     peerJoined: [Peer];
     /** The peer's data channels are open and the handshake is done: reliable sends reach it now (earlier ones were queued and flushed). */
@@ -425,6 +460,13 @@ export type LobbyEvents = {
     ready: [];
     /** reason "left", "kicked", "disconnected" (kick with ban false), "timeout", ...; `close` when the host gave one. */
     peerLeft: [Peer, reason: string, close?: CloseInfo];
+    /**
+     * Host only: a joiner never got its link to the host open ("a friend could not connect"). reason "timeout" when it is
+     * not ready `readyTimeoutMs` after joining (it may still connect: `peerReady` then fires as usual), else the
+     * `peerLeft` reason when it leaves before it was ready (a joiner's own `ice_failed` ends that way). Fires at most once
+     * per peer, just before that `peerLeft`; not for peers the host kicks or disconnects.
+     */
+    peerFailed: [Peer, reason: string];
     joinRequested: [Peer];
     hostChanged: [hostId: number];
     phase: [Phase];
@@ -434,6 +476,16 @@ export type LobbyEvents = {
     /** The signaling server went away. The game continues on the data channels (s.9). */
     serverLost: [];
     metaChanged: [Record<string, string>];
+    /**
+     * Direct-IP host only: the join code changed after `hostDirect` resolved, e.g. the router answered a later port-mapping
+     * retry and the code went from "same_network" to "internet". Show the new code (and `joinUrl`).
+     */
+    joinCodeChanged: [code: string, kind: JoinCodeKind];
+    /**
+     * Browser host only (`kit.hostNostr`): the host tab went hidden (`true`) or visible again (`false`). Browsers throttle
+     * timers in hidden tabs, so joiners may see lag or drop; ask the host to keep the tab visible.
+     */
+    hostHiddenChanged: [hidden: boolean];
 };
 export interface LobbyConfig {
     signaling: SignalingClient;
@@ -453,7 +505,7 @@ export interface LobbyConfig {
      */
     readyTimeoutMs?: number;
     /**
-     * Direct IP (docs/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
+     * Direct IP (docs/design/direct-ip.md): the hub lives in the host, so there is no migration. A joiner that loses the host
      * (link, peer_left, a host_changed from the hub as it shuts down, or the signaling socket) ends with "host_left".
      */
     direct?: boolean;
@@ -498,21 +550,39 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** Last measured round trip to the host in ms (joiners), or 0. */
     rtt: number;
     /**
-     * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/direct-ip.md
+     * Direct-IP host only (onelobby/direct): the code friends paste to join, e.g. "6B01-RGFE-P2B" (docs/design/direct-ip.md
      * s.2a). Show it with joinCodeKind. Empty when the machine has no IPv4 address, and on joiners.
      */
     joinCode: string;
-    /** "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN address. */
-    joinCodeKind: "internet" | "same_network" | "none";
+    /**
+     * "nostr": a version 1 code that works through public Nostr relays (spec/nostr-signaling.md; the default for a direct
+     * host). "internet": the router forwarded the port and the code carries its public address; "same_network": the LAN
+     * address. "none": no code.
+     */
+    joinCodeKind: JoinCodeKind;
+    /**
+     * Direct-IP host only: the IP code (address and port, version 0), with `directCodeKind` "internet" or "same_network".
+     * Equal to `joinCode` when Nostr is off; otherwise the code to hand out for LAN play or when the router port is open.
+     */
+    directCode: string;
+    directCodeKind: IpCodeKind;
     /** Direct-IP host only: this machine's addresses with the port, for an "Advanced" fold-out. */
     directAddresses: string[];
     /** Direct-IP host only: how the router port-open went ("UPnP", "no UPnP gateway answered; ...", "off"). */
     portMapping: string;
     /** Direct-IP host only: the one startup line (bound port, join code, port mapping); see `formatHostLog` in onelobby/direct. */
     directHostLog: string;
+    /** Browser host only (`kit.hostNostr`): true while the host tab is hidden (see the `hostHiddenChanged` event). */
+    hostHidden: boolean;
+    /** @internal kit.hostNostr: the tab's visibility changed. */
+    setHostHidden(hidden: boolean): void;
+    /** @internal onelobby/direct: fires `joinCodeChanged` with the current code. */
+    notifyJoinCodeChanged(): void;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
+    /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
     /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
+    /** Host: joiners that joined but are not ready yet, with the cancel of their readyTimeoutMs timer (peerFailed). */
     /** Host: per-peer fixed window for rateLimit. */
     /**
      * Resolves when this peer can exchange data: immediately for the host, once the link to the host is open for a
@@ -571,8 +641,17 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** @internal set by OneLobby: the server issued a new resume token (rememberSeat). */
     seatSink: ((token: string) => void) | null;
     /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
+    /** @internal A direct host's hub learns where each joiner's link comes from (Nostr kick bans the address too). */
+    linkAddressSink: ((peerId: number, ip: string) => void) | null;
     /** Host side: offer to a joiner. */
     /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
+    /** Offers that came from roster members while the host link was still open: now the host is lost, answer them. */
+    /**
+     * Whether an SDP offer from `from` may be answered. The host (or a joiner's host) always may. Direct lobbies have no
+     * migration, so nobody else. In a server lobby a roster member may dial us when we are the host (a claim race decides
+     * who wins) or when our own link to the host is gone (the migration window); while that link is open the offer is
+     * held, to be answered if the host turns out to be lost a moment later.
+     */
     /**
      * `linger` (host kick / disconnect): stop using the peer's link at once but leave it open until that peer closes it
      * or KICK_LINGER_MS pass. The hub tells the peer over its WebSocket; closing the data link first would make it look
@@ -580,6 +659,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
      */
     /** Lockstep drops (stalled, desynced): removed without a ban, so the player can come back (a rejoin resyncs). */
     /** peerTimeoutMs: the host drops joiners it has not heard from; a joiner handles a silent host as lost. */
+    /** Host: report a joiner that is not ready `readyTimeoutMs` after joining as peerFailed("timeout"), once. */
     /** Total in-flight links (diagnostics and tests). */
     get linkCount(): number;
 }
@@ -882,8 +962,9 @@ export declare class Pause extends Emitter<PauseEvents> {
     get canResume(): boolean;
     /**
      * Ask to pause (true) or resume (false) the match for everyone. Throws `pause_disabled` when the blueprint says
-     * `session.pause` is "off". The result arrives as `changed` or `refused`; asking for the state that already holds
-     * does nothing.
+     * `session.pause` is "off" (the default; set it to "anyone" or "host" in onelobby.json). Works only while the lobby
+     * is in game (phase "in_game", after `start()`): before that the host refuses with `not_in_game`. The result arrives
+     * as `changed` or `refused`; asking for the state that already holds does nothing.
      */
     request(paused: boolean): void;
     /**
@@ -1123,7 +1204,7 @@ export declare function encodeCrockford(value: bigint, length?: number): string;
 
 ```ts
 /**
- * `dc1` join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in
+ * `dc1` join codes (docs/design/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in
  * 11 Crockford characters, shown `6B01-RGFE-P2B`. The code is the address in disguise, so decoding asks nobody.
  * Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5 (CRC-5, polynomial 0x05, over the 50
  * bits before it). One mistyped character always fails the check.
@@ -1134,10 +1215,19 @@ export type DecodedJoinCode = {
     ip: string;
     port: number;
 } | {
+    room: string;
+} | {
     error: JoinCodeError;
 };
 /** Display form (`6B01-RGFE-P2B`) for an IPv4 address and port 1-65535. Throws on anything else. */
 export declare function encodeJoinCode(ipv4: string, port: number): string;
+/**
+ * Version 1 code (a Nostr room, spec/nostr-signaling.md s.1): version:2 = 1 | room:48 | crc:5. `roomHex` is 12 hex
+ * digits. The room is only a secret both sides derive keys from.
+ */
+export declare function encodeRoomCodeFor(roomHex: string): string;
+/** A new version 1 code with a random 48-bit room from the platform's CSPRNG. */
+export declare function encodeRoomCode(): string;
 /** Upper case, spaces and hyphens dropped, i/l -> 1, o -> 0; null unless 11 alphabet characters. */
 export declare function normalizeJoinCode(input: string): string | null;
 export declare function decodeJoinCode(input: string): DecodedJoinCode;
@@ -1158,6 +1248,7 @@ export declare class WebRtcLink implements PeerLink {
     onClose: PeerLink["onClose"];
     onMessage: PeerLink["onMessage"];
     onPath: PeerLink["onPath"];
+    onRemoteAddress: PeerLink["onRemoteAddress"];
     /**
      * Set once setRemoteDescription resolves. Not `pc.remoteDescription`: node-datachannel's polyfill returns an object
      * there before any is set, and its addIceCandidate throws until one is.
@@ -1312,6 +1403,8 @@ export interface PeerLink {
     onMessage: ((channel: ChannelName, bytes: Uint8Array) => void) | null;
     /** Fired once after ICE completes: whether the selected candidate pair uses a TURN relay (reported to the server). */
     onPath?: ((path: "direct" | "relayed") => void) | null;
+    /** Fired when the selected candidate pair's remote address is known and is neither relayed nor an mDNS name. */
+    onRemoteAddress?: ((ip: string) => void) | null;
     /** The offerer calls this to start negotiation. The answerer just feeds handleSignal. */
     startOffer(): void;
     handleSignal(s: SignalPayload): void | Promise<void>;
@@ -1323,7 +1416,7 @@ export interface LinkOptions {
     iceServers: IceServer[];
     relayOnly: boolean;
     /**
-     * Direct-IP host (docs/direct-ip.md s.2): bind ICE to these local UDP ports. One port (begin = end) also turns on
+     * Direct-IP host (docs/design/direct-ip.md s.2): bind ICE to these local UDP ports. One port (begin = end) also turns on
      * ICE UDP mux so every peer shares it. Honoured by libdatachannel-based RTCPeerConnection (node-datachannel);
      * browsers ignore it.
      */
@@ -1372,6 +1465,7 @@ export declare const systemClock: Clock;
 ## friendly
 
 ```ts
+import type { IpCodeKind, JoinCodeKind } from "./join-code-kind.js";
 export interface FriendlyError {
     /** Stable machine code (the OneLobbyError code, or "unknown"). */
     code: string;
@@ -1416,6 +1510,7 @@ export declare const ErrorCodes: {
     readonly ChatDisabled: "chat_disabled";
     readonly PauseDisabled: "pause_disabled";
     readonly ListingDisabled: "listing_disabled";
+    readonly NostrDisabled: "nostr_disabled";
     readonly IdentityAnonymous: "identity_anonymous";
 };
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -1429,6 +1524,24 @@ export declare function describeError(err: unknown): FriendlyError;
  * `base` defaults to the current page; any existing `param` is replaced. Throws on an invalid code.
  */
 export declare function shareUrl(code: string, base?: string, param?: string): string;
+/** What a direct host answers at `GET /joininfo` (onelobby/direct). */
+export interface JoinInfo {
+    joinCode: string;
+    joinCodeKind: JoinCodeKind;
+    /** The IP code (address and port); equals `joinCode` when Nostr is off. */
+    directCode: string;
+    directCodeKind: IpCodeKind;
+    /** `http://<public or LAN address>:<port>/` when the host serves pages; else null. */
+    joinUrl: string | null;
+    port: number;
+}
+/**
+ * For a page served by a direct host (`hostDirect` with `http`): the host's current join code and share link, so a
+ * player who opened the page at a LAN or localhost address still shares the public one. `base` defaults to the page's
+ * origin. Null when the host has no code yet or cannot be reached. Ask again after a while: the code turns "internet"
+ * when the router answers a later port-mapping retry.
+ */
+export declare function directJoinInfo(base?: string): Promise<JoinInfo | null>;
 /** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
 export declare function codeFromUrl(url?: string, param?: string): string | null;
 ```

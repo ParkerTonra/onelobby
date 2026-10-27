@@ -10,8 +10,8 @@ public enum SyncMode { Lockstep, Raw }
 public enum Channel { Reliable, Fast }
 public enum Visibility { Public, Unlisted, Private }
 public enum LobbyPhase { Lobby, InGame }
-/// Direct-IP join codes (docs/direct-ip.md s.2a): "Internet code" or "Same-network code" on the host screen.
-public enum JoinCodeKind { None, SameNetwork, Internet }
+/// Direct-IP join codes (docs/design/direct-ip.md s.2a): "Internet code" or "Same-network code" on the host screen; Nostr is a version 1 code (spec/nostr-signaling.md) that works through any router.
+public enum JoinCodeKind { None, SameNetwork, Internet, Nostr }
 public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyServer, SyncMode Mode = SyncMode.Lockstep, int TickRate = 20, int HashEveryTicks = 20, string DisplayName = "Player", bool RelayOnly = false, int DirectPort = 47810)
     /// Joiner: how long Lobby.ReadyAsync waits for the link to the host to open (default 15 s, TimeSpan.Zero = wait forever). On timeout ReadyAsync faults with OneLobbyException code ice_failed, LobbyClient.Error fires, the lobby is left and Lobby.SessionEnded fires with "ice_failed". When the server offers a TURN relay (and RelayOnly is off, not direct IP), the second half of the budget is one relay-only retry. Set it with config with { ReadyTimeout = TimeSpan.FromSeconds(30) }.
     public TimeSpan ReadyTimeout { get; init; }
@@ -46,7 +46,9 @@ public sealed class BlueprintException : OneLobbyException
     public string Rule { get; }
     public BlueprintException(string path, string rule, string message) : base(LobbyErrorCodes.BadConfig, (path.Length == 0 ? "onelobby.json" : path) + ": " + message);
 public sealed record GameSection(string Id, string NetVersion, string? Title);
-public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly, IReadOnlyList<string> AllowedOrigins);
+public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly, IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
+    /// The hosting.nostrRelays list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).
+    public IReadOnlyList<string> Relays;
 public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin, bool JoinLink, IReadOnlyDictionary<string, string> Meta);
 /// Mode is "raw", "lockstep" or "replication".
 public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
@@ -65,6 +67,8 @@ public sealed record UiSection(string Kind, string? Entry, string Theme);
 public sealed record Blueprint(int Version, GameSection Game, string? Engine, HostingSection Hosting, LobbySection Lobby, SyncSection Sync, PlayersSection Players, ChatSection Chat, SessionSection Session, PlatformsSection Platforms, UiSection Ui)
     /// Stand-in server URL used by ToConfig when the file names no lobby server (direct-only games).
     public static readonly Uri NoServer;
+    /// Default public Nostr relays (the JS DEFAULT_NOSTR_RELAYS, same URLs in the same order; probed 2026-10-26, docs/design/no-server-fallback.md): all accept and echo ephemeral kind 25050.
+    public static readonly IReadOnlyList<string> DefaultNostrRelays;
     /// The JSON Schema (spec/blueprint.schema.json), embedded in this assembly.
     public static string SchemaJson { get; }
     /// Reads and validates a file. Throws BlueprintException (code bad_config).
@@ -148,6 +152,9 @@ public interface IPeerLink : IDisposable
     /// Queue one frame. Contract every transport keeps: PeerChannel.Reliable frames arrive complete, in send order, exactly once, for as long as the link is open (WebRTC: an ordered reliable SCTP channel). Fast and Voice frames may be lost or reordered, never corrupted or duplicated.
     void Send(PeerChannel channel, ReadOnlySpan<byte> frame);
     bool TryReceive(out PeerChannel channel, out byte[] frame);
+/// Optional on an IPeerLink: the other end's IP address once the connection's selected path is known and is a direct one (not relayed, not an mDNS name); null while unknown. Used to ban an address, not only a signaling identity.
+public interface IRemoteAddressPeerLink
+    string? RemoteAddress { get; }
 /// Optional on an IPeerLink: how many bytes of PeerChannel.Reliable frames are queued and not yet handed to the network stack (WebRTC bufferedAmount). Lobby.FlushAsync waits for 0; a link without it counts as always flushed.
 public interface IBufferedPeerLink
     long ReliableBufferedBytes { get; }
@@ -210,13 +217,17 @@ public sealed class InMemoryNetwork
 ## OneLobby.Core/JoinCode.cs
 
 ```csharp
-/// dc1 join codes (docs/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in 11 Crockford characters, shown K3J7-X9QA-2MT. The code is the address in disguise, so decoding needs nothing outside the game. Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5, CRC-5 with polynomial 0x05 over the 50 bits before it, which catches every single mistyped character.
+/// dc1 join codes (docs/design/direct-ip.md s.2a, spec/reference/joincode.mjs): a direct-IP host's IPv4 address and port in 11 Crockford characters, shown K3J7-X9QA-2MT. The code is the address in disguise, so decoding needs nothing outside the game. Bits, most significant first: version:2 (0 = IPv4) | ipv4:32 | port:16 | crc:5, CRC-5 with polynomial 0x05 over the 50 bits before it, which catches every single mistyped character.
 public static class JoinCode
     public const int Length;
     /// Canonical code without hyphens.
     public static string EncodeRaw(uint ipv4, int port);
     /// Display form for an IPv4 address in dotted form, e.g. 6B01-RGFE-P2B.
     public static string Encode(string ipv4, int port);
+    /// Version 1 (spec/nostr-signaling.md s.1): version:2 = 1 | room:48 | crc:5. room is the 48-bit random room; the result is grouped, e.g. XXXX-XXXX-XXX.
+    public static string EncodeRoom(ulong room);
+    /// Decodes a version 1 (Nostr) code to its 12 lower-case hex digit room. False for anything else; use TryDecode for version 0 codes (it answers unknown_version for version 1).
+    public static bool TryDecodeRoom(string? input, out string roomHex);
     /// 6B01RGFEP2B -> 6B01-RGFE-P2B.
     public static string Group(string raw);
     /// Upper case, spaces and hyphens dropped, i/l -> 1, o -> 0; null unless 11 alphabet characters.
@@ -264,12 +275,18 @@ public sealed class Lobby : IAsyncDisposable
     public RateLimit? RateLimit { get; internal set; }
     /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen, e.g. 192.168.1.20:47810. Empty otherwise.
     public IReadOnlyList<string> DirectAddresses { get; internal set; }
-    /// Direct-IP host only: the code friends paste to join, e.g. 6B01-RGFE-P2B (docs/direct-ip.md s.2a). Show it with JoinCodeKind. Empty when this machine has no IPv4 address.
+    /// Direct-IP host only: the code friends paste to join, e.g. 6B01-RGFE-P2B (docs/design/direct-ip.md s.2a). Show it with JoinCodeKind. Empty when this machine has no IPv4 address.
     public string JoinCode { get; internal set; }
+    /// Direct-IP host only: the IP-address code (version 0). Equals JoinCode when Nostr is off or no relay was reachable; with Nostr on, JoinCode is the version 1 code and this one is the fallback for LAN or forwarded ports.
+    public string DirectCode { get; internal set; }
+    /// Whether DirectCode carries the router's public address or this PC's LAN address.
+    public JoinCodeKind DirectCodeKind { get; internal set; }
     /// Whether JoinCode carries the router's public address (internet) or this PC's LAN address.
     public JoinCodeKind JoinCodeKind { get; internal set; }
     /// Direct-IP host only: how the router port-open went, for logs ("UPnP", "no UPnP gateway answered; ...").
     public string PortMapping { get; internal set; }
+    /// Direct-IP host only: the join code changed after hosting began, e.g. the router answered a later port-mapping retry and the code went from SameNetwork to Internet. Fires inside Pump like every lobby event; show the new code.
+    public event Action<string, JoinCodeKind>? JoinCodeChanged;
     /// True once the data channel to the host is up and welcomed (always true on the host).
     public bool IsReady;
     /// Completes when IsReady first becomes true (immediately for a host).
@@ -284,6 +301,8 @@ public sealed class Lobby : IAsyncDisposable
     public event Action<Peer>? PeerReady;
     public event Action<Peer>? PeerJoined;
     public event Action<Peer, string>? PeerLeft;
+    /// Host only: a joiner never got its link to the host open ("a friend could not connect"). The reason is "timeout" when it is not ready OneLobbyConfig.ReadyTimeout after joining (it keeps its seat and may still connect: PeerReady then fires as usual), else the PeerLeft reason when it leaves before it was ready (a joiner's own ice_failed ends that way). Fires at most once per peer, just before that PeerLeft; not for peers the host kicks or disconnects. Zero ReadyTimeout turns the timeout off.
+    public event Action<Peer, string>? PeerFailed;
     public event Action<Peer>? JoinRequested;
     public event Action<int>? HostChanged;
     public event Action<LobbyPhase>? PhaseChanged;
@@ -309,6 +328,8 @@ public sealed class Lobby : IAsyncDisposable
     public void Broadcast(ReadOnlySpan<byte> payload, Channel channel = Channel.Reliable);
     /// The ONE per-frame call for a game in a lobby: pumps the owning LobbyClient and transport (signaling, peer links), delivers events on the calling thread, advances lockstep, voice and timeouts.
     public void Pump();
+    /// Offers from a non-host roster member wait this long for the host to be declared lost.
+    public const int HeldOfferMs;
 ```
 
 ## OneLobby.Core/LobbyClient.cs
@@ -458,7 +479,7 @@ public sealed class SharedPause
     public event Action<string>? Refused;
     /// Host: replaces the default policy. Called with (requesting peer, true to pause / false to resume); return true to allow. Default: anyone pauses, the pauser or the host resumes. A blueprint with session.pause "host" makes the default host-only. Phase and rate checks run first.
     public Func<int, bool, bool>? Policy { get; set; }
-    /// Ask to pause (true) or resume (false) the match for everyone. Throws pause_disabled when the blueprint says session.pause is "off". The result arrives as Changed or Refused; asking for the state that already holds does nothing.
+    /// Ask to pause (true) or resume (false) the match for everyone. Throws pause_disabled when the blueprint says session.pause is "off" (the default; set it to "anyone" or "host" in onelobby.json). Works only while the lobby is in game (LobbyPhase.InGame, after StartAsync): before that the host refuses with not_in_game. The result arrives as Changed or Refused; asking for the state that already holds does nothing.
     public void Request(bool paused);
     /// Host only: unpause at once, skipping the policy and the rate limit. Call it before a restart or game over so the next round does not start frozen. Does nothing when not paused.
     public void Clear();
