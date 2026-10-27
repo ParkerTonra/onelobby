@@ -108,6 +108,19 @@ A token is single-use for resuming; a fresh `lobby` message carries the new toke
 `from` is ignored), `sdp`/`ice` forwarded verbatim. `to` must be a connected member of the sender's lobby, not the sender:
 else `bad_request`. A signal with neither `sdp` nor `ice`: `bad_request`. Not in a lobby: `bad_request`.
 
+**Direct hubs relay only to or from the host (hardening).** A hub in single-lobby (direct) mode has no host migration, so
+the only legitimate peer links are host to joiner. A `signal` where neither the sender nor `to` is the lobby's host is
+refused with `bad_request` (message `signals go to or from the host only`, `field:"to"`) and nothing is relayed, before
+either rate limit is counted. This keeps one joiner from opening a WebRTC link to another (which would reveal its
+address). Server lobbies relay between any two members (migration needs it); clients gate offers themselves (below).
+
+**Clients accept offers only from the host (hardening).** A client answers an SDP `offer` (and queues `ice`) only from
+the lobby's host. In a direct lobby that is the only rule. In a server lobby a non-host offer is acted on only inside a
+migration window: the client has been in the lobby at least once, its link to the current host is gone, and the
+sender is on its roster. An offer from a roster member that arrives while the host link is still open is held (one per
+member) and answered when the host is declared lost; it is dropped after 20 s. Data that arrives over a link whose peer
+is not the current host (other than `host_claim`) is not handled. A `host_claim` must name its own sender as `hostId`.
+
 ## Rate limits (DESIGN s.12) and error data
 
 | Limit | Default | Error |
@@ -117,6 +130,9 @@ else `bad_request`. A signal with neither `sdp` nor `ice`: `bad_request`. Not in
 | `signal` per sender and target peer **(decision)** | 20 per second | `rate_limited` |
 | `signal` per sender, all targets **(decision)** | 160 per second (8 targets' worth) | `rate_limited` |
 | open lobbies per IP | 8 | `rate_limited`, `data:{reason:"max_lobbies"}` **(decision)** |
+| open sockets per IP, loopback included | 32 | the 33rd gets `rate_limited` `data:{reason:"max_sockets"}`, then the socket is closed with code **1008**, reason `too_many_sockets` **(decision)** |
+| `signal` per sender and target whose address starts `nostr:` | 10 per second | `rate_limited` **(decision)** (relays refuse high publish rates; the 160/s total stays) |
+| pending outbound bytes on one socket | 1 MiB | the socket is closed with code **1008**, reason `backpressure` **(decision)** (hub hosts that own the socket, not the hosted-server queue) |
 
 The `signal` limit is counted for each (sender, `to`) pair, not for the sender alone: the host signals every joiner,
 so a host answering several joiners at once would otherwise run out and leave one of them unanswered. The total cap keeps
@@ -126,6 +142,9 @@ an invalid target is refused with `bad_request` before either limit is counted.
 `rate_limited` carries `data:{retryAfterMs}`. A rate-limited message is not processed. `server_full` is returned for
 `create` and `join` when the global `maxLobbies` / `maxPeers` is reached. `game_not_allowed`: reply to `hello` when the
 server has an `allowedGameIds` list and the id is not on it; the server then closes the socket.
+
+The IP limits (`create`, `join`, open lobbies, open sockets) can be switched off for tests (`disableIpLimits`); that
+switch never turns off the `signal` limits or the backpressure close.
 
 **Test mode (decision).** The per-IP limits make a full functional run impossible from one IP, so a server must offer a
 way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; conformance functional suite is run with 20, the

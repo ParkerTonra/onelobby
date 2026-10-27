@@ -58,6 +58,15 @@ Publish every event to every relay in the list (s.6); receivers dedupe by event 
   at most 64 out-of-order frames. Senders resend every unacknowledged frame 3 s after its last send, at most 5 times,
   then close the socket (code 1006, reason `timeout`). Queue sends for 30 ms and pack them into one frame; keep a
   frame's content under 32 KiB (split `msgs` over several frames).
+- **Outbound queue (hardening).** A link holds at most 128 frames and 256 KiB of unacknowledged or queued outbound
+  hub texts together; a text that would exceed either is dropped (the link stays open). Relays rate-limit publishes, so
+  an unbounded queue only turns into dead resends.
+- **New sessions (hardening).** A host accepts at most 8 new joiner pubkeys per 10 s per lobby; excess `open`s are
+  ignored, not answered. The joiner repeats `open` every 2 s inside its 15 s budget, so it is let in when the window
+  frees. Repeat `open`s from a pubkey already attached are always answered.
+- **Bans (hardening).** Kicking a Nostr joiner bans its pubkey and, when the host's WebRTC link to it has a known
+  remote address (selected candidate pair, not relayed, not an mDNS name), that IP too. When a later joiner's link
+  resolves to a banned IP the host removes it as kicked. A link whose address is unknown cannot be matched.
 - **beat.** Sent when nothing else went to that peer for 10 s; carries `ack`. A side that hears nothing from its
   peer for 30 s closes the socket (1006, `timeout`).
 - **close.** Sent once on close with an optional `reason`; the receiver closes its socket with that reason (1000).
