@@ -81,11 +81,12 @@ export class Pause extends Emitter<PauseEvents> {
 
   /**
    * Ask to pause (true) or resume (false) the match for everyone. Throws `pause_disabled` when the blueprint says
-   * `session.pause` is "off". The result arrives as `changed` or `refused`; asking for the state that already holds
-   * does nothing.
+   * `session.pause` is "off" (the default; set it to "anyone" or "host" in onelobby.json). Works only while the lobby
+   * is in game (phase "in_game", after `start()`): before that the host refuses with `not_in_game`. The result arrives
+   * as `changed` or `refused`; asking for the state that already holds does nothing.
    */
   request(paused: boolean): void {
-    if (this.mode === "off") throw new OneLobbyError("pause_disabled", "this game has pause turned off (session.pause is \"off\")");
+    if (this.mode === "off") throw new OneLobbyError("pause_disabled", "pause is off in onelobby.json (session.pause is \"off\"); set session.pause to \"anyone\" or \"host\" to turn it on");
     if (this.hub.isHost) this.hostHandle(this.hub.localPeerId, paused);
     else this.hub.sendToHost({ type: "pause_request", paused: paused ? 1 : 0 });
   }

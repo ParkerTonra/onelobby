@@ -63,7 +63,10 @@ namespace OneLobby.Direct
         /// Nostr signaling (spec/nostr-signaling.md), default on: <see cref="Lobby.JoinCode"/> becomes a version 1 code that
         /// joins through any router over public relays, and <see cref="Lobby.DirectCode"/> keeps the IP-address code. Set
         /// <see cref="NostrOptions.Enabled"/> false for IP codes only; <see cref="NostrOptions.Relays"/> and
-        /// <see cref="NostrOptions.Stun"/> replace the defaults.
+        /// <see cref="NostrOptions.Stun"/> replace the defaults. Relay precedence when hosting: this property's
+        /// <see cref="NostrOptions.Relays"/> if set; else the default list. The blueprint's <c>hosting.nostrRelays</c> is used only
+        /// by <c>HostDirectAsync(client)</c> without options (or via <c>Blueprint.ToDirectHostOptions()</c>), which copies it here.
+        /// The host startup line's <c>nostr n/m relays</c> shows the count in use.
         /// </summary>
         public NostrOptions Nostr { get; set; } = new NostrOptions();
     }

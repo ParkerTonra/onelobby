@@ -26,7 +26,7 @@ namespace OneLobby.Direct.Nostr
 
         /// <summary>Host: publish a version 1 join code and answer joiners over Nostr. Default on.</summary>
         public bool Enabled { get; set; } = true;
-        /// <summary><c>wss://</c> relay URLs; null or empty = <see cref="DefaultRelays"/> (the blueprint's <c>hosting.nostrRelays</c>).</summary>
+        /// <summary><c>wss://</c> relay URLs; null or empty = <see cref="DefaultRelays"/>. Precedence: this list when set, else (joining only) the client's blueprint <c>hosting.nostrRelays</c>, else <see cref="DefaultRelays"/>; when hosting, <c>HostDirectAsync(client)</c> without options copies the blueprint's list here, and your own <see cref="DirectHostOptions"/> bypasses the blueprint. The startup line's <c>nostr n/m relays</c> shows the count in use.</summary>
         public IReadOnlyList<string>? Relays { get; set; }
         /// <summary>STUN URLs for the peer links; null = <see cref="DefaultStun"/>, an empty list = no ICE servers.</summary>
         public IReadOnlyList<string>? Stun { get; set; }

@@ -4,6 +4,11 @@ A pause every player shares: anyone asks, the host decides, everyone hears the a
 `raw`, `OneLobby.Replication`), on server lobbies and direct-IP lobbies, from the moment the game phase starts.
 Join a lobby first (`js-web.md`, `dotnet-generic.md`, `godot-csharp.md`, `unity.md`).
 
+Two things to know before the first call. Pause works only in the game phase (`InGame`, after `StartAsync()` / `start()`);
+before that the host refuses with `not_in_game`. And a game with an `onelobby.json` has pause **off** unless it says
+otherwise: `Request` throws `pause_disabled` until the file has `"session": { "pause": "anyone" }` (or `"host"`). A lobby
+made without a blueprint behaves as `anyone`.
+
 OneLobby moves the state and, in `lockstep`, stops the host's frames. Everything else is yours: freezing your sim or time
 scale, the pause menu, the "Paused by Ann" banner. The pause is outside the sim, so never put it in a lockstep command or
 hash.

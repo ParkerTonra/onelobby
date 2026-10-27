@@ -4,7 +4,18 @@
 #   clients/unity/build-unity-package.sh            # build into the package folder
 #   clients/unity/build-unity-package.sh --pack     # also write clients/unity/com.onelobby.unity-<version>.tgz
 # Extra projects: EXTRA="OneLobby.Foo OneLobby.Bar" clients/unity/build-unity-package.sh
+#   clients/unity/build-unity-package.sh --pack --version 0.6.0-dev.4   # stamp that version into the packed package.json and file name
+# Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
 set -euo pipefail
+pack=0; version_override=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pack) pack=1 ;;
+    --version) version_override="${2:?--version needs a value}"; shift ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
 here="$(cd "$(dirname "$0")" && pwd)"
 pkg="$here/com.onelobby.unity"
 dotnetdir="$(dirname "$here")/dotnet"
@@ -79,12 +90,25 @@ for spec in "win-x64 datachannel.dll x86_64" "linux-x64 libdatachannel.so x86_64
   echo "native $1: $(wc -c < "$dir/$2") bytes"
 done
 rm -rf "$out"
+
+# Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
+repo="$(dirname "$dotnetdir")"
+mkdir -p "$pkg/Documentation~"
+for d in docs/recipes/unity.md docs/recipes/direct-ip.md docs/recipes/pause.md docs/recipes/game-console.md \
+         docs/recipes/replication.md docs/recipes/voice-and-chat.md spec/nostr-signaling.md AGENTS.md; do
+  if [ -f "$repo/$d" ]; then cp "$repo/$d" "$pkg/Documentation~/"; else echo "doc $d: not in this checkout (skipped)"; fi
+done
 echo "plugins:"; (cd "$pkg" && find Runtime/Plugins -name '*.dll' | sed 's/^/  /')
 
-if [ "${1:-}" = "--pack" ]; then
+if [ "$pack" = 1 ]; then
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$pkg/package.json" | head -1)"
   stage="$(mktemp -d)"
   cp -R "$pkg" "$stage/package"
+  if [ -n "$version_override" ]; then
+    # stamp the packed copy only; the tracked package.json stays as it is
+    version="$version_override"
+    sed -i "0,/\"version\": *\"[^\"]*\"/s//\"version\": \"$version\"/" "$stage/package/package.json"
+  fi
   tar $(tar --version 2>/dev/null | grep -q GNU && echo --force-local) -czf "$here/com.onelobby.unity-$version.tgz" -C "$stage" package
   rm -rf "$stage"
   echo "packed $here/com.onelobby.unity-$version.tgz"

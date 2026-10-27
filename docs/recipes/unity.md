@@ -37,8 +37,14 @@ Then add it to your project's `Packages/manifest.json` (no other Unity packages 
 }
 ```
 
+Your own `.asmdef` files (game code and test assemblies) that use `OneLobbyRunner`, `GameConsoleServer` or anything else
+from `OneLobby.Unity` must list it, or the compiler reports CS0012: `"references": ["OneLobby.Unity"]`. Code in the
+default `Assembly-CSharp` needs nothing (the package asmdef is auto-referenced).
+
 Or build a tarball with `-Pack` (`--pack`) and use Package Manager, "Add package from tarball". Re-run the build script
-after pulling OneLobby changes. If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
+after pulling OneLobby changes. The tarball carries the recipes under `Documentation~/` (unity, direct-ip, pause,
+game-console, replication, voice-and-chat, the Nostr spec and AGENTS.md); `-Version 0.6.0-dev.4` (`--version`) stamps the
+version into the packed `package.json` and the file name. If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
 `Runtime/Plugins/Dependencies`), delete the duplicate there.
 
 Committing the tarball into your game's repo: if that repo tracks `*.tgz` with Git LFS, a fresh clone or worktree holds

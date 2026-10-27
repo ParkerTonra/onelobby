@@ -182,6 +182,7 @@ describe("shared pause", () => {
     const [bob] = others;
     bob.pause.mode = "off";
     expect(() => bob.pause.request(true)).toThrowError(expect.objectContaining({ code: "pause_disabled" }));
+    expect(() => bob.pause.request(true)).toThrowError(/set session\.pause to "anyone" or "host"/);
     host.pause.mode = "host";
     bob.pause.mode = "anyone";
     bob.pause.request(true);

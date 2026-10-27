@@ -62,7 +62,9 @@ curl -s -H "Authorization: Bearer $(cat /path/to/console-47820.token)" -d '{"lin
 
 ## 5. Unity: `GameConsoleServer`
 
-The Unity package ships the server side (`OneLobby.Unity.GameConsoleServer`). Your game supplies two callbacks, both
+The Unity package ships the server side (`OneLobby.Unity.GameConsoleServer`). An assembly of yours that uses it (including
+a test assembly) must list the package's assembly in its `.asmdef`, or the compiler reports CS0012 ("type ... is defined in
+an assembly that is not referenced"): `"references": ["OneLobby.Unity"]`. Your game supplies two callbacks, both
 run on the main thread from `Pump()`: `run` takes one line and returns `(ok, lines)` through the same path as your
 in-game console, and `info` returns the `/info` JSON body.
 

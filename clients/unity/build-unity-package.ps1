@@ -4,7 +4,9 @@
 #   powershell -File clients/unity/build-unity-package.ps1  # build (or pwsh) into the package folder
 #   powershell -File clients/unity/build-unity-package.ps1 -Pack   # also write clients/unity/com.onelobby.unity-<version>.tgz
 # Mirrors build-unity-package.sh. Needs the .NET 8 SDK or newer.
-param([switch]$Pack, [string[]]$Extra = @())
+#   powershell -File clients/unity/build-unity-package.ps1 -Pack -Version 0.6.0-dev.4   # stamp that version into the packed package.json and the file name
+# Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
+param([switch]$Pack, [string[]]$Extra = @(), [string]$Version = '')
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
@@ -99,13 +101,31 @@ foreach ($n in $natives) {
     Write-Host ("native $($n.Rid): {0:N0} bytes" -f (Get-Item $to).Length)
 }
 Remove-Item -Recurse -Force $out
+
+# Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
+$repo = Split-Path (Split-Path $here)
+$docDir = Join-Path $pkg 'Documentation~'
+New-Item -ItemType Directory -Force $docDir | Out-Null
+$docs = @('docs/recipes/unity.md', 'docs/recipes/direct-ip.md', 'docs/recipes/pause.md', 'docs/recipes/game-console.md',
+          'docs/recipes/replication.md', 'docs/recipes/voice-and-chat.md', 'spec/nostr-signaling.md', 'AGENTS.md')
+foreach ($d in $docs) {
+    $src = Join-Path $repo $d
+    if (Test-Path $src) { Copy-Item $src $docDir -Force } else { Write-Host "doc ${d}: not in this checkout (skipped)" }
+}
 Write-Host "plugins:"; Get-ChildItem $plugins -Recurse -Filter *.dll | ForEach-Object { Write-Host "  $($_.FullName.Substring($pkg.Length + 1))" }
 
 if ($Pack) {
-    $version = (Get-Content (Join-Path $pkg 'package.json') -Raw | ConvertFrom-Json).version
+    $version = if ($Version) { $Version } else { (Get-Content (Join-Path $pkg 'package.json') -Raw | ConvertFrom-Json).version }
     $stage = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-pack-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force $stage | Out-Null
     Copy-Item -Recurse $pkg (Join-Path $stage 'package')
+    if ($Version) {
+        # stamp the packed copy only; the tracked package.json stays as it is
+        $pj = Join-Path $stage 'package/package.json'
+        $text = [IO.File]::ReadAllText($pj)
+        $text = [regex]::Replace($text, '"version"\s*:\s*"[^"]*"', '"version": "' + $Version + '"', 1)
+        [IO.File]::WriteAllText($pj, $text, (New-Object Text.UTF8Encoding($false)))
+    }
     $tgz = Join-Path $here "com.onelobby.unity-$version.tgz"
     # Windows' own bsdtar; a GNU tar earlier on PATH (Git for Windows) reads "C:" as a remote host
     $tar = Join-Path $env:SystemRoot 'System32/tar.exe'

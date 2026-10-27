@@ -48,13 +48,15 @@ namespace OneLobby
 
         /// <summary>
         /// Ask to pause (true) or resume (false) the match for everyone. Throws <c>pause_disabled</c> when the blueprint
-        /// says session.pause is "off". The result arrives as <see cref="Changed"/> or <see cref="Refused"/>; asking for
-        /// the state that already holds does nothing.
+        /// says session.pause is "off" (the default; set it to "anyone" or "host" in onelobby.json). Works only while the
+        /// lobby is in game (<see cref="LobbyPhase.InGame"/>, after <c>StartAsync</c>): before that the host refuses with
+        /// <c>not_in_game</c>. The result arrives as <see cref="Changed"/> or <see cref="Refused"/>; asking for the state
+        /// that already holds does nothing.
         /// </summary>
         public void Request(bool paused)
         {
             if (_lobby.Blueprint is { Session: { Pause: "off" } })
-                throw new OneLobbyException(LobbyErrorCodes.PauseDisabled, "pause is off in onelobby.json (session.pause is \"off\")");
+                throw new OneLobbyException(LobbyErrorCodes.PauseDisabled, "pause is off in onelobby.json (session.pause is \"off\"); set session.pause to \"anyone\" or \"host\" to turn it on");
             if (_lobby.IsHost) HostHandle(_lobby.LocalPeerId, paused);
             else _lobby.SendToHost(PeerChannel.Reliable, Wire.BuildPauseRequest(paused));
         }

@@ -136,7 +136,12 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
 (`JoinCodeKind.Nostr`) that joins through any router over public Nostr relays, and `lobby.DirectCode` /
 `lobby.DirectCodeKind` keep the IP-address code. `new DirectHostOptions { Nostr = new NostrOptions { Enabled = false } }` turns it off;
 `NostrOptions.Relays` and `NostrOptions.Stun` replace the default relay and STUN lists (from a blueprint: `hosting.nostr`,
-`hosting.nostrRelays`). With no relay reachable the host keeps the IP code as `JoinCode` and logs `; nostr: no relay
+`hosting.nostrRelays`). **Which relays are used**, hosting: `HostDirectAsync(client)` with no options on a client made with
+`FromBlueprint` (or `OneLobbyRunner` with a Blueprint) uses the blueprint's `hosting.nostrRelays`; when you pass your own
+`DirectHostOptions`, its `Nostr.Relays` is used and the blueprint is NOT consulted (call `blueprint.ToDirectHostOptions()` and
+adjust that instead of `new DirectHostOptions`); an empty `Relays` means the library's default list. Joining: the `NostrOptions` you
+pass to `JoinDirectAsync` wins, else the client's blueprint `hosting.nostrRelays`, else the default list. The startup line's
+`nostr n/m relays` shows how many of the relays in use answered. With no relay reachable the host keeps the IP code as `JoinCode` and logs `; nostr: no relay
 reachable`; when one answers later `JoinCodeChanged` fires. `JoinDirectAsync(code)` / `RejoinDirectAsync(code, token)` take either kind
 of code; `JoinDirectAsync(code, password, new NostrOptions { Relays = ... })` picks the relays for a version 1 code (a client built
 from a blueprint uses its `hosting.nostrRelays`). With Nostr on, peer links use the public STUN servers. `GET /joininfo` adds
