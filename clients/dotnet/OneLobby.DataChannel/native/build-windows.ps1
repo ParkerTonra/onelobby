@@ -48,13 +48,16 @@ if (-not (Test-Path $src)) {
 }
 $tarball = Join-Path $WorkDir "mbedtls-$mbedVer.tar.bz2"
 if (-not (Test-Path $tarball)) {
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$mbedVer/mbedtls-$mbedVer.tar.bz2" -OutFile $tarball
+    # curl.exe with a deadline and retries: Invoke-WebRequest hung silently here on CI for the whole job timeout
+    Write-Host "download mbedtls $mbedVer"
+    & (Join-Path $env:SystemRoot 'System32/curl.exe') -fsSL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 300 -o $tarball "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$mbedVer/mbedtls-$mbedVer.tar.bz2"
+    if ($LASTEXITCODE -ne 0) { Remove-Item -Force -ErrorAction SilentlyContinue $tarball; throw "mbedtls download failed (curl $LASTEXITCODE)" }
 }
 $sha = (Get-FileHash -Algorithm SHA256 $tarball).Hash.ToLowerInvariant()
 if ($sha -ne $mbedSha) { throw "mbedtls tarball sha256 $sha does not match $mbedSha" }
 $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
 $mbedSrc = Join-Path $WorkDir "mbedtls-$mbedVer"
-if (-not (Test-Path $mbedSrc)) { & $tar -xjf $tarball -C $WorkDir; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } }
+if (-not (Test-Path $mbedSrc)) { Write-Host "extract mbedtls"; & $tar -xjf $tarball -C $WorkDir; if ($LASTEXITCODE -ne 0) { throw 'extract failed' } }
 # libdatachannel's DTLS transport needs DTLS-SRTP key export, off in the default config (Godot enables it too).
 $cfg = Join-Path $mbedSrc 'include/mbedtls/mbedtls_config.h'
 $text = [IO.File]::ReadAllText($cfg)
@@ -68,6 +71,7 @@ $common = "-G Ninja -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=Release -
 $trim = "/d1trimfile:$((Resolve-Path $WorkDir).Path.TrimEnd('\'))\"
 $env:CFLAGS = $trim; $env:CXXFLAGS = $trim
 function Invoke-Vs([string]$cmdline) {
+    Write-Host "run: $($cmdline.Substring(0, [Math]::Min(100, $cmdline.Length)))"
     cmd /c "`"$vcvars`" >nul && $cmdline"
     if ($LASTEXITCODE -ne 0) { throw "failed: $cmdline" }
 }
