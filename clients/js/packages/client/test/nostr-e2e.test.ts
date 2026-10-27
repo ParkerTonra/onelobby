@@ -200,7 +200,9 @@ describe("hostDirect + joinDirect with a Nostr code (real WebRTC on loopback, fa
     const hostPort = await freePort();
     const host = await hostDirect(mk("Host", relays), { bindHost: "127.0.0.1", port: hostPort, openPort: false, nostr: { relays: URLS }, log: (l) => lines.push(l) });
     cleanup.push(() => host.leave());
-    expect(Date.now() - t0).toBeGreaterThan(9000); // waited the 10 s for a relay
+    const waited = Date.now() - t0;
+    expect(waited).toBeGreaterThan(2800); // waited the 3 s for a relay (HOST_FIRST_RELAY_MS)
+    expect(waited).toBeLessThan(8000);
     expect(lines[0]).toMatch(/; nostr: no relay reachable$/);
     // the IP code is the code meanwhile
     expect(host.joinCode).toBe(host.directCode);

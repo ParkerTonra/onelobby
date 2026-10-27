@@ -94,8 +94,11 @@ extra remote candidate. The host still pins its peer links to the direct UDP por
 A list of `wss://` URLs: the blueprint's `hosting.nostrRelays`, else the library default. Use them all at once,
 reconnect each with backoff (1 s doubling to 30 s), and treat the transport as up while at least one relay is
 connected. A relay answering `["OK", id, false, ...]` or `["CLOSED", ...]` is skipped for the session. No relay
-reachable within 10 s: `connect_failed` for joiners, and the host reports `nostr: no relay reachable` in its log
+reachable within the wait below: `connect_failed` for joiners, and the host reports `nostr: no relay reachable` in its log
 line and keeps hosting by IP.
 
-The waits are in `spec/vectors/nostr-limits.json` (`relays`): `hostFirstRelayMs` (`hostDirect`), `hostNostrFirstRelayMs`
-(`hostNostr`), `joinerFirstRelayMs`, then at most `restWaitMs` for the remaining relays.
+The waits are in `spec/vectors/nostr-limits.json` (`relays`). A host that can also be reached by IP (`hostDirect`) waits
+`hostFirstRelayMs` (3 s) for a first relay, then starts with the IP code and switches to the Nostr code when a relay
+connects later. A host with no IP fallback (`hostNostr`, `hostNostrFirstRelayMs`) and a joiner (`joinerFirstRelayMs`)
+wait 10 s. Once one relay is up, wait at most `restWaitMs` (1.5 s) for the others, and stop at once when every relay has
+connected or failed.

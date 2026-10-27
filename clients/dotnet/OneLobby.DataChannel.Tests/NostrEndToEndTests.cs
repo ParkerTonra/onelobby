@@ -166,7 +166,9 @@ public sealed class NostrEndToEndTests
             RelayFactory = topic => { var r = (FakeRelays)net.Create(topic); r.Up = false; relays = r; return r; },
             Stun = new[] { "stun:127.0.0.1:9" },
         };
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var host = Await(c.HostDirectAsync(new DirectHostOptions { BindAddress = System.Net.IPAddress.Loopback, Port = port, FallbackPorts = 0, OpenPort = false, Nostr = opts }), c.Pump, "host");
+        Assert.InRange(sw.ElapsedMilliseconds, NostrLimits.HostFirstRelayMs - 200, 8000); // waited the 3 s for a relay
         Assert.NotNull(relays);
         Assert.EndsWith("; nostr: no relay reachable", DirectLobby.HostLogLine(host));
         Assert.NotEqual(JoinCodeKind.Nostr, host.JoinCodeKind);

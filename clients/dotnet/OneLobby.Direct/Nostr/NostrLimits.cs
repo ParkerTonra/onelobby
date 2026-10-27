@@ -31,13 +31,13 @@ namespace OneLobby.Direct.Nostr
         public const int GiveUpMs = 15_000;
 
         // Relay waits (spec s.6)
-        /// <summary><c>HostDirectAsync</c>: how long to wait for a first relay before hosting by IP alone.</summary>
-        public const int HostFirstRelayMs = 10_000;
+        /// <summary><c>HostDirectAsync</c>: how long to wait for a first relay before hosting by IP alone (the IP code shows first, the Nostr code takes over later).</summary>
+        public const int HostFirstRelayMs = 3_000;
         /// <summary>Pinned by the vector for JS <c>hostNostr</c> (a browser host has no IP fallback); C# has no browser host.</summary>
         public const int HostNostrFirstRelayMs = 10_000;
         /// <summary>A joiner: how long to wait for a first relay before <c>connect_failed</c>.</summary>
         public const int JoinerFirstRelayMs = 10_000;
-        /// <summary>After the first relay: at most this long for the rest of the list.</summary>
+        /// <summary>After the first relay: at most this long for the rest of the list; ends at once when every relay has answered.</summary>
         public const int RestWaitMs = 1500;
         public const int RestPollMs = 50;
     }

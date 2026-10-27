@@ -253,8 +253,8 @@ namespace OneLobby.Direct
         }
 
         /// <summary>
-        /// Waits (off the game thread) for the relays like the JS host: up to 10 s for the first one, then up to 1.5 s for the
-        /// rest. True when at least one connected.
+        /// Waits (off the game thread) for the relays like the JS host: up to <see cref="NostrLimits.HostFirstRelayMs"/> for the first one, then up to 1.5 s for the
+        /// rest (less once every relay has answered). True when at least one connected.
         /// </summary>
         private static async Task<bool> SettleRelays(INostrRelays relays)
         {
@@ -264,7 +264,7 @@ namespace OneLobby.Direct
                 if (sw.ElapsedMilliseconds >= NostrLimits.HostFirstRelayMs) return false;
                 await Task.Delay(50).ConfigureAwait(false);
             }
-            for (var i = 0; i < NostrLimits.RestWaitMs / NostrLimits.RestPollMs && relays.Connected < relays.Total; i++) await Task.Delay(NostrLimits.RestPollMs).ConfigureAwait(false);
+            for (var i = 0; i < NostrLimits.RestWaitMs / NostrLimits.RestPollMs && !relays.Settled; i++) await Task.Delay(NostrLimits.RestPollMs).ConfigureAwait(false);
             return true;
         }
 

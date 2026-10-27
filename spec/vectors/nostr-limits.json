@@ -24,7 +24,7 @@
     "giveUpMs": 15000
   },
   "relays": {
-    "hostFirstRelayMs": 10000,
+    "hostFirstRelayMs": 3000,
     "hostNostrFirstRelayMs": 10000,
     "joinerFirstRelayMs": 10000,
     "restWaitMs": 1500,

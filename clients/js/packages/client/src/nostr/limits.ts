@@ -28,12 +28,12 @@ export const OPEN_EVERY_MS = 2000;
 export const GIVE_UP_MS = 15_000;
 
 // Relay waits (spec s.6)
-/** `hostDirect`: how long to wait for a first relay before hosting by IP alone. */
-export const HOST_FIRST_RELAY_MS = 10_000;
+/** `hostDirect`: how long to wait for a first relay before hosting by IP alone (the IP code shows first, the Nostr code takes over later). */
+export const HOST_FIRST_RELAY_MS = 3_000;
 /** `hostNostr` (no IP fallback): how long to wait for a first relay before `direct_unreachable`. */
 export const HOST_NOSTR_FIRST_RELAY_MS = 10_000;
 /** A joiner: how long to wait for a first relay before `connect_failed`. */
 export const JOINER_FIRST_RELAY_MS = 10_000;
-/** After the first relay: at most this long for the rest of the list. */
+/** After the first relay: at most this long for the rest of the list; ends at once when every relay has answered. */
 export const RELAY_REST_WAIT_MS = 1500;
 export const RELAY_REST_POLL_MS = 50;
