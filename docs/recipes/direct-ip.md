@@ -110,6 +110,14 @@ router (up to about 4 s when nothing answers). Everything after that is the norm
   `new DirectHostOptions { AllowedOrigins = new[] { "https://play.example" } }` (Unity: the same options object to
   `runner.HostDirectAsync`; JS/Node: `hostDirect(kit, { allowedOrigins: ["https://play.example"] })`). Exact match;
   `"*"` allows every origin, which lets any web page the host visits probe the host's network, so only for testing.
+  - What the same-`Host` rule does not stop: DNS rebinding. A page on a name the attacker controls can re-point that
+    name at the host's address (a LAN or loopback IP, so even a host with `OpenPort = false` behind a router). The
+    browser then sends `Origin: http://attacker.example:47810` with `Host: attacker.example:47810`, the two match, and
+    the page opens the signaling socket like the host's own page would. It needs a player on the host's network to have
+    the page open, and it gets what any joiner gets: a seat and the messages the game sends to players, no more (no
+    files, no console, no other ports). So the rule already holds for direct hosts: treat every joiner as untrusted
+    and check what it sends. The local game console (`docs/recipes/game-console.md`) is not open to this: it answers
+    only `Host: 127.0.0.1:<port>` (a rebound name gets `400`) and needs its token besides.
 - A joiner whose peer link does not open within `OneLobbyConfig.ReadyTimeout` (15 s) gives up like on the hosted
   server: `ReadyAsync` throws code `ice_failed` and `SessionEnded("ice_failed")` fires (no relay retry: no TURN here).
 - No STUN or TURN with IP codes: the game only ever talks to the other players and the player's own router. A Nostr code
