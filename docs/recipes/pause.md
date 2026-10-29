@@ -20,7 +20,7 @@ hash.
 | Who pauses | Anyone. A blueprint with `session.pause: "host"` makes it host-only for both pausing and resuming; `"off"` makes `request` throw `pause_disabled` |
 | Who resumes | The player who paused, or the host. Others are refused with `not_allowed` |
 | Pauser leaves | The host inherits the pause: `byPeer` = host, `pauserLeft` = true, told to everyone. No surprise unpause |
-| Rate | At most one accepted request per peer per 0.5 s; more are refused with `rate_limited` |
+| Rate | At most one accepted request per peer per 0.5 s (`PAUSE_MIN_REQUEST_GAP_MS` / `SharedPause.MinRequestGapMs`, measured on the host's clock from its last accepted request); more are refused with `rate_limited` through the `refused` / `Refused` event, never silently. A pause then resume from a script waits that long, or retries on `rate_limited` |
 | Phase | Only while the lobby is in game (`InGame`); otherwise refused with `not_in_game`. Going back to the lobby phase clears the pause |
 | Late joiner | Gets the current state when its link is up (`peerReady`) |
 | Host migration (server lobbies) | The new host takes the state over as is; if the holder is gone it holds the pause (`pauserLeft`) |
