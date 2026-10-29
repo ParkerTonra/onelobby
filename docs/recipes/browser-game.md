@@ -262,6 +262,35 @@ Caveats:
 - An `https` page may only connect to `wss://` relays; the default relays all are. A test relay on `ws://127.0.0.1` needs
   an `http://127.0.0.1` page (`clients/js/e2e/browser-host.mjs` does exactly that).
 
+### Game in a Web Worker
+
+The lobby cannot run in a Worker: browsers only give the page's main thread `RTCPeerConnection`. Keep the lobby on main and
+move only your game or simulation to a worker, forwarding bytes both ways. With `{ binary: true }` every `e.data` is a
+`Uint8Array`; it can be a view into a larger buffer, so `slice()` it before transferring its `.buffer`.
+
+```ts compile file=worker-forward.ts
+import type { Lobby, LobbySocket } from "onelobby";
+
+/** Main thread: one lobby connection per peer, the game in `worker` sees only peer ids and bytes. */
+export function forwardToWorker(lobby: Lobby, worker: Worker): void {
+  const conns = new Map<number, LobbySocket<Uint8Array>>();
+  lobby.onConnection((conn) => {
+    conns.set(conn.peerId, conn);
+    worker.postMessage({ type: "join", peer: conn.peerId });
+    conn.onmessage = (e) => {
+      const bytes = e.data.slice();                                // its own buffer, safe to transfer
+      worker.postMessage({ type: "msg", peer: conn.peerId, bytes }, [bytes.buffer]);
+    };
+    conn.onclose = () => {
+      conns.delete(conn.peerId);
+      worker.postMessage({ type: "leave", peer: conn.peerId });
+    };
+  }, { binary: true });
+  // the worker answers with postMessage({ peer, bytes }, [bytes.buffer])
+  worker.onmessage = (e: MessageEvent<{ peer: number; bytes: Uint8Array }>) => conns.get(e.data.peer)?.send(e.data.bytes);
+}
+```
+
 ## Done when
 
 1. `node host.mjs` prints `Send this link: http://...:47810/` (or the `off` reason, and the game still runs).

@@ -325,11 +325,20 @@ export class Lobby extends Emitter<LobbyEvents> {
    * Joiner: the link to the host as a WebSocket-shaped object (text by default), so WebSocket client code runs
    * unchanged. It opens when `ready` resolves and closes when the session ends (`host_left` gives code 1001).
    */
+  asWebSocket(opts: LobbySocketOptions & { binary: true }): LobbySocket<Uint8Array>;
+  asWebSocket(opts?: LobbySocketOptions & { binary?: false }): LobbySocket<string>;
+  asWebSocket(opts?: LobbySocketOptions): LobbySocket;
   asWebSocket(opts?: LobbySocketOptions): LobbySocket {
     return joinerSocket(this, opts);
   }
 
-  /** Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket(). */
+  /**
+   * Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket().
+   * With `{ binary: true }` every `conn.onmessage` gets a Uint8Array.
+   */
+  onConnection(handler: (conn: LobbySocket<Uint8Array>) => void, opts: LobbySocketOptions & { binary: true }): () => void;
+  onConnection(handler: (conn: LobbySocket<string>) => void, opts?: LobbySocketOptions & { binary?: false }): () => void;
+  onConnection(handler: (conn: LobbySocket) => void, opts?: LobbySocketOptions): () => void;
   onConnection(handler: (conn: LobbySocket) => void, opts?: LobbySocketOptions): () => void {
     return hostConnections(this, handler, opts);
   }

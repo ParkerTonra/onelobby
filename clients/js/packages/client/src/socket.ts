@@ -4,8 +4,9 @@ import type { CloseInfo, Lobby, Peer } from "./lobby.js";
  * A WebSocket-shaped view of one peer link, so code written against `WebSocket` runs on a lobby unchanged:
  * `lobby.asWebSocket()` on a joiner (the link to the host), `lobby.onConnection(conn => ...)` on the host (one per
  * joiner). Not a real WebSocket: no URL, no subprotocols, no `addEventListener`; `bufferedAmount` is always 0.
+ * `D` is what `onmessage` gets: `Uint8Array` with `{ binary: true }`, `string` without.
  */
-export interface LobbySocket {
+export interface LobbySocket<D extends string | Uint8Array = string | Uint8Array> {
   /** The peer at the other end (the host for a joiner's socket, the joiner for a host's connection). */
   readonly peerId: number;
   /** 0 CONNECTING (joiner, before `lobby.ready`), 1 OPEN, 3 CLOSED (there is no CLOSING). */
@@ -24,13 +25,19 @@ export interface LobbySocket {
    * fired (the socket came out of an `await` chain)? It runs for the new handler once; `readyState === 1` also tells.
    */
   onopen: ((ev: { type: "open" }) => void) | null;
-  /** `data` is a string (UTF-8 decoded), or the bytes with `{ binary: true }`. */
-  onmessage: ((ev: { type: "message"; data: string | Uint8Array }) => void) | null;
+  /**
+   * `data` is a string (UTF-8 decoded), or with `{ binary: true }` always a Uint8Array. It can be a view into a larger
+   * buffer (check `byteOffset`/`byteLength`): `data.slice()` before transferring its `.buffer` to a Worker.
+   */
+  onmessage: MessageHandler<D> | null;
   /** `reason` is the lobby's reason ("host_left", "timeout", "kicked", "disconnected", ...) unless `close()` or the host gave one. */
   onclose: ((ev: { type: "close"; code: number; reason: string; wasClean: boolean }) => void) | null;
   /** Never called (errors surface as `onclose` with code 1006); present so WebSocket code that assigns it works. */
   onerror: ((ev: { type: "error" }) => void) | null;
 }
+
+/** Declared as a method so a `LobbySocket<Uint8Array>` still assigns to a plain `LobbySocket` (and back). */
+type MessageHandler<D> = { handle(ev: { type: "message"; data: D }): void }["handle"];
 
 export interface LobbySocketOptions {
   /** Deliver `onmessage` data as bytes (Uint8Array) instead of UTF-8 text. Default false. */

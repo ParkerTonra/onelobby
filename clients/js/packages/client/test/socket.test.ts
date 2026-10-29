@@ -68,6 +68,29 @@ describe("WebSocket-shaped sockets", () => {
     expect(got).toEqual([Uint8Array.of(1, 2, 3)]);
   });
 
+  it("binary: true types data as Uint8Array on both ends; text sockets type it as string (checked by typecheck)", async () => {
+    const { h, a } = await pair();
+    const hostGot: Uint8Array[] = [];
+    const joinerGot: Uint8Array[] = [];
+    h.onConnection((c) => {
+      c.onmessage = (e) => {
+        hostGot.push(e.data); // a type error unless data is Uint8Array
+        c.send(e.data.slice().reverse());
+      };
+    }, { binary: true });
+    const ws = a.asWebSocket({ binary: true });
+    ws.onmessage = (e) => joinerGot.push(e.data);
+    const text: (s: LobbySocket<string>) => void = (s) => (s.onmessage = (e) => void e.data.toUpperCase());
+    const plain: LobbySocket = ws; // still assigns to the untyped socket
+    void text;
+    void plain;
+    await settle();
+    ws.send(Uint8Array.of(1, 2, 3));
+    await settle();
+    expect(hostGot[0]).toBeInstanceOf(Uint8Array);
+    expect(joinerGot).toEqual([Uint8Array.of(3, 2, 1)]);
+  });
+
   it("a server-backed host leaving migrates, which closes the joiner socket with 1001 host_changed", async () => {
     const { h, a } = await pair();
     const ws = a.asWebSocket();
