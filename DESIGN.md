@@ -7,10 +7,9 @@ everything needed to keep playing after the author is gone ships in this repo.
 Status: design, 2026-10-23. No code yet. The protocol in sections 7-9 is frozen for the first build so the work could
 run in parallel. Working name during drafting: lobbykit.
 
-**Name.** `OneLobby` (the designer, 2026-10-24; first drafted as Keepalive). Packages: `onelobby` (npm, unscoped),
+**Name.** `OneLobby` (the designer, 2026-10-24). Packages: `onelobby` (npm, unscoped),
 `OneLobby.Core` + `OneLobby.Godot` (.NET, namespace `OneLobby`), server binary and image `onelobby-server`. Env vars
-are `ONELOBBY_*`. The old name's `KEEPALIVE_*` env vars and JS aliases were removed after one version. The wire
-protocol id (`lk1`) never contained the name.
+are `ONELOBBY_*`. The wire protocol id is `lk1`.
 
 ---
 

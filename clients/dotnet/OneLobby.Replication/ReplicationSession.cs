@@ -154,7 +154,7 @@ namespace OneLobby.Replication
             ReleaseHeld(now);
             UpdateRenderTick(elapsed);
             ReportVisibility();
-            if (_newestTick > 0 && now - _lastInputSendMs >= Config.TickMs) SendInputMessage(0); // ack-only keepalive
+            if (_newestTick > 0 && now - _lastInputSendMs >= Config.TickMs) SendInputMessage(0); // ack-only heartbeat
         }
 
         // ================================================================== host ====================================
