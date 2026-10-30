@@ -116,7 +116,7 @@ write('invalid.json', {
 });
 
 // ---- turn-rest.json ----
-const secret = 'keepalive-test-secret';
+const secret = 'onelobby-test-secret';
 const tv = [
   { username: '1761267600:c7', secret },
   { username: '2000000000:p42', secret },

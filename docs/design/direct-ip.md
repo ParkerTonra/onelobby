@@ -135,7 +135,7 @@ fails), `direct_unreachable` (no answer on TCP `P` within 5 s) and `bad_password
 - "If Windows asks, allow access on Private networks." The game cannot see the answer, so the text stays on the host
   screen until someone joins.
 
-## 5. Build list for today (keepalive session)
+## 5. Build list for today (network session)
 
 1. **`OneLobby.Hub` library** (netstandard2.1 + net8.0): move `Hub`, `Model`, `Crockford`, `Text`, `Clock`, `Metrics`,
    `ServerOptions` (the parts `Hub` reads) out of `OneLobby.Server`; the server references it. Server tests stay green.

@@ -78,13 +78,8 @@ describe("export surface", () => {
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
       "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
       "checkNostrRelays", "DEFAULT_NOSTR_RELAYS", "DEFAULT_NOSTR_STUN", "encodeRoomCode",
-      "parseBlueprint", "defineBlueprint", "BlueprintError", "Keepalive", "KeepaliveError", // deprecated pre-rename aliases, one version
+      "parseBlueprint", "defineBlueprint", "BlueprintError",
     ].sort());
-  });
-
-  it("deprecated Keepalive names are the OneLobby classes", () => {
-    expect(root.Keepalive).toBe(root.OneLobby);
-    expect(root.KeepaliveError).toBe(root.OneLobbyError);
   });
 
   it("internals keeps everything the root used to export", () => {

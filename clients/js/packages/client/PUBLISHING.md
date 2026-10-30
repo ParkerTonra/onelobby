@@ -47,6 +47,4 @@ push a tag `js-v<version>` on main (`git tag js-v0.6.0 origin/main && git push o
 `publish-npm.yml` workflow checks the tag against `package.json` and runs `npm publish` with npm trusted publishing
 (GitHub OIDC: no token, no 2FA prompt, provenance attached). Its one-time setup is on npmjs.com: the package's
 Settings > Trusted Publisher > GitHub Actions, repository `ParkerTonra/onelobby`, workflow `publish-npm.yml`. A
-manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.6.0`) so a page never silently picks up a different release. The
-deprecated `Keepalive` / `KeepaliveError` aliases can be dropped in the next minor release once existing games import
-`OneLobby`.
+manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.6.0`) so a page never silently picks up a different release.

@@ -9,8 +9,8 @@ run in parallel. Working name during drafting: lobbykit.
 
 **Name.** `OneLobby` (the designer, 2026-10-24; first drafted as Keepalive). Packages: `onelobby` (npm, unscoped),
 `OneLobby.Core` + `OneLobby.Godot` (.NET, namespace `OneLobby`), server binary and image `onelobby-server`. Env vars
-are `ONELOBBY_*`; the server still reads the old `KEEPALIVE_*` names for one version. The JS package keeps deprecated
-`Keepalive` / `KeepaliveError` aliases for one version. The wire protocol id (`lk1`) never contained the name.
+are `ONELOBBY_*`. The old name's `KEEPALIVE_*` env vars and JS aliases were removed after one version. The wire
+protocol id (`lk1`) never contained the name.
 
 ---
 

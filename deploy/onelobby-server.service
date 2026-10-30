@@ -20,8 +20,6 @@ Wants=network-online.target
 User=onelobby
 Group=onelobby
 EnvironmentFile=/etc/onelobby.env
-# Pre-rename installs: the old file (KEEPALIVE_* names are still read) is used if it exists.
-EnvironmentFile=-/etc/keepalive.env
 ExecStart=/usr/local/bin/onelobby-server \
   --listen 127.0.0.1:8080 \
   --public-url wss://${LOBBY_DOMAIN} \

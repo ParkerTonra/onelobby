@@ -792,15 +792,6 @@ public class HubTests
     }
 
     [Fact]
-    public void Options_read_legacy_KEEPALIVE_env_when_ONELOBBY_is_unset()
-    {
-        var o = ServerOptions.Parse(Array.Empty<string>(),
-            k => k == ServerOptions.LegacyEnvPrefix + "TURN_SECRET" ? "old" : k == ServerOptions.LegacyEnvPrefix + "MAX_LOBBIES" ? "9" : k == "ONELOBBY_MAX_LOBBIES" ? "3" : null);
-        Assert.Equal("old", o.TurnSecret);
-        Assert.Equal(3, o.MaxLobbies); // the new name wins
-    }
-
-    [Fact]
     public void Options_honor_host_PORT_below_explicit_listen()
     {
         Assert.Equal("http://0.0.0.0:10000", ServerOptions.Parse(Array.Empty<string>(), k => k == "PORT" ? "10000" : null).ListenUrl());

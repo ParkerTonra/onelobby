@@ -68,5 +68,4 @@ free one in a few clicks ([deploy/EASY_SERVER.md](deploy/EASY_SERVER.md)).
 ## Project notes
 
 Status: early (0.4). Design and wire protocol: [DESIGN.md](DESIGN.md) and [spec/](spec/). Generated API reference:
-[docs/api/](docs/api/). Formerly Keepalive: the JS names `Keepalive` / `KeepaliveError` and the server's `KEEPALIVE_*`
-environment variables still work but are deprecated.
+[docs/api/](docs/api/).

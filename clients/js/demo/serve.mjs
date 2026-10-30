@@ -16,7 +16,7 @@ const arg = (name, dflt) => {
   return i >= 0 ? process.argv[i + 1] : dflt;
 };
 const port = Number(arg("port", process.env.PORT ?? 5173));
-const lobby = arg("lobby", process.env.ONELOBBY_LOBBY ?? process.env.KEEPALIVE_LOBBY ?? "ws://localhost:8080/ws");
+const lobby = arg("lobby", process.env.ONELOBBY_LOBBY ?? "ws://localhost:8080/ws");
 
 if (!existsSync(join(dist, "internals.js")) || process.argv.includes("--build")) {
   console.log("building onelobby ...");

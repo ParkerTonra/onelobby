@@ -3,13 +3,13 @@
   "vectors": [
     {
       "username": "1761267600:c7",
-      "secret": "keepalive-test-secret",
-      "credential": "Eo7GydsW4v5d+yFkevvJK2v3xE8="
+      "secret": "onelobby-test-secret",
+      "credential": "s+55EcElwedXW+lhLrNeE2u3tUc="
     },
     {
       "username": "2000000000:p42",
-      "secret": "keepalive-test-secret",
-      "credential": "hBXnf4wxE+ysfNU2if4B9HjecaQ="
+      "secret": "onelobby-test-secret",
+      "credential": "BEN+yV5YLNXXqgq0TayHe3ZwrNU="
     },
     {
       "username": "1761267600:c7",
@@ -18,11 +18,11 @@
     }
   ],
   "mint": {
-    "secret": "keepalive-test-secret",
+    "secret": "onelobby-test-secret",
     "userId": "c7",
     "nowSeconds": 1761264000,
     "ttl": 3600,
     "expectUsername": "1761267600:c7",
-    "expectCredential": "Eo7GydsW4v5d+yFkevvJK2v3xE8="
+    "expectCredential": "s+55EcElwedXW+lhLrNeE2u3tUc="
   }
 }

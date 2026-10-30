@@ -5,7 +5,7 @@ import { OneLobby, OneLobbyError } from "../src/internals.js";
 import { MemoryNetwork } from "../src/testing.js";
 import { FakeCodec, Player } from "./helpers.js";
 
-const url = process.env.ONELOBBY_SERVER ?? process.env.KEEPALIVE_SERVER; // old name: deprecated
+const url = process.env.ONELOBBY_SERVER;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (f: () => boolean, ms = 8000) => {
   const t = Date.now();

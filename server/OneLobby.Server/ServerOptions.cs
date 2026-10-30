@@ -28,7 +28,6 @@ public sealed class ServerOptions : HubOptions
   --max-players <n>        largest maxPlayers a lobby may ask for, <=250 (ONELOBBY_MAX_PLAYERS, default 64)
   --rate-scale <n>         testing only: multiply the per-IP limits     (ONELOBBY_RATE_SCALE, default 1)
   --disable-ip-limits      testing only: no per-IP rate limits          (ONELOBBY_DISABLE_IP_LIMITS)
-Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecated) when the new one is unset.
 ";
 
     private static List<string> Split(string v) =>
@@ -50,9 +49,6 @@ Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecate
         "listen", "turn-urls", "turn-secret", "stun-urls", "public-url", "allowed-games", "max-lobbies", "max-peers",
         "game-quotas", "region", "turn-ttl", "max-msg", "trust-proxy", "trust-proxy-hops", "disable-ip-limits", "max-players", "rate-scale",
     };
-
-    /// <summary>Env var prefix from before the Keepalive -> OneLobby rename; read as a fallback for one version.</summary>
-    public const string LegacyEnvPrefix = "KEEPALIVE_";
 
     /// <summary>Environment first, then flags override. Throws ArgumentException on bad input.</summary>
     public static ServerOptions Parse(string[] args, Func<string, string?> env)
@@ -90,9 +86,7 @@ Every ONELOBBY_* variable is also read under its old name KEEPALIVE_* (deprecate
         foreach (var key in Keys)
         {
             string name = key.ToUpperInvariant().Replace('-', '_');
-            // KEEPALIVE_* is the pre-rename name, still read for one version (ONELOBBY_* wins when both are set).
             string? v = env("ONELOBBY_" + name);
-            if (string.IsNullOrEmpty(v)) v = env(LegacyEnvPrefix + name);
             if (!string.IsNullOrEmpty(v)) Apply(key, v);
         }
         for (int i = 0; i < args.Length; i++)

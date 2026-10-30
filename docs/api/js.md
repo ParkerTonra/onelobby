@@ -43,8 +43,6 @@ export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, Chann
 export type { Clock } from "./clock.js";
 export { describeError, shareUrl, codeFromUrl, directJoinInfo, ErrorCodes } from "./friendly.js";
 export type { FriendlyError, ErrorCode, JoinInfo } from "./friendly.js";
-export { Keepalive, KeepaliveError } from "./deprecated.js";
-export type { KeepaliveOptions, KeepaliveEvents } from "./deprecated.js";
 export { checkNostrRelays, DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "./nostr/relays.js";
 export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
 export { encodeRoomCode } from "./joincode.js";
@@ -600,8 +598,23 @@ export declare class Lobby extends Emitter<LobbyEvents> {
      * Joiner: the link to the host as a WebSocket-shaped object (text by default), so WebSocket client code runs
      * unchanged. It opens when `ready` resolves and closes when the session ends (`host_left` gives code 1001).
      */
+    asWebSocket(opts: LobbySocketOptions & {
+        binary: true;
+    }): LobbySocket<Uint8Array>;
+    asWebSocket(opts?: LobbySocketOptions & {
+        binary?: false;
+    }): LobbySocket<string>;
     asWebSocket(opts?: LobbySocketOptions): LobbySocket;
-    /** Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket(). */
+    /**
+     * Host: `handler(conn)` once per joiner (a WebSocket-shaped connection), the server-side mirror of asWebSocket().
+     * With `{ binary: true }` every `conn.onmessage` gets a Uint8Array.
+     */
+    onConnection(handler: (conn: LobbySocket<Uint8Array>) => void, opts: LobbySocketOptions & {
+        binary: true;
+    }): () => void;
+    onConnection(handler: (conn: LobbySocket<string>) => void, opts?: LobbySocketOptions & {
+        binary?: false;
+    }): () => void;
     onConnection(handler: (conn: LobbySocket) => void, opts?: LobbySocketOptions): () => void;
     set snapshotChunkSize(n: number);
     /** Current migration epoch (0 until the first host change). */
@@ -674,8 +687,9 @@ import type { Lobby } from "./lobby.js";
  * A WebSocket-shaped view of one peer link, so code written against `WebSocket` runs on a lobby unchanged:
  * `lobby.asWebSocket()` on a joiner (the link to the host), `lobby.onConnection(conn => ...)` on the host (one per
  * joiner). Not a real WebSocket: no URL, no subprotocols, no `addEventListener`; `bufferedAmount` is always 0.
+ * `D` is what `onmessage` gets: `Uint8Array` with `{ binary: true }`, `string` without.
  */
-export interface LobbySocket {
+export interface LobbySocket<D extends string | Uint8Array = string | Uint8Array> {
     /** The peer at the other end (the host for a joiner's socket, the joiner for a host's connection). */
     readonly peerId: number;
     /** 0 CONNECTING (joiner, before `lobby.ready`), 1 OPEN, 3 CLOSED (there is no CLOSING). */
@@ -696,11 +710,11 @@ export interface LobbySocket {
     onopen: ((ev: {
         type: "open";
     }) => void) | null;
-    /** `data` is a string (UTF-8 decoded), or the bytes with `{ binary: true }`. */
-    onmessage: ((ev: {
-        type: "message";
-        data: string | Uint8Array;
-    }) => void) | null;
+    /**
+     * `data` is a string (UTF-8 decoded), or with `{ binary: true }` always a Uint8Array. It can be a view into a larger
+     * buffer (check `byteOffset`/`byteLength`): `data.slice()` before transferring its `.buffer` to a Worker.
+     */
+    onmessage: MessageHandler<D> | null;
     /** `reason` is the lobby's reason ("host_left", "timeout", "kicked", "disconnected", ...) unless `close()` or the host gave one. */
     onclose: ((ev: {
         type: "close";
@@ -713,6 +727,13 @@ export interface LobbySocket {
         type: "error";
     }) => void) | null;
 }
+/** Declared as a method so a `LobbySocket<Uint8Array>` still assigns to a plain `LobbySocket` (and back). */
+type MessageHandler<D> = {
+    handle(ev: {
+        type: "message";
+        data: D;
+    }): void;
+}["handle"];
 export interface LobbySocketOptions {
     /** Deliver `onmessage` data as bytes (Uint8Array) instead of UTF-8 text. Default false. */
     binary?: boolean;
@@ -738,6 +759,7 @@ export declare function joinerSocket(lobby: Lobby, o?: LobbySocketOptions): Lobb
  * that stops new connections (existing ones keep working).
  */
 export declare function hostConnections(lobby: Lobby, handler: (conn: LobbySocket) => void, o?: LobbySocketOptions): () => void;
+export {};
 ```
 
 ## lockstep
@@ -1544,29 +1566,6 @@ export interface JoinInfo {
 export declare function directJoinInfo(base?: string): Promise<JoinInfo | null>;
 /** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
 export declare function codeFromUrl(url?: string, param?: string): string | null;
-```
-
-## deprecated
-
-```ts
-/**
- * Names from before the Keepalive -> OneLobby rename. They are the same classes and types, so old code keeps
- * working unchanged; they will be removed in the next minor release.
- */
-import { OneLobby, type OneLobbyEvents, type OneLobbyOptions } from "./onelobby.js";
-import { OneLobbyError } from "./signaling.js";
-/** @deprecated renamed to `OneLobby`; this alias goes away in the next minor release. */
-export declare const Keepalive: typeof OneLobby;
-/** @deprecated renamed to `OneLobby`. */
-export type Keepalive = OneLobby;
-/** @deprecated renamed to `OneLobbyError`; this alias goes away in the next minor release. */
-export declare const KeepaliveError: typeof OneLobbyError;
-/** @deprecated renamed to `OneLobbyError`. */
-export type KeepaliveError = OneLobbyError;
-/** @deprecated renamed to `OneLobbyOptions`. */
-export type KeepaliveOptions = OneLobbyOptions;
-/** @deprecated renamed to `OneLobbyEvents`. */
-export type KeepaliveEvents = OneLobbyEvents;
 ```
 
 ## ui/index

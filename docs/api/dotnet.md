@@ -250,8 +250,10 @@ public sealed class Lobby : IAsyncDisposable
     public const int PingEveryMs;
     public const int ClaimWaitMs;
     public const int MigrationGraceMs;
-    /// A departure the server announces (peer left, direct host gone) waits up to this long for the peer's open link to close, reading it meanwhile, so the last messages it flushed before leaving still arrive.
+    /// A departure the server announces (peer left, direct host gone) waits for the peer's open link to close, reading it meanwhile, so the last messages it flushed before leaving still arrive: until this long passes with nothing received from it, and never past LeaveMaxMs.
     public const int LeaveGraceMs;
+    /// The longest a departure waits while the leaving peer's last messages keep arriving.
+    public const int LeaveMaxMs;
     /// How long a kicked / disconnected peer's link stays open, so the hub's notice reaches it first.
     public const int KickLingerMs;
     public string Code { get; }
@@ -287,6 +289,10 @@ public sealed class Lobby : IAsyncDisposable
     public string PortMapping { get; internal set; }
     /// Direct-IP host only: the join code changed after hosting began, e.g. the router answered a later port-mapping retry and the code went from SameNetwork to Internet. Fires inside Pump like every lobby event; show the new code.
     public event Action<string, JoinCodeKind>? JoinCodeChanged;
+    /// False while JoinCode can still change: a direct host whose Nostr relays have not answered yet, or whose router may still answer a port-mapping retry. True once it cannot (the Nostr code is up), and always on other lobbies.
+    public bool JoinCodeFinal { get; internal set; }
+    /// The join code once JoinCodeFinal (Final true), or whatever JoinCode is when timeout runs out or the lobby ends (Final false: keep showing it and follow JoinCodeChanged), so a game need not hold the code itself. Completes inside Pump, so keep pumping while you await it.
+    public Task<(string Code, bool Final)> FinalJoinCodeAsync(TimeSpan timeout);
     /// True once the data channel to the host is up and welcomed (always true on the host).
     public bool IsReady;
     /// Completes when IsReady first becomes true (immediately for a host).
