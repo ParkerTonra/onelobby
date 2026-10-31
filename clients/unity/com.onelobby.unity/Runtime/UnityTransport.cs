@@ -38,6 +38,9 @@ namespace OneLobby.Unity
             }
         }
 
+        /// <summary><see cref="DataChannelTransport.BindAddress"/>: one local address for the ICE sockets (127.0.0.1 in automated tests). Null = every interface.</summary>
+        public string? BindAddress { get => _inner.BindAddress; set => _inner.BindAddress = value; }
+
         public long NowMs => _inner.NowMs;
         public ISignalingSocket ConnectSignaling(Uri url) => _inner.ConnectSignaling(url);
         public IPeerLink CreatePeerLink(PeerLinkOptions options) => _inner.CreatePeerLink(options);

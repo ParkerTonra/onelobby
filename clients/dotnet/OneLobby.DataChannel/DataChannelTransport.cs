@@ -39,8 +39,12 @@ namespace OneLobby.DataChannel
         internal static void RaiseNativeLog(string line) { Action<string>? h; lock (LogGate) h = _nativeLog; h?.Invoke(line); }
         internal static bool HasNativeLog { get { lock (LogGate) return _nativeLog != null; } }
 
-        /// <summary>Test seam: bind the ICE sockets to this one local address (e.g. 127.0.0.1) instead of every interface. Null (default) = all.</summary>
-        internal string? BindAddress { get; set; }
+        /// <summary>
+        /// Bind the ICE sockets to this one local address (e.g. 127.0.0.1) instead of every interface. Null (default) = all.
+        /// For automated tests on one machine: a loopback-only game never trips the Windows firewall prompt, and peers on
+        /// other machines cannot reach it. Set before the first link is created.
+        /// </summary>
+        public string? BindAddress { get; set; }
 
         public long NowMs => Clock.ElapsedMilliseconds;
 

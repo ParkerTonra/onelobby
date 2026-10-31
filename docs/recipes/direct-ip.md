@@ -319,6 +319,11 @@ itself runs on Node.
 - **Dev machines.** Node often has an old Public-only rule from its installer's first prompt. A Private allow for
   `node.exe` (admin PowerShell: `New-NetFirewallRule -DisplayName "Node.js (Private)" -Direction Inbound -Action Allow
   -Profile Private -Program "C:\Program Files\nodejs\node.exe"`) lets a Node host be reached from outside.
+- **Automated tests.** Each test build is a new exe path, so each one prompts again. Tests that run every player on one
+  machine can listen on loopback only, which Windows never prompts for: `DirectHostOptions.BindAddress =
+  IPAddress.Loopback` (the hub's TCP + UDP listener) plus `DataChannelTransport.BindAddress = "127.0.0.1"` (the WebRTC
+  sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both. Never in
+  a shipped build: other machines cannot connect.
 
 ## 7. Reference: direct-lobby behavior and limits
 

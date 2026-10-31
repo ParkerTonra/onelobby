@@ -35,6 +35,11 @@ namespace OneLobby.Unity
         [Tooltip("While hosting or joining, force Application.runInBackground = true so an unfocused window keeps pumping " +
                  "(otherwise the handshake stalls and the joiner waits at ReadyAsync). The previous value is restored when the lobby ends.")]
         public bool KeepRunningInBackground = true;
+        [Tooltip("Automated tests only: listen on this one local IPv4 address (127.0.0.1) instead of every interface, so a test " +
+                 "build never trips the Windows firewall prompt. Peers on other machines cannot reach it. Empty = every interface " +
+                 "(real play). Covers the direct host's TCP + UDP listener and the WebRTC sockets of every lobby. Set before the " +
+                 "first Host/Join. Command line: --bind-address=127.0.0.1")]
+        public string BindAddress = "";
 
         private LobbyClient? _client;
         private bool _clientIsDirect;
@@ -69,6 +74,7 @@ namespace OneLobby.Unity
             foreach (var arg in Environment.GetCommandLineArgs())
             {
                 if (arg.StartsWith("--lobby-server=", StringComparison.Ordinal)) LobbyServer = arg.Substring("--lobby-server=".Length);
+                else if (arg.StartsWith("--bind-address=", StringComparison.Ordinal)) BindAddress = arg.Substring("--bind-address=".Length);
                 else if (FlagMs(arg, "--fakelag=", out var v)) NetSim = (NetSim ?? new NetSimOptions()) with { LatencyMs = v };
                 else if (FlagMs(arg, "--fakejitter=", out v)) NetSim = (NetSim ?? new NetSimOptions()) with { JitterMs = v };
                 else if (FlagMs(arg, "--fakeloss=", out v)) NetSim = (NetSim ?? new NetSimOptions()) with { LossPercent = v };
@@ -96,6 +102,9 @@ namespace OneLobby.Unity
                 config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
                 if (ConfigureConfig != null) config = ConfigureConfig(config);
             }
+            var bind = Bind();
+            Transport.BindAddress = bind?.ToString();
+            if (bind != null) Debug.Log("OneLobby: bound to " + bind + " only (BindAddress); other machines cannot connect");
             ITransport transport = Transport;
             if (NetSim != null)
             {
@@ -133,6 +142,15 @@ namespace OneLobby.Unity
         /// </summary>
         public async Task<Lobby> HostDirectAsync(DirectHostOptions? options = null)
         {
+            var bind = Bind();
+            if (bind != null && options == null)
+            {
+                // same options the no-argument call would pick; a blueprint with hosting.direct false keeps its bad_config error
+                var bp = DirectClient().Blueprint;
+                if (bp == null) options = new DirectHostOptions();
+                else if (bp.Hosting.Direct) options = bp.ToDirectHostOptions(null, DisplayName);
+            }
+            if (bind != null && options != null && options.BindAddress == null) options.BindAddress = bind;
             var lobby = await Enter(() => options == null ? DirectClient().HostDirectAsync() : DirectClient().HostDirectAsync(options));
             Debug.Log(DirectLobby.HostLogLine(lobby)); // bound port (after any busy-port fallback), code, router mapping
             lobby.JoinCodeChanged += (_, _) => Debug.Log(DirectLobby.HostLogLine(lobby)); // the router answered a later retry
@@ -156,6 +174,14 @@ namespace OneLobby.Unity
         {
             if (_clientIsDirect) DropClient();
             return Client;
+        }
+
+        /// <summary><see cref="BindAddress"/> parsed; null when empty. A typo throws rather than silently listening everywhere.</summary>
+        private System.Net.IPAddress? Bind()
+        {
+            if (string.IsNullOrWhiteSpace(BindAddress)) return null;
+            if (System.Net.IPAddress.TryParse(BindAddress.Trim(), out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) return a;
+            throw new ArgumentException("OneLobbyRunner.BindAddress must be an IPv4 address such as 127.0.0.1, got '" + BindAddress + "'");
         }
 
         private LobbyClient DirectClient()

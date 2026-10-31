@@ -17,8 +17,12 @@ namespace OneLobby.Direct
         /// the port, so friends never type it.
         /// </summary>
         public int Port { get; set; }
-        /// <summary>Test seam: listen on this one local IPv4 address (127.0.0.1) instead of every interface. Null (the default) = every interface.</summary>
-        internal System.Net.IPAddress? BindAddress { get; set; }
+        /// <summary>
+        /// Listen on this one local IPv4 address (127.0.0.1) instead of every interface. Null (the default) = every interface.
+        /// For automated tests on one machine (no Windows firewall prompt); pair it with the transport's BindAddress
+        /// (<c>DataChannelTransport.BindAddress</c>) so the peer links stay on loopback too.
+        /// </summary>
+        public System.Net.IPAddress? BindAddress { get; set; }
         /// <summary>How many ports after <see cref="Port"/> to try when it is busy; null = 9 with <see cref="Port"/> 0, else 0.</summary>
         public int? FallbackPorts { get; set; }
         /// <summary>Optional; joiners must send the same one or get <c>bad_password</c>. Null or empty = none.</summary>

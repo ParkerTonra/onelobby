@@ -287,6 +287,9 @@ public async Task<bool> JoinByIpAsync(string codeOrAddress, string? password = n
   tick public too for internet play). When another program holds 47810 the host takes the next free port up to 47819
   (the code carries it); set `DirectHostOptions.Port` to pick one (`FallbackPorts` to allow others after it),
   `OpenPort = false` to skip the router request.
+- Automated tests with every player on one machine: pass `--bind-address=127.0.0.1` (or set `OneLobbyRunner.BindAddress`)
+  so the host listener and the WebRTC sockets stay on loopback and Windows never shows the firewall prompt. Not for
+  shipped builds: other machines cannot connect.
 - A joiner's `Lobby.JoinCode` is the code it joined with (normalized), so a HUD shows the same code on both sides
   (`Lobby.Code` is empty in direct mode).
 - No host migration: when the host leaves, joiners get `SessionEnded("host_left")` (with `OneLobby.Replication`, end the
