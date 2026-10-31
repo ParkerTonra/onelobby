@@ -36,6 +36,7 @@ a "Done when" check the agent can run. Doc tools can read [llms.txt](llms.txt).
 | --- | --- |
 | A Unity game | [Unity recipe](docs/recipes/unity.md) (host by IP: [direct-ip.md](docs/recipes/direct-ip.md)) |
 | A Godot 4 C# game | [Godot recipe](docs/recipes/godot-csharp.md) (Godot hosting by IP comes later) |
+| A Godot 4 GDScript game (no .NET) | [GDScript recipe](docs/recipes/godot-gdscript.md) (raw mode) |
 | A browser game | [JS recipe](docs/recipes/js-web.md), or the quickstart below |
 | A browser game with a Node server on the host's PC | [browser-game.md](docs/recipes/browser-game.md) |
 | Any other .NET app (MonoGame, console, bots) | [.NET recipe](docs/recipes/dotnet-generic.md) |

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Extracts every fenced snippet tagged `ts compile` or `csharp compile` from AGENTS.md and docs/recipes/*.md and
-// type-checks it against the real client code.
+// Extracts every fenced snippet tagged `ts compile`, `csharp compile` or `gdscript compile` from AGENTS.md and
+// docs/recipes/*.md and type-checks it against the real client code.
 //   ```ts compile file=net.ts        -> tsc --noEmit with "onelobby" mapped to clients/js/packages/client/src/index.ts
 //   ```csharp compile file=Net.cs    -> temp csproj with ProjectReferences to clients/dotnet/OneLobby.Core (+ OneLobby.Replication, OneLobby.DataChannel, OneLobby.Direct)
+//   ```gdscript compile file=net.gd  -> temp Godot project with clients/gdscript/addons/onelobby, parsed headless by the
+//                                      Godot at $GODOT (WAITING when GODOT is unset)
 // Snippets of one markdown file share a folder, so ts snippets can import each other ("./settings"). Untagged fences and
 // ```csharp godot fences are documentation only. Flags: --strict (a missing client counts as a failure).
 import { execFileSync } from "node:child_process";
@@ -32,7 +34,7 @@ for (const doc of docs) {
     while (j < lines.length && !lines[j].startsWith("```")) j++;
     snippets.push({
       doc: path.relative(root, doc).replace(/\\/g, "/"), lang: m[1].toLowerCase(),
-      file: fm ? fm[1] : `snippet${snippets.length}.${m[1] === "csharp" ? "cs" : "ts"}`,
+      file: fm ? fm[1] : `snippet${snippets.length}.${{ csharp: "cs", gdscript: "gd" }[m[1]] ?? "ts"}`,
       code: lines.slice(start, j).join("\n") + "\n", line: start + 1,
     });
     i = j;
@@ -138,6 +140,61 @@ if (cs.length) {
         failed += cs.length;
         console.error("FAIL csharp snippets:\n" + mapBack(mine.join("\n"), [[dir + path.sep, ""], [dir + "/", ""]]));
       }
+    }
+  }
+}
+
+// ---- GDScript ----
+const gd = snippets.filter((s) => s.lang === "gdscript" || s.lang === "gd");
+if (gd.length) {
+  const addon = path.join(root, "clients", "gdscript", "addons", "onelobby");
+  const godot = process.env.GODOT;
+  if (!fs.existsSync(addon)) {
+    waiting += gd.length;
+    console.warn(`WAITING ${gd.length} gdscript snippets: clients/gdscript/addons/onelobby has not landed`);
+  } else if (!godot) {
+    waiting += gd.length;
+    console.warn(`WAITING ${gd.length} gdscript snippets: set GODOT to a Godot 4.4+ executable`);
+  } else {
+    const dir = path.join(tmp, "gd");
+    fs.mkdirSync(path.join(dir, "addons"), { recursive: true });
+    fs.cpSync(addon, path.join(dir, "addons", "onelobby"), { recursive: true });
+    // unsafe access counts as an error, so a misspelled addon member in a snippet fails (the addon itself is excluded)
+    fs.writeFileSync(path.join(dir, "project.godot"), fs.readFileSync(path.join(root, "clients", "gdscript", "project.godot"), "utf8")
+      .replace(/\[debug\]\r?\n/, "[debug]\n\ngdscript/warnings/unsafe_property_access=2\ngdscript/warnings/unsafe_method_access=2\n"));
+    const files = [];
+    for (const s of gd) {
+      const rel = `snippets/${s.doc.replace(/[\/]/g, "_").replace(/\.md$/, "")}/${s.file}`;
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), s.code);
+      files.push({ rel, s });
+    }
+    // loads every snippet; a parse error makes load() fail and Godot print the file and line
+    fs.writeFileSync(path.join(dir, "check.gd"), `extends SceneTree
+func _init() -> void:
+	var bad := 0
+	for p: String in ${JSON.stringify(files.map((f) => "res://" + f.rel))}:
+		var s := ResourceLoader.load(p, "", ResourceLoader.CACHE_MODE_IGNORE) as GDScript
+		if s == null or not s.can_instantiate():
+			bad += 1
+			print("SNIPPET-FAIL ", p)
+	print("SNIPPETS-DONE ", bad)
+	quit(1 if bad > 0 else 0)
+`);
+    const run = (args) => {
+      try { return execFileSync(godot, ["--headless", "--audio-driver", "Dummy", "--path", dir, ...args], { encoding: "utf8", stdio: "pipe", timeout: 180000 }); }
+      catch (e) { return (e.stdout?.toString() ?? "") + (e.stderr?.toString() ?? ""); }
+    };
+    run(["--import"]); // registers the addon's class_names; the headless editor may crash on exit, which is harmless
+    const out = run(["-s", "res://check.gd"]);
+    const done = /SNIPPETS-DONE (\d+)/.exec(out);
+    if (done && done[1] === "0") {
+      checked += gd.length;
+      console.log(`ok   ${gd.length} gdscript snippets`);
+    } else {
+      failed += gd.length;
+      const lines = out.split("\n").filter((l) => /SNIPPET-FAIL|ERROR|Parse Error|at: /.test(l)).slice(0, 20);
+      console.error("FAIL gdscript snippets:\n" + (lines.length ? lines.join("\n") : out.slice(-2000)).split("res://snippets/").join(""));
     }
   }
 }

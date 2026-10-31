@@ -1,0 +1,12 @@
+; Engine configuration file. The OneLobby GDScript client: the addon lives in addons/onelobby/, tests in tests/.
+
+config_version=5
+
+[application]
+
+config/name="OneLobby GDScript client"
+config/features=PackedStringArray("4.4")
+
+[debug]
+
+gdscript/warnings/untyped_declaration=1

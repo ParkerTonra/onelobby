@@ -242,6 +242,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
 
 - Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
+- Godot 4 GDScript, no .NET (desktop, raw mode): `docs/recipes/godot-gdscript.md`
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
