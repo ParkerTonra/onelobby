@@ -47,7 +47,7 @@ jobs:
         with: { name: native-linux-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/linux-x64/native/ }
 
   macos-universal:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
