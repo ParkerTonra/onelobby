@@ -165,8 +165,8 @@ if ($Pack) {
     }
     $tgz = Join-Path $(if ($outDir) { $outDir } else { $here }) "com.onelobby.unity-$version.tgz"
     # Windows' own bsdtar; a GNU tar earlier on PATH (Git for Windows) reads "C:" as a remote host
-    $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
-    if (-not $env:SystemRoot -or -not (Test-Path $tar)) { $tar = 'tar' }
+    $tar = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32/tar.exe' } else { '' }
+    if (-not $tar -or -not (Test-Path $tar)) { $tar = 'tar' }
     & $tar -czf $tgz -C $stage package
     if ($LASTEXITCODE -ne 0) { throw 'tar failed' }
     Remove-Item -Recurse -Force $stage
