@@ -16,6 +16,9 @@ signal _op_done(result: Variant)
 
 const REQUEST_TIMEOUT_MS := 10000
 const SERVER_PING_MS := 10000
+## A direct join waits for the relays (10 s), the host's answer (15 s) and the lobby reply.
+const DIRECT_TIMEOUT_MS := 30000
+const RETIRE_MS := 1500
 
 ## Your game's id (lobbies are per game).
 @export var game_id := ""
@@ -42,6 +45,14 @@ var transport: OneLobbyTransport = OneLobbyGodotTransport.new()
 var ice: Array = []
 
 var _socket: OneLobbyTransport.Socket
+## Direct mode: builds the signaling socket instead of a WebSocket to lobby_server (valid while a direct lobby is open).
+var _socket_factory := Callable()
+## The join code (display form) of the direct lobby being hosted, joined or rejoined; "" outside Direct mode.
+var _direct_code := ""
+var _direct_host: OneLobbyDirectHost = null
+## A direct joiner's socket after its lobby ended: kept polled until its last message (the leave) is out.
+var _retiring: OneLobbyTransport.Socket = null
+var _retire_deadline := 0
 var _welcomed := false
 var _hello_sent := false
 var _hello_resume := ""
@@ -62,6 +73,12 @@ func _exit_tree() -> void:
 	if _socket != null:
 		_socket.close()
 		_socket = null
+	if _retiring != null:
+		_retiring.close()
+		_retiring = null
+	if _direct_host != null:
+		_direct_host.close()
+		_direct_host = null
 
 
 ## Creates a lobby. `options`: name, max_players (4), visibility ("public" | "unlisted" | "private"), late_join (true),
@@ -85,9 +102,120 @@ func join(join_code: String) -> OneLobbyLobby:
 	return await _run("", OneLobbySignaling.join(norm), ["lobby"], _enter_lobby)
 
 
-## Takes your seat back after a dropped connection (lobby.resume_token from before).
+## Takes your seat back after a dropped connection (lobby.resume_token from before). If the connection to the server is
+## still up (a lobby you left, or a seat you want to take over from another socket) it is closed and reopened first, so
+## the server sees a fresh hello carrying the token.
 func rejoin(token: String) -> OneLobbyLobby:
 	return await _run(token, "", ["lobby"], _enter_lobby)
+
+
+## Direct mode, host: runs the lobby inside this game with no lobby server. Joiners find you through public Nostr
+## relays with a short code: `lobby.code` ("D1PB-1X9S-FPV"; show it, or copy it). The lobby, its signals and peers are
+## the same as raw mode, and JS and .NET players can join it.
+##
+##     var lobby := await client.host_direct({"name": "My game", "max_players": 4})
+##     print("Join code: ", lobby.code)
+##
+## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit as in host(); relays (wss URLs,
+## default: seven public ones), stun (default: Google and Cloudflare), upnp_port (0 = off: asks the router to forward
+## that UDP port; best effort, see the README). Fails with no_relay when no relay can be reached.
+func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
+	if not _op.is_empty():
+		_fail("busy", "another request is in flight")
+		return null
+	if lobby != null:
+		_fail("in_lobby", "already in a lobby; leave it first")
+		return null
+	var d := OneLobbyDirectHost.start(options)
+	if d == null:
+		_fail("bad_code", "could not make a join code")
+		return null
+	_direct_host = d
+	_direct_code = d.code
+	# the relays connect while we wait; pump() polls the host meanwhile
+	var deadline := transport.now_ms() + OneLobbyNostrLimits.HOST_NOSTR_FIRST_RELAY_MS
+	while not d.relays_up() and transport.now_ms() < deadline and is_inside_tree():
+		await get_tree().process_frame
+	if not d.relays_up():
+		_clear_direct()
+		_fail("no_relay", "no Nostr relay reachable; check the internet connection")
+		return null
+	var rest := transport.now_ms() + OneLobbyNostrLimits.RELAY_REST_WAIT_MS
+	while not d.nostr.relays_settled() and transport.now_ms() < rest and is_inside_tree():
+		await get_tree().process_frame
+	_socket_factory = d.connect_local
+	var rl: Dictionary = options.get("rate_limit", {})
+	var o := options.duplicate()
+	o["relay_only"] = relay_only
+	o["visibility"] = "unlisted"
+	var result: Variant = await _run("", OneLobbySignaling.create(o, "raw", tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
+		var l := _enter_lobby(e)
+		l.rate_limit = rl
+		return l)
+	if result == null:
+		_clear_direct()
+	return result
+
+
+## Direct mode, joiner: joins the lobby a host_direct() host published. `join_code` is the code the host shows
+## ("D1PB-1X9S-FPV"; case, dashes and look-alike letters do not matter). Needs no lobby server. `options`: password,
+## relays (wss URLs), timeout_ms (30000).
+##
+##     var lobby := await client.join_direct("D1PB-1X9S-FPV")
+func join_direct(join_code: String, options: Dictionary = {}) -> OneLobbyLobby:
+	return await _direct_join(join_code, options, "", OneLobbySignaling.join_direct(str(options.get("password", ""))))
+
+
+## Direct mode: takes your seat back after the connection dropped (lobby.resume_token and the code from before). Works
+## only while the host is still running that lobby (60 s after the drop).
+func rejoin_direct(join_code: String, token: String, options: Dictionary = {}) -> OneLobbyLobby:
+	return await _direct_join(join_code, options, token, "")
+
+
+func _direct_join(join_code: String, options: Dictionary, resume: String, request: String) -> OneLobbyLobby:
+	var dec := OneLobbyJoinCode.decode_dc1(join_code)
+	if dec.has("error") or not dec.has("room"):
+		if dec.get("error", "") == "unknown_version" or dec.has("ip"):
+			_fail("unsupported_code", "this build joins Nostr codes only (a code of the D1 family, version 1)")
+		else:
+			_fail("unknown_code", "not a valid join code")
+		return null
+	if not _op.is_empty():
+		_fail("busy", "another request is in flight")
+		return null
+	if lobby != null:
+		_fail("in_lobby", "already in a lobby; leave it first")
+		return null
+	var norm := OneLobbyJoinCode.normalize_dc1(join_code)
+	var relays: Array = options.get("relays", [])
+	_direct_code = OneLobbyJoinCode.group(norm)
+	_socket_factory = func() -> OneLobbyTransport.Socket: return OneLobbyNostrSocket.new(norm, relays)
+	var result: Variant = await _run(resume, request, ["lobby"], _enter_lobby, int(options.get("timeout_ms", DIRECT_TIMEOUT_MS)))
+	if result == null:
+		_clear_direct()
+	return result
+
+
+## Closes the connection to the lobby server (or, in Direct mode, to the host's signaling) without leaving the lobby,
+## the way a dropped network would. The data channels stay up. For tests: rejoin()/rejoin_direct() afterwards.
+func disconnect_signaling() -> void:
+	if _socket != null:
+		_socket.close()
+
+
+## Waits until what was sent on the signaling socket has left the machine (at most `timeout_ms`). After leave() it
+## makes sure the leave message goes out before the game quits:  lobby.leave(); await client.flush_signaling().
+func flush_signaling(timeout_ms: int = 1500) -> void:
+	var deadline := transport.now_ms() + timeout_ms
+	while transport.now_ms() < deadline and is_inside_tree():
+		var pending := 0
+		if _socket != null and _socket.state == OneLobbyTransport.Socket.OPEN:
+			pending += _socket.buffered()
+		if _retiring != null and _retiring.state == OneLobbyTransport.Socket.OPEN:
+			pending += _retiring.buffered()
+		if pending == 0:
+			break
+		await get_tree().process_frame
 
 
 ## Public lobbies of this game: Dictionaries {code, name, host_name, players, max_players, phase, meta, region}.
@@ -107,8 +235,16 @@ func list(meta_filter: Dictionary = {}) -> Array:
 func pump() -> void:
 	transport.poll()
 	var now := transport.now_ms()
+	if _direct_host != null:
+		_direct_host.poll()
+	if _retiring != null:
+		_retiring.poll()
+		if _retiring.state == OneLobbyTransport.Socket.CLOSED or _retiring.buffered() == 0 or now > _retire_deadline:
+			_retiring.close()
+			_retiring = null
 	var sock := _socket
 	if sock != null:
+		sock.poll() # a no-op for WebSockets (the transport polls them); Direct-mode sockets poll themselves
 		if sock.state == OneLobbyTransport.Socket.OPEN and not _hello_sent and (not _op.is_empty() or lobby != null):
 			_hello_sent = true
 			sock.send_text(OneLobbySignaling.hello(game_id, net_version, display_name, _hello_resume))
@@ -142,6 +278,9 @@ func raise_error(code: String, message: String) -> void:
 
 func _enter_lobby(e: Dictionary) -> OneLobbyLobby:
 	var l := OneLobbyLobby.new(self, e)
+	if _direct_code != "":
+		l._direct = true
+		l.code = _direct_code
 	lobby = l
 	l._start()
 	return l
@@ -150,18 +289,46 @@ func _enter_lobby(e: Dictionary) -> OneLobbyLobby:
 func _lobby_closed(l: OneLobbyLobby) -> void:
 	if lobby == l:
 		lobby = null
+		if _direct_code != "":
+			_clear_direct()
 
 
-func _run(resume: String, request: String, expect: Array, finish: Callable) -> Variant:
+## Ends Direct mode: the host's hub and relays close, a joiner's socket drains what it still has to say, then closes.
+func _clear_direct() -> void:
+	_direct_code = ""
+	_socket_factory = Callable()
+	if _direct_host != null:
+		_direct_host.close()
+		_direct_host = null
+	if _socket != null and not (_socket is OneLobbyDirectHost.LocalSocket):
+		if _socket.state == OneLobbyTransport.Socket.OPEN and _socket.buffered() > 0:
+			if _retiring != null:
+				_retiring.close()
+			_retiring = _socket
+			_retire_deadline = transport.now_ms() + RETIRE_MS
+		else:
+			_socket.close()
+	elif _socket != null:
+		_socket.close()
+	_socket = null
+	_welcomed = false
+	_hello_sent = false
+	_stashed_lobby = {}
+
+
+func _run(resume: String, request: String, expect: Array, finish: Callable, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Variant:
 	if not _op.is_empty():
 		_fail("busy", "another request is in flight")
 		return null
 	if lobby != null and expect[0] == "lobby":
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
-	_op = {"request": request, "expect": expect, "sent": false, "deadline": transport.now_ms() + REQUEST_TIMEOUT_MS, "finish": finish}
+	_op = {"request": request, "expect": expect, "sent": false, "deadline": transport.now_ms() + timeout_ms, "finish": finish}
+	# A resume needs a fresh hello: if this connection already said hello, drop it and start a new one.
+	if _socket != null and resume != "" and _welcomed:
+		_socket.close()
 	if _socket == null or _socket.state == OneLobbyTransport.Socket.CLOSED:
-		_socket = transport.connect_signaling(lobby_server)
+		_socket = _socket_factory.call() if _socket_factory.is_valid() else transport.connect_signaling(lobby_server)
 		_welcomed = false
 		_hello_sent = false
 	_hello_resume = resume

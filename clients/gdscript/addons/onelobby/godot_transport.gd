@@ -69,6 +69,9 @@ class WsSocket:
 		_inbox = []
 		return out
 
+	func buffered() -> int:
+		return _ws.get_current_outbound_buffered_amount() if state == OPEN else 0
+
 	func close() -> void:
 		if state != CLOSED:
 			_ws.close()

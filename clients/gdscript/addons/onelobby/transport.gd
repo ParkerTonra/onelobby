@@ -34,12 +34,20 @@ class Socket:
 	var state := CONNECTING
 	var close_reason := ""
 
+	## Sockets that need their own polling (the Direct-mode ones) do it here; OneLobbyClient calls it every pump.
+	func poll() -> void:
+		pass
+
 	func send_text(_text: String) -> void:
 		pass
 
 	## The text messages that arrived since the last call.
 	func receive() -> Array[String]:
 		return []
+
+	## Bytes sent but not yet on the wire (or not yet acknowledged, for a Nostr socket).
+	func buffered() -> int:
+		return 0
 
 	func close() -> void:
 		state = CLOSED

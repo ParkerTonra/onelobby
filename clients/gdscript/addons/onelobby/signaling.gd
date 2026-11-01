@@ -34,6 +34,14 @@ static func join(code: String) -> String:
 	return JSON.stringify({"t": "join", "code": code})
 
 
+## Direct mode: a host runs exactly one lobby, so the join carries no code (the Nostr code was the invitation).
+static func join_direct(password: String) -> String:
+	var m := {"t": "join"}
+	if password != "":
+		m["password"] = password
+	return JSON.stringify(m)
+
+
 static func list(meta_filter: Dictionary) -> String:
 	var m := {"t": "list", "visibility": "public", "limit": 100}
 	if not meta_filter.is_empty():

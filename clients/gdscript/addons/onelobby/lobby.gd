@@ -58,6 +58,8 @@ var rate_limit := {}
 var is_ready := false
 
 var _c: OneLobbyClient
+## Direct mode: no server, so no host migration. The host leaving (or the joiner losing its signaling) ends the session.
+var _direct := false
 var _host_id := 0
 var _epoch := 0
 var _closed := false
@@ -232,6 +234,29 @@ func leave() -> void:
 		return
 	_c.send_signaling(OneLobbySignaling.simple("leave"))
 	_close()
+
+
+## leave(), then waits until the leave message has really gone out (at most `timeout_ms`), after letting reliable data
+## already queued to peers drain first. Await it before quitting: leave() followed at once by get_tree().quit() can
+## drop the message, and the server (or the Direct host) then sees a timeout instead of a leave.
+##
+##     await lobby.leave_and_flush()
+##     get_tree().quit()
+func leave_and_flush(timeout_ms: int = 1500) -> void:
+	if _closed:
+		return
+	var client := _c
+	var deadline := now_ms() + timeout_ms
+	while reliable_buffered_bytes() > 0 and now_ms() < deadline and client.is_inside_tree():
+		await client.get_tree().process_frame
+	leave()
+	await client.flush_signaling(maxi(0, deadline - now_ms()))
+
+
+## Drops the connection to the lobby server (Direct mode: to the host's signaling) as a network loss would, without
+## leaving. Peer links stay as they are. Meant for testing reconnects: afterwards call client.rejoin(resume_token).
+func debug_drop() -> void:
+	_c.disconnect_signaling()
 
 
 ## Reliable bytes queued on all links and not yet sent.
@@ -427,7 +452,7 @@ func _timeouts(now: int) -> void:
 			if r.id != local_peer_id and r.link != null and r.open_handled and now - r.last_rx_ms > _peer_timeout_ms:
 				_drop_peer(r, "timeout")
 		return
-	if _awaiting_claim and now > _await_deadline_ms:
+	if _awaiting_claim and not _direct and now > _await_deadline_ms:
 		# the elected host never showed up: it is gone too
 		_awaiting_claim = false
 		if _peers.has(_host_id):
@@ -597,12 +622,20 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 			if not is_host and id == _host_id:
 				_depart(rec, func() -> void:
 					_drop_peer(rec, reason)
-					_host_lost(true))
+					if _direct:
+						_end("host_left")
+					else:
+						_host_lost(true))
 			else:
 				_depart(rec, func() -> void: _drop_peer(rec, reason))
 		"host_changed":
 			var id := OneLobbySignaling.i(e, "hostId")
 			var ep := OneLobbySignaling.i(e, "epoch")
+			if _direct and not is_host:
+				# a Direct lobby does not migrate: a new host means the real one is gone
+				if id != _host_id:
+					_end("host_left")
+				return
 			if id != _host_id and id != 0:
 				_switch_host(id)
 			if ep > _epoch and id == _host_id:
@@ -680,6 +713,8 @@ func _release_held_signals(now: int) -> void:
 func _accepts_signal_from(from: int) -> bool:
 	if from == _host_id:
 		return true
+	if _direct:
+		return false
 	var h: PeerRec = _peers.get(_host_id)
 	var alive := not _awaiting_claim and h != null and h.link != null and h.link.is_open and not h.link.is_failed
 	return not alive
@@ -692,6 +727,9 @@ func _on_server_error(error_code: String, disconnected: bool) -> void:
 
 func _on_socket_closed() -> void:
 	if _closed:
+		return
+	if _direct and not is_host:
+		_end("host_left") # the signaling path to the host is the host's presence: no server to migrate to
 		return
 	# data channels keep the running game alive; only a joiner without a host link is stranded
 	if not is_host and not is_ready and not _awaiting_claim:
@@ -753,6 +791,13 @@ func _link_lost(rec: PeerRec) -> void:
 		if rec.id != local_peer_id:
 			_drop_peer(rec, "timeout")
 		return
+	if _direct and rec.id == _host_id:
+		_peers.erase(rec.id)
+		rec.link.close()
+		rec.link = null
+		peer_left.emit(_to_peer(rec), "timeout")
+		_end("host_left")
+		return
 	if rec.id == _host_id:
 		if _awaiting_claim:
 			return # the timeout check elects the next one
@@ -768,6 +813,9 @@ func _link_lost(rec: PeerRec) -> void:
 func _host_lost(already_removed: bool = false) -> void:
 	if not already_removed and _peers.has(_host_id):
 		_drop_peer(_peers[_host_id], "timeout")
+	if _direct:
+		_end("host_left")
+		return
 	is_ready = false
 	_elect_host()
 
