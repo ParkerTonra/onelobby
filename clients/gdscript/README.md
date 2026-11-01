@@ -51,6 +51,8 @@ both directions).
   `rejoin()`.
 - `client.rejoin(token)` closes and reopens the signaling socket if it is still up, so it also takes over a seat from
   another socket.
+- A game with an auto-rejoin loop should skip it on `session_ended("host_left")`: the host is gone (Direct mode has no
+  migration), so there is no seat to take back. Rejoin only after a dropped connection.
 - Local dev server, from `server/`: `dotnet build -c Release`, then `dotnet run -c Release --no-build --project
   OneLobby.Server -- --listen 127.0.0.1:8787`, then `curl http://127.0.0.1:8787/healthz`, then set
   `client.lobby_server = "ws://127.0.0.1:8787/ws"`. Use 127.0.0.1, not `localhost` (IPv6 first, the connect stalls).
