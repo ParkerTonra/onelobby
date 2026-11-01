@@ -124,6 +124,10 @@ are the same as `raw-mode.md` (a joiner's send goes through the host, `from` is 
 `lobby.peers()`, `ping_ms(id)`, `start()` / `end_game()` (phase), `set_lobby_meta`, `kick`, `leave()`, and
 `client.rejoin(lobby.resume_token)` after a drop. Big payloads are fine: frames over 16 KB are chunked for you.
 
+No lobby server? Direct mode: `await client.host_direct({"name": "My game", "max_players": 4})` shows `lobby.code`
+("D1PB-1X9S-FPV"), joiners call `await client.join_direct(code)`; everything after that is the same lobby API. See
+`clients/gdscript/README.md`.
+
 To pump from `_physics_process` instead, set `client.auto_pump = false` and call `client.pump()` yourself.
 
 ## Testing headless
