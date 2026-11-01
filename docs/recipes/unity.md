@@ -44,8 +44,15 @@ default `Assembly-CSharp` needs nothing (the package asmdef is auto-referenced).
 Or build a tarball with `-Pack` (`--pack`) and use Package Manager, "Add package from tarball". Re-run the build script
 after pulling OneLobby changes. The tarball carries the recipes under `Documentation~/` (unity, direct-ip, pause,
 game-console, replication, voice-and-chat, the Nostr spec and AGENTS.md); `-Version 0.6.0-dev.4` (`--version`) stamps the
-version into the packed `package.json` and the file name. If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
+version into the packed `package.json` and the file name. `-Out <dir>` (`--out <dir>`) packs without writing into the
+checkout: it fills a staged copy, keeps dotnet's bin/obj in a temp folder and writes only `<dir>/<tarball>` (implies
+`-Pack`). If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
 `Runtime/Plugins/Dependencies`), delete the duplicate there.
+
+Without a clone: every push to `main` runs the `unity-dev-package` workflow, which packs
+`com.onelobby.unity-<version>-ci.<run>.tgz` with all four natives (taken from the newest `datachannel-natives` artifacts;
+the run summary names the commit each one was built from). Download it from that run's `unity-dev-<sha>` artifact, or
+`gh run download -R <owner>/<repo> -n unity-dev-<sha>`.
 
 Committing the tarball into your game's repo: if that repo tracks `*.tgz` with Git LFS, a fresh clone or worktree holds
 only a small pointer file and Unity fails to read the package. Run `git lfs pull -I "Packages/*.tgz"` (your path) after

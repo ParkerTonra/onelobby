@@ -6,12 +6,15 @@
 # Extra projects: EXTRA="OneLobby.Foo OneLobby.Bar" clients/unity/build-unity-package.sh
 #   clients/unity/build-unity-package.sh --pack --version 0.6.0-dev.4   # stamp that version into the packed package.json and file name
 # Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
+#   clients/unity/build-unity-package.sh --out /tmp/feed --version 0.6.0-dev.12   # read-only checkout: implies --pack;
+# builds a staged copy of the package with dotnet bin/obj in a temp folder and writes only <out>/<tgz>.
 set -euo pipefail
-pack=0; version_override=""
+pack=0; version_override=""; out_dir=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --pack) pack=1 ;;
     --version) version_override="${2:?--version needs a value}"; shift ;;
+    --out) out_dir="${2:?--out needs a value}"; pack=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -32,6 +35,20 @@ ship_deps="System.Text.Json System.Text.Encodings.Web Microsoft.Bcl.AsyncInterfa
 # editor only), so it is not shipped and Unity's import-time reference check is off for the DLL that names it.
 no_validate="Microsoft.Extensions.Logging.Abstractions.dll"
 
+publish_args=()
+stage_root=""
+if [ -n "$out_dir" ]; then
+  mkdir -p "$out_dir"; out_dir="$(cd "$out_dir" && pwd)"
+  stage_root="$(mktemp -d)"
+  # the staged copy is what gets filled and packed; build output in the checkout is left out of it
+  cp -R "$pkg" "$stage_root/package"
+  pkg="$stage_root/package"; plugins="$pkg/Runtime/Plugins"; deps="$plugins/Dependencies"
+  rm -rf "$plugins" "$pkg/Runtime/Plugins.meta"
+  # PathMap: the PDB path in each DLL names the temp folder otherwise (in-repo builds map to /_/ already)
+  map_from="$stage_root"; command -v cygpath >/dev/null && map_from="$(cygpath -w "$stage_root")"   # MSYS on Windows: dotnet sees C:\...
+  publish_args=(--artifacts-path "$stage_root/artifacts" "-p:PathMap=$map_from=/_stage/")
+fi
+
 out="$(mktemp -d)"
 ours=""
 for p in $projects; do
@@ -39,7 +56,7 @@ for p in $projects; do
   if [ ! -f "$csproj" ]; then echo "skip $p (not in this checkout)"; continue; fi
   echo "build $p (netstandard2.1)"
   # ContinuousIntegrationBuild: source paths in the DLLs become /_/... instead of this machine's checkout path
-  dotnet publish "$csproj" -c Release -f netstandard2.1 -o "$out" --nologo -v quiet -p:ContinuousIntegrationBuild=true
+  dotnet publish "$csproj" -c Release -f netstandard2.1 -o "$out" --nologo -v quiet -p:ContinuousIntegrationBuild=true ${publish_args[@]+"${publish_args[@]}"}
   ours="$ours $p"
 done
 
@@ -92,24 +109,38 @@ done
 rm -rf "$out"
 
 # Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
-repo="$(dirname "$dotnetdir")"
+repo="$(dirname "$(dirname "$dotnetdir")")"
+docs="docs/recipes/unity.md docs/recipes/direct-ip.md docs/recipes/pause.md docs/recipes/game-console.md
+      docs/recipes/replication.md docs/recipes/voice-and-chat.md spec/nostr-signaling.md AGENTS.md"
 mkdir -p "$pkg/Documentation~"
-for d in docs/recipes/unity.md docs/recipes/direct-ip.md docs/recipes/pause.md docs/recipes/game-console.md \
-         docs/recipes/replication.md docs/recipes/voice-and-chat.md spec/nostr-signaling.md AGENTS.md; do
+for d in $docs; do
   if [ -f "$repo/$d" ]; then cp "$repo/$d" "$pkg/Documentation~/"; else echo "doc $d: not in this checkout (skipped)"; fi
+done
+# Repo paths inside the copies point where a package user can open them: a shipped doc at Documentation~/<name>,
+# any other docs/ or spec/ file at its GitHub page.
+for f in "$pkg/Documentation~/"*.md; do
+  SHIPPED="$docs" perl -0pi -e '
+    BEGIN { %ship = map { $_ => 1 } split " ", $ENV{SHIPPED} }
+    s{(?<![\w/.~-])((?:docs|spec)/[\w./-]+?\.(?:md|json))}{
+      $ship{$1} ? "Documentation~/" . ($1 =~ s{.*/}{}r) : "https://github.com/ParkerTonra/onelobby/blob/main/$1" }ge' "$f"
 done
 echo "plugins:"; (cd "$pkg" && find Runtime/Plugins -name '*.dll' | sed 's/^/  /')
 
 if [ "$pack" = 1 ]; then
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$pkg/package.json" | head -1)"
-  stage="$(mktemp -d)"
-  cp -R "$pkg" "$stage/package"
+  if [ -n "$stage_root" ]; then
+    stage="$stage_root"; rm -rf "$stage/artifacts"
+  else
+    stage="$(mktemp -d)"
+    cp -R "$pkg" "$stage/package"
+  fi
   if [ -n "$version_override" ]; then
     # stamp the packed copy only; the tracked package.json stays as it is
     version="$version_override"
     sed -i "0,/\"version\": *\"[^\"]*\"/s//\"version\": \"$version\"/" "$stage/package/package.json"
   fi
-  tar $(tar --version 2>/dev/null | grep -q GNU && echo --force-local) -czf "$here/com.onelobby.unity-$version.tgz" -C "$stage" package
+  tgz="${out_dir:-$here}/com.onelobby.unity-$version.tgz"
+  tar $(tar --version 2>/dev/null | grep -q GNU && echo --force-local) -czf "$tgz" -C "$stage" package
   rm -rf "$stage"
-  echo "packed $here/com.onelobby.unity-$version.tgz"
+  echo "packed $tgz"
 fi

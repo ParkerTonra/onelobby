@@ -1,0 +1,72 @@
+# Packs a dev Unity package (com.onelobby.unity-<version>-ci.<run>.tgz) for every push to main, so a game can test the
+# current main without packing by hand. The libdatachannel natives are not rebuilt here: each one comes from the
+# newest unexpired artifact of datachannel-natives.yml on main (that workflow uploads per platform, so one red job
+# does not hold back the others). The run summary names the sha each native was built from.
+# Get one: GitHub > Actions > unity-dev-package > the run for your sha > artifact unity-dev-<sha>,
+#   or: gh run download -R <owner>/<repo> -n unity-dev-<sha>
+name: unity-dev-package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/unity-dev-package.yml"
+      - "clients/unity/build-unity-package.*"
+
+permissions:
+  contents: read
+  actions: read # list and download datachannel-natives artifacts
+
+jobs:
+  pack:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # natives freshness check diffs against the sha each native was built from
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - name: Natives from the newest datachannel-natives artifacts on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runtimes=clients/dotnet/OneLobby.DataChannel/runtimes
+          echo "| native | built from | run |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for rid in win-x64 linux-x64 osx android-arm64; do
+            row="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=native-$rid&per_page=100" \
+              --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main")][0]
+                    | "\(.id) \(.workflow_run.id) \(.workflow_run.head_sha)"')"
+            if [ -z "$row" ] || [ "$row" = "null" ]; then
+              echo "::error::no unexpired native-$rid artifact on main: run datachannel-natives on main first"
+              exit 1
+            fi
+            read -r id run sha <<< "$row"
+            mkdir -p "$runtimes/$rid/native"
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/$rid.zip"
+            unzip -o -q "$RUNNER_TEMP/$rid.zip" -d "$runtimes/$rid/native"
+            if ! git diff --quiet "$sha" HEAD -- clients/dotnet/OneLobby.DataChannel/native; then
+              echo "::warning::native $rid was built from $sha; native/ sources changed since (run datachannel-natives)"
+            fi
+            echo "| $rid | ${sha:0:7} | $run |" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Pack (read-only checkout, -Out)
+        shell: pwsh
+        run: |
+          $base = (Get-Content clients/unity/com.onelobby.unity/package.json -Raw | ConvertFrom-Json).version
+          $version = "$base-ci.$env:GITHUB_RUN_NUMBER"
+          ./clients/unity/build-unity-package.ps1 -Out "$env:RUNNER_TEMP/unity" -Version $version
+          $plugins = tar -tzf "$env:RUNNER_TEMP/unity/com.onelobby.unity-$version.tgz" | Select-String 'datachannel\.(dll|so|dylib)$'
+          if (@($plugins).Count -lt 4) { throw "expected 4 natives in the tgz, found: $plugins" }
+          $dirty = git status --porcelain --ignored -- clients/unity clients/dotnet ':!clients/dotnet/OneLobby.DataChannel/runtimes'
+          if ($dirty) { throw "packing wrote into the checkout:`n$dirty" }
+          "Packed ``com.onelobby.unity-$version.tgz`` from ``$env:GITHUB_SHA``." >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unity-dev-${{ github.sha }}
+          path: ${{ runner.temp }}/unity/*.tgz
+          if-no-files-found: error
+          retention-days: 30

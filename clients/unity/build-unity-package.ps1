@@ -6,11 +6,32 @@
 # Mirrors build-unity-package.sh. Needs the .NET 8 SDK or newer.
 #   powershell -File clients/unity/build-unity-package.ps1 -Pack -Version 0.6.0-dev.4   # stamp that version into the packed package.json and the file name
 # Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
-param([switch]$Pack, [string[]]$Extra = @(), [string]$Version = '')
+#   powershell -File clients/unity/build-unity-package.ps1 -Out C:/feed -Version 0.6.0-dev.12   # read-only checkout:
+# implies -Pack; builds a staged copy of the package with dotnet bin/obj in a temp folder and writes only <Out>/<tgz>.
+param([switch]$Pack, [string[]]$Extra = @(), [string]$Version = '', [string]$Out = '')
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
 $pkg = (Resolve-Path (Join-Path $here "com.onelobby.unity")).Path
+$publishArgs = @()
+$stageRoot = ''
+$outDir = ''   # PowerShell names are case-insensitive: $out below is the build temp folder
+if ($Out) {
+    $Pack = $true
+    New-Item -ItemType Directory -Force $Out | Out-Null
+    $outDir = (Resolve-Path $Out).Path
+    $stageRoot = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-stage-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force $stageRoot | Out-Null
+    # the staged copy is what gets filled and packed; build output in the checkout is left out of it
+    Copy-Item -Recurse $pkg (Join-Path $stageRoot 'package')
+    $pkg = Join-Path $stageRoot 'package'
+    foreach ($gen in @('Runtime/Plugins', 'Runtime/Plugins.meta')) {
+        $g = Join-Path $pkg $gen
+        if (Test-Path $g) { Remove-Item -Recurse -Force $g }
+    }
+    # PathMap: the PDB path in each DLL names the temp folder otherwise (in-repo builds map to /_/ already)
+    $publishArgs = @('--artifacts-path', (Join-Path $stageRoot 'artifacts'), "-p:PathMap=$stageRoot=/_stage/")
+}
 $dotnet = Join-Path (Split-Path $here) 'dotnet'
 $plugins = Join-Path $pkg 'Runtime/Plugins'
 $deps = Join-Path $plugins 'Dependencies'
@@ -37,7 +58,7 @@ foreach ($p in $projects) {
     if (-not (Test-Path $csproj)) { Write-Host "skip $p (not in this checkout)"; continue }
     Write-Host "build $p (netstandard2.1)"
     # ContinuousIntegrationBuild: source paths in the DLLs become /_/... instead of this machine's checkout path
-    dotnet publish $csproj -c Release -f netstandard2.1 -o $out --nologo -v quiet -p:ContinuousIntegrationBuild=true
+    dotnet publish $csproj -c Release -f netstandard2.1 -o $out --nologo -v quiet -p:ContinuousIntegrationBuild=true @publishArgs
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish $p failed" }
     $ours += $p
 }
@@ -127,9 +148,14 @@ Write-Host "plugins:"; Get-ChildItem $plugins -Recurse -Filter *.dll | ForEach-O
 
 if ($Pack) {
     $version = if ($Version) { $Version } else { (Get-Content (Join-Path $pkg 'package.json') -Raw | ConvertFrom-Json).version }
-    $stage = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-pack-' + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Force $stage | Out-Null
-    Copy-Item -Recurse $pkg (Join-Path $stage 'package')
+    if ($stageRoot) {
+        $stage = $stageRoot
+        Remove-Item -Recurse -Force (Join-Path $stage 'artifacts') -ErrorAction SilentlyContinue
+    } else {
+        $stage = Join-Path ([IO.Path]::GetTempPath()) ('onelobby-pack-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $stage | Out-Null
+        Copy-Item -Recurse $pkg (Join-Path $stage 'package')
+    }
     if ($Version) {
         # stamp the packed copy only; the tracked package.json stays as it is
         $pj = Join-Path $stage 'package/package.json'
@@ -137,7 +163,7 @@ if ($Pack) {
         $text = [regex]::Replace($text, '"version"\s*:\s*"[^"]*"', '"version": "' + $Version + '"', 1)
         [IO.File]::WriteAllText($pj, $text, (New-Object Text.UTF8Encoding($false)))
     }
-    $tgz = Join-Path $here "com.onelobby.unity-$version.tgz"
+    $tgz = Join-Path $(if ($outDir) { $outDir } else { $here }) "com.onelobby.unity-$version.tgz"
     # Windows' own bsdtar; a GNU tar earlier on PATH (Git for Windows) reads "C:" as a remote host
     $tar = Join-Path $env:SystemRoot 'System32/tar.exe'
     if (-not $env:SystemRoot -or -not (Test-Path $tar)) { $tar = 'tar' }
