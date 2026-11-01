@@ -26,6 +26,9 @@ func _init() -> void:
 	_crypto()
 	_join_codes()
 	_limits()
+	_events()
+	_link()
+	_hub()
 	print("nostr unit: %d passed, %d failed" % [_pass, _fail])
 	quit(0 if _fail == 0 else 1)
 
@@ -105,4 +108,116 @@ func _join_codes() -> void:
 
 
 func _limits() -> void:
-	pass
+	var file: Dictionary = _spec("vectors/nostr-limits.json")
+	var mine := OneLobbyNostrLimits.groups()
+	var keys := file.keys()
+	keys.erase("$comment")
+	keys.sort()
+	var mykeys := mine.keys()
+	mykeys.sort()
+	_check(keys == mykeys, "limits: same groups as nostr-limits.json")
+	for g: String in keys:
+		var want: Dictionary = file[g]
+		var have: Dictionary = mine.get(g, {})
+		var wk := want.keys()
+		var hk := have.keys()
+		wk.sort()
+		hk.sort()
+		_check(wk == hk, "limits: same names in " + g)
+		for k: String in wk:
+			_check(int(want[k]) == int(have.get(k, -1)), "limits: %s.%s = %s" % [g, k, want[k]])
+	_check(OneLobbyNostrPool.KIND == 25050, "event kind 25050")
+
+
+func _events() -> void:
+	var ev: Dictionary = _spec("vectors/nostr.json")["event"]
+	var id := OneLobbyNostrPool.event_id(ev["pubkey"], int(ev["created_at"]), int(ev["kind"]), ev["tags"][0][1], ev["content"])
+	_check(id == ev["id"], "nostr event id matches the vector")
+	var kp := OneLobbySecp256k1.random_keypair()
+	var made := OneLobbyNostrPool.make_event(kp, "abc", "Zm9v", 1700000000)
+	_check(made["id"] == OneLobbyNostrPool.event_id(kp.pubkey_hex(), 1700000000, 25050, "abc", "Zm9v"), "made event has its own id")
+	_check(String(made["sig"]).length() == 128 and made["kind"] == 25050 and made["tags"] == [["t", "abc"]], "made event shape")
+
+
+## Two links wired through arrays: ordering, duplicates, reordering, acks and close.
+func _link() -> void:
+	var a_out: Array = []
+	var b_out: Array = []
+	var a_got: Array = []
+	var b_got: Array = []
+	var a_closed := [""]
+	var a := OneLobbyNostrLink.new(func(f: Dictionary) -> void: a_out.append(f), func(t: String) -> void: a_got.append(t), func(r: String) -> void: a_closed[0] = "peer:" + r, func(_r: String) -> void: a_closed[0] = "dead")
+	var b := OneLobbyNostrLink.new(func(f: Dictionary) -> void: b_out.append(f), func(t: String) -> void: b_got.append(t), func(_r: String) -> void: pass, func(_r: String) -> void: pass)
+	a.send("one")
+	a.send("two")
+	OS.delay_msec(40)
+	a.poll()
+	_check(a_out.size() == 1 and a_out[0]["type"] == "data" and a_out[0]["msgs"] == ["one", "two"], "link batches two texts into one frame")
+	_check(a.buffered() == 6, "link counts unacked bytes")
+	a.send("three")
+	OS.delay_msec(40)
+	a.poll()
+	_check(a_out.size() == 2 and a_out[1]["seq"] == 2, "link second frame has seq 2")
+	# frame 2 arrives first (held), then frame 1, then a duplicate of frame 1
+	b.receive(a_out[1])
+	_check(b_got.is_empty(), "link holds an out-of-order frame")
+	b.receive(a_out[0])
+	_check(b_got == ["one", "two", "three"], "link delivers in order once the gap fills")
+	b.receive(a_out[0])
+	_check(b_got.size() == 3, "link drops a duplicate")
+	OS.delay_msec(40)
+	b.poll()
+	_check(b_out.size() == 1 and b_out[0]["type"] == "beat" and b_out[0]["ack"] == 2, "link answers with an ack beat")
+	a.receive(b_out[0])
+	_check(a.buffered() == 0, "ack frees the sent frames")
+	b.close("bye")
+	_check(b_out.back()["type"] == "close" and b_out.back()["reason"] == "bye", "close frame carries the reason")
+	a.receive(b_out.back())
+	_check(a_closed[0] == "peer:bye" and a.is_closed(), "peer close reaches the owner")
+
+
+## The hub over text, the way the host's sessions talk to it.
+func _hub() -> void:
+	var hub := OneLobbyHub.direct(3, "pw", ["stun:example.org:3478"])
+	var host_in: Array = []
+	var j_in: Array = []
+	var hs := hub.connect_session("local", func(t: String) -> void: host_in.append(JSON.parse_string(t)), func(_c: int, _r: String) -> void: pass)
+	var js := hub.connect_session("nostr:abcd", func(t: String) -> void: j_in.append(JSON.parse_string(t)), func(_c: int, _r: String) -> void: pass)
+	hub.receive(hs, '{"t":"create","name":"L","maxPlayers":3,"mode":"raw"}')
+	_check(host_in.size() == 1 and host_in[0]["code"] == "bad_request", "create before hello is refused")
+	host_in.clear()
+	hub.receive(hs, '{"t":"hello","proto":"lk1","gameId":"g","netVersion":"1","name":"Host"}')
+	_check(host_in[0]["t"] == "welcome" and host_in[0]["ice"][0]["urls"][0] == "stun:example.org:3478", "welcome carries the STUN list")
+	_check(int(host_in[0]["limits"]["maxPlayers"]) == 3, "welcome limits.maxPlayers")
+	hub.receive(hs, '{"t":"create","name":"L","maxPlayers":3,"mode":"raw","visibility":"unlisted"}')
+	var lobby: Dictionary = host_in[1]
+	_check(lobby["t"] == "lobby" and lobby["code"] == "" and int(lobby["you"]) == 1 and int(lobby["hostId"]) == 1, "create answers a lobby with no code")
+	hub.receive(js, '{"t":"hello","proto":"lk1","gameId":"g","netVersion":"1","name":"Jo"}')
+	hub.receive(js, '{"t":"join"}')
+	_check(j_in.back()["t"] == "error" and j_in.back()["code"] == "bad_password", "join without the password is refused")
+	hub.receive(js, '{"t":"join","password":"pw"}')
+	var jl: Dictionary = j_in.back()
+	_check(jl["t"] == "lobby" and int(jl["you"]) == 2 and (jl["peers"] as Array).size() == 2, "join without a code enters the one lobby")
+	_check(host_in.back()["t"] == "peer_joined" and int(host_in.back()["peer"]["peerId"]) == 2, "host hears peer_joined")
+	hub.receive(js, '{"t":"signal","to":1,"sdp":{"type":"answer","sdp":"x"}}')
+	_check(host_in.back()["t"] == "signal" and int(host_in.back()["from"]) == 2, "signal joiner to host is relayed")
+	hub.receive(hs, '{"t":"signal","to":2,"ice":{"candidate":"c"}}')
+	_check(j_in.back()["t"] == "signal" and int(j_in.back()["from"]) == 1, "signal host to joiner is relayed")
+	hub.receive(js, '{"t":"ping","n":7}')
+	_check(j_in.back()["t"] == "pong" and int(j_in.back()["n"]) == 7, "ping answers pong")
+	hub.receive(js, '{"t":"phase","phase":"in_game"}')
+	_check(j_in.back()["code"] == "not_host", "joiner cannot change the phase")
+	hub.receive(hs, '{"t":"phase","phase":"in_game"}')
+	_check(host_in.back()["t"] == "lobby" and host_in.back()["phase"] == "in_game", "host phase is broadcast as a lobby message")
+	hub.receive(hs, '{"t":"kick","peerId":2}')
+	_check(j_in.back()["t"] == "error" and j_in.back()["code"] == "kicked", "kicked joiner gets the kicked error")
+	_check(host_in.back()["t"] == "peer_left" and host_in.back()["reason"] == "kicked", "host hears peer_left kicked")
+	var j2_in: Array = []
+	var j2 := hub.connect_session("nostr:abcd", func(t: String) -> void: j2_in.append(JSON.parse_string(t)), func(_c: int, _r: String) -> void: pass)
+	hub.receive(j2, '{"t":"hello","proto":"lk1","gameId":"g","netVersion":"1","name":"Jo"}')
+	hub.receive(j2, '{"t":"join","password":"pw"}')
+	_check(j2_in.back()["code"] == "kicked", "a kicked address cannot rejoin")
+	hub.receive(j2, '{"t":"hello","proto":"lk1"}')
+	_check(j2_in.back()["code"] == "bad_request", "hello twice is refused")
+	_check(OneLobbyHub.sanitize("a\u0001b" + char(0x202E) + "c", 24) == "abc", "sanitize drops control and bidi characters")
+	_check(OneLobbyHub.sanitize("", 24, "Player") == "Player", "sanitize falls back")
