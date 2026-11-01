@@ -83,7 +83,8 @@ export class WebRtcLink implements PeerLink {
           void this.reportPath();
         }
       };
-      ch.onclose = () => this.fail(`channel ${name} closed`);
+      // only reliable's close ends the link: an idle fast/voice reset can overtake reliable data a leaving peer flushed
+      if (name === "reliable") ch.onclose = () => this.fail(`channel ${name} closed`);
       ch.onmessage = (e) => {
         const d = e.data as unknown;
         const data = d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d as never);

@@ -224,7 +224,10 @@ namespace OneLobby.DataChannel
         [MonoPInvokeCallback(typeof(Rtc.ClosedCallback))]
         private static void OnClosed(int dc, IntPtr ptr)
         {
-            if (ById.TryGetValue(dc, out var l) && l.IndexOf(dc) is var i && i >= 0 && Volatile.Read(ref l._open[i]) == 1)
+            // Only the reliable channel's close ends the link: its stream reset arrives after the last reliable frame,
+            // while an idle fast or voice channel's reset can overtake reliable data still in flight (a leaving peer
+            // that closes all three would cut its own flushed tail). A dead connection still fails through OnState.
+            if (ById.TryGetValue(dc, out var l) && l.IndexOf(dc) is var i && i == 0 && Volatile.Read(ref l._open[0]) == 1)
                 l._nativeError ??= "channel " + Labels[i] + " closed";
         }
 
@@ -386,11 +389,12 @@ namespace OneLobby.DataChannel
             for (var i = 0; i < 3; i++) if (_dc[i] >= 0) ById.TryRemove(_dc[i], out _);
             if (_pc >= 0) ById.TryRemove(_pc, out _);
             // A zero bufferedAmount only means libdatachannel handed the bytes to SCTP; deleting the peer connection now
-            // would drop what SCTP has not delivered yet. Close the channels (each stream reset goes out after its queued
-            // data, so the far side sees the link close after the last message) and delete everything a moment later.
+            // would drop what SCTP has not delivered yet. Close only the reliable channel (its stream reset goes out after
+            // its queued data, so the far side sees the link close after the last message; resets of the idle fast and
+            // voice channels would get there first) and delete everything a moment later.
             var dc = (int[])_dc.Clone();
             var pc = _pc;
-            try { for (var i = 0; i < 3; i++) if (dc[i] >= 0) Rtc.rtcClose(dc[i]); }
+            try { if (dc[0] >= 0) Rtc.rtcClose(dc[0]); }
             catch (DllNotFoundException) { return; /* never loaded */ }
             System.Threading.Tasks.Task.Delay(CloseGraceMs).ContinueWith(_ =>
             {
