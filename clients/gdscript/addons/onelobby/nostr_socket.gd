@@ -1,5 +1,5 @@
 class_name OneLobbyNostrSocket
-extends OneLobbyTransport.Socket
+extends OneLobbyTransport.OLSocket
 ## The joiner's signaling socket over Nostr (spec/nostr-signaling.md s.4): carries the hub protocol to the host through
 ## a OneLobbyNostrRoom. The client cannot tell it from a TCP WebSocket. Polled: OneLobbyClient calls poll() each frame.
 

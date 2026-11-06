@@ -22,7 +22,7 @@ const DEFAULT_RELAYS: Array[String] = [
 ## Public STUN servers for Nostr joiners (spec s.5).
 const DEFAULT_STUN: Array[String] = ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"]
 
-class Relay:
+class OLRelay:
 	var url := ""
 	var ws: WebSocketPeer = null
 	var open := false
@@ -32,7 +32,7 @@ class Relay:
 	var backoff := OneLobbyNostrLimits.BACKOFF_START_MS
 	var retry_at := 0
 
-var _relays: Array[Relay] = []
+var _relays: Array[OLRelay] = []
 var _topic := ""
 var _on_event: Callable   # (ev: Dictionary)
 var _on_change: Callable  # ()
@@ -47,7 +47,7 @@ func _init(urls: Array, topic: String, on_event: Callable, on_change: Callable =
 	_on_change = on_change
 	_sub = "ol" + Crypto.new().generate_random_bytes(4).hex_encode()
 	for u in urls:
-		var r := Relay.new()
+		var r := OLRelay.new()
 		r.url = str(u)
 		_relays.append(r)
 
@@ -152,7 +152,7 @@ func _changed() -> void:
 		_on_change.call()
 
 
-func _dial(r: Relay) -> void:
+func _dial(r: OLRelay) -> void:
 	if _closed or r.skipped:
 		return
 	var ws := WebSocketPeer.new()
@@ -167,14 +167,14 @@ func _dial(r: Relay) -> void:
 	r.ws = ws
 
 
-func _retry_later(r: Relay) -> void:
+func _retry_later(r: OLRelay) -> void:
 	if _closed or r.skipped or r.retry_at > 0:
 		return
 	r.retry_at = Time.get_ticks_msec() + r.backoff
 	r.backoff = mini(OneLobbyNostrLimits.BACKOFF_MAX_MS, r.backoff * 2)
 
 
-func _skip(r: Relay) -> void:
+func _skip(r: OLRelay) -> void:
 	if r.skipped:
 		return
 	r.skipped = true
@@ -186,7 +186,7 @@ func _skip(r: Relay) -> void:
 	_changed()
 
 
-func _on_message(r: Relay, text: String) -> void:
+func _on_message(r: OLRelay, text: String) -> void:
 	var m: Variant = JSON.parse_string(text)
 	if not m is Array or (m as Array).is_empty():
 		return
@@ -228,7 +228,7 @@ static func event_id(pubkey: String, created_at: int, kind: int, topic: String, 
 
 
 ## A signed kind-25050 event (BIP340 Schnorr over the id).
-static func make_event(kp: OneLobbySecp256k1.Keypair, topic: String, content: String, created_at: int) -> Dictionary:
+static func make_event(kp: OneLobbySecp256k1.OLKeypair, topic: String, content: String, created_at: int) -> Dictionary:
 	var pubkey := kp.pubkey_hex()
 	var id := event_id(pubkey, created_at, KIND, topic, content)
 	var sig := OneLobbySecp256k1.sign_random(id.hex_decode(), kp)

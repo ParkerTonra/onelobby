@@ -29,8 +29,24 @@ func _init() -> void:
 	_events()
 	_link()
 	_hub()
+	_inner_class_names()
 	print("nostr unit: %d passed, %d failed" % [_pass, _fail])
 	quit(0 if _fail == 0 else 1)
+
+
+# A game's global class_name clashes with an inner class of the same name here, and the whole addon fails to compile.
+# So every inner class carries the OL prefix.
+func _inner_class_names() -> void:
+	var re := RegEx.create_from_string("(?m)^\\s*class (\\w+)")
+	var dir := "res://addons/onelobby/"
+	var seen := 0
+	for f in DirAccess.get_files_at(dir):
+		if not f.ends_with(".gd"):
+			continue
+		for m in re.search_all(FileAccess.get_file_as_string(dir + f)):
+			seen += 1
+			_check(m.get_string(1).begins_with("OL"), "inner class has the OL prefix: %s in %s" % [m.get_string(1), f])
+	_check(seen > 0, "inner class scan found classes")
 
 
 func _crypto() -> void:

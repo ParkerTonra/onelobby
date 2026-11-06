@@ -136,6 +136,26 @@ To pump from `_physics_process` instead, set `client.auto_pump = false` and call
 exchange a message; `tests/vectors.gd` runs the spec vectors; `conformance-adapter.mjs` runs `conformance/peer`.
 Always pass `--headless --audio-driver Dummy`.
 
+Godot's WebRTC loads and works under `--headless`. Several processes on one PC are separate peers; `user://` is shared
+between them, so give your own settings or save files a per-process suffix (the addon itself does not use `user://`).
+On one PC the data almost certainly stays on the machine, so such a run proves your game logic and signaling, not NAT
+traversal, real latency or real loss.
+
+## Exporting
+
+A Windows export with `webrtc-native` in `addons/` writes three files, with no extra setup and no .NET:
+
+```
+game.exe
+game.pck
+libwebrtc_native.windows.template_release.x86_64.dll
+```
+
+- Ship the DLL beside the exe. Without it the build has no WebRTC.
+- `-s res://...` does not work in an exported build: official templates ignore it, and the main scene runs instead.
+  To test the export, have your main scene or an autoload read a flag from `OS.get_cmdline_user_args()`:
+  `./game.exe --headless --audio-driver Dummy -- --my-test-role=host`.
+
 ## Done when
 
 - The menu shows Host / Join / Browse and the project opens without script errors.

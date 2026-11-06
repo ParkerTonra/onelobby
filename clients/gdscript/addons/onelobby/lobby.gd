@@ -77,10 +77,10 @@ var _lingering: Array = [] # [link, until]
 var _rate := {} # id -> [start, n]
 
 
-class PeerRec:
+class OLPeerRec:
 	var id := 0
 	var name := ""
-	var link: OneLobbyTransport.Link
+	var link: OneLobbyTransport.OLLink
 	var open_handled := false
 	var hello := false
 	var hi_sent := false
@@ -123,8 +123,8 @@ func _init(client: OneLobbyClient, msg: Dictionary) -> void:
 		_host_timeout_ms = _peer_timeout_ms
 
 
-static func _rec(id: int, peer_name: String) -> PeerRec:
-	var r := PeerRec.new()
+static func _rec(id: int, peer_name: String) -> OLPeerRec:
+	var r := OLPeerRec.new()
 	r.id = id
 	r.name = peer_name
 	return r
@@ -139,20 +139,20 @@ func now_ms() -> int:
 ## Everyone in the lobby, you included.
 func peers() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for r: PeerRec in _peers.values():
+	for r: OLPeerRec in _peers.values():
 		out.append(_to_peer(r))
 	return out
 
 
 ## Round trip in ms from OneLobby's own 1 s pings (host: any peer; joiner: the host); 0 before the first pong.
 func ping_ms(peer_id: int) -> int:
-	return (_peers[peer_id] as PeerRec).ping_ms if _peers.has(peer_id) else 0
+	return (_peers[peer_id] as OLPeerRec).ping_ms if _peers.has(peer_id) else 0
 
 
 func is_peer_ready(peer_id: int) -> bool:
 	if peer_id == local_peer_id:
 		return true
-	var r: PeerRec = _peers.get(peer_id)
+	var r: OLPeerRec = _peers.get(peer_id)
 	return r != null and r.ready_raised and r.link != null and r.link.is_open
 
 
@@ -170,7 +170,7 @@ func broadcast(bytes: PackedByteArray, channel: int = OneLobbyWire.RELIABLE) -> 
 	var ch := OneLobbyWire.FAST if channel == OneLobbyWire.FAST else OneLobbyWire.RELIABLE
 	if is_host:
 		var f := OneLobbyWire.build_raw(local_peer_id, bytes)
-		for r: PeerRec in _peers.values():
+		for r: OLPeerRec in _peers.values():
 			if r.id != local_peer_id and r.link != null:
 				_send_link(r, ch, f)
 	else:
@@ -262,11 +262,11 @@ func debug_drop() -> void:
 ## Reliable bytes queued on all links and not yet sent.
 func reliable_buffered_bytes() -> int:
 	var n := 0
-	for r: PeerRec in _peers.values():
+	for r: OLPeerRec in _peers.values():
 		if r.link != null:
 			n += r.link.buffered()
 	for l: Array in _lingering:
-		n += (l[0] as OneLobbyTransport.Link).buffered()
+		n += (l[0] as OneLobbyTransport.OLLink).buffered()
 	return n
 
 
@@ -285,7 +285,7 @@ func _require_host(what: String) -> bool:
 func _start() -> void:
 	if is_host:
 		is_ready = true
-		for r: PeerRec in _peers.values():
+		for r: OLPeerRec in _peers.values():
 			if r.id != local_peer_id:
 				_connect_peer(r, true)
 	else:
@@ -295,7 +295,7 @@ func _start() -> void:
 			_ready_deadline_ms = now_ms() + _c.ready_timeout_ms
 
 
-func _connect_peer(rec: PeerRec, initiator: bool) -> void:
+func _connect_peer(rec: OLPeerRec, initiator: bool) -> void:
 	if rec.link != null:
 		rec.link.close()
 	rec.open_handled = false
@@ -309,7 +309,7 @@ func _connect_peer(rec: PeerRec, initiator: bool) -> void:
 		rec.link.start_offer()
 
 
-func _watch_ready(rec: PeerRec) -> void:
+func _watch_ready(rec: OLPeerRec) -> void:
 	rec.watching = true
 	rec.watch_deadline_ms = now_ms() + _c.ready_timeout_ms if _c.ready_timeout_ms > 0 else 0
 
@@ -324,7 +324,7 @@ func _send_to_peer(peer_id: int, ch: int, data: PackedByteArray) -> void:
 		_send_link(_peers[peer_id], ch, data)
 
 
-func _send_link(r: PeerRec, ch: int, data: PackedByteArray) -> void:
+func _send_link(r: OLPeerRec, ch: int, data: PackedByteArray) -> void:
 	if r.link == null or r.link.is_failed:
 		return
 	if not r.link.is_open:
@@ -340,9 +340,9 @@ func _send_link(r: PeerRec, ch: int, data: PackedByteArray) -> void:
 		r.link.send(OneLobbyWire.RELIABLE, chunk)
 
 
-func _hello_peers() -> Array[PeerRec]:
-	var out: Array[PeerRec] = []
-	for r: PeerRec in _peers.values():
+func _hello_peers() -> Array[OLPeerRec]:
+	var out: Array[OLPeerRec] = []
+	for r: OLPeerRec in _peers.values():
 		if r.id != local_peer_id and r.hello and r.link != null and r.link.is_open:
 			out.append(r)
 	return out
@@ -365,9 +365,9 @@ func _pump() -> void:
 		_release_held_signals(now)
 	for i in range(_lingering.size() - 1, -1, -1):
 		if now >= int(_lingering[i][1]):
-			(_lingering[i][0] as OneLobbyTransport.Link).close()
+			(_lingering[i][0] as OneLobbyTransport.OLLink).close()
 			_lingering.remove_at(i)
-	for rec: PeerRec in _peers.values().duplicate():
+	for rec: OLPeerRec in _peers.values().duplicate():
 		if rec.link == null or _closed:
 			continue
 		for sig in rec.link.take_signals():
@@ -394,7 +394,7 @@ func _pump() -> void:
 				_link_lost(rec)
 			if _closed:
 				return
-	for rec: PeerRec in _peers.values().duplicate():
+	for rec: OLPeerRec in _peers.values().duplicate():
 		if rec.departing and now >= rec.depart_at_ms:
 			_finish_departure(rec)
 			if _closed:
@@ -412,7 +412,7 @@ func _pump() -> void:
 		_last_ping_ms = now
 		_ping_n += 1
 		var ping := OneLobbyWire.build_ping(OneLobbyWire.PING, _ping_n, now)
-		for r: PeerRec in _peers.values():
+		for r: OLPeerRec in _peers.values():
 			if r.id != local_peer_id and r.link != null and r.link.is_open and (is_host or r.id == _host_id):
 				r.link.send(OneLobbyWire.FAST, ping)
 
@@ -437,7 +437,7 @@ func _check_ready_timer(now: int) -> void:
 func _check_peer_watches(now: int) -> void:
 	if not is_host:
 		return
-	for rec: PeerRec in _peers.values().duplicate():
+	for rec: OLPeerRec in _peers.values().duplicate():
 		if rec.watching and rec.watch_deadline_ms != 0 and now >= rec.watch_deadline_ms:
 			rec.watch_deadline_ms = 0
 			rec.watching = false
@@ -448,7 +448,7 @@ func _check_peer_watches(now: int) -> void:
 
 func _timeouts(now: int) -> void:
 	if is_host:
-		for r: PeerRec in _peers.values().duplicate():
+		for r: OLPeerRec in _peers.values().duplicate():
 			if r.id != local_peer_id and r.link != null and r.open_handled and now - r.last_rx_ms > _peer_timeout_ms:
 				_drop_peer(r, "timeout")
 		return
@@ -459,7 +459,7 @@ func _timeouts(now: int) -> void:
 			_drop_peer(_peers[_host_id], "timeout")
 		_elect_host()
 		return
-	var h: PeerRec = _peers.get(_host_id)
+	var h: OLPeerRec = _peers.get(_host_id)
 	if not _awaiting_claim and h != null and h.open_handled and now - h.last_rx_ms > _host_timeout_ms:
 		_host_lost()
 
@@ -478,7 +478,7 @@ func _allow_raw(from: int) -> bool:
 	return int(w[1]) <= msgs
 
 
-func _on_link_open(rec: PeerRec) -> void:
+func _on_link_open(rec: OLPeerRec) -> void:
 	# telemetry (the server counts relayed vs direct): one report per connection
 	_c.send_signaling(OneLobbySignaling.path(rec.link.relayed))
 	if is_host:
@@ -492,12 +492,12 @@ func _on_link_open(rec: PeerRec) -> void:
 		_send_link(rec, q[0], q[1])
 
 
-func _send_hi(rec: PeerRec) -> void:
+func _send_hi(rec: OLPeerRec) -> void:
 	rec.hi_sent = true
 	_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_hi(local_peer_id, -1))
 
 
-func _raise_ready(rec: PeerRec) -> void:
+func _raise_ready(rec: OLPeerRec) -> void:
 	if rec.ready_raised:
 		return
 	rec.ready_raised = true
@@ -507,7 +507,7 @@ func _raise_ready(rec: PeerRec) -> void:
 
 # ---- inbound frames ------------------------------------------------------------------------------------------------
 
-func _handle_frame(rec: PeerRec, ch: int, data: PackedByteArray, reassembled: bool = false) -> void:
+func _handle_frame(rec: OLPeerRec, ch: int, data: PackedByteArray, reassembled: bool = false) -> void:
 	var m := OneLobbyWire.decode(data, OneLobbyWire.MAX_REASSEMBLED if reassembled else OneLobbyWire.MAX_FRAME)
 	if m.has("error"):
 		return # malformed frame: drop
@@ -532,7 +532,7 @@ func _handle_frame(rec: PeerRec, ch: int, data: PackedByteArray, reassembled: bo
 		_handle_as_joiner(rec, ch, m)
 
 
-func _handle_as_host(rec: PeerRec, ch: int, m: Dictionary, data: PackedByteArray) -> void:
+func _handle_as_host(rec: OLPeerRec, ch: int, m: Dictionary, data: PackedByteArray) -> void:
 	match int(m["typeId"]):
 		OneLobbyWire.HI:
 			if int(m["proto"]) != OneLobbyWire.PROTO:
@@ -561,12 +561,12 @@ func _handle_as_host(rec: PeerRec, ch: int, m: Dictionary, data: PackedByteArray
 					if r2.id != rec.id:
 						_send_link(r2, ch, f)
 			elif route != local_peer_id:
-				var dest: PeerRec = _peers.get(route)
+				var dest: OLPeerRec = _peers.get(route)
 				if dest != null and dest.hello:
 					_send_link(dest, ch, OneLobbyWire.with_route(data, rec.id))
 
 
-func _handle_as_joiner(rec: PeerRec, ch: int, m: Dictionary) -> void:
+func _handle_as_joiner(rec: OLPeerRec, ch: int, m: Dictionary) -> void:
 	var t := int(m["typeId"])
 	if t == OneLobbyWire.HOST_CLAIM:
 		if int(m["hostId"]) == rec.id:
@@ -600,7 +600,7 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 				return
 			var id := OneLobbySignaling.i(p, "peerId")
 			# a resume that beat the departure grace: the old seat goes now, the new one connects fresh
-			if _peers.has(id) and (_peers[id] as PeerRec).departing:
+			if _peers.has(id) and (_peers[id] as OLPeerRec).departing:
 				_finish_departure(_peers[id])
 			if _closed or id == local_peer_id or _peers.has(id):
 				return
@@ -616,7 +616,7 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 			if id == local_peer_id:
 				_end(reason if reason == "kicked" or reason == "disconnected" else "server_closed")
 				return
-			var rec: PeerRec = _peers.get(id)
+			var rec: OLPeerRec = _peers.get(id)
 			if rec == null or rec.departing:
 				return
 			if not is_host and id == _host_id:
@@ -678,7 +678,7 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 				_switch_host(hid)
 
 
-func _deliver_signal(rec: PeerRec, sig: Dictionary) -> void:
+func _deliver_signal(rec: OLPeerRec, sig: Dictionary) -> void:
 	var is_offer := str(sig.get("type", "")) == "offer"
 	if rec.link == null:
 		if not is_offer or is_host:
@@ -715,7 +715,7 @@ func _accepts_signal_from(from: int) -> bool:
 		return true
 	if _direct:
 		return false
-	var h: PeerRec = _peers.get(_host_id)
+	var h: OLPeerRec = _peers.get(_host_id)
 	var alive := not _awaiting_claim and h != null and h.link != null and h.link.is_open and not h.link.is_failed
 	return not alive
 
@@ -738,11 +738,11 @@ func _on_socket_closed() -> void:
 
 # ---- departures ----------------------------------------------------------------------------------------------------
 
-func _to_peer(r: PeerRec) -> Dictionary:
+func _to_peer(r: OLPeerRec) -> Dictionary:
 	return {"peer_id": r.id, "name": r.name, "ping_ms": r.ping_ms, "relayed": r.link != null and r.link.relayed}
 
 
-func _drop_peer(rec: PeerRec, reason: String, linger: bool = false) -> void:
+func _drop_peer(rec: OLPeerRec, reason: String, linger: bool = false) -> void:
 	if not _peers.has(rec.id):
 		return
 	_peers.erase(rec.id)
@@ -759,7 +759,7 @@ func _drop_peer(rec: PeerRec, reason: String, linger: bool = false) -> void:
 
 
 ## Runs `finish` now, or once the open link to `rec` closes (at most LEAVE_MAX_MS).
-func _depart(rec: PeerRec, finish: Callable) -> void:
+func _depart(rec: OLPeerRec, finish: Callable) -> void:
 	if rec.departing:
 		return
 	if rec.link == null:
@@ -773,7 +773,7 @@ func _depart(rec: PeerRec, finish: Callable) -> void:
 		_finish_departure(rec)
 
 
-func _finish_departure(rec: PeerRec) -> void:
+func _finish_departure(rec: OLPeerRec) -> void:
 	if not rec.departing:
 		return
 	rec.departing = false
@@ -786,7 +786,7 @@ func _finish_departure(rec: PeerRec) -> void:
 		rec.depart_finish.call()
 
 
-func _link_lost(rec: PeerRec) -> void:
+func _link_lost(rec: OLPeerRec) -> void:
 	if is_host:
 		if rec.id != local_peer_id:
 			_drop_peer(rec, "timeout")
@@ -850,13 +850,13 @@ func _await_host(id: int) -> void:
 	_await_deadline_ms = now_ms() + CLAIM_WAIT_MS
 	if not _peers.has(id):
 		_peers[id] = _rec(id, "?")
-	var rec: PeerRec = _peers[id]
+	var rec: OLPeerRec = _peers[id]
 	if rec.link == null or rec.link.is_failed:
 		_connect_peer(rec, false)
 
 
 ## A claim wins on a higher epoch, or an equal epoch with a lower host id than the current one.
-func _accept_claim(rec: PeerRec, epoch: int, hid: int) -> void:
+func _accept_claim(rec: OLPeerRec, epoch: int, hid: int) -> void:
 	if not (epoch > _epoch or (epoch == _epoch and hid < _host_id)):
 		return
 	_epoch = epoch
@@ -875,7 +875,7 @@ func _become_host() -> void:
 	_host_id = local_peer_id
 	_awaiting_claim = false
 	is_ready = true
-	for r: PeerRec in _peers.values():
+	for r: OLPeerRec in _peers.values():
 		if r.id != local_peer_id:
 			_connect_peer(r, true)
 	_c.send_signaling(OneLobbySignaling.host_changed(local_peer_id, _epoch))
@@ -885,14 +885,14 @@ func _become_host() -> void:
 func _demote(new_host: int, epoch: int) -> void:
 	_epoch = epoch
 	_host_id = new_host
-	for r: PeerRec in _peers.values():
+	for r: OLPeerRec in _peers.values():
 		if r.id != new_host and r.link != null:
 			r.link.close()
 			r.link = null
 			r.hello = false
 	_awaiting_claim = false
 	is_ready = true
-	var h: PeerRec = _peers.get(new_host)
+	var h: OLPeerRec = _peers.get(new_host)
 	if h != null and h.link == null:
 		_connect_peer(h, false)
 	host_changed.emit(new_host)
@@ -909,11 +909,11 @@ func _end(reason: String) -> void:
 
 func _close() -> void:
 	_closed = true
-	for r: PeerRec in _peers.values():
+	for r: OLPeerRec in _peers.values():
 		if r.link != null:
 			r.link.close()
 		r.link = null
 	for l: Array in _lingering:
-		(l[0] as OneLobbyTransport.Link).close()
+		(l[0] as OneLobbyTransport.OLLink).close()
 	_lingering.clear()
 	_c._lobby_closed(self)

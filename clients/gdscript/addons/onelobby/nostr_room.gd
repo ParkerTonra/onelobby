@@ -9,7 +9,7 @@ const MAX_AGE_S := 120
 var pub := ""
 ## Called with each valid frame addressed to nobody in particular or to us (`to` empty or our pubkey).
 var on_frame: Callable
-var _kp: OneLobbySecp256k1.Keypair
+var _kp: OneLobbySecp256k1.OLKeypair
 var _key := PackedByteArray()
 var _topic := ""
 var _pool: OneLobbyNostrPool

@@ -6,18 +6,18 @@ extends OneLobbyTransport
 const DEFAULT_STUN := "stun:stun.l.google.com:19302"
 const LABELS := ["reliable", "fast", "voice"]
 
-var _sockets: Array[WsSocket] = []
-var _links: Array[RtcLink] = []
+var _sockets: Array[OLWsSocket] = []
+var _links: Array[OLRtcLink] = []
 
 
-func connect_signaling(url: String) -> OneLobbyTransport.Socket:
-	var s := WsSocket.new(url)
+func connect_signaling(url: String) -> OneLobbyTransport.OLSocket:
+	var s := OLWsSocket.new(url)
 	_sockets.append(s)
 	return s
 
 
-func create_link(opts: Dictionary) -> OneLobbyTransport.Link:
-	var l := RtcLink.new(opts)
+func create_link(opts: Dictionary) -> OneLobbyTransport.OLLink:
+	var l := OLRtcLink.new(opts)
 	_links.append(l)
 	return l
 
@@ -25,14 +25,14 @@ func create_link(opts: Dictionary) -> OneLobbyTransport.Link:
 func poll() -> void:
 	for s in _sockets:
 		s.poll()
-	_sockets = _sockets.filter(func(s: WsSocket) -> bool: return s.state != OneLobbyTransport.Socket.CLOSED)
+	_sockets = _sockets.filter(func(s: OLWsSocket) -> bool: return s.state != OneLobbyTransport.OLSocket.CLOSED)
 	for l in _links:
 		l.poll()
-	_links = _links.filter(func(l: RtcLink) -> bool: return not l.closed)
+	_links = _links.filter(func(l: OLRtcLink) -> bool: return not l.closed)
 
 
-class WsSocket:
-	extends OneLobbyTransport.Socket
+class OLWsSocket:
+	extends OneLobbyTransport.OLSocket
 	var _ws := WebSocketPeer.new()
 	var _inbox: Array[String] = []
 	var _ever_open := false
@@ -78,8 +78,8 @@ class WsSocket:
 		state = CLOSED
 
 
-class RtcLink:
-	extends OneLobbyTransport.Link
+class OLRtcLink:
+	extends OneLobbyTransport.OLLink
 	var closed := false
 	var _pc := WebRTCPeerConnection.new()
 	var _ch: Array[WebRTCDataChannel] = []

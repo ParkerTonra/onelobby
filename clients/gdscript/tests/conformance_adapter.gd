@@ -18,10 +18,10 @@ class HarnessTransport:
 	var links := {} # remote id -> HarnessLink
 	var started := false # links created after start are migration dials
 
-	func connect_signaling(_url: String) -> OneLobbyTransport.Socket:
-		return OneLobbyTransport.Socket.new()
+	func connect_signaling(_url: String) -> OneLobbyTransport.OLSocket:
+		return OneLobbyTransport.OLSocket.new()
 
-	func create_link(opts: Dictionary) -> OneLobbyTransport.Link:
+	func create_link(opts: Dictionary) -> OneLobbyTransport.OLLink:
 		var l := HarnessLink.new()
 		l.remote_id = int(opts["remote_id"])
 		l.adapter = adapter
@@ -33,7 +33,7 @@ class HarnessTransport:
 
 
 class HarnessLink:
-	extends OneLobbyTransport.Link
+	extends OneLobbyTransport.OLLink
 	var remote_id := 0
 	var adapter: Object
 	var transport: HarnessTransport

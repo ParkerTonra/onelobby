@@ -81,6 +81,9 @@ both directions).
 Desktop WebRTC needs the `webrtc-native` GDExtension (not committed): `./fetch-webrtc.sh` (or `fetch-webrtc.ps1`), then
 `godot --headless --import --path .` once. Always run headless with `--headless --audio-driver Dummy`.
 
+A desktop export copies `libwebrtc_native.*.dll` (or `.so`, `.dylib`) next to the executable: ship the whole folder, or
+the build has no WebRTC. See "Exporting" in the [recipe](../../docs/recipes/godot-gdscript.md).
+
 ```
 godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/vectors.gd
 GODOT=/path/to/godot node conformance/peer/run.mjs --adapter=clients/gdscript/conformance-adapter.mjs

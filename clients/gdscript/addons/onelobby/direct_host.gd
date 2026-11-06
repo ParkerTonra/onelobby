@@ -41,8 +41,8 @@ static func start(options: Dictionary) -> OneLobbyDirectHost:
 
 
 ## The host's own signaling socket: wired straight into the hub.
-func connect_local() -> OneLobbyTransport.Socket:
-	return LocalSocket.new(hub)
+func connect_local() -> OneLobbyTransport.OLSocket:
+	return OLLocalSocket.new(hub)
 
 
 func poll() -> void:
@@ -102,10 +102,10 @@ func _start_upnp(port: int) -> void:
 
 
 ## The host's end of the hub, as a signaling socket: always open, no network.
-class LocalSocket:
-	extends OneLobbyTransport.Socket
+class OLLocalSocket:
+	extends OneLobbyTransport.OLSocket
 	var _hub: OneLobbyHub
-	var _session: OneLobbyHub.Session
+	var _session: OneLobbyHub.OLSession
 	var _inbox: Array[String] = []
 
 	func _init(hub: OneLobbyHub) -> void:

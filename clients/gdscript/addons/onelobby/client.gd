@@ -44,14 +44,14 @@ var last_error := {}
 var transport: OneLobbyTransport = OneLobbyGodotTransport.new()
 var ice: Array = []
 
-var _socket: OneLobbyTransport.Socket
+var _socket: OneLobbyTransport.OLSocket
 ## Direct mode: builds the signaling socket instead of a WebSocket to lobby_server (valid while a direct lobby is open).
 var _socket_factory := Callable()
 ## The join code (display form) of the direct lobby being hosted, joined or rejoined; "" outside Direct mode.
 var _direct_code := ""
 var _direct_host: OneLobbyDirectHost = null
 ## A direct joiner's socket after its lobby ended: kept polled until its last message (the leave) is out.
-var _retiring: OneLobbyTransport.Socket = null
+var _retiring: OneLobbyTransport.OLSocket = null
 var _retire_deadline := 0
 var _welcomed := false
 var _hello_sent := false
@@ -189,7 +189,7 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 	var norm := OneLobbyJoinCode.normalize_dc1(join_code)
 	var relays: Array = options.get("relays", [])
 	_direct_code = OneLobbyJoinCode.group(norm)
-	_socket_factory = func() -> OneLobbyTransport.Socket: return OneLobbyNostrSocket.new(norm, relays)
+	_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
 	var result: Variant = await _run(resume, request, ["lobby"], _enter_lobby, int(options.get("timeout_ms", DIRECT_TIMEOUT_MS)))
 	if result == null:
 		_clear_direct()
@@ -209,9 +209,9 @@ func flush_signaling(timeout_ms: int = 1500) -> void:
 	var deadline := transport.now_ms() + timeout_ms
 	while transport.now_ms() < deadline and is_inside_tree():
 		var pending := 0
-		if _socket != null and _socket.state == OneLobbyTransport.Socket.OPEN:
+		if _socket != null and _socket.state == OneLobbyTransport.OLSocket.OPEN:
 			pending += _socket.buffered()
-		if _retiring != null and _retiring.state == OneLobbyTransport.Socket.OPEN:
+		if _retiring != null and _retiring.state == OneLobbyTransport.OLSocket.OPEN:
 			pending += _retiring.buffered()
 		if pending == 0:
 			break
@@ -239,22 +239,22 @@ func pump() -> void:
 		_direct_host.poll()
 	if _retiring != null:
 		_retiring.poll()
-		if _retiring.state == OneLobbyTransport.Socket.CLOSED or _retiring.buffered() == 0 or now > _retire_deadline:
+		if _retiring.state == OneLobbyTransport.OLSocket.CLOSED or _retiring.buffered() == 0 or now > _retire_deadline:
 			_retiring.close()
 			_retiring = null
 	var sock := _socket
 	if sock != null:
 		sock.poll() # a no-op for WebSockets (the transport polls them); Direct-mode sockets poll themselves
-		if sock.state == OneLobbyTransport.Socket.OPEN and not _hello_sent and (not _op.is_empty() or lobby != null):
+		if sock.state == OneLobbyTransport.OLSocket.OPEN and not _hello_sent and (not _op.is_empty() or lobby != null):
 			_hello_sent = true
 			sock.send_text(OneLobbySignaling.hello(game_id, net_version, display_name, _hello_resume))
 		for text in sock.receive():
 			_dispatch(text)
-		if sock.state == OneLobbyTransport.Socket.CLOSED:
+		if sock.state == OneLobbyTransport.OLSocket.CLOSED:
 			_fail_op("server_closed", sock.close_reason if sock.close_reason != "" else "closed")
 			if lobby != null:
 				lobby._on_socket_closed()
-		elif sock.state == OneLobbyTransport.Socket.OPEN and _welcomed and now - _last_ping_ms >= SERVER_PING_MS:
+		elif sock.state == OneLobbyTransport.OLSocket.OPEN and _welcomed and now - _last_ping_ms >= SERVER_PING_MS:
 			_last_ping_ms = now
 			_ping_n += 1
 			sock.send_text(OneLobbySignaling.ping(_ping_n))
@@ -267,7 +267,7 @@ func pump() -> void:
 # ---- internals (the lobby and the conformance adapter use these) ---------------------------------------------------
 
 func send_signaling(json: String) -> void:
-	if _socket != null and _socket.state == OneLobbyTransport.Socket.OPEN:
+	if _socket != null and _socket.state == OneLobbyTransport.OLSocket.OPEN:
 		_socket.send_text(json)
 
 
@@ -300,8 +300,8 @@ func _clear_direct() -> void:
 	if _direct_host != null:
 		_direct_host.close()
 		_direct_host = null
-	if _socket != null and not (_socket is OneLobbyDirectHost.LocalSocket):
-		if _socket.state == OneLobbyTransport.Socket.OPEN and _socket.buffered() > 0:
+	if _socket != null and not (_socket is OneLobbyDirectHost.OLLocalSocket):
+		if _socket.state == OneLobbyTransport.OLSocket.OPEN and _socket.buffered() > 0:
 			if _retiring != null:
 				_retiring.close()
 			_retiring = _socket
@@ -327,7 +327,7 @@ func _run(resume: String, request: String, expect: Array, finish: Callable, time
 	# A resume needs a fresh hello: if this connection already said hello, drop it and start a new one.
 	if _socket != null and resume != "" and _welcomed:
 		_socket.close()
-	if _socket == null or _socket.state == OneLobbyTransport.Socket.CLOSED:
+	if _socket == null or _socket.state == OneLobbyTransport.OLSocket.CLOSED:
 		_socket = _socket_factory.call() if _socket_factory.is_valid() else transport.connect_signaling(lobby_server)
 		_welcomed = false
 		_hello_sent = false

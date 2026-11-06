@@ -11,13 +11,13 @@ func now_ms() -> int:
 
 
 ## Opens a signaling WebSocket to `url`.
-func connect_signaling(_url: String) -> Socket:
+func connect_signaling(_url: String) -> OLSocket:
 	return null
 
 
 ## A WebRTC link to one peer. `opts`: remote_id, initiator (bool), ice_servers (Array of {urls, username?,
 ## credential?}), relay_only (bool).
-func create_link(_opts: Dictionary) -> Link:
+func create_link(_opts: Dictionary) -> OLLink:
 	return null
 
 
@@ -26,7 +26,7 @@ func poll() -> void:
 
 
 ## A signaling socket: text messages only.
-class Socket:
+class OLSocket:
 	extends RefCounted
 	const CONNECTING := 0
 	const OPEN := 1
@@ -54,7 +54,7 @@ class Socket:
 
 
 ## A peer link: three negotiated data channels (reliable 0, fast 1, voice 2) over one WebRTC connection.
-class Link:
+class OLLink:
 	extends RefCounted
 	var is_open := false
 	var is_failed := false

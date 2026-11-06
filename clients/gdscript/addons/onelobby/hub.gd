@@ -24,7 +24,7 @@ const KNOWN_TYPES := ["hello", "create", "join", "list", "leave", "signal", "met
 
 
 ## Sliding-window counter: at most `limit` events per `window_ms`.
-class RateWindow:
+class OLRateWindow:
 	var limit := 0
 	var window_ms := 0
 	var hits: Array[int] = []
@@ -55,17 +55,17 @@ class RateWindow:
 			hits.pop_front()
 
 
-class Member:
+class OLMember:
 	var peer_id := 0
 	var name := ""
 	var joined_at := 0
-	var session: Session = null
+	var session: OLSession = null
 	var detached_at := 0
 	var token := ""
 	var ip := ""
 
 
-class Session:
+class OLSession:
 	var id := 0
 	var ip := ""
 	var send: Callable   # (text: String)
@@ -76,15 +76,15 @@ class Session:
 	var game_id := ""
 	var net_version := ""
 	var name := ""
-	var lobby: Lobby = null
-	var member: Member = null
-	var pending_in: Lobby = null
-	var pending_member: Member = null
+	var lobby: OLLobby = null
+	var member: OLMember = null
+	var pending_in: OLLobby = null
+	var pending_member: OLMember = null
 	var signal_rates := {}  # Member -> RateWindow
-	var signal_total: RateWindow = null
+	var signal_total: OLRateWindow = null
 
 
-class Lobby:
+class OLLobby:
 	var code := ""
 	var game_id := ""
 	var net_version := ""
@@ -99,14 +99,14 @@ class Lobby:
 	var created_at := 0
 	var owner_ip := ""
 	var meta := {}
-	var members: Array[Member] = []
-	var pending: Array[Member] = []
+	var members: Array[OLMember] = []
+	var pending: Array[OLMember] = []
 	var kicked := {}
 	var host_id := 0
 	var epoch := 0
 	var next_peer_id := 1
 
-	func find(peer_id: int) -> Member:
+	func find(peer_id: int) -> OLMember:
 		for m in members:
 			if m.peer_id == peer_id:
 				return m
@@ -154,8 +154,8 @@ func session_count() -> int:
 # ---------------------------------------------------------------- connection lifecycle
 
 ## Registers a socket. Returns null (after sending server_full and closing) when over the peer limit.
-func connect_session(ip: String, send: Callable, close: Callable) -> Session:
-	var s := Session.new()
+func connect_session(ip: String, send: Callable, close: Callable) -> OLSession:
+	var s := OLSession.new()
 	_next_session += 1
 	s.id = _next_session
 	s.ip = ip
@@ -170,7 +170,7 @@ func connect_session(ip: String, send: Callable, close: Callable) -> Session:
 	return s
 
 
-func disconnect_session(s: Session) -> void:
+func disconnect_session(s: OLSession) -> void:
 	if not _sessions.erase(s.id):
 		return
 	s.closed = true
@@ -191,7 +191,7 @@ func disconnect_session(s: Session) -> void:
 			_promote_host(lobby, m.peer_id)
 
 
-func _close_session(s: Session) -> void:
+func _close_session(s: OLSession) -> void:
 	s.close.call(1000, "")
 	disconnect_session(s)
 
@@ -199,10 +199,10 @@ func _close_session(s: Session) -> void:
 ## Call about once a second: idle timeouts and resume-window expiry.
 func tick() -> void:
 	var now := _now()
-	for s: Session in _sessions.values():
+	for s: OLSession in _sessions.values():
 		if now - s.last_seen > IDLE_TIMEOUT_MS:
 			_close_session(s)
-	for lobby: Lobby in _lobbies.values():
+	for lobby: OLLobby in _lobbies.values():
 		for m in lobby.members.duplicate():
 			if m.detached_at > 0 and now - m.detached_at >= RESUME_WINDOW_MS:
 				_remove_member(lobby, m, "timeout")
@@ -210,7 +210,7 @@ func tick() -> void:
 
 # ---------------------------------------------------------------- inbound
 
-func receive(s: Session, text: String) -> void:
+func receive(s: OLSession, text: String) -> void:
 	if s.closed:
 		return
 	s.last_seen = _now()
@@ -253,7 +253,7 @@ func receive(s: Session, text: String) -> void:
 
 # ---------------------------------------------------------------- hello / welcome
 
-func _hello(s: Session, m: Dictionary) -> void:
+func _hello(s: OLSession, m: Dictionary) -> void:
 	if s.hello_done:
 		_error(s, "bad_request", "hello already sent")
 		return
@@ -280,13 +280,13 @@ func _hello(s: Session, m: Dictionary) -> void:
 	s.name = sanitize(_str(m, "name"), NAME_MAX, "Player")
 	s.hello_done = true
 
-	var resumed: Member = null
-	var rl: Lobby = null
+	var resumed: OLMember = null
+	var rl: OLLobby = null
 	var token: Variant = _str(m, "resumeToken")
 	var entry: Variant = _tokens.get(token) if token != null else null
 	if entry != null:
-		var el: Lobby = entry[0]
-		var em: Member = entry[1]
+		var el: OLLobby = entry[0]
+		var em: OLMember = entry[1]
 		if el.game_id == game_id and el.net_version == net_version:
 			var old := em.session
 			var take_over := old != null and old != s
@@ -326,7 +326,7 @@ func _hello(s: Session, m: Dictionary) -> void:
 
 # ---------------------------------------------------------------- create / join / leave
 
-func _create(s: Session, m: Dictionary) -> void:
+func _create(s: OLSession, m: Dictionary) -> void:
 	if s.lobby != null or s.pending_in != null:
 		_error(s, "bad_request", "already in a lobby")
 		return
@@ -372,7 +372,7 @@ func _create(s: Session, m: Dictionary) -> void:
 		_error(s, "bad_request", meta["err"], {"field": "meta"})
 		return
 
-	var lobby := Lobby.new()
+	var lobby := OLLobby.new()
 	lobby.code = _new_code()
 	lobby.game_id = s.game_id
 	lobby.net_version = s.net_version
@@ -393,11 +393,11 @@ func _create(s: Session, m: Dictionary) -> void:
 	_send(s, _lobby_msg(lobby, host))
 
 
-func _join(s: Session, m: Dictionary) -> void:
+func _join(s: OLSession, m: Dictionary) -> void:
 	if s.lobby != null or s.pending_in != null:
 		_error(s, "bad_request", "already in a lobby")
 		return
-	var lobby: Lobby = null
+	var lobby: OLLobby = null
 	if not _has(m, "code"):
 		# the code (or address) is the invitation, so a join without one means the one lobby
 		if not _lobbies.is_empty():
@@ -436,7 +436,7 @@ func _join(s: Session, m: Dictionary) -> void:
 		if lobby.pending.size() >= PENDING_MAX:
 			_error(s, "lobby_full", "too many pending requests")
 			return
-		var pm := Member.new()
+		var pm := OLMember.new()
 		pm.peer_id = lobby.next_peer_id
 		lobby.next_peer_id += 1
 		pm.name = s.name
@@ -452,7 +452,7 @@ func _join(s: Session, m: Dictionary) -> void:
 	_admit(lobby, s, null)
 
 
-func _admit(lobby: Lobby, s: Session, pending: Member) -> void:
+func _admit(lobby: OLLobby, s: OLSession, pending: OLMember) -> void:
 	var joiner := _add_member(lobby, s, pending)
 	for other in lobby.members:
 		if other != joiner:
@@ -464,8 +464,8 @@ func _admit(lobby: Lobby, s: Session, pending: Member) -> void:
 	_send(s, _lobby_msg(lobby, joiner))
 
 
-func _add_member(lobby: Lobby, s: Session, reuse: Member) -> Member:
-	var mem := reuse if reuse != null else Member.new()
+func _add_member(lobby: OLLobby, s: OLSession, reuse: OLMember) -> OLMember:
+	var mem := reuse if reuse != null else OLMember.new()
 	if reuse == null:
 		mem.peer_id = lobby.next_peer_id
 		lobby.next_peer_id += 1
@@ -485,7 +485,7 @@ func _add_member(lobby: Lobby, s: Session, reuse: Member) -> Member:
 	return mem
 
 
-func _leave(s: Session) -> void:
+func _leave(s: OLSession) -> void:
 	if s.pending_in != null:
 		s.pending_in.pending.erase(s.pending_member)
 		s.pending_in = null
@@ -498,14 +498,14 @@ func _leave(s: Session) -> void:
 
 # ---------------------------------------------------------------- relay + host-only
 
-func _signal(s: Session, m: Dictionary) -> void:
+func _signal(s: OLSession, m: Dictionary) -> void:
 	var lobby := s.lobby
 	var me := s.member
 	if lobby == null or me == null:
 		_error(s, "bad_request", "not in a lobby")
 		return
 	var to: Variant = _int(m, "to")
-	var target: Member = lobby.find(to) if to != null else null
+	var target: OLMember = lobby.find(to) if to != null else null
 	if target == null or target.session == null or target == me:
 		_error(s, "bad_request", "unknown signal target", {"field": "to"})
 		return
@@ -519,7 +519,7 @@ func _signal(s: Session, m: Dictionary) -> void:
 		_rate_limited(s, "signal", rate.retry_after_ms(now))
 		return
 	if s.signal_total == null:
-		s.signal_total = RateWindow.new(SIGNAL_PER_SEC * SIGNAL_FANOUT, 1000)
+		s.signal_total = OLRateWindow.new(SIGNAL_PER_SEC * SIGNAL_FANOUT, 1000)
 	if not s.signal_total.try_hit(now):
 		_rate_limited(s, "signal", s.signal_total.retry_after_ms(now))
 		return
@@ -534,19 +534,19 @@ func _signal(s: Session, m: Dictionary) -> void:
 	_send(target.session, o)
 
 
-func _signal_rate(s: Session, to: Member, now: int) -> RateWindow:
-	var w: RateWindow = s.signal_rates.get(to)
+func _signal_rate(s: OLSession, to: OLMember, now: int) -> OLRateWindow:
+	var w: OLRateWindow = s.signal_rates.get(to)
 	if w == null:
 		for k in s.signal_rates.keys():
-			if (s.signal_rates[k] as RateWindow).is_idle(now):
+			if (s.signal_rates[k] as OLRateWindow).is_idle(now):
 				s.signal_rates.erase(k)
 		var per := NOSTR_SIGNAL_PER_SEC if (to.session != null and to.session.ip.begins_with(NOSTR_ADDR)) else SIGNAL_PER_SEC
-		w = RateWindow.new(per, 1000)
+		w = OLRateWindow.new(per, 1000)
 		s.signal_rates[to] = w
 	return w
 
 
-func _require_host(s: Session) -> Lobby:
+func _require_host(s: OLSession) -> OLLobby:
 	if s.lobby == null or s.member == null:
 		_error(s, "bad_request", "not in a lobby")
 		return null
@@ -556,7 +556,7 @@ func _require_host(s: Session) -> Lobby:
 	return s.lobby
 
 
-func _host_meta(s: Session, m: Dictionary) -> void:
+func _host_meta(s: OLSession, m: Dictionary) -> void:
 	var lobby := _require_host(s)
 	if lobby == null:
 		return
@@ -568,7 +568,7 @@ func _host_meta(s: Session, m: Dictionary) -> void:
 	_broadcast_lobby(lobby)
 
 
-func _host_phase(s: Session, m: Dictionary) -> void:
+func _host_phase(s: OLSession, m: Dictionary) -> void:
 	var lobby := _require_host(s)
 	if lobby == null:
 		return
@@ -580,12 +580,12 @@ func _host_phase(s: Session, m: Dictionary) -> void:
 	_broadcast_lobby(lobby)
 
 
-func _kick(s: Session, m: Dictionary) -> void:
+func _kick(s: OLSession, m: Dictionary) -> void:
 	var lobby := _require_host(s)
 	if lobby == null:
 		return
 	var id: Variant = _int(m, "peerId")
-	var target: Member = lobby.find(id) if id != null else null
+	var target: OLMember = lobby.find(id) if id != null else null
 	if id == null or id == s.member.peer_id or target == null:
 		_error(s, "bad_request", "unknown peerId", {"field": "peerId"})
 		return
@@ -613,16 +613,16 @@ func _kick(s: Session, m: Dictionary) -> void:
 	_remove_member(lobby, target, "disconnected" if ban == false else "kicked", data)
 
 
-func _approve(s: Session, m: Dictionary) -> void:
+func _approve(s: OLSession, m: Dictionary) -> void:
 	var lobby := _require_host(s)
 	if lobby == null:
 		return
 	var id: Variant = _int(m, "peerId")
-	var pm: Member = null
+	var pm: OLMember = null
 	for p in lobby.pending:
 		if p.peer_id == id:
 			pm = p
-	var js: Session = pm.session if pm != null else null
+	var js: OLSession = pm.session if pm != null else null
 	if pm == null or js == null:
 		_error(s, "bad_request", "no such pending request", {"field": "peerId"})
 		return
@@ -644,7 +644,7 @@ func _approve(s: Session, m: Dictionary) -> void:
 	_admit(lobby, js, pm)
 
 
-func _path_report(s: Session, m: Dictionary) -> void:
+func _path_report(s: OLSession, m: Dictionary) -> void:
 	var p: Variant = _str(m, "path")
 	if p != "relayed" and p != "direct":
 		_error(s, "bad_request", "path must be relayed or direct", {"field": "path"})
@@ -653,7 +653,7 @@ func _path_report(s: Session, m: Dictionary) -> void:
 # ---------------------------------------------------------------- membership changes
 
 ## Removes a member for good. A member that is already detached was announced as left, so nothing is sent for it.
-func _remove_member(lobby: Lobby, mem: Member, reason: String, kick_data: Dictionary = {}) -> void:
+func _remove_member(lobby: OLLobby, mem: OLMember, reason: String, kick_data: Dictionary = {}) -> void:
 	var i := lobby.members.find(mem)
 	if i < 0:
 		return
@@ -677,8 +677,8 @@ func _remove_member(lobby: Lobby, mem: Member, reason: String, kick_data: Dictio
 
 
 ## The new host is the lowest peerId still connected; epoch +1.
-func _promote_host(lobby: Lobby, leaving_id: int) -> void:
-	var next: Member = null
+func _promote_host(lobby: OLLobby, leaving_id: int) -> void:
+	var next: OLMember = null
 	for x in lobby.members:
 		if x.session != null and x.peer_id != leaving_id and (next == null or x.peer_id < next.peer_id):
 			next = x
@@ -699,9 +699,9 @@ func _promote_host(lobby: Lobby, leaving_id: int) -> void:
 			_send(next.session, {"t": "join_request", "peer": _peer_obj(pm)})
 
 
-func _close_lobby(lobby: Lobby) -> void:
+func _close_lobby(lobby: OLLobby) -> void:
 	_lobbies.erase(lobby.code)
-	for pm: Member in lobby.pending.duplicate():
+	for pm: OLMember in lobby.pending.duplicate():
 		var ps := pm.session
 		if ps != null:
 			ps.pending_in = null
@@ -720,14 +720,14 @@ func _new_code() -> String:
 
 # ---------------------------------------------------------------- output helpers
 
-func _lobby_msg(l: Lobby, you: Member) -> Dictionary:
+func _lobby_msg(l: OLLobby, you: OLMember) -> Dictionary:
 	var ms: Array = []
 	for x in l.members:
 		if x.detached_at == 0:
 			ms.append(x)
-	ms.sort_custom(func(a: Member, b: Member) -> bool: return a.peer_id < b.peer_id)
+	ms.sort_custom(func(a: OLMember, b: OLMember) -> bool: return a.peer_id < b.peer_id)
 	var peers: Array = []
-	for p: Member in ms:
+	for p: OLMember in ms:
 		peers.append({"peerId": p.peer_id, "name": p.name, "joinedAt": p.joined_at})
 	return {
 		"t": "lobby", "code": l.code if issue_codes else "", "gameId": l.game_id, "netVersion": l.net_version, "hostId": l.host_id,
@@ -737,39 +737,39 @@ func _lobby_msg(l: Lobby, you: Member) -> Dictionary:
 	}
 
 
-func _broadcast_lobby(l: Lobby) -> void:
+func _broadcast_lobby(l: OLLobby) -> void:
 	for m in l.members:
 		if m.session != null:
 			_send_to(m, _lobby_msg(l, m))
 
 
-func _broadcast(l: Lobby, o: Dictionary) -> void:
+func _broadcast(l: OLLobby, o: Dictionary) -> void:
 	for m in l.members:
 		_send_to(m, o)
 
 
-func _peer_obj(m: Member) -> Dictionary:
+func _peer_obj(m: OLMember) -> Dictionary:
 	return {"peerId": m.peer_id, "name": m.name}
 
 
-func _send(s: Session, o: Dictionary) -> void:
+func _send(s: OLSession, o: Dictionary) -> void:
 	if not s.closed:
 		s.send.call(JSON.stringify(o))
 
 
-func _send_to(m: Member, o: Dictionary) -> void:
+func _send_to(m: OLMember, o: Dictionary) -> void:
 	if m.session != null:
 		_send(m.session, o)
 
 
-func _error(s: Session, code: String, msg: String, data: Variant = null) -> void:
+func _error(s: OLSession, code: String, msg: String, data: Variant = null) -> void:
 	var o := {"t": "error", "code": code, "msg": msg}
 	if data != null:
 		o["data"] = data
 	s.send.call(JSON.stringify(o))
 
 
-func _rate_limited(s: Session, kind: String, retry_after_ms: int) -> void:
+func _rate_limited(s: OLSession, kind: String, retry_after_ms: int) -> void:
 	_error(s, "rate_limited", "too many %s requests" % kind, {"retryAfterMs": retry_after_ms})
 
 

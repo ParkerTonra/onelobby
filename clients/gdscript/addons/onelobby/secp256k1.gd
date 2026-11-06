@@ -24,7 +24,7 @@ static var _tag_cache: Dictionary = {}
 
 
 ## A signing key pair: secret key adjusted to an even-y public key (BIP340), plus its x-only public key.
-class Keypair:
+class OLKeypair:
 	var d: PackedInt64Array  # scalar limbs
 	var px: PackedByteArray  # 32-byte x-only public key
 	var d_bytes: PackedByteArray
@@ -673,21 +673,21 @@ static func tagged_hash(tag: String, data: PackedByteArray) -> PackedByteArray:
 
 
 ## Builds a key pair from a 32-byte secret key; null when the key is 0 or >= n.
-static func keypair(sk: PackedByteArray) -> Keypair:
+static func keypair(sk: PackedByteArray) -> OLKeypair:
 	if sk.size() != 32:
 		return null
 	var d0 := fe_from_bytes(sk)
 	if sc_is_zero(d0) or _cmp(d0, _n_limbs()) >= 0:
 		return null
 	var pt := mul_base(d0)
-	var kp := Keypair.new()
+	var kp := OLKeypair.new()
 	kp.d = sc_neg(d0) if fe_is_odd(pt[1]) else d0
 	kp.d_bytes = limbs_to_bytes(kp.d)
 	kp.px = fe_to_bytes(pt[0])
 	return kp
 
 
-static func random_keypair() -> Keypair:
+static func random_keypair() -> OLKeypair:
 	while true:
 		var kp := keypair(Crypto.new().generate_random_bytes(32))
 		if kp != null:
@@ -696,7 +696,7 @@ static func random_keypair() -> Keypair:
 
 
 ## BIP340 signature (64 bytes) of a 32-byte message with 32 bytes of auxiliary randomness.
-static func sign_msg(msg: PackedByteArray, kp: Keypair, aux: PackedByteArray) -> PackedByteArray:
+static func sign_msg(msg: PackedByteArray, kp: OLKeypair, aux: PackedByteArray) -> PackedByteArray:
 	var ah := tagged_hash("BIP0340/aux", aux)
 	var t := PackedByteArray()
 	t.resize(32)
@@ -714,5 +714,5 @@ static func sign_msg(msg: PackedByteArray, kp: Keypair, aux: PackedByteArray) ->
 	return rx + limbs_to_bytes(s)
 
 
-static func sign_random(msg: PackedByteArray, kp: Keypair) -> PackedByteArray:
+static func sign_random(msg: PackedByteArray, kp: OLKeypair) -> PackedByteArray:
 	return sign_msg(msg, kp, Crypto.new().generate_random_bytes(32))

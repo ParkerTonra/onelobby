@@ -7,9 +7,9 @@ extends RefCounted
 const PING := '{"t":"ping","n":0}'
 const CLOSED_MEMORY := 512
 
-class Peer:
+class OLPeer:
 	var link: OneLobbyNostrLink = null
-	var session: OneLobbyHub.Session = null
+	var session: OneLobbyHub.OLSession = null
 
 var _hub: OneLobbyHub
 var _room: OneLobbyNostrRoom
@@ -66,7 +66,7 @@ func poll() -> void:
 	if _stopped:
 		return
 	_room.poll()
-	for p: Peer in _peers.values():
+	for p: OLPeer in _peers.values():
 		p.link.poll()
 	if _wait_timer_at >= 0 and Time.get_ticks_msec() >= _wait_timer_at:
 		_wait_timer_at = -1
@@ -80,7 +80,7 @@ func close() -> void:
 	_wait_timer_at = -1
 	_waiting.clear()
 	for pub in _peers.keys():
-		var p: Peer = _peers[pub]
+		var p: OLPeer = _peers[pub]
 		p.link.close("host left")
 		if p.session != null:
 			_hub.disconnect_session(p.session)
@@ -92,7 +92,7 @@ func _on_frame(f: Dictionary) -> void:
 	if _stopped:
 		return
 	var from: String = f["from"]
-	var known: Peer = _peers.get(from)
+	var known: OLPeer = _peers.get(from)
 	if f["type"] == "open":
 		if _gone.has(from):
 			return
@@ -155,7 +155,7 @@ func _answer(pub: String) -> void:
 
 
 func _accept(pub: String) -> void:
-	var peer := Peer.new()
+	var peer := OLPeer.new()
 	peer.link = OneLobbyNostrLink.new(
 		func(out: Dictionary) -> void: _room.send(pub, out),
 		func(text: String) -> void:
@@ -183,7 +183,7 @@ func _accept(pub: String) -> void:
 	peer.session = session
 
 
-func _detach(pub: String, peer: Peer) -> void:
+func _detach(pub: String, peer: OLPeer) -> void:
 	peer.link.stop()
 	if peer.session != null:
 		_hub.disconnect_session(peer.session)
@@ -191,7 +191,7 @@ func _detach(pub: String, peer: Peer) -> void:
 	_forget(pub, peer)
 
 
-func _forget(pub: String, peer: Peer) -> void:
+func _forget(pub: String, peer: OLPeer) -> void:
 	if _peers.get(pub) == peer:
 		_peers.erase(pub)
 	_gone[pub] = true

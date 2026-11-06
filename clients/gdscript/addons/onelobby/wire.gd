@@ -136,7 +136,7 @@ static func decode(b: PackedByteArray, max_len: int = MAX_FRAME) -> Dictionary:
 	var name := type_name(type_id)
 	if name == "":
 		return {"type": "unknown", "typeId": type_id, "route": route, "body": b.slice(HEADER)}
-	var r := _Reader.new(b, HEADER)
+	var r := OLReader.new(b, HEADER)
 	var o := {"type": name, "typeId": type_id, "route": route}
 	_read_fields(r, LAYOUTS[name], o)
 	if r.error != "":
@@ -146,7 +146,7 @@ static func decode(b: PackedByteArray, max_len: int = MAX_FRAME) -> Dictionary:
 	return o
 
 
-static func _read_fields(r: _Reader, spec: Array, o: Dictionary) -> void:
+static func _read_fields(r: OLReader, spec: Array, o: Dictionary) -> void:
 	for f: Array in spec:
 		if r.error != "":
 			return
@@ -177,7 +177,7 @@ static func _read_fields(r: _Reader, spec: Array, o: Dictionary) -> void:
 				o[fname] = items
 
 
-class _Reader:
+class OLReader:
 	var b: PackedByteArray
 	var p: int
 	var error := ""
