@@ -157,7 +157,9 @@ class OLRtcLink:
 		is_open = all_open
 
 	func send(channel: int, bytes: PackedByteArray) -> void:
-		if is_open and channel >= 0 and channel < _ch.size():
+		# is_open is as of the last poll; a peer that left since then has closed the channel underneath it.
+		if is_open and channel >= 0 and channel < _ch.size() \
+				and _ch[channel].get_ready_state() == WebRTCDataChannel.STATE_OPEN:
 			_ch[channel].put_packet(bytes)
 
 	func receive() -> Array:

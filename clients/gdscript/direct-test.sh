@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Direct mode, no lobby server: two headless Godot instances, a GDScript host and a GDScript joiner, meet through the
 # Nostr test relay (integration/nostr-test-relay.mjs, needs node) and exchange reliable + fast messages; then the
-# host leaves. Real WebRTC between the two processes.
+# host leaves. Real WebRTC between the two processes. Then send-after-leave (tests/send_closed.gd, no engine error).
 #   usage: GODOT=/path/to/godot ./direct-test.sh            # local test relay
 #          GODOT=/path/to/godot ./direct-test.sh public     # the default public relays (needs internet)
 # Run fetch-webrtc.sh + `godot --headless --import --path .` first.
@@ -32,4 +32,7 @@ echo "host   (exit $HC): $(grep -E '^(hosting|host got|host sees|direct e2e)' "$
 echo "joiner (exit $JC): $(grep -E '^(joined|joiner got|joiner has|direct e2e)' "$WORK/join.out" | tr '\n' ' ')"
 grep -h "ERROR" "$WORK/host.out" "$WORK/join.out" | head -n 10
 if [ $HC -ne 0 ] || [ $JC -ne 0 ]; then tail -n 30 "$WORK/host.out" "$WORK/join.out"; exit 1; fi
+"$GODOT" --headless --audio-driver Dummy --path "$HERE" -s res://tests/send_closed.gd > "$WORK/closed.out" 2>&1; CC=$?
+grep -E '^send closed' "$WORK/closed.out"
+if [ $CC -ne 0 ] || grep -q 'isClosed' "$WORK/closed.out"; then tail -n 30 "$WORK/closed.out"; exit 1; fi
 echo "direct e2e: passed"
