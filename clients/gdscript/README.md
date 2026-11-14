@@ -47,8 +47,13 @@ both directions).
 - A host that builds its own session state after `host()` returns should seed it from `lobby.peers()`: joiners may
   already be in by then, and `peer_joined` only fires for later ones.
 - `await lobby.leave_and_flush()` instead of `leave()` when the game quits right after: it waits for your queued reliable
-  messages and the leave to go out. `lobby.debug_drop()` closes the signaling socket like a dropped network, for testing
-  `rejoin()`.
+  messages and the leave to go out, then keeps the peer links open for a short linger (300 ms, `linger_ms`) so peers
+  hear the leave before the channels close. No goodbye message of your own is needed. A send to a peer whose channel
+  has closed is dropped without an engine error, and that link counts as closed from then on. `lobby.debug_drop()`
+  closes the signaling socket like a dropped network, for testing `rejoin()`.
+- After `await lobby.leave_and_flush()` the scene may be gone. To clean up on a timer, connect the method, not a lambda
+  that captures a node: `timer.timeout.connect(node.queue_free)`. The engine drops a method connection with its node;
+  a lambda keeps the freed capture and logs `Lambda capture at index 0 was freed`.
 - `client.rejoin(token)` closes and reopens the signaling socket if it is still up, so it also takes over a seat from
   another socket.
 - A game with an auto-rejoin loop should skip it on `session_ended("host_left")`: the host is gone (Direct mode has no

@@ -34,6 +34,9 @@ const CLAIM_WAIT_MS := 6000
 const LEAVE_GRACE_MS := 500
 const LEAVE_MAX_MS := 5000
 const KICK_LINGER_MS := 3000
+## leave_and_flush keeps the peer links open this long after the leave has gone out, so peers hear the leave before
+## the channels close under them.
+const LEAVE_LINGER_MS := 300
 const HELD_OFFER_MS := 20000
 const MAX_HELD_ICE := 32
 const MAX_PENDING := 1024
@@ -237,20 +240,39 @@ func leave() -> void:
 
 
 ## leave(), then waits until the leave message has really gone out (at most `timeout_ms`), after letting reliable data
-## already queued to peers drain first. Await it before quitting: leave() followed at once by get_tree().quit() can
+## already queued to peers drain first. The peer links stay open for `linger_ms` after that (nothing is sent or
+## delivered on them), so peers learn of the leave before the channels close and don't send into closed ones; no
+## game-level goodbye message is needed. Await it before quitting: leave() followed at once by get_tree().quit() can
 ## drop the message, and the server (or the Direct host) then sees a timeout instead of a leave.
 ##
 ##     await lobby.leave_and_flush()
 ##     get_tree().quit()
-func leave_and_flush(timeout_ms: int = 1500) -> void:
+func leave_and_flush(timeout_ms: int = 1500, linger_ms: int = LEAVE_LINGER_MS) -> void:
 	if _closed:
 		return
 	var client := _c
 	var deadline := now_ms() + timeout_ms
 	while reliable_buffered_bytes() > 0 and now_ms() < deadline and client.is_inside_tree():
 		await client.get_tree().process_frame
+	# take the links out first so leave() does not close them
+	var links: Array[OneLobbyTransport.OLLink] = []
+	for r: OLPeerRec in _peers.values():
+		if r.link != null:
+			links.append(r.link)
+			r.link = null
+	for l: Array in _lingering:
+		links.append(l[0] as OneLobbyTransport.OLLink)
+	_lingering.clear()
 	leave()
 	await client.flush_signaling(maxi(0, deadline - now_ms()))
+	var until := now_ms() + linger_ms
+	while now_ms() < until and client.is_inside_tree():
+		for link in links:
+			link.poll()
+			link.receive()
+		await client.get_tree().process_frame
+	for link in links:
+		link.close()
 
 
 ## Drops the connection to the lobby server (Direct mode: to the host's signaling) as a network loss would, without

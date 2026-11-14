@@ -29,6 +29,8 @@ func _run() -> String:
 		return "is_open fell, so this no longer tests the gap between polls"
 	for id in 3:
 		a.send(id, PackedByteArray([1, 2, 3]))
+	if a.is_open:
+		return "is_open still true after a send found the channel closed"
 	a.close()
 	return ""
 
