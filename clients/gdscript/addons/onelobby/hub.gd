@@ -116,6 +116,8 @@ class OLLobby:
 
 # options (see direct_options)
 var stun_urls: Array = []
+## Extra ICE servers ({urls, username?, credential?}) for welcome.ice after the STUN entry, e.g. a TURN relay.
+var ice_servers: Array = []
 var max_players_hard := 64
 var max_peers := 10000
 var password := ""  # empty = none
@@ -129,14 +131,16 @@ var _created_once := false
 var _members := 0
 
 
-## A hub for a host's own game: one lobby, `max_players` seats, optional password, STUN list handed to joiners.
-static func direct(max_players: int, pw := "", stun: Array = []) -> OneLobbyHub:
+## A hub for a host's own game: one lobby, `max_players` seats, optional password, STUN list and extra ICE servers
+## handed to joiners.
+static func direct(max_players: int, pw := "", stun: Array = [], ice_servers: Array = []) -> OneLobbyHub:
 	var h := OneLobbyHub.new()
 	var n := clampi(max_players, 2, 250)
 	h.max_players_hard = n
 	h.max_peers = n + 8
 	h.password = pw
 	h.stun_urls = stun
+	h.ice_servers = ice_servers
 	return h
 
 
@@ -302,6 +306,9 @@ func _hello(s: OLSession, m: Dictionary) -> void:
 	var ice: Array = []
 	if not stun_urls.is_empty():
 		ice.append({"urls": stun_urls.duplicate()})
+	for e: Variant in ice_servers:
+		if e is Dictionary:
+			ice.append(e.duplicate())
 	var w := {
 		"t": "welcome",
 		"ice": ice,

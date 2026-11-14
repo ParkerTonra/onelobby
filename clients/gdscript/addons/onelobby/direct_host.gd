@@ -20,13 +20,14 @@ var _upnp_mapped := false
 var _closed := false
 
 
-## Starts the hub and the relay connections. `options`: max_players, password, relays (Array of wss URLs), stun (Array).
+## Starts the hub and the relay connections. `options`: max_players, password, relays (Array of wss URLs), stun (Array),
+## ice_servers (Array of {urls, username?, credential?}: handed to joiners in welcome.ice).
 ## Null when the join code could not be made.
 static func start(options: Dictionary) -> OneLobbyDirectHost:
 	var d := OneLobbyDirectHost.new()
 	var max_players := int(options.get("max_players", 4))
 	var stun: Array = options.get("stun", OneLobbyNostrPool.DEFAULT_STUN)
-	d.hub = OneLobbyHub.direct(max_players, str(options.get("password", "")), stun)
+	d.hub = OneLobbyHub.direct(max_players, str(options.get("password", "")), stun, options.get("ice_servers", []))
 	var room := OneLobbyJoinCode.random_room()
 	d.code = OneLobbyJoinCode.encode_room(room)
 	var relays: Array = options.get("relays", [])

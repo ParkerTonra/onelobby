@@ -116,10 +116,27 @@ class OLRtcLink:
 
 	func _on_description(type: String, sdp: String) -> void:
 		_pc.set_local_description(type, sdp)
-		_out.append({"type": type, "sdp": sdp})
+		_out.append({"type": type, "sdp": _relay_sdp(sdp) if relayed else sdp})
 
 	func _on_candidate(media: String, index: int, name: String) -> void:
+		if relayed and not _is_relay(name):
+			return
 		_out.append({"candidate": name, "sdpMid": media, "sdpMLineIndex": index})
+
+	# webrtc-native ignores iceTransportPolicy, so relay-only is enforced here: only relay candidates are sent or taken,
+	# and with the TURN servers' permissions that leaves relay-to-relay as the one path that connects.
+	static func _is_relay(candidate: String) -> bool:
+		return candidate.contains(" typ relay")
+
+	static func _relay_sdp(sdp: String) -> String:
+		var keep: PackedStringArray = []
+		for line in sdp.split("
+"):
+			if line.begins_with("a=candidate:") and not _is_relay(line):
+				continue
+			keep.append(line)
+		return "
+".join(keep)
 
 	func start_offer() -> void:
 		if _initiator and not is_failed:
@@ -129,8 +146,11 @@ class OLRtcLink:
 		if closed or is_failed:
 			return
 		if sig.has("sdp"):
-			_pc.set_remote_description(str(sig["type"]), str(sig["sdp"]))
+			var sdp := str(sig["sdp"])
+			_pc.set_remote_description(str(sig["type"]), _relay_sdp(sdp) if relayed else sdp)
 		elif str(sig.get("candidate", "")) != "":
+			if relayed and not _is_relay(str(sig["candidate"])):
+				return
 			_pc.add_ice_candidate(str(sig.get("sdpMid", "0")), int(sig.get("sdpMLineIndex", 0)), str(sig["candidate"]))
 
 	func take_signals() -> Array[Dictionary]:

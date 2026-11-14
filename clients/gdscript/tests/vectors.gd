@@ -13,6 +13,7 @@ func _init() -> void:
 	_invalid(_load(spec.path_join("vectors/invalid.json")))
 	_chunking(_load(spec.path_join("vectors/chunking.json")))
 	_codes(_load(spec.path_join("codes.json")))
+	_turn_rest(_load(spec.path_join("vectors/turn-rest.json")))
 	_u64()
 	print("vectors: %d passed, %d failed" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
@@ -26,6 +27,14 @@ func _load(path: String) -> Dictionary:
 		return {}
 	return d
 
+
+func _turn_rest(d: Dictionary) -> void:
+	for v: Dictionary in d.get("vectors", []):
+		var got := OneLobbyTurn.credential(v["secret"], v["username"])
+		_check(got == v["credential"], "turn credential for %s, got %s" % [v["username"], got])
+	var m: Dictionary = d.get("mint", {})
+	var l := OneLobbyTurn.login(m["secret"], m["userId"], int(m["ttl"]), int(m["nowSeconds"]))
+	_check(l.username == m["expectUsername"] and l.credential == m["expectCredential"], "turn login mint, got " + JSON.stringify(l))
 
 func _check(ok: bool, what: String) -> void:
 	if ok:

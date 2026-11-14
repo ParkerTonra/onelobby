@@ -4,6 +4,7 @@
 # host leaves. Real WebRTC between the two processes. Then send-after-leave (tests/send_closed.gd, no engine error).
 #   usage: GODOT=/path/to/godot ./direct-test.sh            # local test relay
 #          GODOT=/path/to/godot ./direct-test.sh public     # the default public relays (needs internet)
+#   DIRECT_E2E_ARGS="--relay-only=1 --turn-url=turn:HOST:PORT --turn-secret=S" adds tests/direct_e2e.gd flags (TURN).
 # Run fetch-webrtc.sh + `godot --headless --import --path .` first.
 set -uo pipefail
 GODOT="${GODOT:?set GODOT to a Godot 4.4+ executable}"
@@ -22,7 +23,7 @@ if [ "$MODE" != "public" ]; then
   RELAY="$(grep -m1 '^relay ws' "$WORK/relay.out" | cut -d' ' -f2)"
   [ -n "$RELAY" ] || { echo "test relay did not start"; cat "$WORK/relay.out"; exit 1; }
 fi
-run() { "$GODOT" --headless --audio-driver Dummy --path "$HERE" -s res://tests/direct_e2e.gd -- --role="$1" --relay="$RELAY" --code-file="$WORK/code.txt" > "$WORK/$1.out" 2>&1; }
+run() { "$GODOT" --headless --audio-driver Dummy --path "$HERE" -s res://tests/direct_e2e.gd -- --role="$1" --relay="$RELAY" --code-file="$WORK/code.txt" ${DIRECT_E2E_ARGS:-} > "$WORK/$1.out" 2>&1; }
 run host & H=$!
 run join & J=$!
 wait $H; HC=$?

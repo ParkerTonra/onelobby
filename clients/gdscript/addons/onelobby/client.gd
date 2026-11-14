@@ -43,6 +43,8 @@ var lobby: OneLobbyLobby
 var last_error := {}
 var transport: OneLobbyTransport = OneLobbyGodotTransport.new()
 var ice: Array = []
+# a Direct joiner's own ice_servers, added to the ones the host's welcome offers
+var _extra_ice: Array = []
 ## Optional messages the hub handles (`welcome.features`, e.g. "set_name"); empty for an older hub.
 var features: Array = []
 
@@ -120,7 +122,10 @@ func rejoin(token: String) -> OneLobbyLobby:
 ##
 ## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit as in host(); relays (wss URLs,
 ## default: seven public ones), stun (default: Google and Cloudflare), upnp_port (0 = off: asks the router to forward
-## that UDP port; best effort, see the README). Fails with no_relay when no relay can be reached.
+## that UDP port; best effort, see the README), ice_servers (Array of {urls, username?, credential?}, e.g. a TURN relay
+## for players behind a strict NAT: sent to every joiner in welcome.ice; OneLobbyTurn.login() mints coturn-style
+## logins). Godot's WebRTC reaches TURN over UDP only (libjuice): turn:...?transport=tcp and turns: are skipped.
+## Fails with no_relay when no relay can be reached.
 func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	if not _op.is_empty():
 		_fail("busy", "another request is in flight")
@@ -161,7 +166,7 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 
 ## Direct mode, joiner: joins the lobby a host_direct() host published. `join_code` is the code the host shows
 ## ("D1PB-1X9S-FPV"; case, dashes and look-alike letters do not matter). Needs no lobby server. `options`: password,
-## relays (wss URLs), timeout_ms (30000).
+## relays (wss URLs), timeout_ms (30000), ice_servers (as in host_direct; added to the host's list).
 ##
 ##     var lobby := await client.join_direct("D1PB-1X9S-FPV")
 func join_direct(join_code: String, options: Dictionary = {}) -> OneLobbyLobby:
@@ -189,6 +194,7 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
 	var norm := OneLobbyJoinCode.normalize_dc1(join_code)
+	_extra_ice = options.get("ice_servers", [])
 	var relays: Array = options.get("relays", [])
 	_direct_code = OneLobbyJoinCode.group(norm)
 	_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
@@ -298,6 +304,7 @@ func _lobby_closed(l: OneLobbyLobby) -> void:
 ## Ends Direct mode: the host's hub and relays close, a joiner's socket drains what it still has to say, then closes.
 func _clear_direct() -> void:
 	_direct_code = ""
+	_extra_ice = []
 	_socket_factory = Callable()
 	if _direct_host != null:
 		_direct_host.close()
@@ -381,7 +388,7 @@ func _dispatch(text: String) -> void:
 	var t := OneLobbySignaling.s(e, "t")
 	match t:
 		"welcome":
-			ice = OneLobbySignaling.ice_of(e)
+			ice = OneLobbySignaling.ice_of(e) + OneLobbySignaling.ice_of({"ice": _extra_ice})
 			var fs: Variant = e.get("features")
 			features = fs if fs is Array else []
 			_welcomed = true

@@ -6,6 +6,9 @@ extends SceneTree
 ##   godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/direct_e2e.gd -- \
 ##       --role=host|join --relay=ws://127.0.0.1:PORT|public --code-file=/tmp/code.txt
 ## --code-file can point at a code made by another client (the JS interop peer) instead.
+## TURN (opt-in, needs internet): --turn-url=turn:host:port --turn-secret=S mints a coturn-style login (OneLobbyTurn) and
+## passes it as ice_servers on --turn-side=host (default: joiners get it in welcome.ice) or join; --relay-only=1 makes
+## both sides use relay candidates only, so the link must go through that TURN server.
 
 var _args := {}
 var _client: OneLobbyClient
@@ -27,6 +30,15 @@ func _watchdog() -> void:
 		quit(1)
 
 
+## The TURN entry for this side's ice_servers, or [] (no --turn-url, or the other side passes it).
+func _turn(side: String) -> Array:
+	var url: String = _args.get("turn-url", "")
+	if url == "" or _args.get("turn-side", "host") != side:
+		return []
+	var l := OneLobbyTurn.login(_args.get("turn-secret", ""), side, 3600)
+	return [{"urls": [url], "username": l.username, "credential": l.credential}]
+
+
 func _relays() -> Array:
 	var r: String = _args.get("relay", "")
 	return [] if r == "public" or r == "" else [r]
@@ -36,6 +48,7 @@ func _run() -> void:
 	_client = OneLobbyClient.new()
 	_client.game_id = _args.get("game", "direct-e2e")
 	_client.display_name = _args.get("role", "host")
+	_client.relay_only = _args.get("relay-only", "") == "1"
 	root.add_child(_client)
 	var code_file: String = _args.get("code-file", "")
 	if _args.get("role", "host") == "host":
@@ -48,6 +61,7 @@ func _host(code_file: String) -> void:
 	var opts := {"name": "direct", "max_players": 4, "relays": _relays()}
 	if _args.get("relay", "") != "public":
 		opts["stun"] = []
+	opts["ice_servers"] = _turn("host")
 	var lobby := await _client.host_direct(opts)
 	if lobby == null:
 		_done(false, "host_direct failed: %s" % _client.last_error)
@@ -83,7 +97,7 @@ func _join(code_file: String) -> void:
 	while not FileAccess.file_exists(code_file) or FileAccess.get_file_as_string(code_file).strip_edges() == "":
 		await create_timer(0.1).timeout
 	var code := FileAccess.get_file_as_string(code_file).strip_edges()
-	var opts := {"relays": _relays()}
+	var opts := {"relays": _relays(), "ice_servers": _turn("join")}
 	var lobby := await _client.join_direct(code.to_lower(), opts)
 	if lobby == null:
 		_done(false, "join_direct failed: %s" % _client.last_error)
