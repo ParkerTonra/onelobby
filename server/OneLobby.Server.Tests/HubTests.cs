@@ -809,5 +809,38 @@ public class HubTests
             k => k == "ONELOBBY_TURN_SECRET" ? "sek" : k == "ONELOBBY_ALLOWED_GAMES" ? "a,b" : null);
         Assert.Equal("OneLobby: server listening on TCP :9000 (http://127.0.0.1:9000); turn on; games a,b", o.StartupLine());
     }
+
+    [Fact]
+    public void Set_name_renames_the_member_resends_lobby_to_all_is_rate_limited_and_survives_resume()
+    {
+        var (hub, clock) = T.NewHub(o => o.IdleTimeoutMs = long.MaxValue / 4);
+        var (h, j, _) = T.Pair(hub);
+        Assert.Equal("set_name", (string)h.Last("welcome")["features"]!.AsArray().Single()!);
+        static string NameOf(JsonObject lobby, int id) =>
+            (string)lobby["peers"]!.AsArray().Single(p => (int)p!["peerId"]! == id)!["name"]!;
+
+        string token = (string)j.Last("lobby")["resumeToken"]!;
+        int hostLobbies = h.Inbox.Count(m => (string?)m["t"] == "lobby");
+        j.Send("{\"t\":\"set_name\",\"name\":\"Re\\u202Enamed\\u0007\"}");
+        Assert.Equal("Renamed", NameOf(h.Last("lobby"), 2));
+        Assert.Equal("Renamed", NameOf(j.Last("lobby"), 2));
+        Assert.Equal(2, (int)j.Last("lobby")["you"]!);
+
+        j.Send("{\"t\":\"set_name\",\"name\":\"Again\"}");
+        Assert.Equal("rate_limited", j.LastError);
+        clock.Advance(1000);
+        j.Send("{\"t\":\"set_name\",\"name\":\"Renamed\"}"); // same name: nothing re-sent
+        Assert.Equal(hostLobbies + 1, h.Inbox.Count(m => (string?)m["t"] == "lobby"));
+        foreach (var bad in new[] { "{\"t\":\"set_name\"}", "{\"t\":\"set_name\",\"name\":5}", "{\"t\":\"set_name\",\"name\":\"\\u0007\"}" })
+        {
+            j.Inbox.Clear(); j.Send(bad);
+            Assert.Equal("bad_request", j.LastError);
+        }
+        Assert.Equal("bad_request", T.Ready(hub, "10.0.0.7").Send("{\"t\":\"set_name\",\"name\":\"Solo\"}").LastError);
+
+        j.Disconnect();
+        var back = new Client(hub, "10.0.0.2").Hello(name: "Other", resume: token);
+        Assert.Equal("Renamed", NameOf(back.Last("lobby"), 2));
+    }
 }
 

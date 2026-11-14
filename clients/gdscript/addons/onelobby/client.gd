@@ -43,6 +43,8 @@ var lobby: OneLobbyLobby
 var last_error := {}
 var transport: OneLobbyTransport = OneLobbyGodotTransport.new()
 var ice: Array = []
+## Optional messages the hub handles (`welcome.features`, e.g. "set_name"); empty for an older hub.
+var features: Array = []
 
 var _socket: OneLobbyTransport.OLSocket
 ## Direct mode: builds the signaling socket instead of a WebSocket to lobby_server (valid while a direct lobby is open).
@@ -380,6 +382,8 @@ func _dispatch(text: String) -> void:
 	match t:
 		"welcome":
 			ice = OneLobbySignaling.ice_of(e)
+			var fs: Variant = e.get("features")
+			features = fs if fs is Array else []
 			_welcomed = true
 			# a resume answered without a seat: the token is unknown or expired
 			if not _op.is_empty() and not _op["sent"] and _op["request"] == "" and _hello_resume != "" and not e.has("peerId"):

@@ -14,7 +14,8 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
 - Unknown `t`: ignored, no reply. Unknown fields: ignored.
 - The first message must be `hello`. Anything else before it: `error{bad_request}`. A second `hello`: `error{bad_request}`.
 - `hello.proto` other than `"lk1"`: `error{bad_request, data:{supported:["lk1"]}}`, then close.
-- `hello` reply: `welcome` (always). With a valid `resumeToken` see Resume.
+- `hello` reply: `welcome` (always). With a valid `resumeToken` see Resume. `welcome.features` (optional array of
+  strings) names optional messages the hub handles; today only `"set_name"`. A missing array means none.
 - `ping{n}` is answered with `pong{n}` at any time after `hello`. A socket silent for 30 s is closed by the server;
   clients ping every 10 s.
 - A socket is in at most one lobby. `create`/`join` while already in one: `error{bad_request}`.
@@ -24,6 +25,13 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
 - `hello.name`: control characters (U+0000-U+001F, U+007F-U+009F) and bidi overrides (U+202A-U+202E, U+2066-U+2069)
   removed, then truncated to 24 characters (not rejected). **(decision)**
 - `create.name` (lobby name): same, truncated to 48. **(decision)**
+- `set_name{name}` (client -> server): a member renames itself mid-session. Sanitised like `hello.name`; empty after
+  sanitising, or not a string: `bad_request` (data `{field:"name"}`). Not in a lobby (pending approval counts as not
+  in): `bad_request`. At most one accepted rename per peer per second, more: `rate_limited{retryAfterMs}`. Names need
+  not be unique. On success the member's name changes (a later Resume keeps it) and the `lobby` message is re-sent to
+  every member, as after `meta`; a name equal to the current one changes nothing and re-sends nothing. Hubs that
+  support it say so in `welcome.features` (contains `"set_name"`); an older hub ignores the type, so clients check the
+  feature first and fail with `unsupported` without sending. **(decision)**
 - `meta`: not sanitised; more than 16 keys or a key/value over 64 characters, or a non-string value: `bad_request`.
 
 ## Lobbies

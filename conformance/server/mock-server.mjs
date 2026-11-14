@@ -15,7 +15,7 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
   const lobbies = new Map();
   const tokens = new Map();
   const windows = new Map(); // key -> timestamps
-  const lim = { create: 10 * scale, join: 60 * scale, signal: 20 * scale, open: 8 * scale };
+  const lim = { create: 10 * scale, join: 60 * scale, signal: 20 * scale, open: 8 * scale, rename: 1 * scale };
   const socketsPerIp = 32 * scale;
   const openByIp = new Map();
   let connSeq = 0;
@@ -90,13 +90,13 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
       const slot = l?.peers.get(tk.peerId);
       const ice = [{ urls: ['stun:localhost:3478'] }];
       if (l && slot && !slot.conn && slot.reservedUntil && l.gameId === m.gameId) {
-        sendTo(conn, { t: 'welcome', peerId: tk.peerId, ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 } });
+        sendTo(conn, { t: 'welcome', peerId: tk.peerId, ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name'] });
         tokens.delete(m.resumeToken); l.peers.delete(slot.peerId);
         const p = addPeer(l, conn, conn.hello.name, slot.peerId, slot.joinedAt);
         sendTo(conn, lobbyMsg(l, p)); everyone(l, { t: 'peer_joined', peer: { peerId: p.peerId, name: p.name } }, p.peerId);
         return;
       }
-      return sendTo(conn, { t: 'welcome', ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 } });
+      return sendTo(conn, { t: 'welcome', ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name'] });
     }
     if (!conn.hello) return bad('hello first');
     const l = conn.lobby ? lobbies.get(conn.lobby) : null;
@@ -177,6 +177,16 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
         if (!l) return bad('not in a lobby'); if (!needHost()) return;
         if (!validMeta(m.meta)) return bad('meta', 'meta');
         l.meta = { ...m.meta }; return broadcastLobby(l);
+      }
+      case 'set_name': {
+        if (!l) return bad('not in a lobby');
+        if (typeof m.name !== 'string') return bad('name', 'name');
+        const name = sanitize(m.name, 24);
+        if (!name) return bad('name', 'name');
+        if (name === me.name) return;
+        const wait = hit(`set_name:${conn.id}`, lim.rename, 1000);
+        if (wait) return err(conn, 'rate_limited', 'too many renames', { retryAfterMs: wait });
+        me.name = name; return broadcastLobby(l);
       }
       case 'phase': {
         if (!l) return bad('not in a lobby'); if (!needHost()) return;

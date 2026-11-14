@@ -251,6 +251,8 @@ export class MemoryServer {
   readonly socketFactory: SocketFactory = () => this.connect();
   private n = 0;
   iceServers = [{ urls: ["stun:stun.example:3478"] }];
+  /** What `welcome.features` lists; `[]` plays an older hub that cannot rename. */
+  features: string[] = ["set_name"];
   /** Log of every client message, for assertions. */
   readonly received: Json[] = [];
 
@@ -379,11 +381,11 @@ export class MemorySocket implements SocketLike {
         l.peers.set(rp.peerId, rp);
         this.lobby = l;
         this.peer = rp;
-        this.push({ t: "welcome", peerId: rp.peerId, ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 } });
+        this.push({ t: "welcome", peerId: rp.peerId, ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 }, features: this.srv.features });
         this.push(this.lobbyMsg(l, rp));
         return this.broadcast(l, { t: "peer_joined", peer: { peerId: rp.peerId, name: rp.name, joinedAt: rp.joinedAt } }, rp.peerId);
       }
-      return this.push({ t: "welcome", ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 } });
+      return this.push({ t: "welcome", ice: this.srv.iceServers, serverTime: Date.now(), limits: { maxMsg: 16384, maxPlayers: 64 }, features: this.srv.features });
     }
     if (!this.hello) return this.err("bad_request", "hello first");
     const gameId = String(this.hello.gameId);
@@ -435,6 +437,16 @@ export class MemorySocket implements SocketLike {
         const to = l.peers.get(Number(m.to));
         if (!to) return this.err("bad_request", "no such peer");
         return to.sock?.push({ t: "signal", from: this.peer.peerId, ...(m.sdp ? { sdp: m.sdp } : {}), ...(m.ice ? { ice: m.ice } : {}) });
+      }
+      case "set_name": {
+        const l = this.lobby;
+        if (!l || !this.peer) return this.err("bad_request", "not in a lobby");
+        const name = typeof m.name === "string" ? m.name.trim().slice(0, 24) : "";
+        if (!name) return this.err("bad_request", "name must be a non-empty string");
+        if (name === this.peer.name) return;
+        this.peer.name = name;
+        for (const q of l.peers.values()) q.sock?.push(this.lobbyMsg(l, q));
+        return;
       }
       case "meta":
       case "phase": {

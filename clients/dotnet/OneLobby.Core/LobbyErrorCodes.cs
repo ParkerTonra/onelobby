@@ -49,6 +49,8 @@ namespace OneLobby
         public const string BadAddress = "bad_address";
         /// <summary>Direct IP host: no port in 47810-47819 could be bound.</summary>
         public const string PortInUse = "port_in_use";
+        /// <summary>The hub is too old for this call (it does not list the feature in welcome.features), e.g. <c>RenameAsync</c>.</summary>
+        public const string Unsupported = "unsupported";
 
         // ---- from the shared pause (Lobby.Pause) ----
         /// <summary>A pause request outside the InGame phase (Pause.Refused reason); also what a host-side refusal carries.</summary>

@@ -193,6 +193,12 @@ Full reference (generated): `docs/api/`.
   `in_game`). To open and close it at will, host with `Visibility.Private` / `visibility: "private"` and answer each
   `JoinRequested` / `"joinRequested"` with `ApproveAsync(peer.PeerId, joinable)` / `approve(peer.peerId, joinable)`;
   a refused joiner gets `kicked` with `data.reason` `"denied"`. Works on onelobby-server and on direct hosts.
+- Renaming mid-session: `lobby.RenameAsync("New")` (C#) / `lobby.rename("New")` (JS) / `lobby.rename("New")` (GDScript).
+  The hub sanitises it like the start name (at most 24 characters; names need not be unique) and every member, you
+  included, gets `PeerRenamed(peer, oldName)` / `"peerRenamed"` / `peer_renamed`; `Peers` shows the new name. One
+  rename per second (`rate_limited`); an empty name is `bad_request`; both arrive on the client's error event. A hub
+  older than 0.7.0 cannot rename: C# and JS throw `unsupported`, GDScript returns false and emits `error`. A blueprint
+  with `players.identity: "anonymous"` refuses it (`identity_anonymous`), and `players.maxNameLength` applies.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 

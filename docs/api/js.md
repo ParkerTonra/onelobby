@@ -467,6 +467,8 @@ export type LobbyEvents = {
     peerFailed: [Peer, reason: string];
     joinRequested: [Peer];
     hostChanged: [hostId: number];
+    /** A member (you included) changed its display name mid-session (`rename`): the peer with its new name, and the old name. */
+    peerRenamed: [Peer, oldName: string];
     phase: [Phase];
     message: [from: number, bytes: Uint8Array, channel: ChannelName];
     /** `close` is the code and reason the host gave when it removed this player (`kick()` / `disconnect()`). */
@@ -489,6 +491,8 @@ export interface LobbyConfig {
     signaling: SignalingClient;
     state: LobbyState;
     ice: IceServer[];
+    /** `welcome.features` of the hub (e.g. "set_name"); absent = none. */
+    features?: string[];
     links: LinkFactory;
     clock: Clock;
     wall: () => number;
@@ -626,6 +630,13 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** @internal Called by OneLobby right after construction: the host waits for joiners, a joiner waits for the host's offer. */
     _begin(): void;
     start(): Promise<void>;
+    /**
+     * Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
+     * you included, gets `peerRenamed`. Names need not be unique. At most one rename per second; a refusal
+     * (`bad_request` for an empty name, `rate_limited`) arrives on the kit's `error` event. Throws `unsupported` when
+     * the hub is too old to rename.
+     */
+    rename(name: string): Promise<void>;
     setMeta(meta: Record<string, string>): Promise<void>;
     /**
      * Host: removes a player. By default it is a ban: the hub refuses that player's address for the rest of this lobby
@@ -1345,6 +1356,8 @@ export interface WelcomeMsg {
         maxMsg: number;
         maxPlayers: number;
     };
+    /** Optional messages the hub handles, e.g. "set_name"; missing on an older hub. */
+    features?: string[];
 }
 export interface ServerError {
     t: "error";
@@ -1520,6 +1533,7 @@ export declare const ErrorCodes: {
     readonly DirectUnreachable: "direct_unreachable";
     readonly BadAddress: "bad_address";
     readonly PortInUse: "port_in_use";
+    readonly Unsupported: "unsupported";
     readonly ConnectFailed: "connect_failed";
     readonly Closed: "closed";
     readonly ServerLost: "server_lost";

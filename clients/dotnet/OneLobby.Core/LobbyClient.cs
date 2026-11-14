@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,6 +44,8 @@ namespace OneLobby
         /// <summary>The wait above for a Nostr joiner (spec/nostr-signaling.md s.4: the socket gives up itself after 15 s).</summary>
         internal long DirectConnectTimeout { get; set; } = DirectConnectTimeoutMs;
         internal IReadOnlyList<IceServer> Ice { get; private set; } = Array.Empty<IceServer>();
+        /// <summary>Optional messages the hub handles (<c>welcome.features</c>, e.g. "set_name"); empty for an older hub.</summary>
+        internal IReadOnlyCollection<string> Features { get; private set; } = Array.Empty<string>();
         internal ISignalingSocket? Socket { get; private set; }
 
         private Op? _op;
@@ -285,6 +288,9 @@ namespace OneLobby
                 {
                     case "welcome":
                         Ice = Signaling.ParseIce(e);
+                        Features = e.TryGetProperty("features", out var fs) && fs.ValueKind == JsonValueKind.Array
+                            ? fs.EnumerateArray().Where(f => f.ValueKind == JsonValueKind.String).Select(f => f.GetString()!).ToArray()
+                            : Array.Empty<string>();
                         _welcomed = true;
                         // a resume answered without a seat: the token is unknown or expired (no lobby message follows)
                         if (_op != null && !_op.Sent && _op.Request == null && _helloResume != null && !e.TryGetProperty("peerId", out _))

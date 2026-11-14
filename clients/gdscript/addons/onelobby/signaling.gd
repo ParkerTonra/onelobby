@@ -57,6 +57,10 @@ static func phase(in_game: bool) -> String:
 	return JSON.stringify({"t": "phase", "phase": "in_game" if in_game else "lobby"})
 
 
+static func rename_msg(new_name: String) -> String:
+	return JSON.stringify({"t": "set_name", "name": new_name})
+
+
 static func meta(m: Dictionary) -> String:
 	return JSON.stringify({"t": "meta", "meta": _meta(m)})
 

@@ -39,6 +39,7 @@ public sealed class Member
     public long DetachedAt;
     public string Token = "";
     public string Ip = "";
+    public RateWindow? Renames;
 }
 
 public sealed class Lobby

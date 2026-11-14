@@ -402,6 +402,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       signaling: sig,
       state,
       ice: welcome.ice ?? [],
+      features: welcome.features ?? [],
       links: direct?.links ?? this.linkFactory,
       direct: !!direct,
       clock: this.clock,
@@ -653,6 +654,13 @@ function definedOnly<T extends object>(o: T | undefined): Partial<T> {
 
 /** Blueprint switches that gate features on the lobby: voice and text chat; chat.voiceMode is the starting voice mode. */
 function guardLobby(lobby: Lobby, bp: Blueprint): void {
+  const rename = lobby.rename.bind(lobby);
+  lobby.rename = async (name: string) => {
+    if (bp.players.identity === "anonymous") throw new OneLobbyError("identity_anonymous", "this game uses anonymous players: no display names");
+    if (String(name ?? "").trim().length > bp.players.maxNameLength)
+      throw new BlueprintError("displayName", "length", `must be at most ${bp.players.maxNameLength} characters`);
+    return rename(name);
+  };
   lobby.voice.mode = bp.chat.voiceMode;
   if (!bp.chat.voice) {
     const voice = lobby.voice;

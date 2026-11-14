@@ -172,6 +172,7 @@ class Member {
   detachedAt = 0;
   token = "";
   ip = "";
+  renames: RateWindow | null = null;
 }
 
 class HubLobby {
@@ -210,7 +211,7 @@ interface IpState {
   sockets: number;
 }
 
-const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path"]);
+const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name"]);
 
 const str = (o: Json, k: string): string | null => (typeof o[k] === "string" ? (o[k] as string) : null);
 const int = (o: Json, k: string): number | null => {
@@ -425,6 +426,7 @@ export class SignalingHub {
       }
       case "host_changed": return this.claimHost(s, msg);
       case "path": return this.pathReport(s, msg);
+      case "set_name": return this.setName(s, msg);
       default: return; // unknown types are ignored
     }
   }
@@ -477,6 +479,7 @@ export class SignalingHub {
       ice: this.iceList(s),
       serverTime: this.now(),
       limits: { maxMsg: this.o.maxMessageBytes, maxPlayers: this.o.hardMaxPlayers },
+      features: ["set_name"],
     };
     if (resumed) w.peerId = resumed.peerId;
     this.send(s, w);
@@ -747,6 +750,19 @@ export class SignalingHub {
     if ("err" in meta || !has(m, "meta")) return this.error(s, "bad_request", "err" in meta ? meta.err : "meta is required", field("meta"));
     lobby.meta = meta.meta;
     this.broadcastLobby(lobby);
+  }
+
+  private setName(s: Session, m: Json): void {
+    if (!s.lobby || !s.member) return this.error(s, "bad_request", "not in a lobby");
+    const name = typeof m.name === "string" ? sanitize(m.name, NAME_MAX) : "";
+    if (!name) return this.error(s, "bad_request", "name must be a non-empty string", field("name"));
+    if (name === s.member.name) return;
+    const now = this.now();
+    const rate = (s.member.renames ??= new RateWindow(this.scale, 1000));
+    if (!rate.tryHit(now)) return this.rateLimited(s, "set_name", rate.retryAfterMs(now), null);
+    s.member.name = name;
+    s.name = name;
+    this.broadcastLobby(s.lobby);
   }
 
   private hostPhase(s: Session, m: Json): void {

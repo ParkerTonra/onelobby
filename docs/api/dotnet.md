@@ -202,6 +202,8 @@ public sealed class InMemoryNetwork
     public IList<IceServer> IceServers { get; }
     /// Allowed (gameId) values; empty means any.
     public ISet<string> AllowedGames { get; }
+    /// What welcome.features lists (empty plays an older hub that cannot rename).
+    public IReadOnlyList<string> Features { get; set; }
     public void Advance(long ms);
     public ITransport CreateTransport();
     /// Simulates a crash: closes the transport's signaling socket and every peer link, without a goodbye.
@@ -311,12 +313,16 @@ public sealed class Lobby : IAsyncDisposable
     public event Action<Peer, string>? PeerFailed;
     public event Action<Peer>? JoinRequested;
     public event Action<int>? HostChanged;
+    /// A member (you included) changed its display name mid-session: the peer with its new name, and the old name.
+    public event Action<Peer, string>? PeerRenamed;
     public event Action<LobbyPhase>? PhaseChanged;
     public event Action<int, ReadOnlyMemory<byte>, Channel>? MessageReceived;
     public event Action<string>? SessionEnded;
     /// The transport's monotonic clock in milliseconds (the same clock the lobby times out and pings with).
     public long NowMs;
     public Task StartAsync();
+    /// Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member, you included, gets PeerRenamed. Names need not be unique. At most one rename per second; a refusal (bad_request for an empty name, rate_limited) arrives on LobbyClient.Error. Throws OneLobbyException unsupported when the hub is too old to rename, and like the display name at start when it breaks the blueprint's players.* (identity_anonymous, bad_config).
+    public Task RenameAsync(string name);
     public Task SetMetaAsync(IReadOnlyDictionary<string, string> meta);
     /// Host: removes a player and bans its address from this lobby for as long as the lobby lasts (a reload or a new window included). To end a connection without the ban, use DisconnectAsync.
     public Task KickAsync(int peerId);
@@ -405,6 +411,8 @@ public static class LobbyErrorCodes
     public const string BadAddress;
     /// Direct IP host: no port in 47810-47819 could be bound.
     public const string PortInUse;
+    /// The hub is too old for this call (it does not list the feature in welcome.features), e.g. RenameAsync.
+    public const string Unsupported;
     /// A pause request outside the InGame phase (Pause.Refused reason); also what a host-side refusal carries.
     public const string NotInGame;
     /// A pause request the host's policy turned down (for example a non-pauser trying to resume; Pause.Refused reason).

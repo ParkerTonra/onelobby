@@ -19,6 +19,8 @@ signal peer_failed(peer: Dictionary, reason: String)
 ## Host only: an approval lobby asks whether this peer may join; answer with approve().
 signal join_requested(peer: Dictionary)
 signal host_changed(host_id: int)
+## A member (you included) changed its display name mid-session (rename): the peer with its new name, and the old name.
+signal peer_renamed(peer: Dictionary, old_name: String)
 ## phase: "lobby" or "in_game".
 signal phase_changed(phase: String)
 ## channel: OneLobbyWire.RELIABLE or OneLobbyWire.FAST.
@@ -194,6 +196,18 @@ func end_game() -> void:
 		return
 	_set_phase("lobby")
 	_c.send_signaling(OneLobbySignaling.phase(false))
+
+
+## Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
+## you included, gets peer_renamed. Names need not be unique. At most one rename per second; a refusal (bad_request for
+## an empty name, rate_limited) arrives on the client's error signal. Returns false, and emits error "unsupported",
+## when the hub is too old to rename.
+func rename(new_name: String) -> bool:
+	if not _c.features.has("set_name"):
+		_c.error.emit("unsupported", "this lobby's hub cannot rename players (update it)")
+		return false
+	_c.send_signaling(OneLobbySignaling.rename_msg(new_name))
+	return true
 
 
 ## Host: replaces the lobby's public metadata (string values; shown in list()).
@@ -688,6 +702,12 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 				for p: Variant in list:
 					var id := OneLobbySignaling.i(p, "peerId")
 					if _peers.has(id):
+						var known: OLPeerRec = _peers[id]
+						var new_name := OneLobbySignaling.s(p, "name")
+						if known.name != new_name:
+							var old_name := known.name
+							known.name = new_name
+							peer_renamed.emit(_to_peer(known), old_name)
 						continue
 					var rec := _rec(id, OneLobbySignaling.s(p, "name"))
 					_peers[id] = rec

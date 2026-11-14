@@ -20,7 +20,7 @@ const IDLE_TIMEOUT_MS := 30000
 const RESUME_WINDOW_MS := 60000
 const MAX_MESSAGE_BYTES := 16 * 1024
 const CROCKFORD := "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-const KNOWN_TYPES := ["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path"]
+const KNOWN_TYPES := ["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name"]
 
 
 ## Sliding-window counter: at most `limit` events per `window_ms`.
@@ -63,6 +63,7 @@ class OLMember:
 	var detached_at := 0
 	var token := ""
 	var ip := ""
+	var renames: OLRateWindow = null
 
 
 class OLSession:
@@ -249,6 +250,7 @@ func receive(s: OLSession, text: String) -> void:
 				_send(s, {"t": "pong", "n": n})
 		"host_changed": pass # a direct lobby has no migration: the host leaving ends the session
 		"path": _path_report(s, msg)
+		"set_name": _set_name(s, msg)
 
 
 # ---------------------------------------------------------------- hello / welcome
@@ -305,6 +307,7 @@ func _hello(s: OLSession, m: Dictionary) -> void:
 		"ice": ice,
 		"serverTime": int(Time.get_unix_time_from_system() * 1000.0),
 		"limits": {"maxMsg": MAX_MESSAGE_BYTES, "maxPlayers": max_players_hard},
+		"features": ["set_name"],
 	}
 	if resumed != null:
 		w["peerId"] = resumed.peer_id
@@ -554,6 +557,28 @@ func _require_host(s: OLSession) -> OLLobby:
 		_error(s, "not_host", "only the host can do that")
 		return null
 	return s.lobby
+
+
+func _set_name(s: OLSession, m: Dictionary) -> void:
+	if s.lobby == null or s.member == null:
+		_error(s, "bad_request", "not in a lobby")
+		return
+	var raw: Variant = m.get("name")
+	var new_name := sanitize(raw, NAME_MAX) if raw is String else ""
+	if new_name.is_empty():
+		_error(s, "bad_request", "name must be a non-empty string", {"field": "name"})
+		return
+	if new_name == s.member.name:
+		return
+	var now := _now()
+	if s.member.renames == null:
+		s.member.renames = OLRateWindow.new(1, 1000)
+	if not s.member.renames.try_hit(now):
+		_rate_limited(s, "set_name", s.member.renames.retry_after_ms(now))
+		return
+	s.member.name = new_name
+	s.name = new_name
+	_broadcast_lobby(s.lobby)
 
 
 func _host_meta(s: OLSession, m: Dictionary) -> void:

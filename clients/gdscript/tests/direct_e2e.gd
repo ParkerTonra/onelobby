@@ -67,7 +67,11 @@ func _host(code_file: String) -> void:
 			lobby.send(from, "hi-fast".to_utf8_buffer(), OneLobbyWire.FAST)
 			got["fast"] = true)
 	lobby.peer_joined.connect(func(p: Dictionary) -> void: print("host sees join ", p["name"]))
-	while not (got["reliable"] and got["fast"]):
+	var renamed := [""]
+	lobby.peer_renamed.connect(func(p: Dictionary, old: String) -> void:
+		print("host sees rename ", old, " -> ", p["name"])
+		renamed[0] = p["name"])
+	while not (got["reliable"] and got["fast"] and renamed[0] == "Renamed"):
 		await create_timer(0.1).timeout
 	# let the replies leave, then go: the joiner must learn that the host left
 	await create_timer(1.5).timeout
@@ -97,12 +101,24 @@ func _join(code_file: String) -> void:
 	lobby.session_ended.connect(func(reason: String) -> void: ended[0] = reason)
 	if not lobby.is_ready:
 		await lobby.ready
+	var self_renamed := [""]
+	lobby.peer_renamed.connect(func(p: Dictionary, _old: String) -> void:
+		if int(p["peer_id"]) == lobby.local_peer_id:
+			self_renamed[0] = p["name"])
+	if not lobby.rename("Re\u202Enamed"):
+		_done(false, "rename refused: no set_name feature")
+		return
 	lobby.send(lobby.host_peer_id, "hello-reliable".to_utf8_buffer(), OneLobbyWire.RELIABLE)
 	# fast may drop: repeat until the reply is in
 	while not (got["reliable"] and got["fast"]):
 		lobby.send(lobby.host_peer_id, "hello-fast".to_utf8_buffer(), OneLobbyWire.FAST)
 		await create_timer(0.2).timeout
-	print("joiner has both replies, waiting for the host to leave")
+	while self_renamed[0] == "":
+		await create_timer(0.1).timeout
+	if self_renamed[0] != "Renamed":
+		_done(false, "joiner saw its own name as '%s'" % self_renamed[0])
+		return
+	print("joiner has both replies and its new name, waiting for the host to leave")
 	while ended[0] == "":
 		await create_timer(0.1).timeout
 	_done(ended[0] == "host_left", "session_ended reason was '%s'" % ended[0])

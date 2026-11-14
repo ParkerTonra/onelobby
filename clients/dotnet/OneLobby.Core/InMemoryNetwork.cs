@@ -218,6 +218,8 @@ namespace OneLobby
 
         /// <summary>Allowed (gameId) values; empty means any.</summary>
         public ISet<string> AllowedGames { get; } = new HashSet<string>();
+        /// <summary>What <c>welcome.features</c> lists (empty plays an older hub that cannot rename).</summary>
+        public IReadOnlyList<string> Features { get; set; } = new[] { "set_name" };
 
         public void Advance(long ms) => NowMs += ms;
 
@@ -292,6 +294,7 @@ namespace OneLobby
                             w.WriteEndArray();
                             w.WriteNumber("serverTime", NowMs);
                             w.WriteStartObject("limits"); w.WriteNumber("maxMsg", 16384); w.WriteNumber("maxPlayers", 250); w.WriteEndObject();
+                            w.WriteStartArray("features"); foreach (var f in Features) w.WriteStringValue(f); w.WriteEndArray();
                         }));
                         if (e.TryGetProperty("resumeToken", out var rt) && rt.ValueKind == JsonValueKind.String) Resume(s, rt.GetString() ?? "");
                         break;
@@ -308,6 +311,15 @@ namespace OneLobby
                         var sig = Signaling.ParseSignal(e);
                         if (sig == null) return;
                         Reply(dest, ForwardSignal(s.PeerId, sig));
+                        break;
+                    }
+                    case "set_name":
+                    {
+                        if (s.Lobby == null) { Error(s, "bad_request", "not in a lobby"); return; }
+                        string name = e.TryGetProperty("name", out var nm) && nm.ValueKind == JsonValueKind.String ? (nm.GetString() ?? "").Trim() : "";
+                        if (name.Length > 24) name = name.Substring(0, 24);
+                        if (name.Length == 0) { Error(s, "bad_request", "name must be a non-empty string"); return; }
+                        if (name != s.Name) { s.Name = name; BroadcastLobby(s.Lobby); }
                         break;
                     }
                     case "meta": if (s.Lobby != null && s.Lobby.HostId == s.PeerId) { s.Lobby.Meta = Signaling.MetaOf(e); BroadcastLobby(s.Lobby); } break;

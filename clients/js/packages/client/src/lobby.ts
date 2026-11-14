@@ -59,6 +59,8 @@ export type LobbyEvents = {
   peerFailed: [Peer, reason: string];
   joinRequested: [Peer];
   hostChanged: [hostId: number];
+  /** A member (you included) changed its display name mid-session (`rename`): the peer with its new name, and the old name. */
+  peerRenamed: [Peer, oldName: string];
   phase: [Phase];
   message: [from: number, bytes: Uint8Array, channel: ChannelName];
   /** `close` is the code and reason the host gave when it removed this player (`kick()` / `disconnect()`). */
@@ -82,6 +84,8 @@ export interface LobbyConfig {
   signaling: SignalingClient;
   state: LobbyState;
   ice: IceServer[];
+  /** `welcome.features` of the hub (e.g. "set_name"); absent = none. */
+  features?: string[];
   links: LinkFactory;
   clock: Clock;
   wall: () => number;
@@ -376,6 +380,17 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.signaling.send({ t: "phase", phase: "in_game" });
     this.setPhase("in_game");
     if (this.mode === "lockstep") this.lockstep.hostStart();
+  }
+
+  /**
+   * Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
+   * you included, gets `peerRenamed`. Names need not be unique. At most one rename per second; a refusal
+   * (`bad_request` for an empty name, `rate_limited`) arrives on the kit's `error` event. Throws `unsupported` when
+   * the hub is too old to rename.
+   */
+  async rename(name: string): Promise<void> {
+    if (!(this.cfg.features ?? []).includes("set_name")) throw new OneLobbyError("unsupported", "this lobby's hub cannot rename players (update it)");
+    this.signaling.send({ t: "set_name", name: String(name ?? "") });
   }
 
   async setMeta(meta: Record<string, string>): Promise<void> {
@@ -874,7 +889,12 @@ export class Lobby extends Emitter<LobbyEvents> {
           this.resumeToken = st.resumeToken;
           this.seatSink?.(this.resumeToken);
         }
+        const before = this.roster;
         this.roster = new Map(st.peers.map((p) => [p.peerId, seatName(p)]));
+        for (const [id, p] of this.roster) {
+          const old = before.get(id);
+          if (old && old.name !== p.name) this.emit("peerRenamed", p, old.name);
+        }
         if (st.hostId !== this.hostPeerId && !this.isHost) this.setHost(st.hostId);
         this.setPhase(st.phase);
         break;

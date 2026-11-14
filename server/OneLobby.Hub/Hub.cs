@@ -169,7 +169,7 @@ public sealed class Hub
 
     private static readonly HashSet<string> KnownTypes = new(StringComparer.Ordinal)
     {
-        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path",
+        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name",
     };
 
     public void Receive(Session s, string text)
@@ -214,6 +214,7 @@ public sealed class Hub
                     break;
                 case "host_changed": ClaimHost(s, msg); break;
                 case "path": PathReport(s, msg); break;
+                case "set_name": SetName(s, msg); break;
                 default: break; // unknown types are ignored
             }
         }
@@ -270,6 +271,7 @@ public sealed class Hub
             ["ice"] = IceList(s),
             ["serverTime"] = _clock.NowMs,
             ["limits"] = new JsonObject { ["maxMsg"] = _o.MaxMessageBytes, ["maxPlayers"] = _o.HardMaxPlayers },
+            ["features"] = new JsonArray("set_name"),
         };
         if (resumed is not null) w["peerId"] = resumed.PeerId;
         Send(s, w);
@@ -552,6 +554,19 @@ public sealed class Hub
         if (!ReadMeta(m["meta"], out var meta, out string? err) || m["meta"] is null) { Error(s, "bad_request", err ?? "meta is required", Field("meta")); return; }
         lobby.Meta = meta!;
         BroadcastLobby(lobby);
+    }
+
+    private void SetName(Session s, JsonObject m)
+    {
+        if (s.Lobby is null || s.Member is null) { Error(s, "bad_request", "not in a lobby"); return; }
+        string name = m["name"] is JsonValue v && v.TryGetValue(out string? raw) ? Text.Sanitize(raw, NameMax) : "";
+        if (name.Length == 0) { Error(s, "bad_request", "name must be a non-empty string", Field("name")); return; }
+        if (name == s.Member.Name) return;
+        long now = _clock.NowMs;
+        var rate = s.Member.Renames ??= new RateWindow(Scale, 1000);
+        if (!rate.TryHit(now)) { RateLimited(s, "set_name", rate.RetryAfterMs(now), null); return; }
+        s.Member.Name = name; s.Name = name;
+        BroadcastLobby(s.Lobby);
     }
 
     private void HostPhase(Session s, JsonObject m)

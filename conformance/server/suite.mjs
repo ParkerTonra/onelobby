@@ -366,6 +366,27 @@ export function buildSuite(opts) {
     await h.callError({ t: 'meta', meta: { k: 'v'.repeat(65) } }, 'bad_request');
     await h.callError({ t: 'meta' }, 'bad_request');
   });
+  T('host', 'set_name: welcome lists the feature; a member renames itself, every member gets a fresh lobby message', async (t) => {
+    const h = await t.host();
+    assert.ok(h.welcome.features?.includes('set_name'), 'welcome.features has set_name');
+    const j = await t.join(h.lobby.code, {}, h);
+    j.send({ t: 'set_name', name: 'Re‮named' });
+    const lh = await h.next('lobby'); const lj = await j.next('lobby');
+    for (const l of [lh, lj]) assert.equal(l.peers.find((p) => p.peerId === 2).name, 'Renamed');
+    assert.equal(lh.you, 1); assert.equal(lj.you, 2);
+    await sleep(1100);
+    j.send({ t: 'set_name', name: 'Renamed' });
+    await h.expectSilence(200);
+    await j.callError({ t: 'set_name', name: '' }, 'bad_request');
+    await j.callError({ t: 'set_name', name: 5 }, 'bad_request');
+    await j.callError({ t: 'set_name' }, 'bad_request');
+    j.send({ t: 'set_name', name: 'x'.repeat(30) });
+    assert.equal((await h.next('lobby')).peers.find((p) => p.peerId === 2).name, 'x'.repeat(24));
+  });
+  T('host', 'set_name outside a lobby -> bad_request', async (t) => {
+    const c = await t.hello();
+    await c.callError({ t: 'set_name', name: 'Solo' }, 'bad_request');
+  });
   T('host', 'phase: invalid value -> bad_request; valid is broadcast', async (t) => {
     const h = await t.host();
     const j = await t.join(h.lobby.code, {}, h);
@@ -504,6 +525,9 @@ export function buildSuite(opts) {
     assert.equal((await a.next('signal')).from, 1);
     a.send({ t: 'signal', to: 1, ice: { candidate: 'x', sdpMid: null, sdpMLineIndex: null } });
     assert.equal((await h.next('signal')).from, 2);
+    assert.ok(h.welcome.features?.includes('set_name'), 'welcome.features has set_name');
+    b.send({ t: 'set_name', name: 'Bee' });
+    for (const c of [h, a, b]) assert.equal((await c.next('lobby')).peers.find((p) => p.peerId === 3).name, 'Bee');
   }, { directOnly: true });
 
   T('signal', 'joiner to joiner works inside one lobby', async (t) => {
@@ -657,6 +681,13 @@ export function buildSuite(opts) {
     await sleep(400);
     assert.deepEqual(h.drain().filter((m) => m.t === 'error'), [], 'no errors');
     for (const j of js) assert.equal(j.drain().filter((m) => m.t === 'signal').length, n, 'every joiner got all its signals');
+  }, { rateLimitOnly: true });
+  T('ratelimit', 'set_name: a second rename within a second -> rate_limited with retryAfterMs, the first applied', async (t) => {
+    const h = await t.host(); const j = await t.join(h.lobby.code, {}, h);
+    j.send({ t: 'set_name', name: 'One' });
+    assert.equal((await h.next('lobby')).peers.find((p) => p.peerId === 2).name, 'One'); await j.next('lobby');
+    const e = await j.callError({ t: 'set_name', name: 'Two' }, 'rate_limited');
+    assert.ok(e.data?.retryAfterMs > 0, 'retryAfterMs');
   }, { rateLimitOnly: true });
 
   return tests;

@@ -244,6 +244,8 @@ namespace OneLobby
         public event Action<Peer, string>? PeerFailed;
         public event Action<Peer>? JoinRequested;
         public event Action<int>? HostChanged;
+        /// <summary>A member (you included) changed its display name mid-session: the peer with its new name, and the old name.</summary>
+        public event Action<Peer, string>? PeerRenamed;
         public event Action<LobbyPhase>? PhaseChanged;
         public event Action<int, ReadOnlyMemory<byte>, Channel>? MessageReceived;
         public event Action<string>? SessionEnded;
@@ -259,6 +261,21 @@ namespace OneLobby
             SetPhase(LobbyPhase.InGame);
             _c.SendRaw(Signaling.Phase(LobbyPhase.InGame));
             Lockstep?.BeginEmitting(NowMs);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
+        /// you included, gets <see cref="PeerRenamed"/>. Names need not be unique. At most one rename per second; a refusal
+        /// (<c>bad_request</c> for an empty name, <c>rate_limited</c>) arrives on <see cref="LobbyClient.Error"/>. Throws
+        /// <see cref="OneLobbyException"/> <c>unsupported</c> when the hub is too old to rename, and like the display name at start
+        /// when it breaks the blueprint's <c>players.*</c> (<c>identity_anonymous</c>, <c>bad_config</c>).
+        /// </summary>
+        public Task RenameAsync(string name)
+        {
+            Blueprint?.CheckDisplayName(name);
+            if (!_c.Features.Contains("set_name")) throw new OneLobbyException(LobbyErrorCodes.Unsupported, "this lobby's hub cannot rename players (update it)");
+            _c.SendRaw(Signaling.SetName(name ?? ""));
             return Task.CompletedTask;
         }
 
@@ -1060,7 +1077,14 @@ namespace OneLobby
                     if (!string.IsNullOrEmpty(m.ResumeToken)) ResumeToken = m.ResumeToken;
                     SetPhase(m.Phase);
                     foreach (var p in m.Peers)
-                        if (!_peers.ContainsKey(p.PeerId))
+                        if (_peers.TryGetValue(p.PeerId, out var known))
+                        {
+                            if (known.Name == p.Name) continue;
+                            string old = known.Name;
+                            known.Name = p.Name;
+                            PeerRenamed?.Invoke(ToPeer(known), old);
+                        }
+                        else
                         {
                             var rec = new PeerRec { Id = p.PeerId, Name = p.Name };
                             _peers[p.PeerId] = rec;

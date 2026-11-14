@@ -23,7 +23,7 @@ test('game_not_allowed and server_full policy tests are green against a restrict
   } finally { await s.close(); }
 });
 
-for (const only of ['open lobbies', 'create: more', 'join: more', 'signal: bursts', 'sockets: the 33rd']) {
+for (const only of ['open lobbies', 'create: more', 'join: more', 'signal: bursts', 'sockets: the 33rd', 'set_name: a second']) {
   test(`rate limits on a fresh mock: ${only}`, async () => {
     const s = await startMock({ scale: 1 });
     try {

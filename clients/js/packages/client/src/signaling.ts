@@ -48,6 +48,8 @@ export interface WelcomeMsg {
   ice: IceServer[];
   serverTime?: number;
   limits?: { maxMsg: number; maxPlayers: number };
+  /** Optional messages the hub handles, e.g. "set_name"; missing on an older hub. */
+  features?: string[];
 }
 
 export interface ServerError {
