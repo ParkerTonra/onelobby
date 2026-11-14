@@ -40,5 +40,7 @@ namespace OneLobby.Direct.Nostr
         /// <summary>After the first relay: at most this long for the rest of the list; ends at once when every relay has answered.</summary>
         public const int RestWaitMs = 1500;
         public const int RestPollMs = 50;
+        /// <summary>A relay that never connected this session is skipped after this many failed dials in a row, while another relay is up.</summary>
+        public const int DeadRelayDials = 4;
     }
 }

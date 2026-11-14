@@ -6,6 +6,7 @@ import type { Clock } from "../clock.js";
 import type { SocketLike } from "../transport.js";
 import { sha256, toHex, fromHex } from "./crypto.js";
 import { schnorrPublicKey, schnorrSign } from "./secp256k1.js";
+import { DEAD_RELAY_DIALS } from "./limits.js";
 
 export const NOSTR_KIND = 25050;
 
@@ -61,6 +62,10 @@ interface Relay {
   /** The first connect to this relay has succeeded or failed (a dead relay is known to be dead). */
   attempted: boolean;
   skipped: boolean;
+  /** Has connected at least once this session. */
+  everOpen: boolean;
+  /** Failed dials in a row. */
+  fails: number;
   backoff: number;
   cancelRetry: (() => void) | null;
 }
@@ -77,7 +82,7 @@ export class RelayPool {
   private waiters: (() => void)[] = [];
 
   constructor(private readonly o: RelayPoolOptions) {
-    this.relays = o.urls.map((url) => ({ url, ws: null, open: false, attempted: false, skipped: false, backoff: 1000, cancelRetry: null }));
+    this.relays = o.urls.map((url) => ({ url, ws: null, open: false, attempted: false, skipped: false, everOpen: false, fails: 0, backoff: 1000, cancelRetry: null }));
   }
 
   get total(): number {
@@ -159,6 +164,8 @@ export class RelayPool {
       if (r.ws !== ws) return;
       r.open = true;
       r.attempted = true;
+      r.everOpen = true;
+      r.fails = 0;
       r.backoff = 1000;
       const since = Math.floor(this.o.wall() / 1000) - SINCE_SLACK_S;
       this.trySend(r, JSON.stringify(["REQ", this.sub, { kinds: [NOSTR_KIND], "#t": [this.o.topic], since }]));
@@ -197,6 +204,12 @@ export class RelayPool {
 
   private retryLater(r: Relay): void {
     if (this.closed || r.skipped || r.cancelRetry) return;
+    if (!r.everOpen) r.fails++;
+    // a relay that is down (never connected, e.g. HTTP 503) is dropped once another relay carries the session
+    if (!r.everOpen && r.fails >= DEAD_RELAY_DIALS && this.connected > 0) {
+      this.skip(r);
+      return;
+    }
     const wait = r.backoff;
     r.backoff = Math.min(30_000, r.backoff * 2);
     r.cancelRetry = this.o.clock.setTimeout(() => {

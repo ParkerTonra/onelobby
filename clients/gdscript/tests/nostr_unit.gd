@@ -27,6 +27,7 @@ func _init() -> void:
 	_join_codes()
 	_limits()
 	_events()
+	_dead_relay()
 	_link()
 	_hub()
 	_inner_class_names()
@@ -156,6 +157,31 @@ func _events() -> void:
 
 
 ## Two links wired through arrays: ordering, duplicates, reordering, acks and close.
+## spec s.6: a relay that never connected is skipped after DEAD_RELAY_DIALS failed dials, but only while another relay is up.
+func _dead_relay() -> void:
+	var pool := OneLobbyNostrPool.new(["wss://up.test", "wss://down.test"], "tt", func(_ev: Dictionary) -> void: pass)
+	var up: OneLobbyNostrPool.OLRelay = pool._relays[0]
+	var down: OneLobbyNostrPool.OLRelay = pool._relays[1]
+	for _i in OneLobbyNostrLimits.DEAD_RELAY_DIALS + 2:
+		down.retry_at = 0
+		pool._retry_later(down)
+	_check(not down.skipped, "a dead relay keeps being retried while no relay is up")
+	up.open = true
+	up.attempted = true
+	up.ever_open = true
+	down.retry_at = 0
+	pool._retry_later(down)
+	_check(down.skipped and pool.settled(), "a dead relay is skipped once another relay is up")
+	var pool2 := OneLobbyNostrPool.new(["wss://up.test", "wss://flaky.test"], "tt", func(_ev: Dictionary) -> void: pass)
+	pool2._relays[0].open = true
+	var flaky: OneLobbyNostrPool.OLRelay = pool2._relays[1]
+	flaky.ever_open = true
+	for _i in OneLobbyNostrLimits.DEAD_RELAY_DIALS + 2:
+		flaky.retry_at = 0
+		pool2._retry_later(flaky)
+	_check(not flaky.skipped, "a relay that connected once is never skipped for failing dials")
+
+
 func _link() -> void:
 	var a_out: Array = []
 	var b_out: Array = []

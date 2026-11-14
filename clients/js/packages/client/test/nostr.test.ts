@@ -23,7 +23,7 @@ describe("limits and timers (spec/vectors/nostr-limits.json)", () => {
       waitingMax: L.WAITING_MAX, waitingStaleMs: L.WAITING_STALE_MS },
     socket: { openEveryMs: L.OPEN_EVERY_MS, giveUpMs: L.GIVE_UP_MS },
     relays: { hostFirstRelayMs: L.HOST_FIRST_RELAY_MS, hostNostrFirstRelayMs: L.HOST_NOSTR_FIRST_RELAY_MS, joinerFirstRelayMs: L.JOINER_FIRST_RELAY_MS,
-      restWaitMs: L.RELAY_REST_WAIT_MS, restPollMs: L.RELAY_REST_POLL_MS },
+      restWaitMs: L.RELAY_REST_WAIT_MS, restPollMs: L.RELAY_REST_POLL_MS, deadRelayDials: L.DEAD_RELAY_DIALS },
   };
   it("the code's constants equal the vector, key for key", () => {
     for (const group of Object.keys(expected)) expect(expected[group], group).toEqual(lim[group]);
@@ -249,6 +249,39 @@ describe("relay pool", () => {
     pool.publish(await makeEvent(secret, "tt", "d", Math.floor(Date.now() / 1000)));
     await new Promise((r) => setTimeout(r, 50));
     expect(pool.connected).toBe(1);
+    pool.close();
+  });
+});
+
+describe("relay pool: a relay that never connects", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  async function dialsTo(down: string[], urls: string[], rounds: number): Promise<{ dials: number; pool: RelayPool }> {
+    const relays = new FakeRelays();
+    for (const u of down) relays.down.add(u);
+    let dials = 0;
+    const clock = new ManualClock();
+    const pool = new RelayPool({ urls, topic: "tt", clock, wall: Date.now, onEvent: () => {},
+      connect: (u) => { if (u === "wss://c.test") dials++; return relays.connect(u); } });
+    pool.start();
+    for (let i = 0; i < rounds; i++) {
+      await tick();
+      clock.advance(30_000);
+    }
+    await tick();
+    return { dials, pool };
+  }
+
+  it("is skipped after deadRelayDials failed dials while another relay is up", async () => {
+    const { dials, pool } = await dialsTo(["wss://c.test"], ["wss://a.test", "wss://c.test"], 12);
+    expect(dials).toBe(L.DEAD_RELAY_DIALS);
+    expect(pool.connected).toBe(1);
+    expect(pool.settled).toBe(true);
+    pool.close();
+  });
+
+  it("keeps being retried while no other relay is up", async () => {
+    const { dials, pool } = await dialsTo(["wss://a.test", "wss://c.test"], ["wss://a.test", "wss://c.test"], 12);
+    expect(dials).toBe(13);
     pool.close();
   });
 });

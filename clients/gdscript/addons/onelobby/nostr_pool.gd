@@ -2,7 +2,8 @@ class_name OneLobbyNostrPool
 extends RefCounted
 ## Nostr events and the relay pool (spec/nostr-signaling.md s.3 and s.6). Anonymous: every connection uses a throw-away
 ## key and carries encrypted frames only. Every relay is dialled at once with a WebSocketPeer and reconnected with
-## backoff (1 s doubling to 30 s); the owner calls poll() every frame.
+## backoff (1 s doubling to 30 s); one that never connects is dropped after a few dials (spec s.6). The owner calls
+## poll() every frame.
 
 const KIND := 25050
 const SEEN_MAX := 4096
@@ -29,6 +30,10 @@ class OLRelay:
 	## The first connect to this relay has succeeded or failed (a dead relay is known to be dead).
 	var attempted := false
 	var skipped := false
+	## Has connected at least once this session.
+	var ever_open := false
+	## Failed dials in a row.
+	var fails := 0
 	var backoff := OneLobbyNostrLimits.BACKOFF_START_MS
 	var retry_at := 0
 
@@ -127,6 +132,8 @@ func poll() -> void:
 				if not r.open:
 					r.open = true
 					r.attempted = true
+					r.ever_open = true
+					r.fails = 0
 					r.backoff = OneLobbyNostrLimits.BACKOFF_START_MS
 					var since := int(Time.get_unix_time_from_system()) - SINCE_SLACK_S
 					r.ws.send_text(JSON.stringify(["REQ", _sub, {"kinds": [KIND], "#t": [_topic], "since": since}]))
@@ -169,6 +176,13 @@ func _dial(r: OLRelay) -> void:
 
 func _retry_later(r: OLRelay) -> void:
 	if _closed or r.skipped or r.retry_at > 0:
+		return
+	if not r.ever_open:
+		r.fails += 1
+	# a relay that is down (never connected, e.g. HTTP 503) is dropped once another relay carries the session: each
+	# dial to it costs two engine ERROR lines from WebSocketPeer that a game cannot silence
+	if not r.ever_open and r.fails >= OneLobbyNostrLimits.DEAD_RELAY_DIALS and connected() > 0:
+		_skip(r)
 		return
 	r.retry_at = Time.get_ticks_msec() + r.backoff
 	r.backoff = mini(OneLobbyNostrLimits.BACKOFF_MAX_MS, r.backoff * 2)

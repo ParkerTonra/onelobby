@@ -37,3 +37,5 @@ export const JOINER_FIRST_RELAY_MS = 10_000;
 /** After the first relay: at most this long for the rest of the list; ends at once when every relay has answered. */
 export const RELAY_REST_WAIT_MS = 1500;
 export const RELAY_REST_POLL_MS = 50;
+/** A relay that never connected this session is skipped after this many failed dials in a row, while another relay is up. */
+export const DEAD_RELAY_DIALS = 4;

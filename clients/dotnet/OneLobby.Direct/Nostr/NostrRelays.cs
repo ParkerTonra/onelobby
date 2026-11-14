@@ -97,6 +97,8 @@ namespace OneLobby.Direct.Nostr
         private async Task RunAsync(Relay r)
         {
             var backoff = 1000;
+            var everUp = false;
+            var fails = 0;
             var token = _cts.Token;
             while (!token.IsCancellationRequested && !r.Skipped)
             {
@@ -114,6 +116,7 @@ namespace OneLobby.Direct.Nostr
                     r.Connected = true;
                     r.Attempted = true;
                     up = true;
+                    everUp = true;
                     backoff = 1000;
                     await ReadLoopAsync(r, ws, token).ConfigureAwait(false);
                 }
@@ -126,6 +129,12 @@ namespace OneLobby.Direct.Nostr
                     try { ws.Dispose(); } catch (Exception) { }
                 }
                 if (r.Skipped || token.IsCancellationRequested) return;
+                // a relay that is down (never connected, e.g. HTTP 503) is dropped once another relay carries the session
+                if (!everUp && ++fails >= NostrLimits.DeadRelayDials && Connected > 0)
+                {
+                    r.Skipped = true;
+                    return;
+                }
                 try { await Task.Delay(up ? 1000 : backoff, token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
                 if (!up) backoff = Math.Min(backoff * 2, 30_000);

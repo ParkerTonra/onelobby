@@ -211,6 +211,7 @@ public sealed class NostrCryptoTests
             {
                 ["hostFirstRelayMs"] = NostrLimits.HostFirstRelayMs, ["hostNostrFirstRelayMs"] = NostrLimits.HostNostrFirstRelayMs,
                 ["joinerFirstRelayMs"] = NostrLimits.JoinerFirstRelayMs, ["restWaitMs"] = NostrLimits.RestWaitMs, ["restPollMs"] = NostrLimits.RestPollMs,
+                ["deadRelayDials"] = NostrLimits.DeadRelayDials,
             },
         };
         var groups = doc.RootElement.EnumerateObject().Where(p => p.Name != "$comment").ToList();

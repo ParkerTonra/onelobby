@@ -93,7 +93,9 @@ extra remote candidate. The host still pins its peer links to the direct UDP por
 
 A list of `wss://` URLs: the blueprint's `hosting.nostrRelays`, else the library default. Use them all at once,
 reconnect each with backoff (1 s doubling to 30 s), and treat the transport as up while at least one relay is
-connected. A relay answering `["OK", id, false, ...]` or `["CLOSED", ...]` is skipped for the session. No relay
+connected. A relay answering `["OK", id, false, ...]` or `["CLOSED", ...]` is skipped for the session, and so is a relay that
+has never connected this session once `deadRelayDials` (4) dials to it failed in a row while another relay is
+connected (a relay that is down, e.g. answering HTTP 503, stops costing a dial and an engine error line every 30 s). No relay
 reachable within the wait below: `connect_failed` for joiners, and the host reports `nostr: no relay reachable` in its log
 line and keeps hosting by IP.
 

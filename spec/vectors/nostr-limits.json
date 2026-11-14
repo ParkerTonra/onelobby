@@ -28,6 +28,7 @@
     "hostNostrFirstRelayMs": 10000,
     "joinerFirstRelayMs": 10000,
     "restWaitMs": 1500,
-    "restPollMs": 50
+    "restPollMs": 50,
+    "deadRelayDials": 4
   }
 }

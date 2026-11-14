@@ -53,6 +53,10 @@ both directions).
   another socket.
 - A game with an auto-rejoin loop should skip it on `session_ended("host_left")`: the host is gone (Direct mode has no
   migration), so there is no seat to take back. Rejoin only after a dropped connection.
+- A public Nostr relay that is down makes Godot print `ERROR: Invalid status code. Got: '503', expected '101'.` and
+  `ERROR: Invalid response headers.` per dial; the lobby keeps working over the other relays. A relay that never
+  connects is dropped after 4 failed dials once another relay is up, so the lines stop within about 15 s. A test that
+  fails on any engine `ERROR` should allow these two.
 - Local dev server, from `server/`: `dotnet build -c Release`, then `dotnet run -c Release --no-build --project
   OneLobby.Server -- --listen 127.0.0.1:8787`, then `curl http://127.0.0.1:8787/healthz`, then set
   `client.lobby_server = "ws://127.0.0.1:8787/ws"`. Use 127.0.0.1, not `localhost` (IPv6 first, the connect stalls).

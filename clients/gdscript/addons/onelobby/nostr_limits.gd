@@ -32,6 +32,8 @@ const HOST_NOSTR_FIRST_RELAY_MS := 10000
 const JOINER_FIRST_RELAY_MS := 10000
 const RELAY_REST_WAIT_MS := 1500
 const RELAY_REST_POLL_MS := 50
+## A relay that never connected this session is skipped after this many failed dials in a row, while another relay is up.
+const DEAD_RELAY_DIALS := 4
 
 # Relay reconnect backoff (spec s.6)
 const BACKOFF_START_MS := 1000
@@ -46,5 +48,5 @@ static func groups() -> Dictionary:
 			"waitingMax": WAITING_MAX, "waitingStaleMs": WAITING_STALE_MS},
 		"socket": {"openEveryMs": OPEN_EVERY_MS, "giveUpMs": GIVE_UP_MS},
 		"relays": {"hostFirstRelayMs": HOST_FIRST_RELAY_MS, "hostNostrFirstRelayMs": HOST_NOSTR_FIRST_RELAY_MS,
-			"joinerFirstRelayMs": JOINER_FIRST_RELAY_MS, "restWaitMs": RELAY_REST_WAIT_MS, "restPollMs": RELAY_REST_POLL_MS},
+			"joinerFirstRelayMs": JOINER_FIRST_RELAY_MS, "restWaitMs": RELAY_REST_WAIT_MS, "restPollMs": RELAY_REST_POLL_MS, "deadRelayDials": DEAD_RELAY_DIALS},
 	}
