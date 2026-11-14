@@ -189,6 +189,10 @@ Full reference (generated): `docs/api/`.
   `host` makes the default host-only.
 - Error codes are constants: `LobbyErrorCodes.LobbyFull` (C#) / `ErrorCodes.LobbyFull` (JS) = `"lobby_full"`,
   `VersionMismatch` = `"version_mismatch"`, `InGame`, `UnknownCode`, `IceFailed`, ... Compare `e.Code` / `e.code` to them.
+- Closing a lobby to new players: with `lateJoin: false` joins stop for good at `StartAsync()` / `start()` (joiners get
+  `in_game`). To open and close it at will, host with `Visibility.Private` / `visibility: "private"` and answer each
+  `JoinRequested` / `"joinRequested"` with `ApproveAsync(peer.PeerId, joinable)` / `approve(peer.peerId, joinable)`;
+  a refused joiner gets `kicked` with `data.reason` `"denied"`. Works on onelobby-server and on direct hosts.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
 
