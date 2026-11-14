@@ -226,6 +226,12 @@ describe("lockstep end to end (memory transport, gridpaint)", () => {
       C.g.restore(tick, bytes.subarray(0, 260));
     };
     await play(r.clock, [A, B, C], 1500);
+    // deflate/inflate (CompressionStream) runs in real time, the game on the manual clock: on a slow runner the
+    // simulated 1.5 s can end before the snapshot is inflated, so keep playing until it lands (at most 10 s real time)
+    for (const until = Date.now() + 10_000; got === 0 && Date.now() < until; ) {
+      await new Promise((res) => setTimeout(res, 10));
+      await play(r.clock, [A, B, C], 50);
+    }
     expect(got).toBe(260 + 40000);
     expect(C.g.tick).toBeGreaterThan(0);
   });
