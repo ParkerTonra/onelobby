@@ -57,13 +57,16 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
         var logs = new ConcurrentQueue<string>();
         Action<string> sink = logs.Enqueue;
         DataChannelTransport.NativeLog += sink;
-        try { Run(); }
+        try { for (var i = 0; i < Repeats; i++) { _log.WriteLine($"-- repeat {i + 1}/{Repeats}"); Run(); } }
         finally
         {
             DataChannelTransport.NativeLog -= sink;
             foreach (var l in logs) _log.WriteLine(l);
         }
     }
+
+    // ONELOBBY_LIVE_REPEAT=N runs the whole scenario N times in one process (CI stress; default 1)
+    private static int Repeats => int.TryParse(Environment.GetEnvironmentVariable("ONELOBBY_LIVE_REPEAT"), out var n) && n > 0 ? n : 1;
 
     private void Run()
     {
@@ -138,6 +141,7 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
         Assert.Equal(0, joiner.ReliableBufferedBytes);
         joiner.LeaveAsync();
         PumpUntil(() => hostSawLeave, Pump, "host sees joiner leave");
+        _log.WriteLine($"FLUSH-LEAVE delivered {atHost.Count}/500 at leave {countAtLeave}/500");
         Assert.Equal(500, countAtLeave);
         Assert.Equal(Enumerable.Range(0, 500).Select(i => i + ":" + chunk), atHost.Select(m => m.Text));
         Assert.Single(host.Peers);
