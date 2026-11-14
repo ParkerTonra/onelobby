@@ -528,7 +528,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private giveUpConnecting(): void {
-    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`);
+    // what the host link saw (states, signals, timings), so a CI log of a failed connect says where it stalled
+    const hostLink = this.links.get(this.hostPeerId);
+    const diagnostics = hostLink ? hostLink.diagnostics?.() : (this.lastHostLinkEnd ?? "no offer from the host ever arrived");
+    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}${diagnostics ? " [" + diagnostics + "]" : ""}`, diagnostics ? { diagnostics } : undefined);
     this.failReady(err);
     this.reportError(err);
     if (this.ended) return;
@@ -586,8 +589,12 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.flush(link.remoteId);
   }
 
+  /** Why and how the joiner's last link to the host ended (shown when the join gives up). */
+  private lastHostLinkEnd: string | null = null;
+
   private onLinkClosed(peerId: number, link: PeerLink, _reason: string): void {
     if (this.links.get(peerId) !== link) return; // replaced
+    if (!this.isHost && peerId === this.hostPeerId) this.lastHostLinkEnd = `link ended (${_reason}): ${link.diagnostics?.() ?? ""}`;
     this.links.delete(peerId);
     this.hiSentTo.delete(link);
     if (this.ended) return;

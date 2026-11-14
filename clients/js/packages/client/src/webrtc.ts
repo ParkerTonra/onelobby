@@ -36,6 +36,8 @@ export class WebRtcLink implements PeerLink {
   private opened = 0;
   private early: [ChannelName, Uint8Array][] = [];
   private extra: string[];
+  private readonly born = Date.now();
+  private trace: string[] = [];
 
   /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
   constructor(opts: LinkOptions, rtc: typeof RTCPeerConnection = globalThis.RTCPeerConnection) {
@@ -53,16 +55,30 @@ export class WebRtcLink implements PeerLink {
     }
     this.pc = new rtc(config);
     this.pc.onicecandidate = (e) => {
-      if (e.candidate) this.onSignal?.({ ice: e.candidate.toJSON() as { candidate: string } });
+      if (e.candidate) {
+        this.note(`out ice ${e.candidate.candidate}`);
+        this.onSignal?.({ ice: e.candidate.toJSON() as { candidate: string } });
+      }
     };
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
+      this.note(`connection ${s}`);
       if (s === "failed" || s === "closed" || s === "disconnected") {
         // "disconnected" can recover; give ICE a moment before declaring the link dead.
         if (s === "disconnected") setTimeout(() => this.pc.connectionState === "disconnected" && this.fail("disconnected"), 4000);
         else this.fail(s);
       }
     };
+  }
+
+  private note(what: string): void {
+    if (this.trace.length < 40) this.trace.push(`+${Date.now() - this.born}ms ${what}`);
+  }
+
+  /** What a "could not connect" report adds: the peer connection's states and the signals seen so far. */
+  diagnostics(): string {
+    const pc = this.pc as unknown as Record<string, unknown>;
+    return `connection=${pc.connectionState} ice=${pc.iceConnectionState} gathering=${pc.iceGatheringState} signaling=${pc.signalingState} haveRemote=${this.haveRemote} pendingIce=${this.pendingIce.length}; ${this.trace.join("; ")}`;
   }
 
   /**
@@ -106,6 +122,7 @@ export class WebRtcLink implements PeerLink {
         this.openChannels();
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
+        this.note("out offer");
         this.onSignal?.({ sdp: { type: "offer", sdp: offer.sdp ?? "" } });
       } catch (e) {
         this.fail(`offer failed: ${String(e)}`);
@@ -114,6 +131,7 @@ export class WebRtcLink implements PeerLink {
   }
 
   async handleSignal(s: SignalPayload): Promise<void> {
+    this.note(`in ${s.sdp ? s.sdp.type : `ice ${(s.ice as { candidate?: string } | undefined)?.candidate}`}`);
     try {
       if (s.sdp) {
         await this.pc.setRemoteDescription({ type: s.sdp.type, sdp: s.sdp.sdp });
@@ -128,6 +146,7 @@ export class WebRtcLink implements PeerLink {
           this.openChannels();
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
+          this.note("out answer");
           this.onSignal?.({ sdp: { type: "answer", sdp: answer.sdp ?? "" } });
         }
       }

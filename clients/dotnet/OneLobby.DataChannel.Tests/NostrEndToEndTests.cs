@@ -69,6 +69,7 @@ public sealed class NostrEndToEndTests
 
     private void RunEndToEnd()
     {
+        NativeLib.Require();
         var net = new FakeRelayNet();
         // loopback needs no STUN; an unroutable local one keeps the test off the internet
         var nostr = () => new NostrOptions { RelayFactory = net.Create, Stun = new[] { "stun:127.0.0.1:9" } };

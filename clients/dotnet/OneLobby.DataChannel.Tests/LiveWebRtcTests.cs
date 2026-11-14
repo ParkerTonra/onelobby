@@ -70,6 +70,7 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
 
     private void Run()
     {
+        NativeLib.Require();
         var cfg = new OneLobbyConfig("com.onelobby.dctest", "1", new Uri(_ws), SyncMode.Raw);
         var hostClient = new LobbyClient(cfg with { DisplayName = "Host" }, new DataChannelTransport());
         var joinClient = new LobbyClient(cfg with { DisplayName = "Joiner" }, new DataChannelTransport());

@@ -49,6 +49,8 @@ export interface PeerLink {
   handleSignal(s: SignalPayload): void | Promise<void>;
   send(channel: ChannelName, bytes: Uint8Array): void;
   close(): void;
+  /** Optional one-line state for a "could not connect" report (connection states, signals seen); never parsed. */
+  diagnostics?(): string;
 }
 
 export interface LinkOptions {

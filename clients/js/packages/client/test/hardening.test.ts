@@ -236,6 +236,9 @@ describe("Nostr host bridge: new sessions are a token bucket (burst max(16, maxP
       return s;
     });
     await until(() => bridge.peerCount === NEW_SESSION_BURST, "a full burst");
+    // wait for the burst's sockets to see their answers (a condition, not a sleep: relay delivery lags under load) ...
+    await until(() => socks.filter((s) => s.readyState === 1).length === NEW_SESSION_BURST, "the burst's sockets open");
+    // ... then give the waiters several open repeats (every 100 ms) to prove they are still refused
     await new Promise((r) => setTimeout(r, 600));
     expect(bridge.peerCount).toBe(NEW_SESSION_BURST);
     expect(socks.filter((s) => s.readyState === 1)).toHaveLength(NEW_SESSION_BURST);

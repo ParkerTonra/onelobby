@@ -107,6 +107,7 @@ public sealed class DirectIpTests
     [Fact]
     public void HostAndTwoJoinersOverOneForwardablePort()
     {
+        NativeLib.Require();
         var logs = new ConcurrentQueue<string>();
         Action<string> sink = logs.Enqueue;
         DataChannelTransport.NativeLog += sink;
@@ -199,6 +200,7 @@ public sealed class DirectIpTests
 
     private void RunRejoin()
     {
+        NativeLib.Require();
         var port = FreePort();
         var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         var oldClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
@@ -272,6 +274,7 @@ public sealed class DirectIpTests
 
     private void RunStart(bool lateJoin)
     {
+        NativeLib.Require();
         var port = FreePort();
         var hostClient = new LobbyClient(Cfg with { DisplayName = "Host", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         var aClient = new LobbyClient(Cfg with { DisplayName = "Ann", DirectPort = port }, new DataChannelTransport { BindAddress = "127.0.0.1" });

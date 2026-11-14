@@ -141,13 +141,17 @@ export async function play(clock: ManualClock, players: Player[], ms: number, st
   for (const p of players) p.pump();
 }
 
+/** Why probes failed (error codes and counts), so "no free port" says what the OS answered. */
+const probeErrors = new Map<string, number>();
+const probeFailed = (e: NodeJS.ErrnoException) => probeErrors.set(e.code ?? String(e), (probeErrors.get(e.code ?? String(e)) ?? 0) + 1);
+
 const bindable = (port: number): Promise<boolean> =>
   new Promise((resolve) => {
     const tcp = createServer();
-    tcp.once("error", () => resolve(false));
+    tcp.once("error", (e) => (probeFailed(e), resolve(false)));
     tcp.listen(port, "127.0.0.1", () => {
       const udp = createSocket("udp4");
-      udp.once("error", () => tcp.close(() => resolve(false)));
+      udp.once("error", (e) => (probeFailed(e), tcp.close(() => resolve(false))));
       udp.bind(port, "127.0.0.1", () => udp.close(() => tcp.close(() => resolve(true))));
     });
   });
@@ -157,6 +161,17 @@ const bindable = (port: number): Promise<boolean> =>
  * ranges (Hyper-V, WSL) that a TCP-only probe misses, so an OS-picked TCP port alone is not enough.
  */
 export async function freePort(span = 4): Promise<number> {
+  // On Windows every probe can fail for a few tens of milliseconds at a time (another process binding or the OS
+  // reserving ranges), so a round of failures waits briefly instead of ending the run.
+  for (let round = 0; round < 5; round++) {
+    if (round > 0) await new Promise((r) => setTimeout(r, 200));
+    const p = await freePortRound(span);
+    if (p !== null) return p;
+  }
+  throw new Error(`no free TCP+UDP port run found (probe errors: ${[...probeErrors].map(([k, v]) => `${k} x${v}`).join(", ") || "none"})`);
+}
+
+async function freePortRound(span: number): Promise<number | null> {
   for (let tries = 0; tries < 50; tries++) {
     const p = await new Promise<number>((resolve) => {
       const s = createServer();
@@ -170,7 +185,7 @@ export async function freePort(span = 4): Promise<number> {
     for (let i = 0; i < span && ok; i++) ok = await bindable(p + i);
     if (ok) return p;
   }
-  throw new Error("no free TCP+UDP port run found");
+  return null;
 }
 
 /**
