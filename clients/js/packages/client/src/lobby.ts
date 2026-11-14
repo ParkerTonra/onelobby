@@ -543,10 +543,11 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private giveUpConnecting(): void {
-    // what the host link saw (states, signals, timings), so a CI log of a failed connect says where it stalled
+    // what the host link saw (states, signals, timings), so a test log of a failed connect says where it stalled
     const hostLink = this.links.get(this.hostPeerId);
     const diagnostics = hostLink ? hostLink.diagnostics?.() : (this.lastHostLinkEnd ?? "no offer from the host ever arrived");
-    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}${diagnostics ? " [" + diagnostics + "]" : ""}`, diagnostics ? { diagnostics } : undefined);
+    // the trace holds ICE candidates (local addresses): keep it in data, out of the message a game may show
+    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`, diagnostics ? { diagnostics } : undefined);
     this.failReady(err);
     this.reportError(err);
     if (this.ended) return;
