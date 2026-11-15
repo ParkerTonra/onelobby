@@ -1,0 +1,75 @@
+# Runs the GDScript client tests headless on Linux: spec vectors, unit tests, two-instance Direct test (real WebRTC on
+# loopback, local Nostr test relay), conformance adapter, GDScript<->JS interop, and the lobby-server e2e. All on
+# 127.0.0.1; no public relays or TURN (those stay opt-in, see clients/gdscript/ci-test.sh).
+name: GDScript tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gdscript-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2-stable
+  # SHA-512 of Godot_v4.7.2-stable_linux.x86_64.zip, from the release's SHA512-SUMS.txt
+  GODOT_SHA512: 9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
+  WEBRTC_NATIVE_VERSION: 1.2.2-stable
+
+jobs:
+  gdscript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-dl ~/godot
+          curl -fL --retry 3 -o ~/godot-dl/godot.zip "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          echo "${GODOT_SHA512}  $HOME/godot-dl/godot.zip" | sha512sum -c -
+          unzip -q ~/godot-dl/godot.zip -d ~/godot
+          chmod +x ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64
+      - name: Cache webrtc-native
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: clients/gdscript/addons/godot_webrtc
+          key: webrtc-native-${{ env.WEBRTC_NATIVE_VERSION }}
+      - name: Fetch webrtc-native
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: clients/gdscript/fetch-webrtc.sh
+      - name: Import project (registers the extension)
+        working-directory: clients/gdscript
+        run: |
+          # --import can crash on exit after a good import (harmless); a bad import shows as a missing class cache.
+          ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64 --headless --audio-driver Dummy --import --path . || echo "import exited $? (tolerated; checked below)"
+          test -s .godot/global_script_class_cache.cfg && grep -q OneLobbyClient .godot/global_script_class_cache.cfg
+          test -s .godot/extension_list.cfg
+          ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64 --version
+      - name: Install node deps and build the JS client
+        run: |
+          (cd conformance && npm install)
+          (cd clients/js && npm ci && npm run build)
+      - name: Build lobby server
+        run: dotnet build server/OneLobby.Server -c Release
+      - name: GDScript tests
+        run: GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" clients/gdscript/ci-test.sh
