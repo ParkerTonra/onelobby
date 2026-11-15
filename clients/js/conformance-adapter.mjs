@@ -68,6 +68,8 @@ export default function createAdapter() {
     lobby.chat.on("message", (m) => emit({ ev: "chat", peerId: m.peerId, id: m.id, ts: m.ts, text: m.text }));
     lobby.chat.on("history", (lines) => emit({ ev: "chat_history", lines: lines.map((l) => ({ peerId: l.peerId, id: l.id, ts: l.ts, text: l.text })) }));
     lobby.chat.on("rejected", (id, reason) => emit({ ev: "chat_rejected", id, reason: { rate: 1, length: 2, muted_by_host: 3 }[reason] ?? 0 }));
+    lobby.pause.on("changed", (st) => emit({ ev: "pause", paused: st.paused, byPeer: st.byPeer, pauserLeft: st.pauserLeft }));
+    lobby.pause.on("refused", (reason) => emit({ ev: "pause_refused", reason }));
     lobby.voice.on("packet", (peerId, seq, flags, frames) => emit({ ev: "voice", peerId, seq, flags, frames: frames.map(hex) }));
     void a;
   }
@@ -105,7 +107,7 @@ export default function createAdapter() {
     set onevent(h) { handler = h; },
     async call(op, a = {}) {
       switch (op) {
-        case "init": return { name: "onelobby (js)", capabilities: ["host", "joiner", "lockstep", "raw", "chat", "voice", "migration", "deflate"] };
+        case "init": return { name: "onelobby (js)", capabilities: ["host", "joiner", "lockstep", "raw", "chat", "voice", "pause", "migration", "deflate"] };
         case "start": await start(a); return {};
         case "begin": await lobby.start(); return {};
         case "link_open": {
@@ -127,6 +129,9 @@ export default function createAdapter() {
         }
         case "command": lobby.lockstep.submit(paintCmd(a.x, a.y)); return {};
         case "chat_send": lobby.chat.send(a.text); return {};
+        case "pause_request": lobby.pause.request(!!a.paused); return {};
+        case "pause_clear": lobby.pause.clear(); return {};
+        case "pause_policy": lobby.pause.policy = (peer) => !(a.denyPeers ?? []).includes(peer); return {};
         case "chat_host_mute": lobby.chat.hostMute(a.peerId, a.muted); return {};
         case "voice_send": lobby.voice.sendEncoded(a.frames.map(unhex), !!a.endOfBurst); return {};
         case "raw_send": if (a.to === 0) lobby.broadcast(unhex(a.hex), { channel: a.channel ?? "reliable" }); else lobby.send(a.to, unhex(a.hex), { channel: a.channel ?? "reliable" }); return {};

@@ -24,6 +24,7 @@ step() { # step <name> <cmd...>
 
 step vectors "${G[@]}" -s res://tests/vectors.gd
 step blueprint "${G[@]}" -s res://tests/blueprint.gd
+step sync "${G[@]}" -s res://tests/sync.gd
 step friendly "${G[@]}" -s res://tests/friendly.gd
 step nostr_unit "${G[@]}" -s res://tests/nostr_unit.gd
 step relay_retry "${G[@]}" -s res://tests/relay_retry.gd

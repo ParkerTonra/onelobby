@@ -1,7 +1,8 @@
 class_name OneLobbyLobby
 extends RefCounted
-## One lobby you host or joined (raw mode). Made by OneLobbyClient.host / join / rejoin; events arrive as signals from
-## inside the client's per-frame pump. Peers are Dictionaries {peer_id, name, ping_ms, relayed}.
+## One lobby you host or joined (raw or lockstep mode). Made by OneLobbyClient.host / join / rejoin; events arrive as signals
+## from inside the client's per-frame pump. Peers are Dictionaries {peer_id, name, ping_ms, relayed}. `chat`, `pause` and
+## (in a lockstep lobby) `lockstep` are the sync helpers on top of the same links.
 ##
 ## The host is a star hub: a joiner's send() goes to the host, which delivers it or forwards it with the sender's id.
 ## When the host goes away the lowest remaining peer id takes over (host migration) and host_changed fires.
@@ -56,13 +57,19 @@ var phase := "lobby"
 var meta := {}
 var name := ""
 var resume_token := ""
-## "raw" (this client) or "lockstep" (a lobby made by another client; its lockstep frames are ignored here).
+## "raw" or "lockstep" (the host's choice; lobby.lockstep runs only in a lockstep lobby).
 var mode := "raw"
 var tick_rate := 30
 var late_join := true
 ## Host: {messages, per_ms} caps raw frames per peer in a fixed window ({} = no cap).
 var rate_limit := {}
 var is_ready := false
+## Text chat (works in raw and lockstep lobbies).
+var chat: OneLobbyChat
+## The shared pause.
+var pause: OneLobbyPause
+## Host-ordered lockstep (frames, commands, hashes, snapshots); idle in a raw lobby.
+var lockstep: OneLobbyLockstep
 
 var _c: OneLobbyClient
 ## Direct mode: no server, so no host migration. The host leaving (or the joiner losing its signaling) ends the session.
@@ -129,6 +136,9 @@ func _init(client: OneLobbyClient, msg: Dictionary) -> void:
 	if client.peer_timeout_ms > 0:
 		_peer_timeout_ms = maxi(client.peer_timeout_ms, MIN_PEER_TIMEOUT_MS)
 		_host_timeout_ms = _peer_timeout_ms
+	chat = OneLobbyChat.new(self)
+	lockstep = OneLobbyLockstep.new(self, client.hash_every_ticks if client.hash_every_ticks > 0 else tick_rate)
+	pause = OneLobbyPause.new(self)
 
 
 static func _rec(id: int, peer_name: String) -> OLPeerRec:
@@ -191,6 +201,8 @@ func start() -> void:
 		return
 	_set_phase("in_game")
 	_c.send_signaling(OneLobbySignaling.phase(true))
+	if mode == "lockstep":
+		lockstep._host_start()
 
 
 ## Host: back to the lobby screen.
@@ -324,6 +336,11 @@ func _require_host(what: String) -> bool:
 func _start() -> void:
 	if is_host:
 		is_ready = true
+		if mode == "lockstep":
+			if phase == "in_game":
+				lockstep._host_start()
+			else:
+				lockstep._host_idle()
 		for r: OLPeerRec in _peers.values():
 			if r.id != local_peer_id:
 				_connect_peer(r, true)
@@ -446,6 +463,10 @@ func _set_phase(p: String) -> void:
 	if phase == p:
 		return
 	phase = p
+	if p == "lobby":
+		pause._on_lobby_phase()
+	elif not lockstep.is_started:
+		lockstep._mark_started()
 	phase_changed.emit(p)
 
 
@@ -502,6 +523,10 @@ func _pump() -> void:
 	_timeouts(now)
 	if _closed:
 		return
+	if mode == "lockstep":
+		lockstep._pump(now)
+		if _closed:
+			return
 	if now - _last_ping_ms >= PING_EVERY_MS:
 		_last_ping_ms = now
 		_ping_n += 1
@@ -560,6 +585,11 @@ func _timeouts(now: int) -> void:
 		_elect_host()
 		return
 	var h: OLPeerRec = _peers.get(_host_id)
+	if not _awaiting_claim and mode == "lockstep" and lockstep._host_silent():
+		lockstep._touch()
+		lockstep._poke_host() # a live-but-stalled host answers with a snapshot; a dead one is replaced below
+		_host_lost()
+		return
 	if not _awaiting_claim and h != null and h.open_handled and now - h.last_rx_ms > _host_timeout_ms:
 		_host_lost()
 
@@ -583,7 +613,7 @@ func _on_link_open(rec: OLPeerRec) -> void:
 	_c.send_signaling(OneLobbySignaling.path(rec.link.relayed))
 	if is_host:
 		if _epoch > 0:
-			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_host_claim(_epoch, local_peer_id, 0))
+			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_host_claim(_epoch, local_peer_id, lockstep.last_tick))
 	elif rec.id == _host_id:
 		_send_hi(rec)
 	var queued := rec.pending
@@ -594,7 +624,8 @@ func _on_link_open(rec: OLPeerRec) -> void:
 
 func _send_hi(rec: OLPeerRec) -> void:
 	rec.hi_sent = true
-	_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_hi(local_peer_id, -1))
+	lockstep._touch()
+	_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_hi(local_peer_id, lockstep.hi_tick()))
 
 
 func _raise_ready(rec: OLPeerRec) -> void:
@@ -622,8 +653,10 @@ func _handle_frame(rec: OLPeerRec, ch: int, data: PackedByteArray, reassembled: 
 			var res := rec.chunks.add(data.slice(OneLobbyWire.HEADER))
 			if res.get("done", false):
 				var all: PackedByteArray = res["bytes"]
-				# an oversized frame sent in chunks: the bytes are one complete inner frame
-				if all.size() > 0 and all[0] != OneLobbyWire.CHUNK:
+				if lockstep._snapshot_pending() and rec.id == _host_id:
+					lockstep._on_snapshot_payload(all) # the chunk set that follows a snapshot header
+				elif all.size() > 0 and all[0] != OneLobbyWire.CHUNK:
+					# an oversized frame sent in chunks: the bytes are one complete inner frame
 					_handle_frame(rec, ch, all, true)
 			return
 	if is_host:
@@ -633,15 +666,21 @@ func _handle_frame(rec: OLPeerRec, ch: int, data: PackedByteArray, reassembled: 
 
 
 func _handle_as_host(rec: OLPeerRec, ch: int, m: Dictionary, data: PackedByteArray) -> void:
+	if _handle_sync(rec, m):
+		return
 	match int(m["typeId"]):
 		OneLobbyWire.HI:
 			if int(m["proto"]) != OneLobbyWire.PROTO:
 				return
 			rec.hello = true
 			_raise_ready(rec)
-			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_welcome_dc(0, tick_rate,
+			# welcome_dc.tick is the tick the snapshot will carry (the game's applied tick): 0 before the game starts and in raw mode
+			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_welcome_dc(lockstep.current_tick if mode == "lockstep" else 0, tick_rate,
 				OneLobbyWire.MODE_RAW if mode == "raw" else OneLobbyWire.MODE_LOCKSTEP, local_peer_id))
-			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_chat_history_empty())
+			chat._send_history(rec.id)
+			pause._send_state(rec.id)
+			if mode == "lockstep":
+				lockstep._on_peer_hi(rec.id, int(m["lastTick"]))
 		OneLobbyWire.HOST_CLAIM:
 			var hid := int(m["hostId"])
 			var ep := int(m["epoch"])
@@ -674,12 +713,15 @@ func _handle_as_joiner(rec: OLPeerRec, ch: int, m: Dictionary) -> void:
 		return
 	if rec.id != _host_id:
 		return # joiners only listen to the host
+	if _handle_sync(rec, m):
+		return
 	match t:
 		OneLobbyWire.WELCOME_DC:
 			if int(m["hostId"]) != _host_id:
 				return
 			if int(m["tick"]) > 0:
 				_set_phase("in_game")
+			lockstep._touch()
 			if not is_ready:
 				is_ready = true
 				ready.emit()
@@ -852,6 +894,9 @@ func _drop_peer(rec: OLPeerRec, reason: String, linger: bool = false) -> void:
 	if not _peers.has(rec.id):
 		return
 	_peers.erase(rec.id)
+	lockstep._on_peer_left(rec.id)
+	chat._on_peer_left(rec.id)
+	pause._on_peer_left(rec.id)
 	if linger and rec.link != null:
 		_lingering.append([rec.link, now_ms() + KICK_LINGER_MS])
 	elif rec.link != null:
@@ -981,6 +1026,9 @@ func _become_host() -> void:
 	_host_id = local_peer_id
 	_awaiting_claim = false
 	is_ready = true
+	if mode == "lockstep":
+		lockstep._become_host()
+	pause._on_became_host()
 	for r: OLPeerRec in _peers.values():
 		if r.id != local_peer_id:
 			_connect_peer(r, true)
@@ -991,6 +1039,7 @@ func _become_host() -> void:
 func _demote(new_host: int, epoch: int) -> void:
 	_epoch = epoch
 	_host_id = new_host
+	lockstep._become_joiner()
 	for r: OLPeerRec in _peers.values():
 		if r.id != new_host and r.link != null:
 			r.link.close()
@@ -1004,6 +1053,67 @@ func _demote(new_host: int, epoch: int) -> void:
 	host_changed.emit(new_host)
 
 
+# ---- sync helpers (chat, pause and lockstep use these) -------------------------------------------------------------
+
+## Chat, pause and lockstep traffic from `rec` (already known to be the host, or us hosting). True when `m` was one of them.
+func _handle_sync(rec: OLPeerRec, m: Dictionary) -> bool:
+	match str(m["type"]):
+		"cmd", "hash", "snapshot_req", "frame", "desync", "snapshot":
+			if mode == "lockstep":
+				lockstep._handle(rec.id, m)
+		"chat", "chat_history", "chat_reject":
+			chat._handle(rec.id, int(m["route"]), m)
+		"pause_request", "pause_state", "pause_refuse":
+			pause._handle(rec.id, m)
+		_:
+			return false
+	return true
+
+
+## Encodes `msg` (route stamps the frame's route field) and sends it to one peer on the reliable channel.
+func _send_msg(peer_id: int, msg: Dictionary, route: int = 0) -> void:
+	msg["route"] = route
+	var bytes := OneLobbyWire.encode(msg, OneLobbyWire.MAX_REASSEMBLED)
+	if not bytes.is_empty():
+		_send_to_peer(peer_id, OneLobbyWire.RELIABLE, bytes)
+
+
+## A joiner's message to the host (does nothing on the host itself).
+func _send_msg_to_host(msg: Dictionary) -> void:
+	if is_host:
+		return
+	msg["route"] = 0
+	var bytes := OneLobbyWire.encode(msg, OneLobbyWire.MAX_REASSEMBLED)
+	if not bytes.is_empty():
+		_send_to_host(OneLobbyWire.RELIABLE, bytes)
+
+
+## An already encoded frame to one peer on the reliable channel (a frame over 16384 bytes goes out as chunks).
+func _send_bytes(peer_id: int, bytes: PackedByteArray) -> void:
+	if not bytes.is_empty():
+		_send_to_peer(peer_id, OneLobbyWire.RELIABLE, bytes)
+
+
+## Peers whose link is open and that said hi: who the host sends game data to.
+func _hello_ids() -> Array[int]:
+	var out: Array[int] = []
+	for r in _hello_peers():
+		out.append(r.id)
+	return out
+
+
+func _next_chunk_id() -> int:
+	_big_id = (_big_id + 1) & 0xFFFFFFFF
+	return _big_id
+
+
+## Lockstep drops a stalled or desynced peer: removed without a ban, so it can come back (a rejoin resyncs).
+func _drop_for_lockstep(peer_id: int, reason: String) -> void:
+	_c.send_signaling(OneLobbySignaling.kick(peer_id, false, 0, reason))
+	if _peers.has(peer_id):
+		_drop_peer(_peers[peer_id], reason) # the host closes that connection at once
+
+
 # ---- teardown ------------------------------------------------------------------------------------------------------
 
 func _end(reason: String) -> void:
@@ -1015,6 +1125,9 @@ func _end(reason: String) -> void:
 
 func _close() -> void:
 	_closed = true
+	lockstep._stop()
+	chat._detach()
+	pause._detach()
 	for r: OLPeerRec in _peers.values():
 		if r.link != null:
 			r.link.close()

@@ -1,6 +1,6 @@
 class_name OneLobbyClient
 extends Node
-## Entry point: talks to onelobby-server and hands out OneLobbyLobby objects (raw mode). Add it to the scene tree; it
+## Entry point: talks to onelobby-server and hands out OneLobbyLobby objects (raw or lockstep mode). Add it to the scene tree; it
 ## pumps signaling and peer links every frame in _process, so signals fire on the main thread.
 ##
 ##     var lobby := await client.host({"name": "My game"})
@@ -28,6 +28,11 @@ const RETIRE_MS := 1500
 @export var lobby_server := "ws://localhost:8080"
 @export var display_name := "Player"
 @export var tick_rate := 30
+## "raw" (you send bytes) or "lockstep" (the host orders commands per tick: `lobby.lockstep`). Used when you host; a joiner
+## takes the host's mode. Chat and pause work in both.
+@export_enum("raw", "lockstep") var sync_mode := "raw"
+## Lockstep: send a state hash every this many ticks (0 = tick_rate, once a second).
+@export var hash_every_ticks := 0
 ## Force TURN relay (hides player IPs from each other; needs a TURN server).
 @export var relay_only := false
 ## A joiner whose link to the host is not open after this long gives up with ice_failed (0 = never).
@@ -99,9 +104,11 @@ func _exit_tree() -> void:
 ## A client that runs from onelobby.json (docs/design/blueprint.md; the GDScript twin of JS `OneLobby.fromConfig` and C#
 ## `LobbyClient.FromBlueprint`). `source` is an OneLobbyConfig, a path to the file (default res://onelobby.json) or a
 ## parsed Dictionary. `overrides`: `display_name` (checked against `players.*`), `lobby_server` (wins over
-## `hosting.lobbyServer`; the file is the bottom layer, so a settings screen or an environment variable goes here),
-## Always returns a client: when the file is invalid
-## (or asks for a sync mode other than "raw"), `config_error` is set and its first host / join / list fails with it.
+## `hosting.lobbyServer`; the file is the bottom layer, so a settings screen or an environment variable goes here).
+## Always returns a client: when the file is invalid (or asks for a sync mode GDScript lacks: "replication"),
+## `config_error` is set and its first host / join / list fails with it. `sync.mode`, `sync.tickRate` and
+## `sync.hashEveryTicks` set `sync_mode`, `tick_rate` and `hash_every_ticks`; `chat.text` and `session.pause` switch the
+## lobby's chat and pause helpers (`lobby.chat.send` raises "chat_disabled", `lobby.pause.request` "pause_disabled").
 ##
 ##     var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Sam"})
 ##     add_child(client)
@@ -129,6 +136,8 @@ static func from_config(source: Variant = OneLobbyConfig.DEFAULT_PATH, overrides
 	c.lobby_server = str(overrides.get("lobby_server", cfg.hosting["lobby_server"]))
 	c.display_name = who
 	c.tick_rate = cfg.sync["tick_rate"]
+	c.sync_mode = cfg.sync["mode"]
+	c.hash_every_ticks = cfg.sync["hash_every_ticks"]
 	c.relay_only = cfg.hosting["relay_only"]
 	c.ready_timeout_ms = cfg.session["ready_timeout_ms"]
 	c.peer_timeout_ms = cfg.session["peer_timeout_ms"]
@@ -151,7 +160,7 @@ func host(options: Dictionary = {}) -> OneLobbyLobby:
 	var rl: Dictionary = options.get("rate_limit", {})
 	var o := options.duplicate()
 	o["relay_only"] = relay_only
-	return await _run("", OneLobbySignaling.create(o, "raw", tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
+	return await _run("", OneLobbySignaling.create(o, sync_mode, tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
 		var l := _enter_lobby(e)
 		l.rate_limit = rl
 		return l)
@@ -238,7 +247,7 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	var o := options.duplicate()
 	o["relay_only"] = relay_only
 	o["visibility"] = "unlisted"
-	var result: Variant = await _run("", OneLobbySignaling.create(o, "raw", tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
+	var result: Variant = await _run("", OneLobbySignaling.create(o, sync_mode, tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
 		var l := _enter_lobby(e)
 		l.rate_limit = rl
 		return l)
@@ -419,6 +428,9 @@ func _enter_lobby(e: Dictionary) -> OneLobbyLobby:
 		l.code = _direct_code
 		if _direct_host != null:
 			l.ip_code = _direct_host.ip_code
+	if config != null:
+		l.pause.mode = str(config.session["pause"])
+		l.chat.enabled = bool(config.chat["text"])
 	lobby = l
 	l._start()
 	return l

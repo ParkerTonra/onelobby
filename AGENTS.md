@@ -79,6 +79,24 @@ lobby.lockstep.submit(cmd); for (let f; (f = lobby.lockstep.nextFrame()); ) { /*
 lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lobby.lockstep.restore = (tick, b) => {};
 ```
 
+```gdscript
+# GDScript (Godot 4, no .NET): clients/gdscript/addons/onelobby; signals instead of events, Dictionaries {peer_id, name, ping_ms, relayed}
+var client := OneLobbyClient.new()                         # a Node: add_child it, it pumps every frame; set client.sync_mode = "lockstep" before host()
+client.game_id = "com.you.game"; client.lobby_server = "ws://127.0.0.1:8080/ws"; client.display_name = "Ann"; add_child(client)
+var lobby := await client.host({"name": "Ann's game", "max_players": 4, "visibility": "public"})   # null on failure: client.last_error
+var lobby := await client.join("7HQ 4K2")                  # also client.rejoin(token), client.host_direct(...) / join_direct(code), client.list()
+lobby.send(peer_id, bytes); lobby.broadcast(bytes)         # OneLobbyWire.RELIABLE (default) or OneLobbyWire.FAST
+lobby.message_received.connect(func(from: int, bytes: PackedByteArray, channel: int) -> void: pass)
+lobby.peer_joined / peer_ready / peer_failed / peer_left / host_changed / phase_changed / session_ended   # signals
+lobby.start(); lobby.kick(id); lobby.leave(); await lobby.leave_and_flush()    # kick bans; disconnect_peer(id, code, reason) does not
+lobby.chat.send("gg"); lobby.chat.message.connect(func(line: Dictionary) -> void: pass)    # {peer_id, id, ts, text}; rejected(id, reason)
+lobby.pause.request(true); lobby.pause.state                # {paused, by_peer, pauser_left}; changed(state) / refused(code) signals
+lobby.pause.can_resume; lobby.pause.policy = func(peer: int, want: bool) -> bool: return true; lobby.pause.clear()   # policy and clear: host only
+lobby.lockstep.submit(cmd); var f := lobby.lockstep.next_frame()   # f = {tick, commands: [{peer_id, bytes}]}, {} when none
+lobby.lockstep.report_hash(f["tick"], hash)                 # a u64 in an int
+lobby.lockstep.snapshot = func() -> PackedByteArray: return bytes; lobby.lockstep.restore = func(tick: int, bytes: PackedByteArray) -> void: pass
+```
+
 ## Install
 
 ```
@@ -230,13 +248,13 @@ Lobby lobby = await client.HostAsync();                    // or HostDirectAsync
 ```
 
 ```gdscript
-var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Ann"})   # engine "godot-gdscript"; raw mode only
-add_child(client)                                          # client.config_error is {} unless the file is bad (or asks for lockstep)
+var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Ann"})   # engine "godot-gdscript"; raw or lockstep
+add_child(client)                                          # client.config_error is {} unless the file is bad (or asks for replication)
 var lobby := await client.host()                           # from the file; a direct lobby when hosting.server is false
 var lobby := await client.join(code)                       # a lobby code to the server, a direct code or "ip:port" to join_direct
 ```
 
-A bad file throws `bad_config` with the key's path (GDScript never throws: `cfg.error` / `client.config_error` hold `{code, path, rule, message}`; a file that asks GDScript for `lockstep` or `replication` fails with rule `gdscript_raw_only`). Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
+A bad file throws `bad_config` with the key's path (GDScript never throws: `cfg.error` / `client.config_error` hold `{code, path, rule, message}`; a file that asks GDScript for `replication` fails with rule `gdscript_raw_only`; `chat.text` false and `session.pause` "off" make `lobby.chat.send` / `lobby.pause.request` raise the client error `chat_disabled` / `pause_disabled` instead of throwing). Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
 with `chat.voice` false), `chat_disabled` (`lobby.chat.send` with `chat.text` false), `listing_disabled` (`list()` with
 `hosting.server` false) and `identity_anonymous`. No lobby server address at all (empty `hosting.lobbyServer`, no
 `lobbyServer` override) makes `host()` / `join()` fail with `no_server`. Browser wiring with the player's server
@@ -267,7 +285,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
 
 - Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
-- Godot 4 GDScript, no .NET (desktop, raw mode): `docs/recipes/godot-gdscript.md`
+- Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause): `docs/recipes/godot-gdscript.md`
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`

@@ -1,8 +1,8 @@
 # onelobby (Godot 4, GDScript)
 
-A pure GDScript client for Godot 4.4+, no .NET. Raw mode (through a lobby server) and Direct mode (no server, Nostr join codes): your own messages over the host's star (a joiner's
+A pure GDScript client for Godot 4.4+, no .NET. Raw and lockstep modes, through a lobby server or Direct (no server, Nostr join codes): your own messages over the host's star (a joiner's
 send goes through the host, `from` is always the real sender), host migration, chunking of big payloads, join codes,
-lobby browse, kick/approve, rejoin, and `onelobby.json` (`OneLobbyConfig`, below). Lockstep, voice and replication are in the C# and JS clients. Written from `spec/`;
+lobby browse, kick/approve, rejoin, text chat, the shared pause, lockstep (below) and `onelobby.json` (`OneLobbyConfig`, below). Voice and replication are in the C# and JS clients. Written from `spec/`;
 the API mirrors `OneLobby.Core`'s, with signals for events. Recipe: [docs/recipes/godot-gdscript.md](../../docs/recipes/godot-gdscript.md).
 
 ```gdscript
@@ -35,9 +35,11 @@ filled in and never throw: check `cfg.ok` and read `cfg.error`. Fields: `game_id
 failures are the shared ones (`spec/vectors/blueprint.json`), with these GDScript specifics:
 
 - `from_config` overrides: `display_name` (checked against `players.identity` / `players.maxNameLength`), `lobby_server` (wins over the file).
-- Raw mode only. `sync.mode` `lockstep` or `replication` parses, but `from_config` records `config_error` with `bad_config`, rule
-  `gdscript_raw_only`, and the first `host()` / `join()` / `list()` fails with it. `chat`, `session.pause`, `chat.voice` and
-  `session.hostLeaves` are read but not enforced: GDScript has no chat, pause, voice or lockstep yet (a later release).
+- `sync.mode` `raw` and `lockstep` run (`sync.tickRate` and `sync.hashEveryTicks` set `client.tick_rate` and `hash_every_ticks`). `replication`
+  parses, but `from_config` records `config_error` with `bad_config`, rule `gdscript_raw_only` (the name is kept from when lockstep
+  was missing too), and the first `host()` / `join()` / `list()` fails with it. `chat.text` false makes `lobby.chat.send()` raise the
+  client error `chat_disabled`; `session.pause` is `"off"` (the default: `lobby.pause.request()` raises `pause_disabled`), `"host"` or
+  `"anyone"`. `chat.voice` and `session.hostLeaves` are read but not enforced (no voice in GDScript).
 - `list()` with `hosting.server` false fails `listing_disabled`; a lobby code with no server fails `no_server`; a name for an
   anonymous game fails `identity_anonymous`. All arrive as `client.last_error` and the `error` signal like any other failure.
 - The file must be in the export (export preset, "Filters to export non-resource files": `*.json`). JSON comments are not allowed (GDScript's parser has none).
@@ -56,6 +58,38 @@ var code := OneLobbyInvite.parse(pasted)    # "7HQ4K2" from a pasted link (query
 lobby codes of a server lobby only and are not registered with the OS (a deep link is the game's job). Both match JS (`describeError`,
 `shareUrl`, `codeFromUrl`) and C# (`Friendly.DescribeError`, `InviteLink.Make` / `Parse`) through `spec/vectors/describe-error.json` and
 `invite-link.json`.
+
+## Text chat, shared pause and lockstep
+
+All three are on the same wire as the JS and C# ones, so GDScript, JS and C# players mix in one lobby (server and Direct,
+host or joiner). Details and the rules: `spec/binary.md` (Chat, Pause, Lockstep), `docs/recipes/godot-gdscript.md`.
+
+```gdscript
+lobby.chat.message.connect(func(line: Dictionary) -> void: print(line["peer_id"], ": ", line["text"]))   # {peer_id, id, ts, text}
+lobby.chat.send("gg")             # 256 bytes, burst of 3 then 5 per 5 s; lobby.chat.rejected(id, "rate" | "length" | "muted_by_host")
+lobby.chat.host_mute(peer_id, true)   # host only; lobby.chat.history() has the last 100 lines
+
+lobby.pause.changed.connect(func(s: Dictionary) -> void: get_tree().paused = s["paused"])   # {paused, by_peer, pauser_left}
+lobby.pause.request(true)         # after start(); lobby.pause.refused("not_in_game" | "rate_limited" | "not_allowed")
+lobby.pause.can_resume; lobby.pause.policy = func(peer: int, want_paused: bool) -> bool: return true   # policy and clear(): host only
+lobby.pause.clear()
+
+client.sync_mode = "lockstep"     # before host(); a joiner takes the host's mode (or sync.mode in onelobby.json)
+lobby.lockstep.snapshot = func() -> PackedByteArray: return game.save()                 # state after the last frame you took
+lobby.lockstep.restore = func(tick: int, bytes: PackedByteArray) -> void: game.load(tick, bytes)
+lobby.lockstep.submit(command_bytes)
+func _process(_dt: float) -> void:
+    var f := lobby.lockstep.next_frame()                    # {tick, commands: [{peer_id, bytes}]}, {} when none
+    while not f.is_empty():
+        var h := game.step(f["tick"], f["commands"])        # deterministic; h is a u64 in an int
+        lobby.lockstep.report_hash(f["tick"], h)            # sent every hash_every_ticks (default: once a second)
+        f = lobby.lockstep.next_frame()
+```
+
+The host emits one frame per tick and never waits (`lobby.start()` begins it; a shared pause stops it). A hash mismatch makes the
+host send a snapshot (your `restore` runs; signals `lobby.lockstep.desync` and `restored`); a third mismatch drops that peer.
+A late joiner is served from `snapshot` (deflated above 1 KiB, as in JS and C#). `lobby.lockstep.catching_up` is true when more
+than 2 frames are waiting. Tests: `tests/sync.gd` (real peers on loopback) and, against JS and C# peers, `tools/engine-smoke`.
 
 ## Direct mode (no lobby server)
 

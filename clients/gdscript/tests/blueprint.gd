@@ -118,13 +118,14 @@ func _extras() -> void:
 	_check(e.get("code") == "bad_config" and e.get("path") == "displayName" and e.get("rule") == "length", "name too long: bad_config displayName length")
 	var anon := OneLobbyConfig.parse({"game": {"id": "a"}, "players": {"identity": "anonymous"}})
 	_check(anon.check_display_name("Sam").get("code") == "identity_anonymous" and anon.check_display_name("").is_empty(), "anonymous game takes no name")
-	# the modes GDScript lacks
+	# raw and lockstep run; replication is the mode GDScript lacks
 	_check(cfg.check_gdscript().is_empty(), "raw is supported")
-	for mode: String in ["lockstep", "replication"]:
-		var m := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "dotnet" if mode == "replication" else "godot-gdscript", "sync": {"mode": mode}})
-		_check(m.ok, "%s parses (other engines read the same file)" % mode)
-		var ge := m.check_gdscript()
-		_check(ge.get("code") == "bad_config" and ge.get("rule") == "gdscript_raw_only" and ge.get("path") == "sync.mode" and str(ge.get("message")).contains(mode), "%s: stable gdscript_raw_only failure" % mode)
+	var ls := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "godot-gdscript", "sync": {"mode": "lockstep", "tickRate": 25}})
+	_check(ls.ok and ls.check_gdscript().is_empty() and ls.sync["mode"] == "lockstep" and ls.sync["tick_rate"] == 25 and ls.sync["hash_every_ticks"] == 25, "lockstep is supported (hashEveryTicks defaults to the tick rate)")
+	var m := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "dotnet", "sync": {"mode": "replication"}})
+	_check(m.ok, "replication parses (other engines read the same file)")
+	var ge := m.check_gdscript()
+	_check(ge.get("code") == "bad_config" and ge.get("rule") == "gdscript_raw_only" and ge.get("path") == "sync.mode" and str(ge.get("message")).contains("replication"), "replication: stable gdscript_raw_only failure")
 	# every engine value of the schema loads
 	for eng: String in ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]:
 		var ok_cfg := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": eng, "hosting": {"direct": eng != "web", "server": true}})
@@ -141,17 +142,25 @@ func _wiring() -> void:
 	_check(c.lobby_server == "ws://b/ws", "lobby_server override wins over the file")
 	c.free()
 
-	# failures are stable and come out of the usual last_error
-	c = OneLobbyClient.from_config({"game": {"id": "a"}, "sync": {"mode": "lockstep"}})
+	# a lockstep file configures the client: mode, tick rate, hash interval
+	c = OneLobbyClient.from_config({"game": {"id": "a"}, "sync": {"mode": "lockstep", "tickRate": 25, "hashEveryTicks": 50}})
+	_check(c.config_error.is_empty() and c.sync_mode == "lockstep" and c.tick_rate == 25 and c.hash_every_ticks == 50, "lockstep file: sync_mode, tick_rate and hash_every_ticks from the file")
+	c.free()
+	c = OneLobbyClient.from_config({"game": {"id": "a"}})
+	_check(c.sync_mode == "raw" and c.hash_every_ticks == 20, "raw file: sync_mode raw, hash interval defaults to the tick rate")
+	c.free()
+
+	# failures are stable and come out of the usual last_error (replication is the one mode GDScript lacks)
+	c = OneLobbyClient.from_config({"game": {"id": "a"}, "engine": "dotnet", "sync": {"mode": "replication"}})
 	root.add_child(c)
 	var errs: Array = []
 	c.error.connect(func(code: String, _msg: String) -> void: errs.append(code))
-	_check(c.config_error.get("rule") == "gdscript_raw_only", "lockstep file: config_error")
+	_check(c.config_error.get("rule") == "gdscript_raw_only", "replication file: config_error")
 	var l: OneLobbyLobby = await c.host()
-	_check(l == null and c.last_error.get("code") == "bad_config" and str(c.last_error.get("message")).contains("raw"), "lockstep file: host() fails with bad_config")
+	_check(l == null and c.last_error.get("code") == "bad_config" and str(c.last_error.get("message")).contains("replication"), "replication file: host() fails with bad_config")
 	l = await c.join("7HQ 4K2")
-	_check(l == null and c.last_error.get("code") == "bad_config" and errs == ["bad_config", "bad_config"], "lockstep file: join() fails too and the error signal fires")
-	_check((await c.list()).is_empty() and c.last_error.get("code") == "bad_config", "lockstep file: list() fails")
+	_check(l == null and c.last_error.get("code") == "bad_config" and errs == ["bad_config", "bad_config"], "replication file: join() fails too and the error signal fires")
+	_check((await c.list()).is_empty() and c.last_error.get("code") == "bad_config", "replication file: list() fails")
 	c.queue_free()
 	c = OneLobbyClient.from_config({"game": {"id": "a", "extra": 1}})
 	root.add_child(c)

@@ -1,7 +1,7 @@
 # Recipe: Godot 4 GDScript (desktop)
 
-A GDScript-only addon, no .NET: `clients/gdscript/addons/onelobby/`. It is raw mode (your own messages over the host's
-star, host migration included); lockstep, voice and replication are C# / JS only for now. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
+A GDScript-only addon, no .NET: `clients/gdscript/addons/onelobby/`. It does raw mode (your own messages over the host's
+star, host migration included), lockstep, text chat and the shared pause (section 4b); voice and replication are C# / JS only. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
 `gdscript compile` snippets below are parse-checked by `check-snippets.mjs` when `GODOT` points at a Godot executable.
 
 ## 1. Add the addon
@@ -130,6 +130,54 @@ No lobby server? Direct mode: `await client.host_direct({"name": "My game", "max
 
 To pump from `_physics_process` instead, set `client.auto_pump = false` and call `client.pump()` yourself.
 
+## 4b. Chat, pause and lockstep
+
+Same wire as the JS and C# ones, so players on any client share a lobby. Chat and the shared pause work in raw and lockstep lobbies;
+`lobby.lockstep` runs in a lobby the host made with `client.sync_mode = "lockstep"` (set it before `host()`; joiners take the host's
+mode; or `sync.mode` in `onelobby.json`). Your game keeps a deterministic sim; OneLobby orders the commands and gives you the frames:
+
+```gdscript compile file=lockstep_game.gd
+extends Node
+
+var lobby: OneLobbyLobby
+var sim_state := PackedByteArray()
+var tick := 0
+
+
+func attach(l: OneLobbyLobby) -> void: # the lobby comes from net.gd (section 2) with client.sync_mode = "lockstep"
+	lobby = l
+	lobby.lockstep.snapshot = func() -> PackedByteArray: return sim_state # the state after the last frame you took
+	lobby.lockstep.restore = func(t: int, bytes: PackedByteArray) -> void: # a late join or a resync
+		sim_state = bytes
+		tick = t
+	lobby.chat.message.connect(func(line: Dictionary) -> void: print("%d: %s" % [line["peer_id"], line["text"]]))
+	lobby.pause.changed.connect(func(s: Dictionary) -> void: get_tree().paused = s["paused"])
+
+
+func command(bytes: PackedByteArray) -> void:
+	lobby.lockstep.submit(bytes) # any peer, any time; it comes back in a frame
+
+
+func _process(_delta: float) -> void:
+	if lobby == null:
+		return
+	var f := lobby.lockstep.next_frame() # {tick, commands: [{peer_id, bytes}]}, {} when none
+	while not f.is_empty():
+		tick = f["tick"]
+		for c: Dictionary in f["commands"]:
+			sim_state = c["bytes"] # a real game applies the command to its state here
+		lobby.lockstep.report_hash(tick, hash(sim_state)) # a u64 in an int; sent every hash_every_ticks
+		f = lobby.lockstep.next_frame()
+```
+
+- The host emits one frame per `tick_rate` and never waits (`lobby.start()` begins it). Ticks count from 1; tick T is the state after
+  frame T. Your step must be a pure function of (state, frame): no `randf()`, no frame delta, no physics, same order everywhere.
+- `report_hash` is how a drift is found: the host compares hashes, sends a snapshot (your `restore` runs, `lobby.lockstep.desync`
+  and `restored` fire) and drops a peer on its third mismatch. A late joiner is served from `snapshot`.
+- `lobby.pause.request(true)` (after `start()`) pauses everyone: the host stops its frames. `pause.policy` and `pause.clear()` are host only.
+- `lobby.chat.send(text)`: 256 bytes, a burst of 3 then 5 per 5 s per player, control characters stripped.
+- Input redundancy (sending the last few ticks of input on the fast channel) is not in the wire yet: commands travel on the reliable channel.
+
 ## 5. From onelobby.json (optional)
 
 Every multiplayer choice can live in one file, `onelobby.json` (schema `spec/blueprint.schema.json`; smallest file
@@ -163,8 +211,9 @@ func join(code: String) -> bool:
 ```
 
 - Add `*.json` (or `onelobby.json`) to the export preset's "Filters to export non-resource files", or the exported game has no file.
-- GDScript speaks `sync.mode` `"raw"` only: `lockstep` and `replication` fail `from_config` with `bad_config`, rule
-  `gdscript_raw_only` (C# and JS read the same file fully).
+- GDScript speaks `sync.mode` `"raw"` and `"lockstep"` (`sync.tickRate`, `sync.hashEveryTicks`); `replication` fails `from_config`
+  with `bad_config`, rule `gdscript_raw_only` (C# reads the same file fully). `chat.text` false and `session.pause` `"off"` (the
+  default) make `lobby.chat.send()` / `lobby.pause.request()` raise the client error `chat_disabled` / `pause_disabled`.
 - `OneLobbyConfig.load_file()` gives the validated fields (`cfg.lobby["max_players"]`, `cfg.hosting["lobby_server"]`, ...) and
   `ok` / `error` without making a client; `OneLobbyFriendly.describe_error(...)` and `OneLobbyInvite.make(code, base_url)` /
   `OneLobbyInvite.parse(text)` are the player-facing helpers (same text and link format as JS and C#).

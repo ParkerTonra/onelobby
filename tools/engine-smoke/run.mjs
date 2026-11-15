@@ -1,6 +1,6 @@
 // engine-smoke: a simulated game per engine client (JS, GDScript, C#) over every route that client supports.
 //   node tools/engine-smoke/run.mjs [--engines=js,gd,cs] [--routes=server,nostr,typed,ipcode,turn] [--cases=js,js+gd] [--verbose]
-//        [--godot=<path to godot>] [--no-build] [--rounds=3] [--timeout=60]
+//        [--godot=<path to godot>] [--no-build] [--rounds=3] [--timeout=60] [--sync=raw|lockstep|both] [--lsroutes=server,typed]
 // One host + two joiners per case exchange a few rounds of game messages (reliable and fast) on one route. Prints one
 // line per case and finally ENGINE_SMOKE_OK or ENGINE_SMOKE_FAIL <list>. Everything binds 127.0.0.1; see README.md.
 import { spawn, execFileSync } from "node:child_process";
@@ -24,6 +24,10 @@ const ROUTES = (flags.routes ?? "server,nostr,typed,ipcode,turn").split(",");
 const ROUNDS = Number(flags.rounds ?? 3);
 const CASE_TIMEOUT = Number(flags.timeout ?? 60);
 const REPEAT = Number(flags.repeat ?? 1); // run every case this many times (flake hunting)
+// raw: ping/pong rounds on every route. lockstep: chat, a shared pause and 60 lockstep ticks (the same hash and the same
+// commands on every peer) on LS_ROUTES. both (default): the raw cases, then the lockstep ones.
+const SYNCS = flags.sync === "raw" ? ["raw"] : flags.sync === "lockstep" ? ["lockstep"] : ["raw", "lockstep"];
+const LS_ROUTES = (flags.lsroutes ?? "server,typed").split(",");
 const verbose = !!flags.verbose;
 const ENGINE_NAME = { js: "JS", gd: "GDScript", cs: "C#" };
 // Routes each engine supports as host and as joiner. (Unity is represented by the C# client over its DataChannel transport.)
@@ -122,11 +126,12 @@ function peer(engine, args, tag) {
   return p;
 }
 
-async function runCase(c, route, idx) {
-  const label = `${ENGINE_NAME[c.host]} host + ${c.joiners.map((j) => ENGINE_NAME[j]).join(" + ")} joiners`;
+async function runCase(c, route, idx, sync = "raw") {
+  const label = `${ENGINE_NAME[c.host]} host + ${c.joiners.map((j) => ENGINE_NAME[j]).join(" + ")} joiners${sync === "lockstep" ? " (lockstep)" : ""}`;
   const t0 = Date.now();
   const port = 47900 + (idx % 40) * 8;
-  const common = [`--route=${route}`, `--rounds=${ROUNDS}`, `--timeout=${CASE_TIMEOUT}`, ...(flags.loopback ? ["--loopback"] : [])];
+  const common = [`--route=${route}`, `--rounds=${ROUNDS}`, `--timeout=${CASE_TIMEOUT}`, ...(flags.loopback ? ["--loopback"] : []),
+    ...(sync === "lockstep" ? ["--sync=lockstep", `--peers=${c.joiners.length + 1}`] : [])];
   if (route === "server") common.push(`--server=${serverUrl}`);
   else common.push(`--relay=${relay.url}`);
   if (route === "turn") common.push(`--turn=${turn.line}`);
@@ -149,6 +154,12 @@ async function runCase(c, route, idx) {
     const crashed = ps.filter((p) => p.code !== 0 && /RESULT PASS/.test(p.getOut()));
     if (crashed.length) warn = `exit code ${[...new Set(crashed.map((p) => p.code))].join("/")} after RESULT PASS in ${crashed.length} peer(s)`;
     detail = ps.map((p) => (/RESULT (PASS|FAIL)[^\r\n]*/.exec(p.getOut())?.[0] ?? `no RESULT (exit ${p.code})`)).join(" | ");
+    if (ok && sync === "lockstep") {
+      // every peer must have applied the same 60 frames: one hash, one command count (each peer submits 5)
+      const lines = ps.map((p) => /LOCKSTEP tick=(\d+) hash=(\d+) cmds=(\d+)/.exec(p.getOut())?.slice(1).join(" "));
+      const want = `60 ${lines[0]?.split(" ")[1]} ${(c.joiners.length + 1) * 5}`;
+      if (lines.some((l) => l !== want)) { ok = false; detail += ` | lockstep results differ: ${lines.join(" ; ")} (want ${want})`; } else note = `lockstep: 60 ticks, hash ${lines[0].split(" ")[1]}, ${c.joiners.length + 1} peers`;
+    }
     if (ok && route === "turn") {
       const n = turn.stats.allocations - allocBefore, k = turn.stats.relayed - relayedBefore;
       if (n < 1 || k < 1) { ok = false; detail += ` | TURN server saw ${n} allocations and ${k} relayed packets: relay not used`; } else note = `TURN: ${n} relay allocations, ${k} relayed packets`;
@@ -161,18 +172,18 @@ async function runCase(c, route, idx) {
   }
   for (const p of ps) kill(p);
   await sleep(300); // let the OS release the case's ports
-  return { name: `${c.host}${c.joiners.every((j) => j === c.host) ? "" : `->${c.joiners.join("+")}`} ${route}`, label, route, ok, warn, note, secs: (Date.now() - t0) / 1000, detail };
+  return { name: `${c.host}${c.joiners.every((j) => j === c.host) ? "" : `->${c.joiners.join("+")}`} ${route}${sync === "lockstep" ? " lockstep" : ""}`, label, route, ok, warn, note, secs: (Date.now() - t0) / 1000, detail };
 }
 
 const results = [];
 let idx = 0;
 try {
-  for (const c of cases()) {
-    for (const route of ROUTES) for (let rep = 0; rep < REPEAT; rep++) {
+  for (const sync of SYNCS) for (const c of cases()) {
+    for (const route of sync === "lockstep" ? ROUTES.filter((x) => LS_ROUTES.includes(x)) : ROUTES) for (let rep = 0; rep < REPEAT; rep++) {
       if (![c.host, ...c.joiners].every((e) => SUPPORTS[e]?.includes(route))) continue;
-      const r = await runCase(c, route, idx++);
+      const r = await runCase(c, route, idx++, sync);
       results.push(r);
-      console.log(`${r.ok ? "PASS" : "FAIL"} ${r.route.padEnd(6)} ${r.label.padEnd(34)} ${r.secs.toFixed(1)}s  ${r.ok ? [r.note, r.warn ? "WARN " + r.warn : ""].filter(Boolean).join("  ") : r.detail}`);
+      console.log(`${r.ok ? "PASS" : "FAIL"} ${r.route.padEnd(6)} ${r.label.padEnd(44)} ${r.secs.toFixed(1)}s  ${r.ok ? [r.note, r.warn ? "WARN " + r.warn : ""].filter(Boolean).join("  ") : r.detail}`);
     }
   }
 } finally {

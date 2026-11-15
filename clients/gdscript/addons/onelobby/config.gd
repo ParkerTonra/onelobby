@@ -18,14 +18,14 @@ extends RefCounted
 ## the same tree with the file's own camelCase keys. Optional keys that are absent in the file are absent (`title`,
 ## `engine`, `session["rate_limit"]`, `ui["entry"]`); `title` and `engine` read as "" here.
 ##
-## GDScript has no lockstep or replication yet (a later release adds helpers): a file whose `sync.mode` is not "raw"
-## parses fine (other engines read the same file) but `check_gdscript()` and `OneLobbyClient.from_config` fail with
-## the stable rule `gdscript_raw_only`.
+## GDScript runs "raw" and "lockstep" (`lobby.lockstep`); it has no replication (C# only): a file whose `sync.mode` is
+## "replication" parses fine (other engines read the same file) but `check_gdscript()` and `OneLobbyClient.from_config` fail
+## with the stable rule `gdscript_raw_only` (the name is from when lockstep was missing too; kept so games can match it).
 
 const DEFAULT_PATH := "res://onelobby.json"
 ## `error["code"]` of every failure here (JS and C#: `bad_config`).
 const BAD_CONFIG := "bad_config"
-## `error["rule"]` of the unsupported sync mode (see check_gdscript).
+## `error["rule"]` of the unsupported sync mode "replication" (see check_gdscript).
 const RULE_RAW_ONLY := "gdscript_raw_only"
 
 ## Default public Nostr relays: the same list, in the same order, as the JS `DEFAULT_NOSTR_RELAYS` and C# `Blueprint.DefaultNostrRelays`.
@@ -89,11 +89,12 @@ static func parse(source: Variant) -> OneLobbyConfig:
 
 
 ## {} when this client can run the file, else the failure ({code, path, rule: "gdscript_raw_only", message}): the GDScript
-## client speaks raw mode only (lockstep and replication are in the C# and JS clients).
+## client speaks "raw" and "lockstep"; "replication" is in the C# client (OneLobby.Replication).
 func check_gdscript() -> Dictionary:
-	if not ok or str(sync.get("mode", "raw")) == "raw":
+	var m := str(sync.get("mode", "raw"))
+	if not ok or m == "raw" or m == "lockstep":
 		return {}
-	return _error("sync.mode", RULE_RAW_ONLY, "the GDScript client supports only \"raw\", not \"%s\" (lockstep and replication are in the C# and JS clients)" % sync["mode"])
+	return _error("sync.mode", RULE_RAW_ONLY, "the GDScript client supports \"raw\" and \"lockstep\", not \"%s\" (replication is in the C# client)" % m)
 
 
 ## {} when `display_name` is allowed by `players.*`, else the failure: `identity_anonymous` (a name for an anonymous game)

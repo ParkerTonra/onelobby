@@ -71,8 +71,9 @@ static func type_name(type_id: int) -> String:
 
 # ---- encode ------------------------------------------------------------------------------------------------------
 
-## Encodes a message Dictionary ({type: name or id, route, ...fields}). Returns an empty array on a bad message.
-static func encode(msg: Dictionary) -> PackedByteArray:
+## Encodes a message Dictionary ({type: name or id, route, ...fields}). Returns an empty array on a bad message. `max_len`
+## is the size cap: MAX_FRAME for a frame sent whole, MAX_REASSEMBLED for one the sender sends as chunks.
+static func encode(msg: Dictionary, max_len: int = MAX_FRAME) -> PackedByteArray:
 	var type_id: int = msg["type"] if msg.get("type") is int else int(TYPES.get(msg.get("type", ""), -1))
 	var name := type_name(type_id)
 	if name == "":
@@ -83,8 +84,8 @@ static func encode(msg: Dictionary) -> PackedByteArray:
 	_put(out, "u16", int(msg.get("route", 0)))
 	if not _write_fields(out, LAYOUTS[name], msg):
 		return PackedByteArray()
-	if out.size() > MAX_FRAME:
-		push_error("OneLobbyWire: frame of %d bytes over %d" % [out.size(), MAX_FRAME])
+	if out.size() > max_len:
+		push_error("OneLobbyWire: frame of %d bytes over %d" % [out.size(), max_len])
 		return PackedByteArray()
 	return out
 

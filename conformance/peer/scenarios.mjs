@@ -512,5 +512,70 @@ export function buildScenarios() {
     assert.ok(q);
   });
 
+  // ---- shared pause (spec/binary.md "Pause"): needs the `pause` capability; the mock reference does not have it
+  T('host', 'pause: refused before the game, state to everyone, host holds its frames, 500 ms rate limit, only the pauser resumes, late joiner told, clear', ['host', 'lockstep', 'pause'], async (s) => {
+    await hostUp(s, { begin: false });
+    const a = (await joinTo(s, 2)).p;
+    await a.send({ type: 'pause_request', route: 0, paused: 1 });
+    const no = await a.wait('pause_refuse'); assert.equal(no.paused, 1); assert.equal(no.reason, 1, 'not_in_game'); assert.equal(no._ch, 'reliable');
+    await s.call('begin');
+    const b = (await joinTo(s, 3)).p;
+    await a.wait('frame', { tick: 3 }, 4000);
+    await a.send({ type: 'pause_request', route: 0, paused: 1 });
+    const pa = await a.wait('pause_state'), pb = await b.wait('pause_state');
+    for (const m of [pa, pb]) { assert.equal(m.paused, 1); assert.equal(m.byPeer, 2); assert.equal(m.flags, 0); assert.equal(m._ch, 'reliable'); }
+    await s.waitEvent('pause', { paused: true, byPeer: 2 });
+    await sleep(120); a.take('frame');
+    await a.none('frame', {}, 300);
+    await a.send({ type: 'pause_request', route: 0, paused: 0 });
+    const rate = await a.wait('pause_refuse'); assert.equal(rate.paused, 0); assert.equal(rate.reason, 2, 'rate_limited');
+    await b.send({ type: 'pause_request', route: 0, paused: 0 });
+    const denied = await b.wait('pause_refuse'); assert.equal(denied.reason, 3, 'not_allowed: only the pauser or the host resumes');
+    await a.send({ type: 'pause_request', route: 0, paused: 1 }); // equals the state: ignored, no reply
+    await a.none('pause_refuse', {}, 150);
+    await sleep(500);
+    await a.send({ type: 'pause_request', route: 0, paused: 0 });
+    const resumed = await b.wait('pause_state', { paused: 0 }); assert.equal(resumed.byPeer, 2);
+    const t0 = (await a.wait('frame', {}, 3000)).tick;
+    const f1 = await a.wait('frame', { tick: t0 + 1n }, 3000); assert.ok(f1, 'the next frame is the next tick');
+    // a late joiner while paused: welcome_dc, chat_history, then the state
+    await sleep(550);
+    await a.send({ type: 'pause_request', route: 0, paused: 1 });
+    await b.wait('pause_state', { paused: 1 });
+    await s.link(4);
+    const d = s.peer(4);
+    await d.send({ type: 'hi', route: 0, proto: 1, peerId: 4, lastTick: -1n });
+    const w = await d.wait('welcome_dc'), h = await d.wait('chat_history'), ps = await d.wait('pause_state');
+    assert.ok(w._n < h._n && h._n < ps._n, 'pause_state follows welcome_dc and chat_history'); assert.equal(ps.paused, 1);
+    // the host clears at once, no policy, no rate limit
+    a.take('pause_state');
+    await s.call('pause_clear');
+    const cleared = await a.wait('pause_state', { paused: 0 }); assert.equal(cleared.byPeer, 1); assert.equal(cleared.flags, 0);
+    await s.waitEvent('pause', { paused: false, byPeer: 1 });
+  });
+
+  T('host', 'pause: the host policy can deny a pause', ['host', 'lockstep', 'pause'], async (s) => {
+    await hostUp(s);
+    const a = (await joinTo(s, 2)).p;
+    await s.call('pause_policy', { denyPeers: [2] });
+    await a.send({ type: 'pause_request', route: 0, paused: 1 });
+    const no = await a.wait('pause_refuse'); assert.equal(no.reason, 3);
+    await a.none('pause_state', {}, 150);
+  });
+
+  T('joiner', 'pause: a request goes to the host, the host state and refusals reach the game', ['joiner', 'lockstep', 'pause'], async (s) => {
+    const host = await joinerUp(s);
+    await s.call('pause_request', { paused: true });
+    const r = await host.wait('pause_request'); assert.equal(r.paused, 1); assert.equal(r.route, 0); assert.equal(r._ch, 'reliable');
+    await host.send({ type: 'pause_refuse', route: 0, paused: 1, reason: 2 });
+    await s.waitEvent('pause_refused', { reason: 'rate_limited' });
+    await host.send({ type: 'pause_state', route: 0, paused: 1, byPeer: 3, flags: 0 });
+    await s.waitEvent('pause', { paused: true, byPeer: 3, pauserLeft: false });
+    await host.send({ type: 'pause_state', route: 0, paused: 1, byPeer: 1, flags: 1 });
+    await s.waitEvent('pause', { paused: true, byPeer: 1, pauserLeft: true });
+    await host.send({ type: 'pause_state', route: 0, paused: 0, byPeer: 1, flags: 0 });
+    await s.waitEvent('pause', { paused: false });
+  });
+
   return S;
 }

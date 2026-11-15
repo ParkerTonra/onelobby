@@ -24,7 +24,7 @@ Missing or half there:
 
 | Area | Gap |
 |---|---|
-| GDScript | Raw bytes only: no chat, pause, lockstep helper (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
+| GDScript | Voice (needs Opus) and replication (C# only) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
 | UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
 | Room layer | No ready toggle, per-player data (colour, team, seat), spectators, countdown, rematch, name dedupe. |
@@ -57,7 +57,7 @@ bots filling empty seats (a seat-dropped hook the game answers with its bot).
 (`leave_and_flush`), host migration on direct lobbies (GDScript and C#), version gate (`<wire>.<content hash>` helper)
 with the refusal reason in plain words.
 
-**Chat.** Text chat everywhere (GDScript gains it), voice where the engine has audio capture (JS, C#/Unity, Godot C#),
+**Chat.** Text chat everywhere (GDScript has it), voice where the engine has audio capture (JS, C#/Unity, Godot C#),
 mute per player, speaking indicator.
 
 **Players in the world (section 7).** Binary packets, smooth remote players, and the player's actions (what they hold,

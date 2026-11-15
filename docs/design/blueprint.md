@@ -497,9 +497,10 @@ if (bp.Chat.Voice) voiceButton.Visible = true;
   sections as snake_case dictionaries (`cfg.lobby["max_players"]`) and `cfg.data` as in the file.
   `OneLobbyClient.from_config(cfg or path, {display_name, lobby_server})` is `fromConfig` / `FromBlueprint`; `host()` then
   defaults from the file (a direct lobby when `hosting.server` is false) and `join()` sends a lobby code to the server and a
-  direct code or address to `join_direct`. GDScript is raw-mode only: `sync.mode` `lockstep` or `replication` parses (other
-  engines read the file) but fails `from_config` with `bad_config`, rule `gdscript_raw_only`. Chat, pause, voice and
-  host-migration keys are read, not enforced yet (GDScript has no such features).
+  direct code or address to `join_direct`. GDScript runs `sync.mode` `raw` and `lockstep` (`tickRate`, `hashEveryTicks`); `replication` parses (other
+  engines read the file) but fails `from_config` with `bad_config`, rule `gdscript_raw_only`. `chat.text` and `session.pause`
+  are enforced (`lobby.chat.send` / `lobby.pause.request` raise the client error `chat_disabled` / `pause_disabled`); voice and
+  host-migration keys are read, not enforced (GDScript has no voice).
 - Enforcement mirrors JS with the same error codes (`LobbyErrorCodes.VoiceDisabled`, ...), tested by the shared
   vectors.
 

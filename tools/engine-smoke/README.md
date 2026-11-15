@@ -3,7 +3,7 @@
 A simulated game per engine client, over every route that client supports. Run it on the final sha before a release.
 
 ```
-node tools/engine-smoke/run.mjs            # everything: 30 cases, about 2 minutes
+node tools/engine-smoke/run.mjs            # everything: 30 raw cases (about 2 minutes) and 12 lockstep ones
 node tools/engine-smoke/run.mjs --cases=js,js+gd+cs --routes=typed,turn --verbose
 ```
 
@@ -52,6 +52,18 @@ kill an allocation on a Refresh without LIFETIME). They are in the test server o
 Everything binds 127.0.0.1 except the WebRTC ICE sockets of the JS and GDScript peers (their libraries bind every
 interface; on Windows that can raise a firewall prompt for node and Godot once). `--loopback` makes the C# peers bind
 ICE to 127.0.0.1 as well. The lobby server is started with a dead local STUN entry so nothing leaves the machine.
+
+## The lockstep cases
+
+After the 30 raw cases the run plays the same six engine combinations again in a lockstep lobby (`--sync=lockstep`; `--sync=raw` or
+`--sync=lockstep` runs one half), on the `server` and `typed` routes (`--lsroutes=` changes that). Every peer, in its own engine:
+
+1. **Chat.** The host says hello, every joiner answers; each peer must see one line from each of the three players.
+2. **Lockstep.** The host calls `start()`; every peer submits 5 commands and applies frames through its own `lockstep` API to a tiny
+   sim (FNV-1a 32 over each frame's tick and commands). At tick 60 each peer prints `LOCKSTEP tick=60 hash=... cmds=15`; `run.mjs`
+   fails the case unless all three lines are identical (same frames, same hash, all 15 commands).
+3. **Shared pause.** The first joiner pauses at tick 20 and resumes 700 ms later; every peer must see both state changes and
+   at most 4 frames arrive in between (without the pause 14 would).
 
 ## Needs
 
