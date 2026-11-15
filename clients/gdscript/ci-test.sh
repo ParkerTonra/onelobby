@@ -25,6 +25,8 @@ step() { # step <name> <cmd...>
 step vectors "${G[@]}" -s res://tests/vectors.gd
 step nostr_unit "${G[@]}" -s res://tests/nostr_unit.gd
 step relay_retry "${G[@]}" -s res://tests/relay_retry.gd
+step port_range "${G[@]}" -s res://tests/port_range.gd
+step ip_loopback "${G[@]}" -s res://tests/ip_loopback.gd
 step sign_bench "${G[@]}" -s res://tests/sign_bench.gd
 step direct-test bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
