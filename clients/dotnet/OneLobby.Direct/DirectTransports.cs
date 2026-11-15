@@ -34,16 +34,24 @@ namespace OneLobby.Direct
 
         public IPeerLink CreatePeerLink(PeerLinkOptions options)
         {
-            var link = _inner.CreatePeerLink(options with
-            {
-                PortRangeBegin = _host.Port,
-                PortRangeEnd = _host.Port,
-                IceServers = _nostr ? options.IceServers : TurnOnly(options.IceServers),
-                NoIceServers = true,
-            });
+            var link = _inner.CreatePeerLink(Pinned(options, _host.Port, _nostr));
             lock (_links) _links[options.RemotePeerId] = link; // the newest link to a peer id (ids are never reused in a lobby)
             return link;
         }
+
+        /// <summary>
+        /// The options a host link is made with: ICE bound to the one forwarded UDP port and only the ICE servers the host offers.
+        /// A relay-only link is not pinned: it never uses a host candidate, so no port needs forwarding, and libjuice cannot do TURN
+        /// on a shared (UDP mux) port ("TURN servers are not supported in mux mode"), so a pinned relay-only host got no relay
+        /// candidate at all and no joiner could ever link.
+        /// </summary>
+        internal static PeerLinkOptions Pinned(PeerLinkOptions options, int port, bool nostr) => options with
+        {
+            PortRangeBegin = options.RelayOnly ? 0 : port,
+            PortRangeEnd = options.RelayOnly ? 0 : port,
+            IceServers = nostr ? options.IceServers : TurnOnly(options.IceServers),
+            NoIceServers = true,
+        };
 
         /// <summary>The TURN entries of <paramref name="ice"/>: a bare host address needs no STUN, but a relay still helps.</summary>
         internal static IReadOnlyList<IceServer> TurnOnly(IReadOnlyList<IceServer> ice)

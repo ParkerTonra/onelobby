@@ -77,6 +77,29 @@ public class DirectIceServersTests
     }
 }
 
+public class DirectHostPinTests
+{
+    private static readonly IceServer Turn = new(new[] { "turn:turn.example.com:3478" }, "1:x", "cred");
+
+    [Fact]
+    public void A_host_link_is_pinned_to_the_forwarded_port()
+    {
+        var o = DirectHostTransport.Pinned(new PeerLinkOptions(2, true, new[] { Turn }, false), 47810, nostr: false);
+        Assert.Equal((47810, 47810), (o.PortRangeBegin, o.PortRangeEnd));
+        Assert.True(o.NoIceServers);
+        Assert.Equal(new[] { Turn }, o.IceServers);
+    }
+
+    [Fact]
+    public void A_relay_only_host_link_is_not_pinned_because_libjuice_has_no_turn_in_mux_mode()
+    {
+        var o = DirectHostTransport.Pinned(new PeerLinkOptions(2, true, new[] { Turn }, true), 47810, nostr: true);
+        Assert.Equal((0, 0), (o.PortRangeBegin, o.PortRangeEnd));
+        Assert.True(o.RelayOnly);
+        Assert.Equal(new[] { Turn }, o.IceServers);
+    }
+}
+
 public class RelayCandidatesTests
 {
     private const string Host = "a=candidate:1 1 UDP 2122 10.0.0.1 5000 typ host";
