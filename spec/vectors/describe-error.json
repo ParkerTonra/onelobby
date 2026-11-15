@@ -8,6 +8,7 @@
     {"name":"in_game","input":{"code":"in_game"},"expect":{"code":"in_game","message":"That game has already started.","hint":"Ask the host to let people join mid-game, or wait for the next round."}},
     {"name":"kicked","input":{"code":"kicked"},"expect":{"code":"kicked","message":"The host removed you from the lobby."}},
     {"name":"bad_password","input":{"code":"bad_password"},"expect":{"code":"bad_password","message":"That password isn't right.","hint":"Check it with the host, then try again."}},
+    {"name":"banned","input":{"code":"banned"},"expect":{"code":"banned","message":"You are banned from this game."}},
     {"name":"not_host","input":{"code":"not_host"},"expect":{"code":"not_host","message":"Only the host can do that."}},
     {"name":"rate_limited","input":{"code":"rate_limited"},"expect":{"code":"rate_limited","message":"Slow down a little: too many tries in a short time.","hint":"Wait a moment, then try again."}},
     {"name":"server_full","input":{"code":"server_full"},"expect":{"code":"server_full","message":"The game server is full right now.","hint":"Try again in a few minutes."}},

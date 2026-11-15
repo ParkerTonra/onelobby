@@ -2176,6 +2176,7 @@ export declare const ErrorCodes: {
     readonly InGame: "in_game";
     readonly Kicked: "kicked";
     readonly BadPassword: "bad_password";
+    readonly Banned: "banned";
     readonly NotHost: "not_host";
     readonly RateLimited: "rate_limited";
     readonly ServerFull: "server_full";

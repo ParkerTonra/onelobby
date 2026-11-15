@@ -16,6 +16,7 @@ const TEXT := {
 	"kicked": ["The host removed you from the lobby.", ""],
 	"denied": ["The host didn't let you in this time.", "Ask the host to approve you, then try again."],
 	"bad_password": ["That password isn't right.", "Check it with the host, then try again."],
+	"banned": ["You are banned from this game.", ""],
 	"not_host": ["Only the host can do that.", ""],
 	"rate_limited": ["Slow down a little: too many tries in a short time.", "Wait a moment, then try again."],
 	"max_lobbies": ["You already have the most lobbies open that this server allows.", "Close one of your other lobbies, then try again."],
