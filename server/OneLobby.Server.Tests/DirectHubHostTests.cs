@@ -272,11 +272,14 @@ public class DirectHubHostTests
         Assert.StartsWith("HTTP/1.1 101", await UpgradeStatus(host, "https://evil.example"));
     }
 
+    /// <summary>The dual-stack hijack cases need sockets on every interface; they run only when this is set (CI on Linux).</summary>
+    private static bool AnyInterface => Environment.GetEnvironmentVariable("ONELOBBY_TEST_ANY_INTERFACE") == "1";
+
     [Fact]
     public void Port_in_use_throws()
     {
-        using var a = new DirectHubHost(0, HubOptions.ForDirect(4, null));
-        Assert.ThrowsAny<SocketException>(() => new DirectHubHost(a.Port, HubOptions.ForDirect(4, null)));
+        using var a = new DirectHubHost(0, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback);
+        Assert.ThrowsAny<SocketException>(() => new DirectHubHost(a.Port, HubOptions.ForDirect(4, null), bindAddress: System.Net.IPAddress.Loopback));
     }
 
     [Fact]
@@ -284,6 +287,7 @@ public class DirectHubHostTests
     {
         // e.g. a Node server listening on 0.0.0.0: Windows lets a dual-stack [::] socket bind the same port, and then
         // every IPv4 joiner reaches the other program
+        if (!AnyInterface) return; // listens on every interface: Windows prompts for the firewall, so opt in with ONELOBBY_TEST_ANY_INTERFACE=1 (CI on Linux)
         var other = new TcpListener(System.Net.IPAddress.Any, 0);
         other.Start();
         try
@@ -299,6 +303,7 @@ public class DirectHubHostTests
     public void Udp_port_held_by_another_program_is_in_use()
     {
         // peer links share UDP P (ICE UDP mux): a port whose UDP half is taken cannot host either
+        if (!AnyInterface) return; // every-interface socket: opt in with ONELOBBY_TEST_ANY_INTERFACE=1
         using var other = new UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Any, 0));
         var port = ((System.Net.IPEndPoint)other.Client.LocalEndPoint!).Port;
         var e = Assert.ThrowsAny<SocketException>(() => new DirectHubHost(port, HubOptions.ForDirect(4, null)));

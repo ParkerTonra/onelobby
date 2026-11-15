@@ -43,3 +43,17 @@ jobs:
         run: dotnet test clients/dotnet/OneLobby.Core.Tests
       - name: Replication tests
         run: dotnet test clients/dotnet/OneLobby.Replication.Tests
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # the dual-stack port-hijack tests open sockets on every interface; locally they are skipped (Windows firewall prompt)
+      ONELOBBY_TEST_ANY_INTERFACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Server tests
+        run: dotnet test server/OneLobby.Server.sln
