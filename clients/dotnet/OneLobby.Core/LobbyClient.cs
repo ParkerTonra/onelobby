@@ -153,7 +153,7 @@ namespace OneLobby
         {
             var room = RoomDefaults.Merge(options.Room);
             if (room.PasswordRequired == true && string.IsNullOrEmpty(options.Password))
-                return Task.FromException<Lobby>(new OneLobbyException(RoomErrorCodes.PasswordRequired, "this game requires a lobby password (room.passwordRequired); pass LobbyOptions.Password"));
+                return Task.FromException<Lobby>(new OneLobbyException(LobbyErrorCodes.PasswordRequired, "this game requires a lobby password (room.passwordRequired); pass LobbyOptions.Password"));
             if (options.Password != null && options.Password.Length > 64)
                 return Task.FromException<Lobby>(new ArgumentOutOfRangeException(nameof(options), "password must be at most 64 characters"));
             var setup = new RoomSetup { Options = room, Password = options.Password ?? "", MaxPlayers = options.MaxPlayers };

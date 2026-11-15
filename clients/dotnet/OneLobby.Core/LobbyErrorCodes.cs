@@ -23,6 +23,26 @@ namespace OneLobby
         public const string BadPassword = "bad_password";
         /// <summary>The host banned this player (by player id; the ban outlives the lobby, spec/room.md).</summary>
         public const string Banned = "banned";
+        /// <summary>The removal code of a join request the host turned down.</summary>
+        public const string Denied = "denied";
+        /// <summary>The host ended this player's connection without a ban (a room kick with the default code, or DisconnectAsync).</summary>
+        public const string Disconnected = "disconnected";
+        /// <summary>No spectator slot is free (room layer).</summary>
+        public const string SpectatorsFull = "spectators_full";
+        /// <summary>The host's version has no room layer; a room call was refused locally.</summary>
+        public const string RoomUnsupported = "room_unsupported";
+        /// <summary>The blueprint says room.passwordRequired and HostAsync got no password.</summary>
+        public const string PasswordRequired = "password_required";
+        /// <summary>A room call the room's state does not allow (Start outside the lobby).</summary>
+        public const string WrongState = "wrong_state";
+        /// <summary>Start needs more connected players than the room has (room.minPlayers).</summary>
+        public const string NotEnoughPlayers = "not_enough_players";
+        /// <summary>A per-player data value failed its declaration (room layer).</summary>
+        public const string BadValue = "bad_value";
+        /// <summary>A per-player data key that no declaration names (room layer).</summary>
+        public const string UnknownKey = "unknown_key";
+        /// <summary>One player's data is over 1024 bytes (room layer).</summary>
+        public const string TooLarge = "too_large";
         /// <summary>A host-only request from a non-host.</summary>
         public const string NotHost = "not_host";
         /// <summary>Too many requests in a short time, or too many lobbies open from this address.</summary>

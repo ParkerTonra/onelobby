@@ -18,29 +18,6 @@ namespace OneLobby
     public enum RoomFilterKind { Name, Chat }
     public enum DataType { String, Int, Enum, Bool, Color }
 
-    /// <summary>Stable codes of the room layer (<c>nack.code</c>, <c>deny.code</c>, <see cref="OneLobbyException.Code"/>; spec/room.md s.3).</summary>
-    public static class RoomErrorCodes
-    {
-        public const string BadValue = "bad_value";
-        public const string UnknownKey = "unknown_key";
-        public const string NotAllowed = "not_allowed";
-        public const string TooLarge = "too_large";
-        public const string RateLimited = "rate_limited";
-        public const string WrongState = "wrong_state";
-        public const string NotEnoughPlayers = "not_enough_players";
-        public const string LobbyFull = "lobby_full";
-        public const string SpectatorsFull = "spectators_full";
-        public const string InGame = "in_game";
-        public const string Banned = "banned";
-        public const string BadPassword = "bad_password";
-        public const string Kicked = "kicked";
-        public const string Disconnected = "disconnected";
-        public const string RoomUnsupported = "room_unsupported";
-        public const string PasswordRequired = "password_required";
-        /// <summary>The removal code of a declined join request.</summary>
-        public const string Denied = "denied";
-    }
-
     /// <summary>One declaration of a per-player data key (spec/room.md s.4.2, <c>room.data</c> in onelobby.json).</summary>
     public sealed record DataDecl(DataType Type)
     {
@@ -404,14 +381,14 @@ namespace OneLobby
             var next = new Dictionary<string, string>(before);
             foreach (var kv in set)
             {
-                if (!IsDataKey(kv.Key) || !spec.TryGetValue(kv.Key, out var decl)) return DataResult.Fail(RoomErrorCodes.UnknownKey, kv.Key);
-                if (decl.HostOnly && !byHost) return DataResult.Fail(RoomErrorCodes.NotAllowed, kv.Key);
+                if (!IsDataKey(kv.Key) || !spec.TryGetValue(kv.Key, out var decl)) return DataResult.Fail(LobbyErrorCodes.UnknownKey, kv.Key);
+                if (decl.HostOnly && !byHost) return DataResult.Fail(LobbyErrorCodes.NotAllowed, kv.Key);
                 var v = kv.Value == null ? null : CheckDataValue(decl, kv.Value);
-                if (v == null) return DataResult.Fail(RoomErrorCodes.BadValue, kv.Key);
+                if (v == null) return DataResult.Fail(LobbyErrorCodes.BadValue, kv.Key);
                 if (v.Length == 0) next.Remove(kv.Key);
                 else next[kv.Key] = v;
             }
-            if (JsonBytes(next) > DataMaxBytes) return DataResult.Fail(RoomErrorCodes.TooLarge);
+            if (JsonBytes(next) > DataMaxBytes) return DataResult.Fail(LobbyErrorCodes.TooLarge);
             return DataResult.Good(next);
         }
 
@@ -530,15 +507,15 @@ namespace OneLobby
         public static Admission Admit(bool banned, bool hasPassword, bool passwordOk, RoomState state, LateJoinPolicy lateJoin, RoomRole role,
             int players, int maxPlayers, int spectators, int spectatorCap)
         {
-            if (banned) return Admission.No(RoomErrorCodes.Banned);
-            if (hasPassword && !passwordOk) return Admission.No(RoomErrorCodes.BadPassword);
+            if (banned) return Admission.No(LobbyErrorCodes.Banned);
+            if (hasPassword && !passwordOk) return Admission.No(LobbyErrorCodes.BadPassword);
             if (state == RoomState.Started)
             {
-                if (lateJoin == LateJoinPolicy.Refuse) return Admission.No(RoomErrorCodes.InGame);
+                if (lateJoin == LateJoinPolicy.Refuse) return Admission.No(LobbyErrorCodes.InGame);
                 if (lateJoin == LateJoinPolicy.Spectate) role = RoomRole.Spectator;
             }
-            if (role == RoomRole.Player && players >= maxPlayers) return Admission.No(RoomErrorCodes.LobbyFull);
-            if (role == RoomRole.Spectator && spectators >= spectatorCap) return Admission.No(RoomErrorCodes.SpectatorsFull);
+            if (role == RoomRole.Player && players >= maxPlayers) return Admission.No(LobbyErrorCodes.LobbyFull);
+            if (role == RoomRole.Spectator && spectators >= spectatorCap) return Admission.No(LobbyErrorCodes.SpectatorsFull);
             return Admission.Yes(role);
         }
 

@@ -230,7 +230,7 @@ namespace OneLobby
         {
             RequireSupport();
             if (peerId == _l.LocalPeerId) { SetData(values); return; }
-            if (!_l.IsHost) throw new OneLobbyException(RoomErrorCodes.NotAllowed, "only the host can set another player's data");
+            if (!_l.IsHost) throw new OneLobbyException(LobbyErrorCodes.NotAllowed, "only the host can set another player's data");
             ThrowOn(HostSet(peerId, Pairs(values), true));
         }
 
@@ -276,9 +276,9 @@ namespace OneLobby
         public void Start()
         {
             RequireHost();
-            if (_state != RoomState.Lobby) throw new OneLobbyException(RoomErrorCodes.WrongState, "the room is " + RoomRules.Name(_state) + ", not in the lobby");
+            if (_state != RoomState.Lobby) throw new OneLobbyException(LobbyErrorCodes.WrongState, "the room is " + RoomRules.Name(_state) + ", not in the lobby");
             if (Eligible() < Math.Max(1, _settings.MinPlayers))
-                throw new OneLobbyException(RoomErrorCodes.NotEnoughPlayers, "at least " + _settings.MinPlayers.ToString(CultureInfo.InvariantCulture) + " connected player(s) needed");
+                throw new OneLobbyException(LobbyErrorCodes.NotEnoughPlayers, "at least " + _settings.MinPlayers.ToString(CultureInfo.InvariantCulture) + " connected player(s) needed");
             BeginStart(false);
         }
 
@@ -336,7 +336,7 @@ namespace OneLobby
         public void Kick(int peerId, string? code = null, string? reason = null)
         {
             RequireHost();
-            var c = CheckCode(code ?? RoomErrorCodes.Kicked);
+            var c = CheckCode(code ?? LobbyErrorCodes.Kicked);
             _l.RemovePeerWith(peerId, false, c, RoomRules.RemovalReason(c, reason));
         }
 
@@ -344,7 +344,7 @@ namespace OneLobby
         public void Ban(int peerId, string? code = null, string? reason = null)
         {
             RequireHost();
-            var c = CheckCode(code ?? RoomErrorCodes.Banned);
+            var c = CheckCode(code ?? LobbyErrorCodes.Banned);
             var text = RoomRules.RemovalReason(c, reason);
             _roster.TryGetValue(peerId, out var e);
             _pids.TryGetValue(peerId, out var pid);
@@ -442,7 +442,7 @@ namespace OneLobby
             _pids.TryGetValue(peerId, out var pid);
             var hit = Bans.Match(string.IsNullOrEmpty(pid) ? null : pid, ip);
             if (hit == null) return;
-            var code = hit.Code != null && RoomRules.IsCode(hit.Code) ? hit.Code : RoomErrorCodes.Banned;
+            var code = hit.Code != null && RoomRules.IsCode(hit.Code) ? hit.Code : LobbyErrorCodes.Banned;
             _l.RemovePeerWith(peerId, false, code, RoomRules.RemovalReason(code, hit.Reason));
         }
 
@@ -566,7 +566,7 @@ namespace OneLobby
 
         private void RequireSupport()
         {
-            if (Supported == false) throw new OneLobbyException(RoomErrorCodes.RoomUnsupported, "the host's version has no room layer (update the host)");
+            if (Supported == false) throw new OneLobbyException(LobbyErrorCodes.RoomUnsupported, "the host's version has no room layer (update the host)");
         }
 
         private void SendToHost(byte[] frame) => _l.RoomSendToHost(frame);
@@ -665,7 +665,7 @@ namespace OneLobby
                 case "join": case "set": case "ready": case "role": case "req":
                     if (!AllowRequest(from))
                     {
-                        if (t != "join") SendRoom(from, RoomWire.Nack(t, RoomErrorCodes.RateLimited));
+                        if (t != "join") SendRoom(from, RoomWire.Nack(t, LobbyErrorCodes.RateLimited));
                         return;
                     }
                     break;
@@ -689,7 +689,7 @@ namespace OneLobby
             }
             else if (t == "role")
             {
-                var r = m.TryGetProperty("role", out var rp) && rp.ValueKind == JsonValueKind.String && RoomRules.TryRole(rp.GetString(), out var role) ? HostRole(from, role) : RoomErrorCodes.BadValue;
+                var r = m.TryGetProperty("role", out var rp) && rp.ValueKind == JsonValueKind.String && RoomRules.TryRole(rp.GetString(), out var role) ? HostRole(from, role) : LobbyErrorCodes.BadValue;
                 if (r != null) SendRoom(from, RoomWire.Nack("role", r));
             }
             else
@@ -698,13 +698,13 @@ namespace OneLobby
                 if (what == "start") Requested?.Invoke(from, RoomRequest.Start);
                 else if (what == "lobby") Requested?.Invoke(from, RoomRequest.Lobby);
                 else if (what == "rematch") Requested?.Invoke(from, RoomRequest.Rematch);
-                else SendRoom(from, RoomWire.Nack("req", RoomErrorCodes.BadValue));
+                else SendRoom(from, RoomWire.Nack("req", LobbyErrorCodes.BadValue));
             }
         }
 
         private (string Code, string? Key)? HostSet(int id, IEnumerable<KeyValuePair<string, string?>> values, bool byHost)
         {
-            if (!_roster.TryGetValue(id, out var e)) return (RoomErrorCodes.NotAllowed, null);
+            if (!_roster.TryGetValue(id, out var e)) return (LobbyErrorCodes.NotAllowed, null);
             var r = RoomRules.ApplyData(_settings.Data, e.Data, values, byHost);
             if (!r.Ok) return (r.Code, r.Key);
             Mutate(_ => e.Data = r.Data!);
@@ -718,8 +718,8 @@ namespace OneLobby
                 if (local) throw new OneLobbyException(code, "cannot change ready: " + code);
                 SendRoom(id, RoomWire.Nack("ready", code));
             }
-            if (!_roster.TryGetValue(id, out var e) || e.Role != RoomRole.Player || e.Legacy) { Fail(RoomErrorCodes.NotAllowed); return; }
-            if (e.Status != RoomStatus.Connected) { Fail(RoomErrorCodes.NotAllowed); return; }
+            if (!_roster.TryGetValue(id, out var e) || e.Role != RoomRole.Player || e.Legacy) { Fail(LobbyErrorCodes.NotAllowed); return; }
+            if (e.Status != RoomStatus.Connected) { Fail(LobbyErrorCodes.NotAllowed); return; }
             if (e.Ready == ready) return;
             Mutate(_ => e.Ready = ready);
         }
@@ -727,17 +727,17 @@ namespace OneLobby
         /// <summary>Returns an error code, or null when the move happened.</summary>
         private string? HostRole(int id, RoomRole role)
         {
-            if (!_roster.TryGetValue(id, out var e) || e.Legacy) return RoomErrorCodes.NotAllowed;
+            if (!_roster.TryGetValue(id, out var e) || e.Legacy) return LobbyErrorCodes.NotAllowed;
             if (e.Role == role) return null;
             if (role == RoomRole.Spectator)
             {
-                if (_roster.Values.Count(x => x.Role == RoomRole.Spectator) >= _settings.Spectators) return RoomErrorCodes.SpectatorsFull;
+                if (_roster.Values.Count(x => x.Role == RoomRole.Spectator) >= _settings.Spectators) return LobbyErrorCodes.SpectatorsFull;
             }
             else
             {
-                if (_roster.Values.Count(x => x.Role == RoomRole.Player) >= _settings.MaxPlayers) return RoomErrorCodes.LobbyFull;
+                if (_roster.Values.Count(x => x.Role == RoomRole.Player) >= _settings.MaxPlayers) return LobbyErrorCodes.LobbyFull;
                 if (_state == RoomState.Started && _settings.LateJoin != LateJoinPolicy.Allow)
-                    return _settings.LateJoin == LateJoinPolicy.Refuse ? RoomErrorCodes.InGame : RoomErrorCodes.NotAllowed;
+                    return _settings.LateJoin == LateJoinPolicy.Refuse ? LobbyErrorCodes.InGame : LobbyErrorCodes.NotAllowed;
             }
             Mutate(_ =>
             {
@@ -955,7 +955,7 @@ namespace OneLobby
                 case "deny":
                 {
                     var code = Signaling.Str(m, "code");
-                    if (!RoomRules.IsCode(code)) code = RoomErrorCodes.Kicked;
+                    if (!RoomRules.IsCode(code)) code = LobbyErrorCodes.Kicked;
                     var reason = RoomRules.RemovalReason(code, Signaling.Str(m, "reason"));
                     OnRemoved(new RemovalInfo(code, reason, false));
                     _l.RoomReportError(code, reason);
