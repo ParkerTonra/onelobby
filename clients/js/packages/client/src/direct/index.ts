@@ -183,8 +183,10 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
           mapped: false, method: "none" as const, externalIPv4: null, localIPv4: null, detail: e.message,
         }));
   const wrapLinks = (inner: LinkFactory): LinkFactory => ({
-    // the hub's welcome.ice is the host's list (STUN only with Nostr on, plus its ice_servers); the UDP port pin stays
-    create: (lo) => inner.create({ ...lo, portRange: { begin: hub.port, end: hub.port } }),
+    // the hub's welcome.ice is the host's list (STUN only with Nostr on, plus its ice_servers); the UDP port pin stays, except for a
+    // relay-only link: it never uses a host candidate, and libjuice cannot do TURN on a shared (UDP mux) port, so a pinned
+    // relay-only host got no relay candidate and sent from its own address instead of through the relay
+    create: (lo) => inner.create(lo.relayOnly ? lo : { ...lo, portRange: { begin: hub.port, end: hub.port } }),
   });
   let lobby: Lobby;
   try {

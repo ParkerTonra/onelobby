@@ -586,7 +586,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     try {
       const state = await sig.request<LobbyState>(
         { t: "create", name: h.name, maxPlayers: h.maxPlayers, visibility: "unlisted", mode: this.options.mode, tickRate: this.options.tickRate,
-          lateJoin: h.lateJoin ?? true, meta: h.meta ?? {} },
+          lateJoin: h.lateJoin ?? true, meta: h.meta ?? {}, ...(this.options.relayOnly ? { relayOnly: true } : {}) },
         "lobby",
       );
       return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit);

@@ -607,6 +607,31 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     }
   }, 30000);
 
+  it("a relay-only host does not pin its links to the UDP port (libjuice has no TURN in mux mode)", async () => {
+    const port = await freePort();
+    const seen: { relayOnly: boolean; pinned: boolean }[] = [];
+    const inner = webRtcLinkFactoryFor(loopbackRtc(RTCPeerConnection) as unknown as typeof globalThis.RTCPeerConnection);
+    const spy: LinkFactory = { create: (o) => (seen.push({ relayOnly: o.relayOnly, pinned: o.portRange !== undefined }), inner.create(o)) };
+    const turn = { urls: ["turn:127.0.0.1:9"], username: "u", credential: "c" };
+    const mk = (relayOnly: boolean) => new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", rememberSeat: false,
+      relayOnly, advanced: { linkFactory: spy } });
+    // a plain host pins its links to the one port ...
+    const plain = await hostIp(mk(false), { port, openPort: false });
+    cleanup.push(() => plain.leave());
+    const a = await kit("A").joinDirect(`127.0.0.1:${port}`);
+    cleanup.push(() => a.leave());
+    await until(() => seen.length === 1, "plain host link");
+    expect(seen[0]).toEqual({ relayOnly: false, pinned: true });
+    // ... a relay-only one does not
+    const port2 = await freePort();
+    const relay = await hostIp(mk(true), { port: port2, openPort: false, iceServers: [turn] });
+    cleanup.push(() => relay.leave());
+    const b = await kit("B").joinDirect(`127.0.0.1:${port2}`);
+    cleanup.push(() => b.leave());
+    await until(() => seen.length === 2, "relay-only host link");
+    expect(seen[1]).toEqual({ relayOnly: true, pinned: false });
+  }, 30000);
+
   it("a host link that dies before it opens is offered again, so the joiner still gets in", async () => {
     // What a DTLS-vs-answer race looks like to the host: the first link to the joiner ends connecting -> closed.
     const port = await freePort();
