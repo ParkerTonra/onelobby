@@ -1,0 +1,9 @@
+{
+  "name": "onelobby-engine-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Per-engine simulated-game check for OneLobby (JS, GDScript, C#). See README.md.",
+  "dependencies": {
+    "node-turn": "^0.0.6"
+  }
+}

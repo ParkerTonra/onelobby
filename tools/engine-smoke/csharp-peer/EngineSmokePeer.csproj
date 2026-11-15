@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EngineSmoke</RootNamespace>
+    <Description>C# engine peer for tools/engine-smoke: OneLobby.Core + OneLobby.Direct over the DataChannel transport (the transport Unity uses).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\clients\dotnet\OneLobby.Core\OneLobby.Core.csproj" />
+    <ProjectReference Include="..\..\..\clients\dotnet\OneLobby.DataChannel\OneLobby.DataChannel.csproj" />
+    <ProjectReference Include="..\..\..\clients\dotnet\OneLobby.Direct\OneLobby.Direct.csproj" />
+  </ItemGroup>
+</Project>

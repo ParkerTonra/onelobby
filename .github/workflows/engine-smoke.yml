@@ -1,0 +1,91 @@
+# Per-engine simulated game (tools/engine-smoke): JS, GDScript and C# (DataChannel, Unity's transport) each host and join
+# over the lobby server, a local Nostr relay, a typed address, an IP code and a local TURN server (relay-only), alone and
+# in mixed pairs. All on 127.0.0.1; no public relays, STUN or TURN. Prints ENGINE_SMOKE_OK or ENGINE_SMOKE_FAIL <cases>.
+name: Engine smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2-stable
+  # SHA-512 of Godot_v4.7.2-stable_linux.x86_64.zip, from the release's SHA512-SUMS.txt
+  GODOT_SHA512: 9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
+  WEBRTC_NATIVE_VERSION: 1.2.2-stable
+
+jobs:
+  engine-smoke:
+    runs-on: ubuntu-22.04   # glibc 2.35, same as the libdatachannel build in datachannel-natives.yml
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-dl ~/godot
+          curl -fL --retry 3 -o ~/godot-dl/godot.zip "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          echo "${GODOT_SHA512}  $HOME/godot-dl/godot.zip" | sha512sum -c -
+          unzip -q ~/godot-dl/godot.zip -d ~/godot
+          chmod +x ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64
+      - name: Cache webrtc-native
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: clients/gdscript/addons/godot_webrtc
+          key: webrtc-native-${{ env.WEBRTC_NATIVE_VERSION }}
+      - name: Fetch webrtc-native
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: bash clients/gdscript/fetch-webrtc.sh
+      - name: Import GDScript project (registers the extension)
+        working-directory: clients/gdscript
+        run: |
+          ~/godot/Godot_v${GODOT_VERSION}_linux.x86_64 --headless --audio-driver Dummy --import --path . || echo "import exited $? (tolerated; checked below)"
+          test -s .godot/global_script_class_cache.cfg && grep -q OneLobbyClient .godot/global_script_class_cache.cfg
+          test -s .godot/extension_list.cfg
+      - name: Cache libdatachannel (linux-x64)
+        id: ldc-cache
+        uses: actions/cache@v4
+        with:
+          path: clients/dotnet/OneLobby.DataChannel/runtimes/linux-x64/native
+          key: libdatachannel-linux-x64-${{ hashFiles('clients/dotnet/OneLobby.DataChannel/native/versions.env', 'clients/dotnet/OneLobby.DataChannel/native/build-posix.sh') }}
+      - name: Build libdatachannel
+        if: steps.ldc-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+          TARGET=linux-x64 bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
+      - name: Install node deps and build the JS client
+        run: |
+          (cd conformance && npm install)
+          (cd clients/js && npm ci && npm run build)
+          (cd tools/engine-smoke && npm ci)
+      - name: Engine smoke
+        run: |
+          set -o pipefail
+          GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" node tools/engine-smoke/run.mjs | tee engine-smoke.log
+      - name: Result
+        if: always()
+        run: |
+          grep -E '^(PASS|FAIL|engine-smoke:|ENGINE_SMOKE)' engine-smoke.log >> "$GITHUB_STEP_SUMMARY" || true
