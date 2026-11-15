@@ -63,7 +63,7 @@ import { type RelayConnect } from "./nostr/relays.js";
 import { type Blueprint } from "./blueprint.js";
 import { type BrowserHostOptions } from "./direct/browser-host.js";
 export declare const LIB_NAME = "onelobby";
-export declare const LIB_VERSION = "0.7.0";
+export declare const LIB_VERSION = "0.7.1";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
     getItem(key: string): string | null;
