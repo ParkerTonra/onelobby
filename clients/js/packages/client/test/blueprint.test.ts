@@ -45,6 +45,28 @@ describe("parseBlueprint vs spec/vectors/blueprint.json (invalid)", () => {
   }
 });
 
+describe("parseBlueprint vs spec/vectors/blueprint.json (room section)", () => {
+  for (const v of vectors.roomValid) {
+    it(v.name, () => {
+      const bp = parseBlueprint(structuredClone(v.input));
+      for (const [path, want] of Object.entries(v.expect)) expect(lookup(bp, path), path).toEqual(want);
+    });
+  }
+  for (const v of vectors.roomInvalid) {
+    it(`${v.name}: ${v.error.rule} at "${v.error.path}"`, () => {
+      let err: unknown;
+      try {
+        parseBlueprint(structuredClone(v.input));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(OneLobbyError);
+      const e = err as BlueprintError;
+      expect({ path: e.path, rule: e.rule }).toEqual(v.error);
+    });
+  }
+});
+
 describe("parseBlueprint result", () => {
   it("is deeply frozen and the input is left alone", () => {
     const input = { game: { id: "a" }, lobby: { meta: { k: "v" } } };

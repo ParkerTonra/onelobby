@@ -61,6 +61,8 @@ export type ChatEvents = {
 export class Chat extends Emitter<ChatEvents> {
   /** Game-provided profanity hook; applied to every line a player is shown. */
   filter: (text: string) => string = (t) => t;
+  /** Host only: filters each line before it is stamped and broadcast (set from `lobby.room.filter`); empty drops the line. */
+  hostFilter: ((text: string) => string) | null = null;
 
   private lines: ChatMessage[] = [];
   private limiter = new ChatLimiter();
@@ -145,7 +147,7 @@ export class Chat extends Emitter<ChatEvents> {
     // spec order: muted, length (before stripping), rate (a reject spends no token), strip, drop if empty
     if (utf8Length(rawText) > CHAT_MAX_BYTES) return reject(CHAT_REJECT.length);
     if (!this.limiter.tryTake(from, this.hub.clock.now())) return reject(CHAT_REJECT.rate);
-    const text = sanitizeChat(rawText);
+    const text = this.hostFilter ? this.hostFilter(sanitizeChat(rawText)) : sanitizeChat(rawText);
     if (text.length === 0) return;
     const line: ChatMessage = { peerId: from, id: ++this.stampId >>> 0, ts: this.wall(), text };
     const out: Message = { type: "chat", id: line.id, ts: line.ts, text: line.text };

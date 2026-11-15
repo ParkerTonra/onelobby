@@ -17,6 +17,9 @@ import type { Hub } from "./hub.js";
 import { Lockstep } from "./lockstep.js";
 import { claimWinsWrapped, pickNewHost } from "./migration.js";
 import { Pause } from "./pause.js";
+import { BanList } from "./bans.js";
+import { Room, resolveSettings, type RemovalInfo, type RoomJoinOptions, type RoomOptions } from "./room.js";
+import { CODE_PATTERN, applyFilter, removalReason } from "./room-rules.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import { hasTurn, type ChannelName, type IceServer, type LinkFactory, type PeerLink, type SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -38,6 +41,22 @@ export interface KickOptions {
   reason?: string;
 }
 export type Peer = PeerInfo;
+
+/** What the kit hands a lobby for its room layer (spec/room.md). */
+export interface RoomSetup {
+  /** Host: settings (blueprint `room` plus code options). */
+  options?: RoomOptions;
+  /** Host: the lobby password ("" = none). */
+  password?: string;
+  /** Host: the player count when the hub's capacity is larger (a hub without spectator slots got the sum). */
+  maxPlayers?: number;
+  /** This install's player id. */
+  pid?: string;
+  /** Host: the persistent ban list; memory only when absent. */
+  bans?: BanList;
+  /** Joiner: role, starting data and password sent in the room `join`. */
+  join?: RoomJoinOptions;
+}
 
 /** What a direct host's `joinCode` is: see {@link Lobby.joinCodeKind}. */
 export type { JoinCodeKind };
@@ -113,6 +132,10 @@ export interface LobbyConfig {
   peerTimeoutMs?: number;
   /** Host: per-peer cap on incoming raw messages; the excess is dropped before `message` fires or is relayed. */
   rateLimit?: RateLimit;
+  /** The room layer's inputs (see `RoomSetup`). */
+  room?: RoomSetup;
+  /** The game id, for the ban list key. */
+  gameId?: string;
 }
 
 /** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
@@ -139,6 +162,16 @@ export function seatName(p: PeerInfo): PeerInfo {
   return { ...p, name: `Player ${p.peerId}` };
 }
 
+/** `s` cut so its UTF-16 length is at most `n`, never inside a surrogate pair. */
+function fitUtf16(s: string, n: number): string {
+  let out = "";
+  for (const ch of s) {
+    if (out.length + ch.length > n) break;
+    out += ch;
+  }
+  return out;
+}
+
 function hasRelay(ice: IceServer[]): boolean {
   return ice.some(hasTurn);
 }
@@ -162,6 +195,14 @@ export class Lobby extends Emitter<LobbyEvents> {
   readonly chat: Chat;
   /** The shared co-op pause (docs/recipes/pause.md). */
   readonly pause: Pause;
+  /**
+   * The room layer (docs/recipes/room.md, spec/room.md): roster with per-player data, ready, countdown and auto start,
+   * back to lobby and rematch, spectators and seats, reconnecting state, kick and ban with reasons. Every lobby has one;
+   * a game that never touches it behaves as before.
+   */
+  readonly room: Room;
+  /** Why this peer was removed (a kick, a ban, a refused join), once it has been; null otherwise. */
+  removal: RemovalInfo | null = null;
   readonly voice: Voice;
 
   localPeerId: number;
@@ -243,6 +284,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   private readonly offeredAt = new Map<number, { at: number; retries: number }>();
   /** clock.now() of the last frame from each peer (peerTimeoutMs). */
   private lastHeard = new Map<number, number>();
+  /** Host: phases this lobby sent whose echo (a `lobby` message) has not come back yet, oldest first. */
+  private phaseSent: Phase[] = [];
+  /** Remote address of each peer's WebRTC link, once known (the room's ban check). */
+  private addrs = new Map<number, string>();
   /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
   private readonly lingering = new Set<PeerLink>();
   /** Host: joiners that joined but are not ready yet, with the cancel of their readyTimeoutMs timer (peerFailed). */
@@ -309,6 +354,33 @@ export class Lobby extends Emitter<LobbyEvents> {
     });
     this.lockstep.on("started", () => this.setPhase("in_game"));
     this.lockstep.on("error", (e) => this.reportError(e));
+
+    const rs = cfg.room ?? {};
+    this.room = new Room(
+      {
+        hub: this.hub,
+        rtt: () => this.rtt,
+        peerName: (id) => this.roster.get(id)?.name,
+        peerIds: () => [...this.roster.keys()],
+        phase: () => this.phase,
+        startGame: () => this.beginGame(),
+        endGame: () => this.endGame(),
+        removePeer: (id, o) => this.kickWith(id, { ban: o.ban, code: o.code, reason: o.reason }),
+        syncBans: (ids) => this.sendBans(ids),
+        linkAddress: (id) => this.addrs.get(id),
+        reportError: (e) => this.reportError(e),
+        setRemoval: (info) => void (this.removal ??= info),
+      },
+      {
+        settings: resolveSettings(rs.options, rs.maxPlayers ?? st.maxPlayers ?? Math.max(2, st.peers.length), st.lateJoin),
+        password: rs.password ?? "",
+        pid: rs.pid ?? "",
+        bans: rs.bans ?? new BanList(null, cfg.gameId ?? ""),
+        join: { role: rs.join?.role ?? "player", data: { ...(rs.join?.data ?? {}) }, password: rs.join?.password ?? "" },
+      },
+    );
+    this.chat.hostFilter = (t) => applyFilter(this.room.filter, t, "chat");
+    if (this.isHost && this.room.bans.hubIds().length) this.sendBans(this.room.bans.hubIds());
 
     this.signaling.onMessage = (m) => this.onSignaling(m);
     this.signaling.onClose = () => this.onServerClosed();
@@ -391,9 +463,34 @@ export class Lobby extends Emitter<LobbyEvents> {
   async start(): Promise<void> {
     if (!this.isHost) throw new Error("only the host can start the game");
     if (this.phase === "in_game") return;
+    this.beginGame();
+  }
+
+  /** Host: the phase goes to in_game (the room calls this at the end of its countdown). */
+  private beginGame(): void {
+    if (this.phase === "in_game") return;
     this.signaling.send({ t: "phase", phase: "in_game" });
+    this.sentPhase("in_game");
     this.setPhase("in_game");
     if (this.mode === "lockstep") this.lockstep.hostStart();
+  }
+
+  private sentPhase(p: Phase): void {
+    this.phaseSent.push(p);
+    if (this.phaseSent.length > 16) this.phaseSent.shift();
+  }
+
+  /** Host: the phase goes back to lobby without touching any link (back to lobby, rematch). */
+  private endGame(): void {
+    if (this.phase === "lobby") return;
+    this.signaling.send({ t: "phase", phase: "lobby" });
+    this.sentPhase("lobby");
+    this.setPhase("lobby");
+  }
+
+  /** Host: tells the hub the banned player ids, when the hub understands `bans`. */
+  private sendBans(ids: string[]): void {
+    if ((this.cfg.features ?? []).includes("room")) this.signaling.send({ t: "bans", ids });
   }
 
   /**
@@ -425,13 +522,20 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (code !== undefined && !(code === 1000 || (Number.isInteger(code) && code >= 3000 && code <= 4999)))
       throw new RangeError("close code must be 1000 or 3000-4999");
     if (reason !== undefined && reason.length > 120) throw new RangeError("close reason must be at most 120 characters");
+    this.kickWith(peerId, { ban, closeCode: code, reason });
+  }
+
+  /** The one place that sends `kick` and removes the peer locally (kick, disconnect, and the room's kick / ban / deny). */
+  private kickWith(peerId: number, o: { ban: boolean; closeCode?: number; reason?: string; code?: string }): void {
+    const reason = o.reason !== undefined ? fitUtf16(o.reason, 120) : undefined;
     const msg: Record<string, unknown> = { t: "kick", peerId };
-    if (!ban) msg.ban = false;
-    if (code !== undefined) msg.closeCode = code;
+    if (!o.ban) msg.ban = false;
+    if (o.closeCode !== undefined) msg.closeCode = o.closeCode;
     if (reason !== undefined) msg.closeReason = reason;
+    if (o.code !== undefined) msg.code = o.code;
     this.signaling.send(msg as { t: "kick"; peerId: number });
-    const close: CloseInfo | undefined = code !== undefined || reason !== undefined ? { code, reason } : undefined;
-    this.removePeer(peerId, ban ? "kicked" : "disconnected", close, true);
+    const close: CloseInfo | undefined = o.closeCode !== undefined || reason !== undefined ? { code: o.closeCode, reason } : undefined;
+    this.removePeer(peerId, o.ban ? "kicked" : "disconnected", close, true);
   }
 
   /**
@@ -596,7 +700,11 @@ export class Lobby extends Emitter<LobbyEvents> {
     link.onClose = (reason) => this.onLinkClosed(peerId, link, reason);
     link.onMessage = (ch, bytes) => this.onData(peerId, ch, bytes);
     link.onPath = (path) => this.signaling.send({ t: "path", path });
-    link.onRemoteAddress = (ip) => this.linkAddressSink?.(peerId, ip);
+    link.onRemoteAddress = (ip) => {
+      this.addrs.set(peerId, ip);
+      this.linkAddressSink?.(peerId, ip);
+      this.room.onLinkAddress(peerId, ip);
+    };
     return link;
   }
 
@@ -634,6 +742,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.hiSentTo.add(link);
     this.lockstep.touch();
     link.send("reliable", encodeMessage(this.lockstep.hiMessage(this.localPeerId)));
+    if (link.remoteId === this.hostPeerId) this.room.onHostLink(); // right behind `hi`, before any game code sees `ready`
     this.markReady();
     this.emit("ready");
     this.emit("peerReady", this.roster.get(link.remoteId) ?? { peerId: link.remoteId, name: "" });
@@ -734,6 +843,9 @@ export class Lobby extends Emitter<LobbyEvents> {
       case "pause_request": case "pause_state": case "pause_refuse":
         this.pause.handle(from, msg);
         break;
+      case "room":
+        this.room.handleFrame(from, msg.body);
+        break;
       case "voice":
         if (channel === "voice") this.voice.handle(from, route, msg); // a voice frame on another channel is ignored
         break;
@@ -767,6 +879,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     }, 0);
     this.chat.sendHistory(from);
     this.pause.sendState(from);
+    this.room.onPeerHi(from);
     if (this.mode === "lockstep") this.lockstep.onPeerHi(from, lastTick);
     this.emit("peerReady", this.roster.get(from) ?? { peerId: from, name: "" });
     this.flush(from);
@@ -862,6 +975,8 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.lastHeard.clear(); // joiners spoke to the old host; their clocks start when they say hi to us
     this.lockstep.becomeHost();
     this.pause.onBecameHost();
+    this.room.onBecameHost();
+    this.phaseSent = [];
     this.emit("hostChanged", this.localPeerId);
     if (this.serverUp) this.signaling.send({ t: "host_changed", hostId: this.localPeerId, epoch: this.epoch });
     for (const p of this.roster.keys()) {
@@ -892,6 +1007,7 @@ export class Lobby extends Emitter<LobbyEvents> {
       }
       this.connected.clear();
       this.lockstep.becomeJoiner();
+      this.room.onBecameJoiner();
     }
     this.setHost(hostId);
     const link = this.links.get(from);
@@ -949,10 +1065,17 @@ export class Lobby extends Emitter<LobbyEvents> {
         this.roster = new Map(st.peers.map((p) => [p.peerId, seatName(p)]));
         for (const [id, p] of this.roster) {
           const old = before.get(id);
-          if (old && old.name !== p.name) this.emit("peerRenamed", p, old.name);
+          if (old && old.name !== p.name) {
+            this.emit("peerRenamed", p, old.name);
+            this.room.onRenamed(id, p.name);
+          }
         }
         if (st.hostId !== this.hostPeerId && !this.isHost) this.setHost(st.hostId);
-        this.setPhase(st.phase);
+        // The host is the source of the phase: while phase changes it sent are still echoing back, a late echo must not undo them.
+        if (!this.isHost) this.setPhase(st.phase);
+        else if (this.phaseSent.length) {
+          if (st.phase === this.phaseSent[0]) this.phaseSent.shift();
+        } else this.setPhase(st.phase);
         break;
       }
       case "meta":
@@ -967,10 +1090,13 @@ export class Lobby extends Emitter<LobbyEvents> {
         break;
       case "error":
         if (m.code === "kicked") {
-          const d = (m.data ?? {}) as { ban?: unknown; closeCode?: unknown; closeReason?: unknown };
+          const d = (m.data ?? {}) as { ban?: unknown; closeCode?: unknown; closeReason?: unknown; code?: unknown; reason?: unknown };
           const close: CloseInfo = {};
           if (typeof d.closeCode === "number") close.code = d.closeCode;
           if (typeof d.closeReason === "string") close.reason = d.closeReason;
+          const rc = typeof d.code === "string" && CODE_PATTERN.test(d.code) ? d.code : d.reason === "denied" ? "denied" : d.ban === false ? "disconnected" : "kicked";
+          this.removal ??= { code: rc, reason: removalReason(rc, close.reason), ban: (d.ban !== false || rc === "banned") && d.reason !== "denied" };
+          this.room.onRemoved(this.removal);
           this.teardown(d.ban === false ? "disconnected" : "kicked", close.code !== undefined || close.reason !== undefined ? close : undefined);
         }
         else this.reportError(new OneLobbyError(String(m.code), String(m.msg ?? ""), m.data as Record<string, unknown> | undefined));
@@ -1075,6 +1201,8 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.chat.onPeerLeft(peerId);
     this.voice.onPeerLeft(peerId);
     this.pause.onPeerLeft(peerId);
+    this.addrs.delete(peerId);
+    this.room.onPeerLeft(peerId, reason, linger);
     if (peer) this.emit("peerLeft", peer, reason, close);
     if (peerId === this.hostPeerId && !this.isHost) {
       this.handleHostLost(reason);
@@ -1091,9 +1219,13 @@ export class Lobby extends Emitter<LobbyEvents> {
     if (p !== "lobby" && p !== "in_game") return;
     if (this.phase === p) return;
     this.phase = p;
-    if (p === "lobby") this.pause.onLobbyPhase();
+    if (p === "lobby") {
+      this.pause.onLobbyPhase();
+      this.lockstep.reset(); // back to lobby: the next start is a fresh match
+    }
     if (p === "in_game" && !this.lockstep.started) this.lockstep.markStarted();
     this.emit("phase", p);
+    this.room.onPhase(p);
   }
 
   private onServerClosed(): void {
@@ -1172,6 +1304,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.cancelPing?.();
     this.lockstep.stop();
     this.voice.close();
+    this.room.close();
     for (const l of [...this.links.values(), ...this.lingering]) {
       l.onClose = null;
       l.onMessage = null;

@@ -11,6 +11,7 @@
  */
 import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
+import type { RoomOptions } from "../room.js";
 import type { IceServer, LinkFactory } from "../transport.js";
 import { encodeJoinCode, encodeRoomCode } from "../joincode.js";
 import { joinCodeKindName, type IpCodeKind, type JoinCodeKind } from "../join-code-kind.js";
@@ -85,6 +86,8 @@ export interface DirectHostOptions {
   allowedOrigins?: string[];
   /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped. */
   rateLimit?: RateLimit;
+  /** Room layer settings (ready, countdown, spectators, per-player data...); the blueprint's `room` fills the defaults. */
+  room?: RoomOptions;
   /** Receives the startup line (`lobby.directHostLog`) once the host is up. Default `console.log`; `false` prints nothing. */
   log?: ((line: string) => void) | false;
 }
@@ -150,6 +153,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   // busy (another program holds it): try the next fallbackPorts; the join code carries the port
   const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));
   const maxPlayers = o.maxPlayers ?? 4;
+  // spectators ride on the hub's capacity; the room layer splits it (spec/room.md s.4.6)
+  const capacity = maxPlayers + (kit.roomOptionsFor(o.room).spectators ?? 0);
   const nostrOn = o.nostr !== false;
   const nostrCfg = typeof o.nostr === "object" ? o.nostr : {};
   const stunUrls = nostrOn ? (nostrCfg.stun ?? [...DEFAULT_NOSTR_STUN]) : [];
@@ -158,7 +163,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   let anyReserved = false;
   for (let p = port; !hub; p++) {
     try {
-      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password, o.iceServers), stunUrls }, o.bindHost ? { host: o.bindHost } : undefined);
+      hub = await DirectHubHost.listen(p, { ...directHubOptions(capacity, o.password, o.iceServers), stunUrls }, o.bindHost ? { host: o.bindHost } : undefined);
     } catch (e) {
       if (!(e instanceof PortInUseError)) throw e;
       if (e.reserved) anyReserved = true;
@@ -191,7 +196,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   let lobby: Lobby;
   try {
     const name = o.name ?? `${kit.options.displayName || "Player"}'s game`;
-    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit };
+    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit, password: o.password, room: o.room };
     lobby = await kit.hostDirectWith(h, { socketFactory: () => hub.connectLocal(), wrapLinks });
   } catch (e) {
     await mapping;
@@ -225,7 +230,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
         connect: env.connect,
         clock: env.clock,
         wall: env.wall,
-        maxPlayers,
+        maxPlayers: capacity,
         onChange: () => onRelays?.(),
       });
       hub.nostr = bridge;

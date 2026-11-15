@@ -43,3 +43,10 @@ export { RelayPool, makeEvent, NOSTR_KIND } from "./nostr/relays.js";
 export { schnorrSign, schnorrVerify, schnorrPublicKey } from "./nostr/secp256k1.js";
 export { deriveRoomKeys } from "./nostr/crypto.js";
 export { encodeRoomCodeFor } from "./joincode.js";
+// The room layer's pure rules and the stores it keeps (spec/room.md; vectors in spec/vectors/room.json).
+export { memoryStore, localStore, fileStore, loadPlayerId, playerIdKey, bansKey } from "./storage.js";
+export { MAX_BANS, HUB_BAN_IDS } from "./bans.js";
+export { ROOM_JOIN_WAIT_MS, COUNTDOWN_TICK_MS, RESYNC_GAP_MS, ROOM_REQUESTS_PER_SECOND, resolveSettings } from "./room.js";
+export * from "./room-rules.js";
+export { encodeRoomFrame, decodeRoomFrame, parseRoomBody, roomMessage } from "./room-wire.js";
+export type { RoomMsg, GoneWhy } from "./room-wire.js";

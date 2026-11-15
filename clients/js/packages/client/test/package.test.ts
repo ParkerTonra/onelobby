@@ -79,6 +79,7 @@ describe("export surface", () => {
       "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
       "checkNostrRelays", "DEFAULT_NOSTR_RELAYS", "DEFAULT_NOSTR_STUN", "encodeRoomCode",
       "parseBlueprint", "defineBlueprint", "BlueprintError", "turnLogin", "turnCredential", "parseTurnLine",
+      "Room", "BanList",
     ].sort());
   });
 

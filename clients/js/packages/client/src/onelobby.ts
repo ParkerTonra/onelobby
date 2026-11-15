@@ -1,7 +1,10 @@
 import { systemClock, type Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
 import { normalizeCode } from "./crockford.js";
-import { Lobby, type RateLimit } from "./lobby.js";
+import { Lobby, type RateLimit, type RoomSetup } from "./lobby.js";
+import { BanList } from "./bans.js";
+import type { RoomJoinOptions, RoomOptions } from "./room.js";
+import { fileStore, loadPlayerId, localStore, memoryStore, type KeyValueStore } from "./storage.js";
 import {
   OneLobbyError,
   PROTO_ID,
@@ -52,6 +55,13 @@ export interface AdvancedOptions {
   storage?: SeatStorage | null;
   /** WebSocket to a Nostr relay (default: the runtime's `WebSocket`); for Node older than 22 or tests. */
   nostrConnect?: RelayConnect;
+  /**
+   * Where the per-install player id is kept (spec/room.md s.1). Default: `playerIdFile` when given, else `localStorage`
+   * where the page has one, else memory (the id then lasts one process).
+   */
+  playerIdStore?: KeyValueStore | null;
+  /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
+  banStore?: KeyValueStore | null;
 }
 
 export interface OneLobbyOptions {
@@ -84,6 +94,15 @@ export interface OneLobbyOptions {
    * instead of joining as a new player. Cleared when the session ends. Default true where sessionStorage exists.
    */
   rememberSeat?: boolean;
+  /**
+   * Node and other runtimes without `localStorage`: a JSON file path that keeps the per-install player id across runs.
+   * It is a random id made once, not an account or a hardware id (spec/room.md s.1).
+   */
+  playerIdFile?: string;
+  /** Node: a JSON file path that keeps the host's ban list across lobbies and runs (spec/room.md s.5.3). */
+  banFile?: string;
+  /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
+  room?: RoomOptions;
   /** Test and runtime seams (see AdvancedOptions). */
   advanced?: AdvancedOptions;
 
@@ -126,6 +145,19 @@ export interface HostOptions {
   meta?: Record<string, string>;
   /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped before `message` fires or is relayed. */
   rateLimit?: RateLimit;
+  /**
+   * Joiners must give this password (at most 64 characters) or get `bad_password`: the hub checks it when it knows
+   * (`welcome.features` has "room"), and the host's room layer checks it on every route (spec/room.md s.6).
+   */
+  password?: string;
+  /** Room layer settings: ready, countdown, auto start, spectators, late join policy, per-player data (`RoomOptions`). */
+  room?: RoomOptions;
+}
+
+/** What a joiner brings to `join()`. */
+export interface JoinOptions extends RoomJoinOptions {
+  /** The lobby's password, if it has one; a wrong one fails with `bad_password`. */
+  password?: string;
 }
 
 export interface ListOptions {
@@ -137,6 +169,10 @@ export interface ListOptions {
 export interface JoinDirectOptions {
   /** The host's password, if it set one; a wrong one fails with `bad_password`. */
   password?: string;
+  /** Join as a spectator instead of a player (when the host allows spectators). */
+  role?: "player" | "spectator";
+  /** Your starting per-player data (colour, avatar, team, game keys); the host validates it (spec/room.md s.4.2). */
+  data?: Record<string, string>;
   /** Port for an address typed without one (default 47810, docs/design/direct-ip.md s.2). */
   defaultPort?: number;
   /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
@@ -212,6 +248,11 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   private createMic: (() => FrameSource) | null;
   private createSink: (() => AudioSink) | null;
   private storage: SeatStorage | null;
+  private idStore: KeyValueStore | null;
+  private banStore: KeyValueStore | null;
+  private banList: BanList | null = null;
+  private pid: string | null = null;
+  private roomOpts: RoomOptions;
   private nostrConnectFn: RelayConnect | undefined;
   /** The validated, frozen onelobby.json this kit was built from (`OneLobby.fromConfig`); undefined for `new OneLobby`. */
   readonly blueprint?: Blueprint;
@@ -241,6 +282,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       readyTimeoutMs: bp.session.readyTimeoutMs,
       peerTimeoutMs: bp.session.peerTimeoutMs,
       rememberSeat: overrides.rememberSeat ?? bp.lobby.rejoin,
+      room: blueprintRoom(bp),
       advanced: overrides.advanced,
     });
     (kit as { blueprint?: Blueprint }).blueprint = bp;
@@ -260,6 +302,24 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       meta: { ...bp.lobby.meta },
       ...(bp.session.rateLimit ? { rateLimit: { ...bp.session.rateLimit } } : {}),
     };
+  }
+
+  /** The room layer options for a lobby this kit hosts: the kit's (`room`, the blueprint) under the explicit ones. */
+  roomOptionsFor(explicit?: RoomOptions): RoomOptions {
+    return { ...this.roomOpts, ...definedOnly(explicit), ...(explicit?.data ? { data: { ...(this.roomOpts.data ?? {}), ...explicit.data } } : {}) };
+  }
+
+  /**
+   * This install's player id for the game (32 hex characters, made once and kept: spec/room.md s.1). It is sent in
+   * `hello` so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
+   */
+  get playerId(): string {
+    return (this.pid ??= loadPlayerId(this.idStore, this.options.gameId));
+  }
+
+  /** The host-side ban list (also `lobby.room.bans`): persistent per game, see `banFile` and `advanced.banStore`. */
+  get bans(): BanList {
+    return (this.banList ??= new BanList(this.banStore, this.options.gameId));
   }
 
   constructor(o: OneLobbyOptions) {
@@ -291,6 +351,10 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     this.createSink = sink !== undefined ? sink : typeof AudioContext !== "undefined" ? () => new WebAudioSink() : null;
     this.nostrConnectFn = a.nostrConnect;
     this.storage = o.rememberSeat === false ? null : a.storage !== undefined ? a.storage : browserStorage();
+    const fallback = () => localStore() ?? memoryStore();
+    this.idStore = a.playerIdStore !== undefined ? a.playerIdStore : o.playerIdFile ? fileStore(o.playerIdFile) : fallback();
+    this.banStore = a.banStore !== undefined ? a.banStore : o.banFile ? fileStore(o.banFile) : fallback();
+    this.roomOpts = { ...(o.room ?? {}) };
   }
 
   // ---- remembered seat -------------------------------------------------------------------------------------------
@@ -367,6 +431,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       netVersion: this.options.netVersion,
       client: { lib: LIB_NAME, ver: LIB_VERSION, platform: typeof navigator !== "undefined" ? "browser" : "node" },
       name: this.options.displayName.slice(0, 24),
+      playerId: this.playerId,
       ...(resumeToken ? { resumeToken } : {}),
     };
   }
@@ -404,7 +469,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     return sig;
   }
 
-  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit): Lobby {
+  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit, room?: RoomSetup): Lobby {
     const lobby = new Lobby({
       signaling: sig,
       state,
@@ -421,6 +486,8 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       readyTimeoutMs: this.options.readyTimeoutMs,
       peerTimeoutMs: this.options.peerTimeoutMs,
       rateLimit,
+      gameId: this.options.gameId,
+      room: { pid: this.playerId, bans: this.bans, ...(state.you === state.hostId ? { options: this.roomOptionsFor() } : {}), ...room },
     });
     lobby.errorSink = (e) => this.emit("error", e);
     if (this.blueprint) guardLobby(lobby, this.blueprint);
@@ -439,30 +506,46 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   /** With a blueprint (`fromConfig`) every option defaults from `lobby.*`; explicit options win. */
   async host(opts?: Partial<HostOptions>): Promise<Lobby> {
     const h = { name: "Game", maxPlayers: 4, ...this.blueprintHostDefaults(), ...definedOnly(opts) } as HostOptions;
+    const room = this.checkRoomHost(h);
     const { sig, welcome } = await this.connect();
     try {
+      const roomHub = (welcome.features ?? []).includes("room");
+      const spectators = room.spectators ?? 0;
+      const limit = welcome.limits?.maxPlayers ?? 64;
+      if (h.maxPlayers + spectators > (roomHub ? 250 : limit)) throw new RangeError(`maxPlayers + spectators is more than the hub allows (${roomHub ? 250 : limit})`);
       const state = await sig.request<LobbyState>(
         {
           t: "create",
           name: h.name,
-          maxPlayers: h.maxPlayers,
+          // a hub without the room feature has no spectator slots: it gets the sum as its capacity and the room splits it
+          maxPlayers: roomHub ? h.maxPlayers : h.maxPlayers + spectators,
           visibility: h.visibility ?? "unlisted",
           mode: this.options.mode,
           tickRate: this.options.tickRate,
-          lateJoin: h.lateJoin ?? true,
+          lateJoin: room.lateJoin !== undefined ? room.lateJoin !== "refuse" : (h.lateJoin ?? true),
           meta: h.meta ?? {},
           ...(this.options.relayOnly ? { relayOnly: true } : {}),
+          ...(roomHub && h.password ? { password: h.password } : {}),
+          ...(roomHub && spectators > 0 ? { spectators } : {}),
         },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state, undefined, h.rateLimit);
+      return this.makeLobby(sig, welcome, state, undefined, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers });
     } catch (e) {
       sig.close();
       throw e;
     }
   }
 
-  async join(code: string): Promise<Lobby> {
+  /** The room options of a host call, checked: `password_required` and the password length. */
+  private checkRoomHost(h: HostOptions): RoomOptions {
+    const room = this.roomOptionsFor(h.room);
+    if (room.passwordRequired && !h.password) throw new OneLobbyError("password_required", "this game requires a lobby password (room.passwordRequired); pass `password`");
+    if (h.password !== undefined && (typeof h.password !== "string" || h.password.length > 64)) throw new RangeError("password must be a string of at most 64 characters");
+    return room;
+  }
+
+  async join(code: string, opts: JoinOptions = {}): Promise<Lobby> {
     const norm = normalizeCode(code);
     if (!norm) throw new OneLobbyError("bad_code", `"${code}" is not a valid join code`);
     const seat = this.loadSeat();
@@ -477,8 +560,8 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     }
     const { sig, welcome } = await this.connect();
     try {
-      const state = await sig.request<LobbyState>({ t: "join", code: norm }, "lobby");
-      return this.makeLobby(sig, welcome, state);
+      const state = await sig.request<LobbyState>({ t: "join", code: norm, ...(opts.password ? { password: opts.password } : {}) }, "lobby");
+      return this.makeLobby(sig, welcome, state, undefined, undefined, { join: joinSetup(opts) });
     } catch (e) {
       sig.close();
       throw e;
@@ -496,7 +579,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const { sig, welcome } = await this.connectDirect(t, opts);
     try {
       const state = await sig.request<LobbyState>({ t: "join", ...(opts.password ? { password: opts.password } : {}) }, "lobby");
-      const lobby = this.makeLobby(sig, this.withStun(welcome, t, opts), state, { links: t.links });
+      const lobby = this.makeLobby(sig, this.withStun(welcome, t, opts), state, { links: t.links }, undefined, { join: joinSetup(opts) });
       // a joiner's joinCode is what it joined with (normalized), so a HUD can show it on both sides
       lobby.joinCode = t.joinedWith;
       return lobby;
@@ -582,14 +665,18 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
 
   /** @internal onelobby/direct's host: create the one lobby on the embedded hub, in direct mode. */
   async hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby> {
+    const room = this.checkRoomHost(h);
+    const spectators = room.spectators ?? 0;
     const { sig, welcome } = await this.connect("onelobby-direct://host/", hooks.socketFactory);
     try {
+      // the hub's own password option guards joins; the host's room layer checks it too (spec/room.md s.6)
       const state = await sig.request<LobbyState>(
         { t: "create", name: h.name, maxPlayers: h.maxPlayers, visibility: "unlisted", mode: this.options.mode, tickRate: this.options.tickRate,
-          lateJoin: h.lateJoin ?? true, meta: h.meta ?? {}, ...(this.options.relayOnly ? { relayOnly: true } : {}) },
+          lateJoin: room.lateJoin !== undefined ? room.lateJoin !== "refuse" : (h.lateJoin ?? true), meta: h.meta ?? {},
+          ...(this.options.relayOnly ? { relayOnly: true } : {}), ...(spectators > 0 ? { spectators } : {}) },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit);
+      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers });
     } catch (e) {
       sig.close();
       throw e;
@@ -659,6 +746,29 @@ function joinedWith(addr: { host: string; port: number; isIPv6: boolean; display
   } catch {
     return addr.display;
   }
+}
+
+/** The room settings an `onelobby.json` implies. */
+function blueprintRoom(bp: Blueprint): RoomOptions {
+  const r = bp.room;
+  return {
+    autoStart: r.autoStart,
+    autoStartPlayers: r.autoStartPlayers,
+    minPlayers: r.minPlayers,
+    countdownSeconds: r.countdownSeconds,
+    spectators: r.spectators,
+    lateJoin: r.lateJoin,
+    seatDropped: r.seatDropped,
+    rejoinWindowSeconds: r.rejoinWindowSeconds,
+    passwordRequired: r.passwordRequired,
+    maxNameLength: bp.players.maxNameLength,
+    data: Object.fromEntries(Object.entries(r.data).map(([k, v]) => [k, { ...v, ...(v.values ? { values: [...v.values] } : {}) }])),
+  };
+}
+
+/** The room `join` a joiner sends: its role, starting data and the password it knows. */
+function joinSetup(o: JoinOptions | JoinDirectOptions): RoomJoinOptions {
+  return { role: o.role ?? "player", data: { ...(o.data ?? {}) }, password: o.password ?? "" };
 }
 
 function definedOnly<T extends object>(o: T | undefined): Partial<T> {

@@ -5,6 +5,7 @@
  * fallback: with no relay reachable it rejects with `direct_unreachable`. Nothing here imports a Node module.
  */
 import type { HostOptions, OneLobby } from "../onelobby.js";
+import type { RoomOptions } from "../room.js";
 import type { Lobby, RateLimit } from "../lobby.js";
 import type { IceServer } from "../transport.js";
 import { encodeRoomCode } from "../joincode.js";
@@ -32,6 +33,8 @@ export interface BrowserHostOptions {
   meta?: Record<string, string>;
   /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped. */
   rateLimit?: RateLimit;
+  /** Room layer settings (ready, countdown, spectators, per-player data...); the blueprint's `room` fills the defaults. */
+  room?: RoomOptions;
   /** Relays (default: the blueprint's `hosting.nostrRelays`, else the library list) and STUN servers (default Google's and Cloudflare's). */
   nostr?: { relays?: string[]; stun?: string[] };
   /** Extra ICE servers (a TURN relay) put in `welcome.ice` after the STUN entry, so every joiner gets them; see DirectHostOptions. */
@@ -74,10 +77,11 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
       }
     : defined;
   const maxPlayers = o.maxPlayers ?? 4;
+  const capacity = maxPlayers + (kit.roomOptionsFor(o.room).spectators ?? 0);
   const relays = o.nostr?.relays && o.nostr.relays.length > 0 ? o.nostr.relays : [...DEFAULT_NOSTR_RELAYS];
   const stunUrls = o.nostr?.stun ?? [...DEFAULT_NOSTR_STUN];
 
-  const hub = new SignalingHub({ ...directHubOptions(maxPlayers, o.password, o.iceServers), stunUrls });
+  const hub = new SignalingHub({ ...directHubOptions(capacity, o.password, o.iceServers), stunUrls });
   const ticker = setInterval(() => hub.tick(), 1000);
   (ticker as { unref?: () => void }).unref?.();
   const code = encodeRoomCode();
@@ -89,7 +93,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
   };
   try {
     try {
-      bridge = await NostrHostBridge.start(hub, { code, relays, connect: env.connect, clock: env.clock, wall: env.wall, maxPlayers });
+      bridge = await NostrHostBridge.start(hub, { code, relays, connect: env.connect, clock: env.clock, wall: env.wall, maxPlayers: capacity });
     } catch (e) {
       throw new OneLobbyError("direct_unreachable", `cannot reach any Nostr relay (${e instanceof Error ? e.message : String(e)}); a browser host has no other way to be reached`);
     }
@@ -98,7 +102,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
     }
 
     const name = o.name ?? `${kit.options.displayName || "Player"}'s game`;
-    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit };
+    const h: HostOptions = { name, maxPlayers, lateJoin: o.lateJoin ?? true, meta: o.meta, rateLimit: o.rateLimit, password: o.password, room: o.room };
     // joiners have no address to dial: links use the hub's STUN list, no port pin
     const lobby = await kit.hostDirectWith(h, { socketFactory: () => new LocalHubSocket(hub), wrapLinks: (inner) => inner });
     lobby.linkAddressSink = (peerId, ip) => hub.reportLinkAddress(peerId, ip);

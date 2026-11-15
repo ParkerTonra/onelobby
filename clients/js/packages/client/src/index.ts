@@ -4,7 +4,7 @@
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, FromConfigOverrides, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 // Blueprint v1: onelobby.json (docs/design/blueprint.md). OneLobby.fromConfig(json) builds a kit from it.
@@ -20,6 +20,15 @@ export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";
 export { Pause } from "./pause.js";
+// The room layer (docs/recipes/room.md, spec/room.md): lobby.room.
+export { Room } from "./room.js";
+export type {
+  RoomOptions, RoomJoinOptions, RoomEvents, RoomEntry, RoomSettings, RoomRole, RoomState, RoomStatus, LateJoinPolicy, AutoStartMode,
+  SeatDroppedPolicy, DataSpec, DataDecl, TextFilter, CountdownView, CountdownInfo, SeatDroppedInfo, SeatRestoredInfo, RemovalInfo, LeftEntry,
+} from "./room.js";
+export { BanList } from "./bans.js";
+export type { BanEntry } from "./room-rules.js";
+export type { KeyValueStore } from "./storage.js";
 export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";

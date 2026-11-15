@@ -197,6 +197,32 @@ export class Lockstep extends Emitter<LockstepEvents> {
     this.lastFrameRx = this.hub.clock.now();
   }
 
+  /**
+   * Back to the lobby (the room's back to lobby and rematch): forgets the match so the next `hostStart()` / first frame
+   * begins at tick 1 again. The host keeps its role and the peers that said hi; the game builds a fresh sim on `started`.
+   */
+  reset(): void {
+    this.cancelTicker?.();
+    this.cancelTicker = null;
+    this._started = false;
+    this.queue = [];
+    this.history = [];
+    this.pending = [];
+    this.lastFrameTick = this.hosting ? 0 : -1;
+    this.consumedTick = 0;
+    this.awaitingSnapshot = false;
+    this.pendingSnapshot = null;
+    this.emitted = 0;
+    this.held = false;
+    this.snapshotting.clear();
+    this.ownHashes.clear();
+    this.peerHashes.clear();
+    this.desyncs.clear();
+    this.lastHashRx.clear();
+    this.staleUpTo.clear();
+    this.lastFrameRx = this.hub.clock.now();
+  }
+
   /** A joiner just learned the session is in game (first frame, snapshot, or phase from the server). */
   markStarted(): void {
     if (this._started) return;

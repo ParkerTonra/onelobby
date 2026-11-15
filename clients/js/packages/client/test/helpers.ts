@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { createSocket } from "node:dgram";
-import { Gridpaint, OneLobby, type Lobby } from "../src/internals.js";
+import { Gridpaint, OneLobby, type Lobby, type OneLobbyOptions } from "../src/internals.js";
 import type { AudioSink, FrameSource, VoiceCodec } from "../src/internals.js";
 import { ManualClock, MemoryNetwork, MemoryServer } from "../src/testing.js";
 
@@ -50,7 +50,7 @@ export interface Rig {
   clock: ManualClock;
   server: MemoryServer;
   net: MemoryNetwork;
-  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number; peerTimeoutMs?: number }): OneLobby;
+  make(name: string, opts?: { mode?: "lockstep" | "raw"; hashEveryTicks?: number; peerTimeoutMs?: number; extra?: Partial<OneLobbyOptions> }): OneLobby;
   sinks: Map<string, RecordingSink>;
   mics: Map<string, ToneMic>;
 }
@@ -88,6 +88,7 @@ export function rig(): Rig {
         voiceCodec: new FakeCodec(),
         createMic: () => mic,
         createSink: () => sink,
+        ...opts.extra,
       });
     },
   };

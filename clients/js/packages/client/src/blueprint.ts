@@ -5,6 +5,7 @@
  */
 import { OneLobbyError } from "./signaling.js";
 import { DEFAULT_NOSTR_RELAYS } from "./nostr/relays.js";
+import { DATA_KEY_PATTERN, checkDataValue, type AutoStartMode, type DataDecl, type LateJoinPolicy, type SeatDroppedPolicy } from "./room-rules.js";
 
 export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "godot-gdscript" | "unity" | "dotnet";
 
@@ -32,6 +33,19 @@ export interface Blueprint {
     readonly rejoin: boolean;
     readonly joinLink: boolean;
     readonly meta: Readonly<Record<string, string>>;
+  };
+  /** The room layer's defaults (spec/room.md s.10). */
+  readonly room: {
+    readonly passwordRequired: boolean;
+    readonly autoStart: AutoStartMode;
+    readonly autoStartPlayers: number;
+    readonly minPlayers: number;
+    readonly countdownSeconds: number;
+    readonly spectators: number;
+    readonly lateJoin: LateJoinPolicy;
+    readonly seatDropped: SeatDroppedPolicy;
+    readonly rejoinWindowSeconds: number;
+    readonly data: Readonly<Record<string, Readonly<DataDecl>>>;
   };
   readonly sync: {
     readonly mode: "raw" | "lockstep" | "replication";
@@ -86,6 +100,19 @@ export interface BlueprintInput {
     joinLink?: boolean;
     meta?: Record<string, string>;
   };
+  room?: {
+    $comment?: string;
+    passwordRequired?: boolean;
+    autoStart?: AutoStartMode;
+    autoStartPlayers?: number;
+    minPlayers?: number;
+    countdownSeconds?: number;
+    spectators?: number;
+    lateJoin?: LateJoinPolicy;
+    seatDropped?: SeatDroppedPolicy;
+    rejoinWindowSeconds?: number;
+    data?: Record<string, DataDecl & { $comment?: string }>;
+  };
   sync?: { $comment?: string; mode?: "raw" | "lockstep" | "replication"; tickRate?: number; hashEveryTicks?: number };
   players?: { $comment?: string; identity?: "name" | "anonymous" | "platform"; maxNameLength?: number };
   chat?: { $comment?: string; text?: boolean; voice?: boolean; voiceMode?: "pushToTalk" | "voiceActivity" };
@@ -130,6 +157,7 @@ type Node =
   | { k: "const"; val: number }
   | { k: "strarr" }
   | { k: "meta" }
+  | { k: "roomdata" }
   | { k: "rate" }
   | { k: "steam" }
   | { k: "epic" };
@@ -168,6 +196,18 @@ const ROOT: Node = obj(
       rejoin: bool,
       joinLink: bool,
       meta: { k: "meta" },
+    }),
+    room: obj({
+      passwordRequired: bool,
+      autoStart: en("off", "all_ready", "players"),
+      autoStartPlayers: int(2, 64),
+      minPlayers: int(1, 64),
+      countdownSeconds: int(0, 60),
+      spectators: int(0, 64),
+      lateJoin: en("allow", "spectate", "refuse"),
+      seatDropped: en("window", "immediate"),
+      rejoinWindowSeconds: int(0, 600),
+      data: { k: "roomdata" },
     }),
     sync: obj({ mode: en("raw", "lockstep", "replication"), tickRate: int(1, 120), hashEveryTicks: int(1, 100000) }),
     players: obj({ identity: en("name", "anonymous", "platform"), maxNameLength: int(1, 24) }),
@@ -249,6 +289,43 @@ function check(n: Node, v: unknown, path: string): void {
     case "rate":
       check(obj({ messages: int(1), perMs: int(1) }, ["messages", "perMs"]), v, path);
       return;
+    case "roomdata": {
+      if (!isObj(v)) throw new Fail(path, "type", "must be an object of data declarations");
+      const keys = Object.keys(v).filter((k) => !IGNORED.has(k));
+      if (keys.length > 16) throw new Fail(path, "length", "at most 16 keys");
+      const decl = obj(
+        {
+          type: en("string", "int", "enum", "bool", "color"),
+          min: int(-2147483647, 2147483647),
+          max: int(-2147483647, 2147483647),
+          maxLength: int(1, 64),
+          values: { k: "strarr" },
+          default: str(),
+          hostOnly: bool,
+        },
+        ["type"],
+      );
+      for (const k of keys) {
+        if (!DATA_KEY_PATTERN.test(k)) throw new Fail(join(path, k), "pattern", `key must match ${DATA_KEY_PATTERN.source}`);
+        const d = v[k];
+        check(decl, d, join(path, k));
+        const o = d as Record<string, unknown>;
+        if (o.type === "enum") {
+          const vals = o.values;
+          if (!Array.isArray(vals) || vals.length === 0) throw new Fail(join(join(path, k), "values"), "required", "an enum needs values");
+          if (vals.length > 16) throw new Fail(join(join(path, k), "values"), "length", "at most 16 values");
+          vals.forEach((x, i) => {
+            if ((x as string).length < 1 || (x as string).length > 32) throw new Fail(join(join(join(path, k), "values"), i), "length", "1 to 32 characters");
+          });
+        }
+        if (typeof o.min === "number" && typeof o.max === "number" && o.min > o.max) throw new Fail(join(path, k), "min_gt_max", "min is more than max");
+        if (typeof o.default === "string" && o.default !== "") {
+          const decl2 = { ...o, min: o.min ?? 0, max: o.max ?? 255 } as unknown as DataDecl;
+          if (checkDataValue(decl2, o.default) === null) throw new Fail(join(join(path, k), "default"), "bad_default", "default fails its own type");
+        }
+      }
+      return;
+    }
     case "steam":
       if (typeof v === "boolean") return;
       if (!isObj(v)) throw new Fail(path, "type", "must be true, false or { appId }");
@@ -287,6 +364,7 @@ function fill(input: Record<string, unknown>): Blueprint {
   const hosting = sect(input.hosting);
   const lobby = sect(input.lobby);
   const sync = sect(input.sync);
+  const room = sect(input.room);
   const players = sect(input.players);
   const chat = sect(input.chat);
   const session = sect(input.session);
@@ -314,10 +392,22 @@ function fill(input: Record<string, unknown>): Blueprint {
       listed: lobby.listed ?? false,
       approveJoins: lobby.approveJoins ?? false,
       password: lobby.password ?? false,
-      lateJoin: lobby.lateJoin ?? true,
+      lateJoin: lobby.lateJoin ?? (room.lateJoin === undefined ? true : room.lateJoin !== "refuse"),
       rejoin: lobby.rejoin ?? true,
       joinLink: lobby.joinLink ?? (web || engine === "node-browser"),
       meta: lobby.meta ?? {},
+    },
+    room: {
+      passwordRequired: room.passwordRequired ?? false,
+      autoStart: room.autoStart ?? "off",
+      autoStartPlayers: room.autoStartPlayers ?? 2,
+      minPlayers: room.minPlayers ?? 1,
+      countdownSeconds: room.countdownSeconds ?? 3,
+      spectators: room.spectators ?? 0,
+      lateJoin: room.lateJoin ?? ((lobby.lateJoin ?? true) ? "allow" : "refuse"),
+      seatDropped: room.seatDropped ?? "window",
+      rejoinWindowSeconds: room.rejoinWindowSeconds ?? 60,
+      data: room.data ?? {},
     },
     sync: { mode: sync.mode ?? "raw", tickRate, hashEveryTicks: sync.hashEveryTicks ?? tickRate },
     players: { identity: players.identity ?? "name", maxNameLength: players.maxNameLength ?? 24 },
@@ -340,13 +430,20 @@ function fill(input: Record<string, unknown>): Blueprint {
   return out as unknown as Blueprint;
 }
 
-function crossRules(b: Blueprint): void {
+function crossRules(b: Blueprint, input: Record<string, unknown>): void {
   if (!b.hosting.direct && !b.hosting.server) throw new Fail("hosting", "hosting_none", "at least one of direct, server must be true");
   if (b.lobby.listed && b.lobby.approveJoins) throw new Fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
   if (b.engine === "web" && b.hosting.direct) throw new Fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
   const csharp = b.engine === "godot-csharp" || b.engine === "unity" || b.engine === "dotnet";
   if (b.sync.mode === "replication" && !csharp) throw new Fail("sync.mode", "replication_needs_csharp", "replication needs engine godot-csharp, unity or dotnet");
   if (b.sync.mode === "replication" && b.session.hostLeaves === "migrate") throw new Fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
+  const lateJoinGiven = sect(input.lobby).lateJoin !== undefined;
+  const roomLate = sect(input.room).lateJoin;
+  if (roomLate !== undefined && lateJoinGiven && (b.lobby.lateJoin ? roomLate === "refuse" : roomLate !== "refuse"))
+    throw new Fail("room.lateJoin", "late_join_conflict", "lobby.lateJoin and room.lateJoin disagree");
+  if (b.room.minPlayers > b.lobby.maxPlayers) throw new Fail("room.minPlayers", "min_exceeds_max", "more than lobby.maxPlayers");
+  if (b.room.autoStart === "players" && b.room.autoStartPlayers > b.lobby.maxPlayers)
+    throw new Fail("room.autoStartPlayers", "autostart_exceeds_players", "more than lobby.maxPlayers");
   if (b.session.hostLeaves === "migrate" && !b.hosting.server) throw new Fail("session.hostLeaves", "migrate_needs_server", "migrate needs hosting.server (direct lobbies always end)");
 }
 
@@ -358,8 +455,9 @@ export function parseBlueprint(json: unknown): Blueprint {
   let b: Blueprint;
   try {
     check(ROOT, json, "");
-    b = fill(strip(json) as Record<string, unknown>);
-    crossRules(b);
+    const clean = strip(json) as Record<string, unknown>;
+    b = fill(clean);
+    crossRules(b, clean);
   } catch (e) {
     if (e instanceof Fail) throw new BlueprintError(e.path, e.rule, e.detail);
     throw e;
