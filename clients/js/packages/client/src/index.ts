@@ -33,6 +33,8 @@ export { normalizeCode, formatCode } from "./crockford.js";
 export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";
 export { webRtcLinkFactoryFor } from "./webrtc.js";
+// TURN logins for a Direct host/joiner `iceServers` entry (coturn shared secret; spec/turn-rest.md).
+export { turnLogin, turnCredential } from "./turn.js";
 export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 // Types for the seams in OneLobbyOptions (ChannelName also tags raw messages).

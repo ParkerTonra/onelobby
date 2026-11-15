@@ -19,3 +19,17 @@ ttl        = 3600 seconds              expiry = now + ttl at the moment `welcome
   minting at a fixed time). Reference: `spec/reference/turn.mjs`.
 - Check against coturn: `turnutils_uclient -u <username> -w <credential> ...` must authenticate when the clock is
   before `expiry`.
+
+## Client login helper (Direct mode)
+
+A Direct host has no lobby server to mint logins, so each client library ships a helper that does it for a TURN server in
+the shared-secret scheme above, to feed a Direct `ice_servers` entry (`nostr-signaling.md` s.5):
+
+```
+login(secret, userId, ttlSeconds, nowSeconds = clock) -> { username = "<nowSeconds + ttlSeconds>:<userId>", credential }
+credential(secret, username)                           -> base64(HMAC-SHA1(secret, username))
+```
+
+`userId` has any `:` removed. JS `turnLogin` / `turnCredential`, C# `OneLobby.TurnLogin.Mint` / `Credential`, GDScript
+`OneLobbyTurn.login` / `credential`; all three are checked against `spec/vectors/turn-rest.json` (`vectors[]` and `mint`).
+The secret then ships inside the game, so use a TURN server whose secret may be shared, or one with a spend cap.

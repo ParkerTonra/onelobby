@@ -6,6 +6,7 @@
  */
 import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
+import type { IceServer } from "../transport.js";
 import { encodeRoomCode } from "../joincode.js";
 import { NostrHostBridge } from "../nostr/host.js";
 import { HOST_NOSTR_FIRST_RELAY_MS } from "../nostr/limits.js";
@@ -33,6 +34,8 @@ export interface BrowserHostOptions {
   rateLimit?: RateLimit;
   /** Relays (default: the blueprint's `hosting.nostrRelays`, else the library list) and STUN servers (default Google's and Cloudflare's). */
   nostr?: { relays?: string[]; stun?: string[] };
+  /** Extra ICE servers (a TURN relay) put in `welcome.ice` after the STUN entry, so every joiner gets them; see DirectHostOptions. */
+  iceServers?: IceServer[];
   /** Receives the startup line (`lobby.directHostLog`). Default `console.log`; `false` prints nothing. */
   log?: ((line: string) => void) | false;
   /** Receives the warning printed when the host tab goes hidden. Default `console.warn`; `false` prints nothing. */
@@ -74,7 +77,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
   const relays = o.nostr?.relays && o.nostr.relays.length > 0 ? o.nostr.relays : [...DEFAULT_NOSTR_RELAYS];
   const stunUrls = o.nostr?.stun ?? [...DEFAULT_NOSTR_STUN];
 
-  const hub = new SignalingHub({ ...directHubOptions(maxPlayers, o.password), stunUrls });
+  const hub = new SignalingHub({ ...directHubOptions(maxPlayers, o.password, o.iceServers), stunUrls });
   const ticker = setInterval(() => hub.tick(), 1000);
   (ticker as { unref?: () => void }).unref?.();
   const code = encodeRoomCode();

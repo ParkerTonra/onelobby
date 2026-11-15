@@ -199,14 +199,15 @@ namespace OneLobby.DataChannel
         private static void OnDescription(int pc, IntPtr sdp, IntPtr type, IntPtr ptr)
         {
             if (ById.TryGetValue(pc, out var l))
-                l._out.Enqueue(PeerSignal.Description(Rtc.FromUtf8z(type) ?? "", Rtc.FromUtf8z(sdp) ?? ""));
+                l._out.Enqueue(PeerSignal.Description(Rtc.FromUtf8z(type) ?? "", l.RelaySdp(Rtc.FromUtf8z(sdp) ?? "")));
         }
 
         [MonoPInvokeCallback(typeof(Rtc.CandidateCallback))]
         private static void OnCandidate(int pc, IntPtr cand, IntPtr mid, IntPtr ptr)
         {
-            if (ById.TryGetValue(pc, out var l))
-                l._out.Enqueue(PeerSignal.Ice(Rtc.FromUtf8z(cand) ?? "", Rtc.FromUtf8z(mid) ?? "", 0));
+            if (!ById.TryGetValue(pc, out var l)) return;
+            var text = Rtc.FromUtf8z(cand) ?? "";
+            if (!l._opts.RelayOnly || RelayCandidates.IsRelay(text)) l._out.Enqueue(PeerSignal.Ice(text, Rtc.FromUtf8z(mid) ?? "", 0));
         }
 
         [MonoPInvokeCallback(typeof(Rtc.StateCallback))]
@@ -299,20 +300,23 @@ namespace OneLobby.DataChannel
             if (r < 0) Fail("rtcSetLocalDescription offer " + r);
         }
 
+        /// <summary>Relay-only is enforced here, not left to libdatachannel's <c>iceTransportPolicy</c>: an SDP that crosses the wire carries no candidate lines but relay ones.</summary>
+        private string RelaySdp(string sdp) => _opts.RelayOnly ? RelayCandidates.FilterSdp(sdp) : sdp;
+
         public void ApplySignal(PeerSignal s)
         {
             if (Disposed || IsFailed) return;
             if (s.Sdp != null)
             {
                 var type = s.SdpType ?? "";
-                var sdp = Rtc.Utf8z(s.Sdp);
+                var sdp = Rtc.Utf8z(RelaySdp(s.Sdp));
                 var tb = Rtc.Utf8z(type);
                 int r;
                 fixed (byte* ps = sdp) fixed (byte* pt = tb) r = Rtc.rtcSetRemoteDescription(_pc, ps, pt);
                 if (r < 0) { Fail("rtcSetRemoteDescription " + type + " " + r); return; }
                 _remoteSet = true;
                 // e.g. the address a direct-IP joiner typed (docs/design/direct-ip.md s.2), tagged with the remote's media id
-                if (_opts.ExtraRemoteCandidates != null)
+                if (_opts.ExtraRemoteCandidates != null && !_opts.RelayOnly) // a typed address is a host candidate
                     foreach (var extra in _opts.ExtraRemoteCandidates) AddIce(extra, MidOf(s.Sdp));
                 while (_pendingIce.Count > 0) { var (c, m) = _pendingIce.Dequeue(); AddIce(c, m); }
                 if (type == "offer")
@@ -324,6 +328,7 @@ namespace OneLobby.DataChannel
             }
             else if (!string.IsNullOrEmpty(s.Candidate))
             {
+                if (_opts.RelayOnly && !RelayCandidates.IsRelay(s.Candidate!)) return;
                 if (_remoteSet) AddIce(s.Candidate!, s.SdpMid);
                 else _pendingIce.Enqueue((s.Candidate!, s.SdpMid));
             }

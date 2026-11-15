@@ -11,7 +11,7 @@
  */
 import type { HostOptions, OneLobby } from "../onelobby.js";
 import type { Lobby, RateLimit } from "../lobby.js";
-import type { LinkFactory } from "../transport.js";
+import type { IceServer, LinkFactory } from "../transport.js";
 import { encodeJoinCode, encodeRoomCode } from "../joincode.js";
 import { joinCodeKindName, type IpCodeKind, type JoinCodeKind } from "../join-code-kind.js";
 import { NostrHostBridge } from "../nostr/host.js";
@@ -58,6 +58,12 @@ export interface DirectHostOptions {
    * library list) and the STUN servers (default Google's and Cloudflare's public ones).
    */
   nostr?: boolean | { relays?: string[]; stun?: string[] };
+  /**
+   * Extra ICE servers, e.g. a TURN relay for players behind a strict NAT: `[{ urls: "turn:turn.example.com:3478", username,
+   * credential }]` (`turnLogin()` mints coturn-style logins). They go in the hub's `welcome.ice` after the STUN entry, so
+   * every joiner gets them, and the host's own links use them too. See spec/nostr-signaling.md s.5.
+   */
+  iceServers?: IceServer[];
   /**
    * This machine's public IPv4 address when the player forwarded the port by hand (no UPnP): the join code and
    * `joinUrl` carry it and `joinCodeKind` is "internet". Default: the `ONELOBBY_PUBLIC_IP` environment variable (then `portMapping` reads "manual (ONELOBBY_PUBLIC_IP)"). With it
@@ -152,7 +158,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   let anyReserved = false;
   for (let p = port; !hub; p++) {
     try {
-      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password), stunUrls }, o.bindHost ? { host: o.bindHost } : undefined);
+      hub = await DirectHubHost.listen(p, { ...directHubOptions(maxPlayers, o.password, o.iceServers), stunUrls }, o.bindHost ? { host: o.bindHost } : undefined);
     } catch (e) {
       if (!(e instanceof PortInUseError)) throw e;
       if (e.reserved) anyReserved = true;
@@ -177,8 +183,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
           mapped: false, method: "none" as const, externalIPv4: null, localIPv4: null, detail: e.message,
         }));
   const wrapLinks = (inner: LinkFactory): LinkFactory => ({
-    // Nostr joiners have no address to dial: the host needs STUN too (the UDP port pin stays)
-    create: (lo) => inner.create({ ...lo, iceServers: nostrOn ? lo.iceServers : [], portRange: { begin: hub.port, end: hub.port } }),
+    // the hub's welcome.ice is the host's list (STUN only with Nostr on, plus its ice_servers); the UDP port pin stays
+    create: (lo) => inner.create({ ...lo, portRange: { begin: hub.port, end: hub.port } }),
   });
   let lobby: Lobby;
   try {

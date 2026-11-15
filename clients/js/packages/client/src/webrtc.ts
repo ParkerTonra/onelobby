@@ -13,6 +13,11 @@ const CHANNEL_INIT: Record<ChannelName, RTCDataChannelInit> = {
   voice: { negotiated: true, id: CHANNEL_IDS.voice, ordered: false, maxRetransmits: 0 },
 };
 
+/** An ICE candidate line (or SDP `a=candidate:` line) of type relay (a TURN allocation). */
+export function isRelayCandidate(candidate: string): boolean {
+  return /\styp relay\b/.test(candidate);
+}
+
 /** Browser (or any WebRTC-capable runtime) PeerLink over RTCPeerConnection with three negotiated channels. */
 export class WebRtcLink implements PeerLink {
   readonly remoteId: number;
@@ -36,13 +41,16 @@ export class WebRtcLink implements PeerLink {
   private opened = 0;
   private early: [ChannelName, Uint8Array][] = [];
   private extra: string[];
+  private readonly relayOnly: boolean;
   private readonly born = Date.now();
   private trace: string[] = [];
 
   /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
   constructor(opts: LinkOptions, rtc: typeof RTCPeerConnection = globalThis.RTCPeerConnection) {
     this.remoteId = opts.remoteId;
-    this.extra = opts.extraRemoteCandidates ?? [];
+    this.relayOnly = opts.relayOnly;
+    // a typed-address candidate is a host candidate: relay-only drops it
+    this.extra = opts.relayOnly ? [] : opts.extraRemoteCandidates ?? [];
     const config: RTCConfiguration & Record<string, unknown> = {
       iceServers: opts.iceServers as RTCIceServer[],
       iceTransportPolicy: opts.relayOnly ? "relay" : "all",
@@ -55,7 +63,7 @@ export class WebRtcLink implements PeerLink {
     }
     this.pc = new rtc(config);
     this.pc.onicecandidate = (e) => {
-      if (e.candidate) {
+      if (e.candidate && (!this.relayOnly || isRelayCandidate(e.candidate.candidate))) {
         this.note(`out ice ${e.candidate.candidate}`);
         this.onSignal?.({ ice: e.candidate.toJSON() as { candidate: string } });
       }
@@ -123,18 +131,27 @@ export class WebRtcLink implements PeerLink {
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
         this.note("out offer");
-        this.onSignal?.({ sdp: { type: "offer", sdp: offer.sdp ?? "" } });
+        this.onSignal?.({ sdp: { type: "offer", sdp: this.relaySdp(offer.sdp ?? "") } });
       } catch (e) {
         this.fail(`offer failed: ${String(e)}`);
       }
     })();
   }
 
+  /**
+   * Relay-only is enforced here too, not left to `iceTransportPolicy` (some stacks, like Godot's webrtc-native, ignore it):
+   * an SDP that crosses the wire carries no candidate lines but relay ones.
+   */
+  private relaySdp(sdp: string): string {
+    if (!this.relayOnly) return sdp;
+    return sdp.split(/\r?\n/).filter((l) => !l.startsWith("a=candidate:") || isRelayCandidate(l)).join("\r\n");
+  }
+
   async handleSignal(s: SignalPayload): Promise<void> {
     this.note(`in ${s.sdp ? s.sdp.type : `ice ${(s.ice as { candidate?: string } | undefined)?.candidate}`}`);
     try {
       if (s.sdp) {
-        await this.pc.setRemoteDescription({ type: s.sdp.type, sdp: s.sdp.sdp });
+        await this.pc.setRemoteDescription({ type: s.sdp.type, sdp: this.relaySdp(s.sdp.sdp) });
         this.haveRemote = true;
         for (const c of this.pendingIce.splice(0)) await this.pc.addIceCandidate(c);
         if (this.extra.length) {
@@ -147,10 +164,12 @@ export class WebRtcLink implements PeerLink {
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
           this.note("out answer");
-          this.onSignal?.({ sdp: { type: "answer", sdp: answer.sdp ?? "" } });
+          this.onSignal?.({ sdp: { type: "answer", sdp: this.relaySdp(answer.sdp ?? "") } });
         }
       }
-      if (s.ice) {
+      if (s.ice && this.relayOnly && !isRelayCandidate((s.ice as { candidate?: string }).candidate ?? "")) {
+        this.note("dropped non-relay candidate");
+      } else if (s.ice) {
         // a candidate can come before the description it belongs to (the far side's native callbacks are unordered)
         if (this.haveRemote) await this.pc.addIceCandidate(s.ice as RTCIceCandidateInit);
         else this.pendingIce.push(s.ice as RTCIceCandidateInit);

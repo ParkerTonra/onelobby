@@ -87,7 +87,19 @@ read them from named constants and a test per language compares them with that f
 Both sides use public STUN (`stun:stun.l.google.com:19302`, `stun:stun.cloudflare.com:3478`; a setting) and no
 extra remote candidate. The host still pins its peer links to the direct UDP port, so a working router mapping
 (UPnP or a manual forward) also gives Nostr joiners a reachable candidate. Symmetric NAT on both sides fails as
-`ice_failed`; the fix is a forwarded port.
+`ice_failed`; the fix is a forwarded port, or a TURN relay (`ice_servers`, below; TURN setup: `turn-rest.md`).
+
+**Direct `ice_servers` (TURN).** A Direct host option `ice_servers` is a list of `{urls, username?, credential?}` entries
+(`urls` a string or a list; same shape as `welcome.ice`). The host's embedded hub puts them in `welcome.ice` after the STUN
+entry (when there is one), unchanged, so every joiner gets them whatever its client version, over IP and over Nostr. A
+joiner's own `ice_servers` option is appended to the list the host's `welcome` gives; the host sees only its own list. A
+TURN entry makes the link's relay-only retry available as in lobby-server mode. An IP-code joiner (no STUN) uses the TURN
+entries of the list and no STUN.
+
+`relayOnly` must force the relay: a link sends and accepts only `typ relay` candidates, both as trickled `ice` signals and
+as `a=candidate:` lines inside an SDP (offer, answer and the joiner's typed-address candidate), whatever the WebRTC stack's
+`iceTransportPolicy` does (libdatachannel's Godot binding ignores it). With both sides relay-only the one path left is
+relay to relay; with no TURN entry a relay-only link cannot connect and fails as `ice_failed`.
 
 ## 6. Relays
 

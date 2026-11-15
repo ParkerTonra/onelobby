@@ -14,6 +14,11 @@ export interface IceServer {
   ttl?: number;
 }
 
+/** Whether an ICE server entry has a `turn:` or `turns:` URL. */
+export function hasTurn(s: IceServer): boolean {
+  return (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^turns?:/i.test(String(u)));
+}
+
 export interface SdpInit {
   type: "offer" | "answer";
   sdp: string;

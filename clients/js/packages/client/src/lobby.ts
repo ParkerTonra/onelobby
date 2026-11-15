@@ -18,7 +18,7 @@ import { Lockstep } from "./lockstep.js";
 import { claimWinsWrapped, pickNewHost } from "./migration.js";
 import { Pause } from "./pause.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
-import type { ChannelName, IceServer, LinkFactory, PeerLink, SignalPayload } from "./transport.js";
+import { hasTurn, type ChannelName, type IceServer, type LinkFactory, type PeerLink, type SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 import { hostConnections, joinerSocket, type LobbySocket, type LobbySocketOptions } from "./socket.js";
 
@@ -137,7 +137,7 @@ export function seatName(p: PeerInfo): PeerInfo {
 }
 
 function hasRelay(ice: IceServer[]): boolean {
-  return ice.some((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^turns?:/i.test(String(u))));
+  return ice.some(hasTurn);
 }
 
 const HOST_WATCHDOG_MS = 250;

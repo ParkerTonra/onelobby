@@ -7,6 +7,7 @@
  * credentials, rate limits) behaves as in C#.
  */
 
+import type { IceServer } from "../transport.js";
 import { Metrics } from "./metrics.js";
 import { randomBelow, randomHex, shortHash, turnCredential } from "./sha1.js";
 
@@ -25,6 +26,8 @@ export interface HubOptions {
   turnUrls: string[];
   turnSecret: string;
   stunUrls: string[];
+  /** Extra ICE servers (a TURN relay) for `welcome.ice`, after the STUN entry; copied as given. Direct mode `ice_servers`. */
+  iceServers: IceServer[];
   region: string;
   /** Empty = every gameId allowed. */
   allowedGames: string[];
@@ -57,19 +60,20 @@ export interface HubOptions {
 
 export function defaultHubOptions(): HubOptions {
   return {
-    turnUrls: [], turnSecret: "", stunUrls: ["stun:stun.l.google.com:19302"], region: "", allowedGames: [], gameQuotas: {},
+    turnUrls: [], turnSecret: "", stunUrls: ["stun:stun.l.google.com:19302"], iceServers: [], region: "", allowedGames: [], gameQuotas: {},
     maxLobbies: 1000, maxPeers: 10000, hardMaxPlayers: 64, rateScale: 1, turnTtlSeconds: 3600, maxMessageBytes: 16 * 1024,
     disableIpLimits: false, createPerMin: 10, joinPerMin: 60, signalPerSec: 20, socketsPerIp: 32, openLobbiesPerIp: 8, idleTimeoutMs: 30_000,
     resumeWindowMs: 60_000, codeReuseMs: 24 * 3600 * 1000, listLimitMax: 100, singleLobby: false, password: null, issueCodes: true,
   };
 }
 
-/** Settings for a hub inside the host's game (docs/design/direct-ip.md s.2): no codes, no list, no ICE servers. */
-export function directHubOptions(maxPlayers: number, password?: string | null): HubOptions {
+/** Settings for a hub inside the host's game (docs/design/direct-ip.md s.2): no codes, no list, no ICE servers of its own
+ * (the caller adds STUN; `iceServers` are the host's TURN entries for `welcome.ice`). */
+export function directHubOptions(maxPlayers: number, password?: string | null, iceServers: IceServer[] = []): HubOptions {
   const n = Math.min(250, Math.max(2, maxPlayers));
   return {
     ...defaultHubOptions(),
-    singleLobby: true, issueCodes: false, password: password ? password : null, stunUrls: [], turnUrls: [],
+    singleLobby: true, issueCodes: false, password: password ? password : null, stunUrls: [], turnUrls: [], iceServers: iceServers.map((e) => ({ ...e })),
     maxLobbies: 1, hardMaxPlayers: n, maxPeers: n + 8,
   };
 }
@@ -508,6 +512,7 @@ export class SignalingHub {
       const credential = turnCredential(this.o.turnSecret, username);
       ice.push({ urls: [...this.o.turnUrls], username, credential, ttl: this.o.turnTtlSeconds });
     }
+    for (const e of this.o.iceServers) ice.push({ ...e } as Json);
     return ice;
   }
 

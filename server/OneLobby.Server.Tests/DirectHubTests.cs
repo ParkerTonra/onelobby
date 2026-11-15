@@ -80,6 +80,26 @@ public class DirectHubTests
     }
 
     [Fact]
+    public void Extra_ice_servers_follow_the_stun_entry_in_welcome_verbatim()
+    {
+        var (hub, _) = T.NewHub(o =>
+        {
+            var d = HubOptions.ForDirect(4, null);
+            o.SingleLobby = d.SingleLobby; o.IssueCodes = d.IssueCodes; o.MaxLobbies = d.MaxLobbies;
+            o.StunUrls = new() { "stun:s.example:3478" };
+            o.ExtraIce = new() { new IceEntry(new[] { "turn:t.example:3478" }, "u1", "c1"), new IceEntry(new[] { "stun:x.example" }) };
+        });
+        var ice = T.Ready(hub, "local", "Host").Last("welcome")["ice"]!.AsArray();
+        Assert.Equal(3, ice.Count);
+        Assert.Equal("stun:s.example:3478", (string)ice[0]!["urls"]![0]!);
+        Assert.Equal("turn:t.example:3478", (string)ice[1]!["urls"]![0]!);
+        Assert.Equal("u1", (string)ice[1]!["username"]!);
+        Assert.Equal("c1", (string)ice[1]!["credential"]!);
+        Assert.Equal("stun:x.example", (string)ice[2]!["urls"]![0]!);
+        Assert.Null(ice[2]!["username"]);
+    }
+
+    [Fact]
     public void Bad_password_is_refused_and_good_password_admits()
     {
         var (hub, _) = Direct("hunter2");

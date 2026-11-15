@@ -72,6 +72,27 @@ namespace OneLobby.Direct
         /// default list. The host startup line's <c>nostr n/m relays</c> shows the count in use.
         /// </summary>
         public NostrOptions Nostr { get; set; } = new NostrOptions();
+        /// <summary>
+        /// Extra ICE servers, e.g. a TURN relay for players behind a strict NAT: they go in the hub's <c>welcome.ice</c> after
+        /// the STUN entry, so every joiner gets them (any client version), and the host's own links use them too.
+        /// <see cref="TurnLogin"/> mints coturn-style logins. A TURN entry also turns on the relay-only retry halfway
+        /// through <c>ReadyTimeout</c>. See spec/nostr-signaling.md s.5.
+        /// </summary>
+        public IReadOnlyList<IceServer>? IceServers { get; set; }
+    }
+
+    /// <summary>Settings for the <c>JoinDirectAsync</c> / <c>RejoinDirectAsync</c> overloads that take options.</summary>
+    public sealed class JoinDirectOptions
+    {
+        /// <summary>The host's password, if it set one; a wrong one fails with <c>bad_password</c>.</summary>
+        public string? Password { get; set; }
+        /// <summary>Relays and STUN servers for a version 1 code; null = the blueprint's relays, else the defaults.</summary>
+        public NostrOptions? Nostr { get; set; }
+        /// <summary>
+        /// Extra ICE servers (a TURN relay) added to the list the host's <c>welcome</c> offers: for a joiner behind a strict NAT
+        /// whose host gave none. The host's own <see cref="DirectHostOptions.IceServers"/> reach every joiner already.
+        /// </summary>
+        public IReadOnlyList<IceServer>? IceServers { get; set; }
     }
 
     /// <summary>
@@ -253,6 +274,9 @@ namespace OneLobby.Direct
         {
             var ho = HubOptions.ForDirect(o.MaxPlayers, o.Password);
             if (nostr.Enabled) ho.StunUrls = new List<string>(nostr.EffectiveStun);
+            if (o.IceServers != null)
+                foreach (var s in o.IceServers)
+                    if (s != null && s.Urls.Count > 0) ho.ExtraIce.Add(new IceEntry(new List<string>(s.Urls), s.Username, s.Credential));
             return ho;
         }
 
@@ -443,7 +467,26 @@ namespace OneLobby.Direct
             return WithJoinCode(client.RejoinAsync(resumeToken, ct), code);
         }
 
-        private static bool TryUseDirect(LobbyClient client, string address, NostrOptions? nostr, out string joinCode, out Exception? fail)
+        /// <summary>As above, with <see cref="JoinDirectOptions"/> (password, Nostr relays and STUN, extra ICE servers such as a TURN relay).</summary>
+        public static Task<Lobby> JoinDirectAsync(this LobbyClient client, string address, JoinDirectOptions options, CancellationToken ct = default)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (!TryUseDirect(client, address, options.Nostr, out var code, out var fail, options.IceServers)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.JoinSingleLobbyAsync(options.Password, ct), code);
+        }
+
+        /// <summary>As <see cref="RejoinDirectAsync(LobbyClient, string, string, CancellationToken)"/>, with <see cref="JoinDirectOptions"/> (its Password is not used).</summary>
+        public static Task<Lobby> RejoinDirectAsync(this LobbyClient client, string address, string resumeToken, JoinDirectOptions options, CancellationToken ct = default)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrEmpty(resumeToken)) throw new ArgumentException("resume token required", nameof(resumeToken));
+            if (!TryUseDirect(client, address, options.Nostr, out var code, out var fail, options.IceServers)) return Task.FromException<Lobby>(fail!);
+            return WithJoinCode(client.RejoinAsync(resumeToken, ct), code);
+        }
+
+        private static bool TryUseDirect(LobbyClient client, string address, NostrOptions? nostr, out string joinCode, out Exception? fail, IReadOnlyList<IceServer>? extraIce = null)
         {
             joinCode = "";
             fail = null;
@@ -456,7 +499,7 @@ namespace OneLobby.Direct
                     var opts = nostr ?? new NostrOptions { Relays = relays is { Count: > 0 } ? relays : null };
                     try
                     {
-                        client.UseDirect(inner => new NostrJoinTransport(inner, normalized, opts), new Uri("onelobby-nostr://" + roomHex + "/"), null,
+                        client.UseDirect(inner => new NostrJoinTransport(inner, normalized, opts, extraIce), new Uri("onelobby-nostr://" + roomHex + "/"), null,
                             NostrSignalingSocket.GiveUpMs + 1000);
                     }
                     catch (Exception e) { fail = e; return false; }
@@ -478,7 +521,7 @@ namespace OneLobby.Direct
                     "'" + address + "' is not an address: use 192.168.1.20, 192.168.1.20:47810 or [2001:db8::1]:47810");
                 return false;
             }
-            try { client.UseDirect(inner => new DirectJoinTransport(inner, new[] { a.Candidate }), a.WebSocketUri, null); }
+            try { client.UseDirect(inner => new DirectJoinTransport(inner, new[] { a.Candidate }, extraIce), a.WebSocketUri, null); }
             catch (Exception e) { fail = e; return false; }
             try { joinCode = a.IsIPv6 ? a.ToString() : OneLobby.JoinCode.Encode(a.Host, a.Port); }
             catch (ArgumentException) { joinCode = a.ToString(); } // a host name has no code

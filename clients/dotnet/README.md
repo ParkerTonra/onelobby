@@ -53,6 +53,14 @@ Use `ws://127.0.0.1:8080/ws`, not `localhost` (Godot's WebSocketPeer can stall o
 3. Godot (windowed): `godot --path clients/dotnet/demo-godot --position 2000,420 --audio-driver Dummy --log-file k.log -- --server=ws://127.0.0.1:8080/ws`; click Host, then type the code in the browser tab and Join (or Host in the browser and type its code into the Godot code field).
 4. Both show the same hash line every second; chat lines cross; hold V in either to talk.
 
+## Direct mode behind a strict NAT (TURN)
+
+Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TURN relay gets them in. Set
+`DirectHostOptions.IceServers` (every joiner gets it in `welcome.ice`) or pass `JoinDirectOptions.IceServers` to
+`JoinDirectAsync(address, options)` (added to the host's list). `TurnLogin.Mint(secret, id, ttl)` mints a coturn shared-secret
+login (spec/turn-rest.md). `RelayOnly` sends and accepts only relay candidates in `OneLobby.DataChannel`; `OneLobby.Godot`
+still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores. Keep TURN passwords out of your repo.
+
 ## Deviations and notes
 
 - A joiner treats 8 s of total silence from the host (no frames and no pongs) as host loss; 3 s without frames while a game runs sends `snapshot_req` (spec). Channel close migrates at once.

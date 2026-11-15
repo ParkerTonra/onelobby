@@ -424,7 +424,7 @@ namespace OneLobby
         {
             var total = (long)Math.Ceiling(_c.Config.ReadyTimeout.TotalMilliseconds);
             if (total <= 0) return;
-            var canRelay = !_c.Config.RelayOnly && !_c.Direct && HasRelay(_c.Ice);
+            var canRelay = !_c.Config.RelayOnly && HasRelay(_c.Ice);
             var first = canRelay ? (total + 1) / 2 : total;
             _readyRetryBudgetMs = canRelay ? total - first : 0;
             _readyDeadlineMs = NowMs + first;

@@ -9,6 +9,11 @@ public class HubOptions
     public List<string> TurnUrls { get; set; } = new();
     public string TurnSecret { get; set; } = "";
     public List<string> StunUrls { get; set; } = new() { "stun:stun.l.google.com:19302" };
+    /// <summary>
+    /// Extra ICE servers for <c>welcome.ice</c>, after the STUN entry and any TURN entry the secret mints: a game hosting
+    /// by IP puts its own TURN relay here (<c>DirectHostOptions.IceServers</c>). Copied as given.
+    /// </summary>
+    public List<IceEntry> ExtraIce { get; set; } = new();
     public string Region { get; set; } = "";
     /// <summary>Empty = every gameId allowed.</summary>
     public HashSet<string> AllowedGames { get; set; } = new(StringComparer.Ordinal);
@@ -60,3 +65,6 @@ public class HubOptions
         MaxPeers = Math.Clamp(maxPlayers, 2, 250) + 8,
     };
 }
+
+/// <summary>One ICE server entry the hub hands out verbatim in <c>welcome.ice</c>.</summary>
+public sealed record IceEntry(IReadOnlyList<string> Urls, string? Username = null, string? Credential = null);

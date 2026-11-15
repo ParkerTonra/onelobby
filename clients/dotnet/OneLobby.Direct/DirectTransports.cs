@@ -38,11 +38,21 @@ namespace OneLobby.Direct
             {
                 PortRangeBegin = _host.Port,
                 PortRangeEnd = _host.Port,
-                IceServers = _nostr ? options.IceServers : Array.Empty<IceServer>(),
+                IceServers = _nostr ? options.IceServers : TurnOnly(options.IceServers),
                 NoIceServers = true,
             });
             lock (_links) _links[options.RemotePeerId] = link; // the newest link to a peer id (ids are never reused in a lobby)
             return link;
+        }
+
+        /// <summary>The TURN entries of <paramref name="ice"/>: a bare host address needs no STUN, but a relay still helps.</summary>
+        internal static IReadOnlyList<IceServer> TurnOnly(IReadOnlyList<IceServer> ice)
+        {
+            var keep = new List<IceServer>();
+            foreach (var s in ice)
+                foreach (var u in s.Urls)
+                    if (u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)) { keep.Add(s); break; }
+            return keep;
         }
 
         private readonly Dictionary<int, IPeerLink> _links = new Dictionary<int, IPeerLink>();
@@ -97,11 +107,14 @@ namespace OneLobby.Direct
     {
         private readonly ITransport _inner;
         private readonly IReadOnlyList<string> _extra;
+        private readonly IReadOnlyList<IceServer> _ice;
 
-        public DirectJoinTransport(ITransport inner, IReadOnlyList<string> extraCandidates)
+        // extraIce: The joiner's own ICE servers, added to the host's welcome list (only TURN entries are used here).
+        public DirectJoinTransport(ITransport inner, IReadOnlyList<string> extraCandidates, IReadOnlyList<IceServer>? extraIce = null)
         {
             _inner = inner;
             _extra = extraCandidates;
+            _ice = extraIce ?? Array.Empty<IceServer>();
         }
 
         public long NowMs => _inner.NowMs;
@@ -109,7 +122,20 @@ namespace OneLobby.Direct
         public ISignalingSocket ConnectSignaling(Uri url) => _inner.ConnectSignaling(url);
 
         public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
-            _inner.CreatePeerLink(options with { ExtraRemoteCandidates = _extra, NoIceServers = true });
+            _inner.CreatePeerLink(options with
+            {
+                IceServers = DirectHostTransport.TurnOnly(Concat(options.IceServers, _ice)),
+                ExtraRemoteCandidates = _extra,
+                NoIceServers = true,
+            });
+
+        internal static IReadOnlyList<IceServer> Concat(IReadOnlyList<IceServer> a, IReadOnlyList<IceServer> b)
+        {
+            if (b.Count == 0) return a;
+            var all = new List<IceServer>(a);
+            all.AddRange(b);
+            return all;
+        }
 
         public void Poll() => _inner.Poll();
     }
@@ -128,9 +154,12 @@ namespace OneLobby.Direct
         private readonly string _code;
         private readonly NostrOptions _options;
         private readonly IReadOnlyList<IceServer> _ice;
+        private readonly IReadOnlyList<IceServer> _extraIce;
 
-        public NostrJoinTransport(ITransport inner, string normalizedCode, NostrOptions options)
+        // extraIce: The joiner's own ICE servers, added after the host's welcome list (or the STUN default).
+        public NostrJoinTransport(ITransport inner, string normalizedCode, NostrOptions options, IReadOnlyList<IceServer>? extraIce = null)
         {
+            _extraIce = extraIce ?? Array.Empty<IceServer>();
             _inner = inner;
             _code = normalizedCode;
             _options = options;
@@ -143,7 +172,7 @@ namespace OneLobby.Direct
         public ISignalingSocket ConnectSignaling(Uri url) => new NostrSignalingSocket(_code, _options);
 
         public IPeerLink CreatePeerLink(PeerLinkOptions options) =>
-            _inner.CreatePeerLink(options with { IceServers = options.IceServers.Count > 0 ? options.IceServers : _ice, ExtraRemoteCandidates = null, NoIceServers = true });
+            _inner.CreatePeerLink(options with { IceServers = DirectJoinTransport.Concat(options.IceServers.Count > 0 ? options.IceServers : _ice, _extraIce), ExtraRemoteCandidates = null, NoIceServers = true });
 
         public void Poll() => _inner.Poll();
     }

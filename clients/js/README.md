@@ -54,6 +54,14 @@ node ../../conformance/peer/run.mjs --adapter=../clients/js/conformance-adapter.
 
 `http://localhost` counts as a secure context, so `getUserMedia` works without TLS; anywhere else serve over https.
 
+## Direct mode behind a strict NAT (TURN)
+
+Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TURN relay gets them in. Pass
+`iceServers: [{ urls: "turn:turn.example.com:3478", username, credential }]` to `hostDirect` / `hostNostr` (every joiner gets
+it in `welcome.ice`) or to `kit.joinDirect(code, { iceServers })` (added to the host's list). For a TURN server with a shared
+secret, `turnLogin(secret, id, ttlSeconds)` mints a short-lived login (spec/turn-rest.md). `relayOnly` sends and accepts only
+relay candidates. Keep TURN passwords out of your repo.
+
 ## Seams
 
 `new OneLobby({ socketFactory, linkFactory, clock, wallClock, voiceCodec, createMic, createSink })` replace the browser pieces.

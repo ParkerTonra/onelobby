@@ -12,6 +12,8 @@ import {
 } from "./signaling.js";
 import {
   defaultSocketFactory,
+  hasTurn,
+  type IceServer,
   type LinkFactory,
   type SocketFactory,
 } from "./transport.js";
@@ -143,6 +145,11 @@ export interface JoinDirectOptions {
   nostrRelays?: string[];
   /** STUN servers for a Nostr code when the host offers none; default Google's and Cloudflare's public ones. */
   stun?: string[];
+  /**
+   * Extra ICE servers (a TURN relay), added to the list the host's `welcome` offers (the host's own `iceServers` reach every
+   * joiner already). For a joiner behind a strict NAT whose host gave none. See spec/nostr-signaling.md s.5.
+   */
+  iceServers?: IceServer[];
 }
 
 /** Where a direct join goes: a host address (TCP) or a Nostr room. */
@@ -533,11 +540,18 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     }
   }
 
-  /** A Nostr joiner needs STUN; take the host's list (it comes in `welcome`), else the public defaults. */
+  /**
+   * A Nostr joiner needs STUN; take the host's list (it comes in `welcome`), else the public defaults. The joiner's own
+   * `iceServers` come last.
+   */
   private withStun(welcome: WelcomeMsg, t: DirectTarget, opts: JoinDirectOptions): WelcomeMsg {
-    if (!t.nostr || (welcome.ice && welcome.ice.length > 0)) return welcome;
-    const urls = opts.stun ?? [...DEFAULT_NOSTR_STUN];
-    return urls.length > 0 ? { ...welcome, ice: [{ urls }] } : welcome;
+    let ice = welcome.ice ?? [];
+    if (t.nostr && ice.length === 0) {
+      const urls = opts.stun ?? [...DEFAULT_NOSTR_STUN];
+      if (urls.length > 0) ice = [{ urls }];
+    }
+    if (opts.iceServers && opts.iceServers.length > 0) ice = [...ice, ...opts.iceServers.map((e) => ({ ...e }))];
+    return ice === welcome.ice ? welcome : { ...welcome, ice };
   }
 
   private directTarget(codeOrAddress: string, opts: JoinDirectOptions): DirectTarget {
@@ -556,7 +570,8 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const addr = parseDirectAddress(input, opts.defaultPort ?? DEFAULT_DIRECT_PORT);
     if (!addr) throw new OneLobbyError("bad_address", `"${codeOrAddress}" is not a join code or an address (try 6B01-RGFE-P2B or 192.168.1.20:47810)`);
     const inner = this.linkFactory;
-    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: [], extraRemoteCandidates: [addr.candidate] }) };
+    // an address needs no STUN: keep the TURN entries (host's and own) and drop the STUN-only ones
+    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: o.iceServers.filter(hasTurn), extraRemoteCandidates: [addr.candidate] }) };
     return { nostr: null, url: addr.url, joinedWith: joinedWith(addr), links };
   }
 

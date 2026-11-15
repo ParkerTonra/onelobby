@@ -308,6 +308,13 @@ public sealed class Hub
                 ["ttl"] = _o.TurnTtlSeconds,
             });
         }
+        foreach (var e in _o.ExtraIce)
+        {
+            var o = new JsonObject { ["urls"] = new JsonArray(e.Urls.Select(u => (JsonNode?)JsonValue.Create(u)).ToArray()) };
+            if (!string.IsNullOrEmpty(e.Username)) o["username"] = e.Username;
+            if (!string.IsNullOrEmpty(e.Credential)) o["credential"] = e.Credential;
+            ice.Add(o);
+        }
         return ice;
     }
 
