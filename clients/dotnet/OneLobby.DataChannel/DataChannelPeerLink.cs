@@ -317,7 +317,8 @@ namespace OneLobby.DataChannel
                 _remoteSet = true;
                 // e.g. the address a direct-IP joiner typed (docs/design/direct-ip.md s.2), tagged with the remote's media id
                 if (_opts.ExtraRemoteCandidates != null && !_opts.RelayOnly) // a typed address is a host candidate
-                    foreach (var extra in _opts.ExtraRemoteCandidates) AddIce(extra, MidOf(s.Sdp));
+                    foreach (var extra in _opts.ExtraRemoteCandidates)
+                        if (!OffersHostAddress(s.Sdp, extra)) AddIce(extra, MidOf(s.Sdp)); // an address the offer already has is not added again
                 while (_pendingIce.Count > 0) { var (c, m) = _pendingIce.Dequeue(); AddIce(c, m); }
                 if (type == "offer")
                 {
@@ -332,6 +333,29 @@ namespace OneLobby.DataChannel
                 if (_remoteSet) AddIce(s.Candidate!, s.SdpMid);
                 else _pendingIce.Enqueue((s.Candidate!, s.SdpMid));
             }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="sdp"/> already holds a host candidate with the same address and port as the candidate line
+        /// <paramref name="candidate"/>. Adding it again makes a second, identical remote candidate; on loopback that duplicate
+        /// repeatedly broke the DTLS handshake of the JS joiner's link (clients/js webrtc.ts offersHostAddress).
+        /// </summary>
+        internal static bool OffersHostAddress(string sdp, string candidate)
+        {
+            var c = HostAddressPort(candidate);
+            if (c == null) return false;
+            foreach (var line in sdp.Split((char)10))
+                if (HostAddressPort(line.Trim()) == c) return true;
+            return false;
+        }
+
+        /// <summary>"address port" of a <c>[a=]candidate:... typ host</c> line, else null.</summary>
+        private static string? HostAddressPort(string line)
+        {
+            if (line.StartsWith("a=", StringComparison.Ordinal)) line = line.Substring(2);
+            if (!line.StartsWith("candidate:", StringComparison.Ordinal) || !line.Contains(" typ host")) return null;
+            var f = line.Split(' ');
+            return f.Length > 7 ? f[4] + " " + f[5] : null;
         }
 
         /// <summary>The first <c>a=mid:</c> of an SDP (OneLobby offers one bundled data-channel section).</summary>

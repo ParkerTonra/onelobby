@@ -192,6 +192,13 @@ class OLRtcLink:
 			if _remote_ip != "":
 				_add_at_remote_ip(str(sig["candidate"]))
 
+	## Whether the host candidate line `candidate` is already at `ip` (the address from the code): adding "<ip> PORT" for
+	## it would make a second, identical remote candidate, which on loopback repeatedly broke the DTLS handshake of the JS
+	## joiner's link (clients/js webrtc.ts offersHostAddress).
+	static func is_at_address(candidate: String, ip: String) -> bool:
+		var f := candidate.split(" ")
+		return f.size() > 5 and candidate.begins_with("candidate:") and candidate.contains(" typ host") and f[4] == ip
+
 	# Join by IP (docs/design/direct-ip.md s.2): the host only knows its own (LAN) addresses, but a forwarded port keeps its
 	# number, so each host candidate "ADDR PORT" is also tried as "<code's address> PORT".
 	func _add_at_remote_ip(candidate: String) -> void:
@@ -200,6 +207,8 @@ class OLRtcLink:
 		var f := candidate.split(" ")
 		if f.size() < 8:
 			return
+		if is_at_address(candidate, _remote_ip):
+			return # the host offers this address itself
 		var port := f[5]
 		if _seen_remote.has(port):
 			return

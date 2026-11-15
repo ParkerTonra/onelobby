@@ -39,6 +39,11 @@ func _run() -> void:
 	_check(OneLobbyLobby.ice_failed_message(false, true).contains("port-forward its UDP port range"), "by-ip message names the next step")
 	_check(OneLobbyLobby.port_range_full_message([47900, 47901]).contains("47900-47901"), "range message")
 
+	var at := OneLobbyGodotTransport.OLRtcLink.is_at_address
+	_check(at.call("candidate:1 1 UDP 2122317823 127.0.0.1 47940 typ host", "127.0.0.1"), "a candidate already at the code's address is not added twice")
+	_check(not at.call("candidate:1 1 UDP 2122317823 10.0.0.5 47940 typ host", "127.0.0.1"), "a candidate at another address still gets the code's address added")
+	_check(not at.call("candidate:1 1 UDP 2122317823 127.0.0.1 47940 typ relay raddr 1.2.3.4 rport 5", "127.0.0.1"), "only host candidates count")
+
 	# ---- loopback: host with range, join by v0 code
 	var host := _mk("host")
 	var lobby_h: OneLobbyLobby = await host.host_direct({"nostr": false, "tcp_port": 0, "listen_address": "127.0.0.1",
