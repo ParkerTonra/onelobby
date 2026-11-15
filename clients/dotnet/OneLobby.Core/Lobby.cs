@@ -418,7 +418,6 @@ namespace OneLobby
 
         private long _readyDeadlineMs; // 0 = no timer
         private long _readyRetryBudgetMs; // > 0: the deadline starts a relay-only retry with this budget instead of giving up
-        private bool _relayRetried;
 
         private void ArmReadyTimer()
         {
@@ -463,7 +462,6 @@ namespace OneLobby
             if (_readyRetryBudgetMs > 0 && _peers.TryGetValue(_hostId, out var h))
             {
                 // the direct attempt stalled: dial the host ourselves through the TURN relay (a host answers an offer)
-                _relayRetried = true;
                 _readyDeadlineMs = now + _readyRetryBudgetMs;
                 _readyRetryBudgetMs = 0;
                 ConnectPeer(h, true, relayOnly: true);
@@ -475,9 +473,10 @@ namespace OneLobby
 
         private void GiveUpConnecting()
         {
-            var secs = _c.Config.ReadyTimeout.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            var msg = "the link to the host did not open in " + secs + " s" + (_relayRetried ? " (direct or relayed)" : "")
-                + ": likely a firewall or strict NAT";
+            // names the next step; same wording as the JS and GDScript clients
+            var msg = HasRelay(_c.Ice)
+                ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
+                : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.";
             _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg));
             _c.RaiseError(new LobbyError("ice_failed", msg));
             if (_closed) return;

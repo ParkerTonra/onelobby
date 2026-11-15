@@ -99,6 +99,9 @@ describe("joiner ready timeout (ice_failed)", () => {
     expect(errors.map((e) => (e as OneLobbyError).code)).toEqual(["ice_failed"]);
     expect(describeError(errors[0]).message).toBe("Couldn't connect to the other players.");
     expect(blocked.relayTries).toBe(0); // no TURN offered: no relay retry
+    expect((rejected as OneLobbyError).message).toContain(
+      "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.",
+    );
     expect(ended).toEqual(["ice_failed"]);
     await settle();
     expect(la.peers.map((p) => p.peerId)).toEqual([1]); // the seat was freed
@@ -163,10 +166,14 @@ describe("joiner ready timeout (ice_failed)", () => {
     const blocked = blockedDirect(w.net, "bob", false);
     const lb = await w.make("bob", { readyTimeoutMs: 8_000 }, { linkFactory: blocked.factory }).join(la.code);
     let code = "";
-    lb.ready.catch((e: OneLobbyError) => (code = e.code));
+    let message = "";
+    lb.ready.catch((e: OneLobbyError) => ((code = e.code), (message = e.message)));
     await w.clock.run(8_100, 100);
     expect(blocked.relayTries).toBe(1);
     expect(code).toBe("ice_failed");
+    expect(message).toContain(
+      "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward.",
+    );
   });
 
   it("readyTimeoutMs: 0 waits forever; a normal join is unaffected by the default", async () => {

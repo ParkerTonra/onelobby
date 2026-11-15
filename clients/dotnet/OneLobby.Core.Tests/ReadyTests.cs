@@ -110,7 +110,7 @@ namespace OneLobby.Tests
             Assert.True(g.ReadyAsync.IsFaulted);
             var ex = Assert.IsType<OneLobbyException>(g.ReadyAsync.Exception!.InnerException);
             Assert.Equal("ice_failed", ex.Code);
-            Assert.Contains("15 s", ex.Message);
+            Assert.EndsWith("Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.", ex.Message);
             Assert.Equal(new[] { "ice_failed" }, ended.ToArray());
             Assert.Equal(new[] { "ice_failed" }, errors.Select(e => e.Code).ToArray());
             Assert.True(rig.Until(() => left.Count == 1, 40));
@@ -135,6 +135,19 @@ namespace OneLobby.Tests
             rig.Step(800); // well past the full budget: the session stays up
             Assert.True(g.IsReady);
             Assert.True(host.IsPeerReady(2));
+        }
+
+        [Fact]
+        public void IceFailedAfterTheRelayAlsoFailedSaysTheRelayCouldNotBeReached()
+        {
+            var (rig, host, gc) = Setup(TimeSpan.FromSeconds(10));
+            rig.Net.IceServers.Add(new IceServer(new[] { "turn:turn.example.org:3478" }, "u", "p"));
+            rig.Net.CanConnect = (_, _) => false;
+            var g = rig.Await(gc.JoinAsync(host.Code));
+            Assert.True(rig.Until(() => g.ReadyAsync.IsCompleted, 1000));
+            var ex = Assert.IsType<OneLobbyException>(g.ReadyAsync.Exception!.InnerException);
+            Assert.Equal("ice_failed", ex.Code);
+            Assert.EndsWith("Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward.", ex.Message);
         }
 
         [Fact]

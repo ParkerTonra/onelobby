@@ -76,6 +76,7 @@ var _big_id := 0x80000000
 var _peer_timeout_ms := PEER_TIMEOUT_MS
 var _host_timeout_ms := HOST_TIMEOUT_MS
 var _ready_deadline_ms := 0
+var _ready_retry_budget_ms := 0 ## > 0: the deadline starts one relay-only retry with this budget instead of giving up
 var _peers := {} # id -> PeerRec
 var _held := {} # from -> {at, signals}
 var _lingering: Array = [] # [link, until]
@@ -327,18 +328,50 @@ func _start() -> void:
 	else:
 		if _peers.has(_host_id):
 			_connect_peer(_peers[_host_id], false)
-		if _c.ready_timeout_ms > 0:
-			_ready_deadline_ms = now_ms() + _c.ready_timeout_ms
+		_arm_ready_timer()
 
 
-func _connect_peer(rec: OLPeerRec, initiator: bool) -> void:
+## Joiner connect timeout (same rules as the JS and C# clients): with a TURN entry and no relay_only, half the budget
+## goes to the direct attempt and the second half to one relay-only retry.
+func _arm_ready_timer() -> void:
+	var total: int = _c.ready_timeout_ms
+	if total <= 0:
+		return
+	var can_relay: bool = not _c.relay_only and has_relay(_c.ice)
+	var first: int = (total + 1) / 2 if can_relay else total
+	_ready_retry_budget_ms = total - first if can_relay else 0
+	_ready_deadline_ms = now_ms() + first
+
+
+## True when an ICE server list holds a TURN entry (turn: or turns:).
+static func has_relay(ice: Array) -> bool:
+	for s in ice:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
+		var urls: Variant = (s as Dictionary).get("urls", [])
+		var list: Array = urls if urls is Array else [urls]
+		for u in list:
+			var lu := str(u).to_lower()
+			if lu.begins_with("turn:") or lu.begins_with("turns:"):
+				return true
+	return false
+
+
+## The ice_failed message: names the next step. Same wording in the JS and C# clients (keep in step).
+static func ice_failed_message(relay_configured: bool) -> String:
+	if relay_configured:
+		return "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
+	return "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward."
+
+
+func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void:
 	if rec.link != null:
 		rec.link.close()
 	rec.open_handled = false
 	rec.hello = false
 	rec.hi_sent = false
 	rec.link = _c.transport.create_link({
-		"remote_id": rec.id, "initiator": initiator, "ice_servers": _c.ice, "relay_only": _c.relay_only,
+		"remote_id": rec.id, "initiator": initiator, "ice_servers": _c.ice, "relay_only": relay_only or _c.relay_only,
 	})
 	rec.last_rx_ms = now_ms()
 	if initiator:
@@ -461,8 +494,14 @@ func _check_ready_timer(now: int) -> void:
 		return
 	if now < _ready_deadline_ms:
 		return
+	if _ready_retry_budget_ms > 0 and _peers.has(_host_id):
+		# the direct attempt stalled: dial the host ourselves through the TURN relay (a host answers an offer)
+		_ready_deadline_ms = now + _ready_retry_budget_ms
+		_ready_retry_budget_ms = 0
+		_connect_peer(_peers[_host_id], true, true)
+		return
 	_ready_deadline_ms = 0
-	var msg := "the link to the host did not open in %s s: likely a firewall or strict NAT" % str(_c.ready_timeout_ms / 1000.0)
+	var msg := ice_failed_message(has_relay(_c.ice))
 	_c.raise_error("ice_failed", msg)
 	if _closed:
 		return

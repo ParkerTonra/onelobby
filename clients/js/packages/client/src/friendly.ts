@@ -82,7 +82,7 @@ const TEXT: Record<string, Entry> = {
   closed: { message: "Lost the connection to the game server.", hint: "Check your internet connection, then try again." },
   server_lost: { message: "Lost the connection to the game server.", hint: "Your game may keep going; new players can't join until it's back." },
   invalid_token: { message: "Your old seat in that lobby is no longer available.", hint: "Join again with the lobby code." },
-  ice_failed: { message: "Couldn't connect to the other players.", hint: "Some networks (school, work, public Wi-Fi) block game connections. Try another network or a phone hotspot." },
+  ice_failed: { message: "Couldn't connect to the other players.", hint: "Some networks (school, work, public Wi-Fi) block game connections. Try another network or a phone hotspot, or ask the host to port-forward." },
   no_server: { message: "This game has no lobby server address yet.", hint: "Enter one in the multiplayer settings, or host from your own computer with a join code." },
   timeout: { message: "The connection took too long.", hint: "Check your internet connection, then try again." },
   unsupported: { message: "The host's game is too old for that.", hint: "Ask the host to update the game." },

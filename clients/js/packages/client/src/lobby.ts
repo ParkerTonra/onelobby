@@ -140,6 +140,13 @@ function hasRelay(ice: IceServer[]): boolean {
   return ice.some(hasTurn);
 }
 
+/** The ice_failed message: names the next step. Same wording in the C# and GDScript clients (keep in step). */
+export function iceFailedMessage(relayConfigured: boolean): string {
+  return relayConfigured
+    ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
+    : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.";
+}
+
 const HOST_WATCHDOG_MS = 250;
 const PING_EVERY_MS = 2000;
 
@@ -547,7 +554,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     const hostLink = this.links.get(this.hostPeerId);
     const diagnostics = hostLink ? hostLink.diagnostics?.() : (this.lastHostLinkEnd ?? "no offer from the host ever arrived");
     // the trace holds ICE candidates (local addresses): keep it in data, out of the message a game may show
-    const err = new OneLobbyError("ice_failed", `could not open a connection to the host${this.relayRetry ? " (direct or relayed)" : ""}`, diagnostics ? { diagnostics } : undefined);
+    const err = new OneLobbyError("ice_failed", iceFailedMessage(hasRelay(this.cfg.ice)), diagnostics ? { diagnostics } : undefined);
     this.failReady(err);
     this.reportError(err);
     if (this.ended) return;

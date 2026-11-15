@@ -101,6 +101,13 @@ as `a=candidate:` lines inside an SDP (offer, answer and the joiner's typed-addr
 `iceTransportPolicy` does (libdatachannel's Godot binding ignores it). With both sides relay-only the one path left is
 relay to relay; with no TURN entry a relay-only link cannot connect and fails as `ice_failed`.
 
+**Ready timeout retry (all clients).** A joiner whose host link is not open after half of the ready timeout, with a TURN
+entry in its ICE list and not already relay-only, dials the host once more relay-only for the second half; no TURN entry
+means no retry and the full timeout goes to the first attempt. Failing that, the joiner reports `ice_failed`. The error
+message (not `data`) names the next step: with no TURN entry, that strict NATs need a relay (TURN) and the host can
+port-forward; with TURN, that the relay could not be reached (Godot reaches TURN over UDP only) and the host can
+port-forward. The wording is the same in the JS, C# and GDScript clients.
+
 ## 6. Relays
 
 A list of `wss://` URLs: the blueprint's `hosting.nostrRelays`, else the library default. Use them all at once,

@@ -88,6 +88,7 @@ both directions).
 | `addons/onelobby/hub.gd`, `direct_host.gd`, `nostr_*.gd` | Direct mode: the in-process hub, the host, the Nostr relay pool / room / link / sockets, limits |
 | `addons/onelobby/secp256k1.gd`, `nostr_crypto.gd` | pure GDScript BIP340, HKDF, AES-GCM |
 | `tests/nostr_unit.gd`, `direct-test.sh`, `tests/direct_e2e.gd`, `tests/direct_interop.gd` | Direct unit tests, two-instance test, interop peer |
+| `tests/relay_retry.gd` | ready-timeout relay-only retry and the ice_failed message (no network) |
 | `tests/vectors.gd` | the shared spec vectors (frames, invalid, chunking, join codes) |
 | `tests/conformance_adapter.gd`, `conformance-adapter.mjs` | `conformance/peer` adapter |
 | `tests/e2e.gd`, `headless-test.sh` | two instances host/join by code through a real server and exchange a message |
