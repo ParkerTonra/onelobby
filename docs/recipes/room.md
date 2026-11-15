@@ -6,7 +6,8 @@ Every lobby has a room: the roster a lobby screen shows. It gives you what three
 survive the lobby, and passwords on every route. The host owns the truth; everyone else holds a copy and asks the host.
 A game that never touches `lobby.room` behaves as before. Spec: `spec/room.md`.
 
-JS ships it in 0.7.2. `lobby.Room` in C# and `room` in GDScript are coming in this release with the same messages and rules.
+JS and C# ship it in 0.7.2 (`lobby.room` in JS, `lobby.Room` in C#, the same messages and rules); GDScript follows in the same release.
+The examples are JS first, then the same in C# under "C#".
 
 ## The lobby screen
 
@@ -129,6 +130,125 @@ move anyone with `room.moveTo(peerId, role)`. Late join once the game started is
 
 Built-in per-player keys: `color` (`#rrggbb`), `avatar` (0-255) and `team` (0-15). Declared keys are strings, ints, enums,
 bools or colours, validated by the host; a key marked `hostOnly` can only be set by the host.
+
+## C#
+
+`lobby.Room` has the same shape as JS `lobby.room`, in C# style: properties and `Pascal` methods, events instead of `on`, the
+same codes as strings. It works on server lobbies, Direct lobbies (IP and Nostr codes) and through `OneLobbyRunner` in Unity.
+Events fire inside `lobby.Pump()` (or when a host call changes the room), on the thread that pumps; time comes from the
+transport's clock, so tests with `InMemoryNetwork` are deterministic.
+
+```csharp compile file=LobbyScreen.cs
+using System;
+using System.Collections.Generic;
+using OneLobby;
+
+public static class LobbyScreen
+{
+    public static void Wire(Lobby lobby, Action<List<string>> draw, Action<bool> setStartEnabled)
+    {
+        var room = lobby.Room;
+        void Redraw()
+        {
+            var rows = new List<string>();
+            foreach (var p in room.Entries)
+            {
+                var tag = p.Role == RoomRole.Spectator ? "watching" : p.Status == RoomStatus.Reconnecting ? "reconnecting" : p.Ready ? "ready" : "not ready";
+                rows.Add($"{p.Name}  seat {p.Seat}  colour {(p.Data.TryGetValue("color", out var c) ? c : "-")}  {tag}");
+            }
+            draw(rows);
+            setStartEnabled(lobby.IsHost && room.State == RoomState.Lobby && room.AllReady);
+        }
+        room.Changed += Redraw;                                   // after every roster, ready, data and state change
+        room.CountdownUpdated += c => Console.WriteLine($"starting in {Math.Ceiling(c.RemainingMs / 1000.0)}");
+        room.CountdownCancelled += why => Console.WriteLine($"start cancelled: {why}");
+        room.Started += () => Console.WriteLine("go");           // the lobby phase is in game now
+        room.Removed += r => Console.WriteLine(r.Reason);          // kicked, banned or refused: a plain sentence for the player
+        room.Unsupported += () => Console.WriteLine("this host is older and has no room layer");
+        Redraw();
+    }
+
+    // A player's own calls (the host answers; a refusal arrives as Rejected)
+    public static void PickMyLook(Lobby lobby)
+    {
+        lobby.Room.SetData(new Dictionary<string, string> { ["color"] = "#ff8800", ["avatar"] = "3", ["team"] = "1" });
+        lobby.Room.SetReady(true);
+        lobby.Room.Rejected += (code, what, key) => Console.WriteLine($"refused {what}: {code} {key}");
+    }
+}
+```
+
+Host side, the same flow:
+
+```csharp compile file=HostFlow.cs
+using OneLobby;
+
+public static class HostFlow
+{
+    public static void HostControls(Lobby lobby)
+    {
+        var room = lobby.Room;
+        room.Requested += (peer, what) =>                         // a joiner clicked "Start", "Back to lobby" or "Rematch"
+        {
+            if (what == RoomRequest.Start && room.AllReady) room.Start();
+            if (what == RoomRequest.Rematch) room.Rematch();
+        };
+        room.SeatDropped += s => SpawnBot(s.Seat, s.Data);        // the player is gone past the window: a bot takes the seat
+        room.SeatRestored += s => RemoveBot(s.Seat);              // the player came back (s.Returning): take the bot out
+        room.Filter = (text, kind) => text.Replace("darn", "****"); // optional word filter for names and chat; nothing by default
+    }
+
+    public static void EndOfRound(Lobby lobby) => lobby.Room.BackToLobby();   // or lobby.Room.Rematch() to go again
+
+    public static void Moderate(Lobby lobby, int peerId)
+    {
+        lobby.Room.Kick(peerId, reason: "Please keep it friendly.");            // may rejoin
+        lobby.Room.Ban(peerId, code: "spam", reason: "Spam in chat.");          // refused from now on, in every lobby you host
+        var first = lobby.Room.Bans.List()[0];                                  // Id, Ip, Name, Reason, Code, At
+        lobby.Room.Unban(first.Id!);
+    }
+
+    private static void SpawnBot(int seat, System.Collections.Generic.IReadOnlyDictionary<string, string> data) { }
+    private static void RemoveBot(int seat) { }
+}
+```
+
+Setup with a password, spectators and late join, then joining:
+
+```csharp compile file=RoomSetup.cs
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using OneLobby;
+
+public static class RoomSetup
+{
+    public static Task<Lobby> HostIt(LobbyClient client) => client.HostAsync(new LobbyOptions("Sam's game", 4)
+    {
+        Password = "tulip",
+        Room = new RoomOptions
+        {
+            Spectators = 4, LateJoin = LateJoinPolicy.Spectate, AutoStart = AutoStartMode.AllReady, CountdownSeconds = 3,
+            Data = new Dictionary<string, DataDecl> { ["team"] = new DataDecl(DataType.Int) { Min = 0, Max = 2 } },
+        },
+    });
+
+    // rejects with OneLobbyException "bad_password" when wrong
+    public static Task<Lobby> JoinIt(LobbyClient client, string code) => client.JoinAsync(code, new RoomJoinOptions
+    {
+        Password = "tulip", Role = RoomRole.Spectator, Data = new Dictionary<string, string> { ["color"] = "#33aaff" },
+    });
+}
+```
+
+`DirectHostOptions.Room` / `.Password` and `JoinDirectOptions.Password` / `.Role` / `.Data` do the same for Direct IP and Nostr
+codes; `onelobby.json`'s `room` section fills the defaults (`Blueprint.Room`, applied by `LobbyClient.FromBlueprint`).
+
+The player id and the ban list live in an `IKeyValueStore` (`GetItem`, `SetItem`, `RemoveItem`). Defaults: memory only (the id
+then lasts one process). Give a file with `OneLobbyConfig.PlayerIdFile` / `BanFile` (the Unity runner does it for you, under
+`Application.persistentDataPath`; in Godot use `ProjectSettings.GlobalizePath("user://onelobby-player.json")`), or your own
+store with `PlayerIdStore` / `BanStore` (PlayerPrefs, a save file). Differences from JS names: the `countdown` event is
+`CountdownUpdated`, the `backToLobby` event is `BackedToLobby`, `supported` is `SupportConfirmed`, and `Room.Supported` is a
+`bool?` (null until the host answers).
 
 ## Compatibility
 

@@ -44,6 +44,13 @@ namespace OneLobby.Unity
                  "JoinDirectOptions.IceServers / DirectHostOptions.IceServers). Same as OneLobbyConfig.RelayOnly; with a Blueprint, " +
                  "this ORs with its hosting.relayOnly. Set before the first Host/Join.")]
         public bool RelayOnly;
+        [Tooltip("File that keeps this install's player id for the game (a random id made once; not an account or a hardware id; " +
+                 "spec/room.md). Empty = onelobby-player.json under Application.persistentDataPath. It lets a host keep your seat and " +
+                 "refuse a banned player. Set before the first Host/Join.")]
+        public string PlayerIdFile = "";
+        [Tooltip("File that keeps the host's ban list across lobbies and runs (Lobby.Room.Bans). Empty = onelobby-bans.json under " +
+                 "Application.persistentDataPath. Set before the first Host/Join.")]
+        public string BanFile = "";
 
         private LobbyClient? _client;
         private bool _clientIsDirect;
@@ -95,6 +102,10 @@ namespace OneLobby.Unity
         private OneLobbyConfig ApplyConfig(OneLobbyConfig config)
         {
             if (RelayOnly) config = config with { RelayOnly = true };
+            if (config.PlayerIdStore == null && config.PlayerIdFile == null)
+                config = config with { PlayerIdFile = string.IsNullOrWhiteSpace(PlayerIdFile) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-player.json") : PlayerIdFile };
+            if (config.BanStore == null && config.BanFile == null)
+                config = config with { BanFile = string.IsNullOrWhiteSpace(BanFile) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-bans.json") : BanFile };
             return ConfigureConfig != null ? ConfigureConfig(config) : config;
         }
 
@@ -140,6 +151,8 @@ namespace OneLobby.Unity
         /// <summary>Host a lobby with the lobby.* settings of the <see cref="Blueprint"/> file.</summary>
         public Task<Lobby> HostAsync() => Enter(() => ServerClient().HostAsync());
         public Task<Lobby> JoinAsync(string code) => Enter(() => ServerClient().JoinAsync(code));
+        /// <summary>Join with a lobby password, as a spectator and/or with your starting per-player data (<c>lobby.Room</c>, docs/recipes/room.md).</summary>
+        public Task<Lobby> JoinAsync(string code, RoomJoinOptions room) => Enter(() => ServerClient().JoinAsync(code, room));
         public Task<Lobby> RejoinAsync(string resumeToken) => Enter(() => ServerClient().RejoinAsync(resumeToken));
         public Task<IReadOnlyList<LobbySummary>> ListAsync() => ServerClient().ListAsync();
 

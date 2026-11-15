@@ -111,7 +111,7 @@ rm -rf "$out"
 # Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
 repo="$(dirname "$(dirname "$dotnetdir")")"
 docs="docs/recipes/unity.md docs/recipes/direct-ip.md docs/recipes/pause.md docs/recipes/game-console.md
-      docs/recipes/replication.md docs/recipes/voice-and-chat.md spec/nostr-signaling.md AGENTS.md"
+      docs/recipes/replication.md docs/recipes/voice-and-chat.md docs/recipes/room.md spec/nostr-signaling.md AGENTS.md"
 mkdir -p "$pkg/Documentation~"
 for d in $docs; do
   if [ -f "$repo/$d" ]; then cp "$repo/$d" "$pkg/Documentation~/"; else echo "doc $d: not in this checkout (skipped)"; fi

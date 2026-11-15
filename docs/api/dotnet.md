@@ -17,11 +17,25 @@ public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyS
     public TimeSpan ReadyTimeout { get; init; }
     /// Treat a peer as gone after this long without hearing from it: the host drops a silent joiner (Lobby.PeerLeft, "timeout") and a joiner handles a silent host as lost. TimeSpan.Zero (default) keeps the built-in Lobby.PeerTimeoutMs / Lobby.HostTimeoutMs. Values under 6 s (Lobby.MinPeerTimeoutMs) are raised to 6 s.
     public TimeSpan PeerTimeout { get; init; }
+    /// Where the per-install player id is kept (spec/room.md s.1; engine-specific stores such as PlayerPrefs implement IKeyValueStore). Default: PlayerIdFile when given, else memory (the id then lasts one process).
+    public IKeyValueStore? PlayerIdStore { get; init; }
+    /// A JSON file path that keeps the per-install player id across runs. It is a random id made once, not an account or a hardware id.
+    public string? PlayerIdFile { get; init; }
+    /// Where the host's ban list is kept (spec/room.md s.5.3). Default: BanFile when given, else memory.
+    public IKeyValueStore? BanStore { get; init; }
+    /// A JSON file path that keeps the host's ban list across lobbies and runs.
+    public string? BanFile { get; init; }
+    /// The room layer's defaults for every lobby this client hosts (the blueprint's room fills the same); LobbyOptions.Room wins.
+    public RoomOptions? Room { get; init; }
 /// At most Messages raw messages per peer in any PerMs window (a fixed window, reset every PerMs).
 public sealed record RateLimit(int Messages, int PerMs);
 public sealed record LobbyOptions(string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted, bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null)
     /// Host: per-joiner cap on incoming raw messages; the excess is dropped before Lobby.MessageReceived fires or is relayed.
     public RateLimit? RateLimit { get; init; }
+    /// Joiners must give this password (at most 64 characters) or get bad_password: the hub checks it when it knows (welcome.features has "room"), and the host's room layer checks it on every route (spec/room.md s.6).
+    public string? Password { get; init; }
+    /// Room layer settings: ready, countdown, auto start, spectators, late join policy, per-player data.
+    public RoomOptions? Room { get; init; }
 public sealed record LobbySummary(string Code, string Name, string HostName, int Players, int MaxPlayers, LobbyPhase Phase, IReadOnlyDictionary<string, string> Meta, string Region, DateTimeOffset CreatedAt);
 public sealed record Peer(int PeerId, string Name, int PingMs, bool Relayed);
 public readonly record struct Frame(long Tick, IReadOnlyList<(int PeerId, ReadOnlyMemory<byte> Command)> Commands);
@@ -50,6 +64,12 @@ public sealed record HostingSection(bool Direct, bool Server, string LobbyServer
     /// The hosting.nostrRelays list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).
     public IReadOnlyList<string> Relays;
 public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin, bool JoinLink, IReadOnlyDictionary<string, string> Meta);
+/// The room layer's defaults (room in onelobby.json, spec/room.md s.10).
+public sealed record RoomSection(bool PasswordRequired, AutoStartMode AutoStart, int AutoStartPlayers, int MinPlayers, int CountdownSeconds, int Spectators, LateJoinPolicy LateJoin, SeatDroppedPolicy SeatDropped, int RejoinWindowSeconds, IReadOnlyDictionary<string, DataDecl> Data)
+    /// Every default of the section.
+    public static readonly RoomSection Defaults;
+    /// The same as RoomOptions for the client (maxNameLength is players.maxNameLength).
+    public RoomOptions ToOptions(int maxNameLength = 24);
 /// Mode is "raw", "lockstep" or "replication".
 public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
 /// Identity is "name", "anonymous" or "platform".
@@ -67,6 +87,8 @@ public sealed record UiSection(string Kind, string? Entry, string Theme);
 public sealed record Blueprint(int Version, GameSection Game, string? Engine, HostingSection Hosting, LobbySection Lobby, SyncSection Sync, PlayersSection Players, ChatSection Chat, SessionSection Session, PlatformsSection Platforms, UiSection Ui)
     /// Stand-in server URL used by ToConfig when the file names no lobby server (direct-only games).
     public static readonly Uri NoServer;
+    /// The room layer's defaults (room; spec/room.md s.10).
+    public RoomSection Room { get; init; }
     /// Default public Nostr relays (the JS DEFAULT_NOSTR_RELAYS, same URLs in the same order; probed 2026-10-26, docs/design/no-server-fallback.md): all accept and echo ephemeral kind 25050.
     public static readonly IReadOnlyList<string> DefaultNostrRelays;
     /// The JSON Schema (spec/blueprint.schema.json), embedded in this assembly.
@@ -219,7 +241,7 @@ public sealed class InMemoryNetwork
     public IList<IceServer> IceServers { get; }
     /// Allowed (gameId) values; empty means any.
     public ISet<string> AllowedGames { get; }
-    /// What welcome.features lists (empty plays an older hub that cannot rename).
+    /// What welcome.features lists: set_name (rename) and room (passwords, spectator slots, player id bans, kick codes). Empty plays an older hub, { "set_name" } one from before the room layer.
     public IReadOnlyList<string> Features { get; set; }
     public void Advance(long ms);
     public ITransport CreateTransport();
@@ -303,6 +325,10 @@ public sealed class Lobby : IAsyncDisposable
     public TextChat Chat { get; }
     /// The shared co-op pause (docs/recipes/pause.md).
     public SharedPause Pause { get; }
+    /// The room layer (docs/recipes/room.md, spec/room.md): roster with per-player data, ready, countdown and auto start, back to lobby and rematch, spectators and seats, reconnecting state, kick and ban with reasons. Every lobby has one; a game that never touches it behaves as before.
+    public Room Room { get; }
+    /// Why this peer was removed (a kick, a ban, a refused join), once it has been; null otherwise.
+    public RemovalInfo? Removal { get; private set; }
     /// Host: the per-joiner cap on incoming raw messages (LobbyOptions.RateLimit); null = none.
     public RateLimit? RateLimit { get; internal set; }
     /// Direct-IP host only (OneLobby.Direct): this machine's addresses with the port, for the "Your address" screen, e.g. 192.168.1.20:47810. Empty otherwise.
@@ -379,6 +405,10 @@ public sealed class Lobby : IAsyncDisposable
 public sealed class LobbyClient : IAsyncDisposable
     public event Action<LobbyError>? Error;
     public LobbyClient(OneLobbyConfig config, ITransport transport);
+    /// This install's player id for the game (32 hex characters, made once and kept: spec/room.md s.1). It is sent in the hello so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
+    public string PlayerId;
+    /// The host-side ban list (also lobby.Room.Bans): persistent per game, see OneLobbyConfig.BanFile.
+    public BanList Bans;
     /// The blueprint this client was built from (FromBlueprint), or null. A blueprint client enforces it.
     public Blueprint? Blueprint { get; private set; }
     /// A client that runs from onelobby.json. lobbyServerOverride (when not empty) replaces hosting.lobbyServer, the per-player layer above the file; configure may adjust the final config. Throws OneLobbyException identity_anonymous / bad_config (path displayName) when the name breaks players.*.
@@ -387,6 +417,8 @@ public sealed class LobbyClient : IAsyncDisposable
     public Task<Lobby> HostAsync(CancellationToken ct = default);
     public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default);
     public Task<Lobby> JoinAsync(string code, CancellationToken ct = default);
+    /// Joins a lobby with a password, a role (spectator) and your starting per-player data (spec/room.md s.4.2).
+    public Task<Lobby> JoinAsync(string code, RoomJoinOptions? options, CancellationToken ct = default);
     public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default);
     public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null, CancellationToken ct = default);
     /// Polls the transport and the signaling socket. You need it only before a lobby exists (to complete HostAsync, JoinAsync or ListAsync); once you hold a Lobby, call Lobby.Pump, which does this too. Calling both is harmless.
@@ -415,6 +447,26 @@ public static class LobbyErrorCodes
     public const string BadPassword;
     /// The host banned this player (by player id; the ban outlives the lobby, spec/room.md).
     public const string Banned;
+    /// The removal code of a join request the host turned down.
+    public const string Denied;
+    /// The host ended this player's connection without a ban (a room kick with the default code, or DisconnectAsync).
+    public const string Disconnected;
+    /// No spectator slot is free (room layer).
+    public const string SpectatorsFull;
+    /// The host's version has no room layer; a room call was refused locally.
+    public const string RoomUnsupported;
+    /// The blueprint says room.passwordRequired and HostAsync got no password.
+    public const string PasswordRequired;
+    /// A room call the room's state does not allow (Start outside the lobby).
+    public const string WrongState;
+    /// Start needs more connected players than the room has (room.minPlayers).
+    public const string NotEnoughPlayers;
+    /// A per-player data value failed its declaration (room layer).
+    public const string BadValue;
+    /// A per-player data key that no declaration names (room layer).
+    public const string UnknownKey;
+    /// One player's data is over 1024 bytes (room layer).
+    public const string TooLarge;
     /// A host-only request from a non-host.
     public const string NotHost;
     /// Too many requests in a short time, or too many lobbies open from this address.
@@ -502,6 +554,227 @@ public sealed class NetSimTransport : ITransport
     public ISignalingSocket ConnectSignaling(Uri url);
     public IPeerLink CreatePeerLink(PeerLinkOptions options);
     public void Poll();
+```
+
+## OneLobby.Core/Room.cs
+
+```csharp
+/// A countdown as a replica sees it: RemainingMs counts down to the host's start in this peer's clock.
+public sealed class RoomCountdown
+    public int Seq { get; }
+    /// The length of the countdown in ms.
+    public int Total { get; }
+    /// In this peer's Lobby.NowMs base.
+    public long DeadlineMs { get; }
+    /// Milliseconds left now.
+    public int RemainingMs;
+/// The room layer (spec/room.md): one host-authoritative roster with per-player data, ready, a start countdown, spectators, seats, a reconnecting state, kick and ban with reasons. The host holds the truth and replicates it over the room frame (0x80); a joiner's calls are requests the host validates. Every Lobby has one as Lobby.Room; a game that never touches it behaves as before. Events fire on the thread that pumps the lobby.
+public sealed class Room
+    /// How long a joiner waits for the host's room reply, and a host for a peer's join, before calling the other side old.
+    public const int JoinWaitMs;
+    /// Host: the cd countdown tick.
+    public const int CountdownTickMs;
+    /// A replica asks for a fresh snapshot at most this often.
+    public const int ResyncGapMs;
+    /// Host: per peer, at most this many requests per second.
+    public const int RequestsPerSecond;
+    /// Host only: filters names (RoomFilterKind.Name) and chat lines (RoomFilterKind.Chat). Nothing is filtered by default.
+    public Func<string, RoomFilterKind, string>? Filter { get; set; }
+    /// Host only: the persistent ban list (spec/room.md s.5.3).
+    public BanList Bans { get; }
+    /// Null until known; true once the host answered (the host itself: always), false when it never did (an older host).
+    public bool? Supported { get; private set; }
+    public RoomState State;
+    /// A copy of the settings the room runs with.
+    public RoomSettings Settings;
+    /// Replica revision (spec/room.md s.1).
+    public int Revision;
+    /// Every entry (players, spectators, reconnecting ones), by peer id. Before the host's snapshot, or on an older host, it is the hub roster (everyone a player, not ready, seat -1).
+    public IReadOnlyList<RoomEntry> Entries { get; }
+    /// Entries with role player, by seat.
+    public IReadOnlyList<RoomEntry> Players;
+    public IReadOnlyList<RoomEntry> Spectators;
+    public RoomEntry? Player(int peerId);
+    /// This peer's own entry.
+    public RoomEntry? Me;
+    /// The countdown now running, or null.
+    public RoomCountdown? Countdown;
+    /// Every non-legacy player is connected and ready, and there is at least one.
+    public bool AllReady { get; }
+    /// Anything in the room changed (after the matching specific events).
+    public event Action? Changed;
+    public event Action<RoomEntry>? PlayerJoined;
+    /// The entry (status RoomStatus.Left) and why: "left", "kicked", "disconnected" or "timeout".
+    public event Action<RoomEntry, string>? PlayerLeft;
+    /// Keys: "name", "role", "seat", "ready", "status", "legacy" and "data.&lt;key&gt;".
+    public event Action<RoomEntry, IReadOnlyList<string>>? PlayerChanged;
+    public event Action<RoomState, RoomState>? StateChanged;
+    /// The state became Started (the lobby phase is in game).
+    public event Action? Started;
+    public event Action<bool>? AllReadyChanged;
+    /// A countdown began, or the host sent its once-a-second tick.
+    public event Action<RoomCountdown>? CountdownUpdated;
+    /// "host", "too_few" or "condition".
+    public event Action<string>? CountdownCancelled;
+    /// The room went from started or countdown back to lobby (a rematch comes through here too).
+    public event Action? BackedToLobby;
+    public event Action<RoomSettings>? SettingsChanged;
+    /// Host only: put a bot in this seat.
+    public event Action<SeatDroppedInfo>? SeatDropped;
+    /// Host only: a player took a dropped seat; take the bot out.
+    public event Action<SeatRestoredInfo>? SeatRestored;
+    /// Host only: a joiner asked for start, back to lobby or a rematch. Nothing changed.
+    public event Action<int, RoomRequest>? Requested;
+    /// This peer was removed from the lobby; Lobby.Removal holds the same. Fires once, before Lobby.SessionEnded.
+    public event Action<RemovalInfo>? Removed;
+    /// A request of this peer was refused by the host: code, what it was ("set", "ready", "role", "req"), key.
+    public event Action<string, string, string?>? Rejected;
+    public event Action? BansChanged;
+    /// The host speaks the room layer (its first snapshot arrived).
+    public event Action? SupportConfirmed;
+    /// The host never answered: it predates the room layer. Players lists the hub roster; calls throw room_unsupported.
+    public event Action? Unsupported;
+    /// Your own ready flag. Players only; the result is the next PlayerChanged, or Rejected.
+    public void SetReady(bool ready);
+    /// Flips your ready flag.
+    public void ToggleReady();
+    /// Your own data (colour, avatar index, team, game keys). Atomic; "" unsets a key.
+    public void SetData(IReadOnlyDictionary<string, string> values);
+    /// Host: sets any player's data, host-only keys included. A joiner passing someone else's id gets not_allowed.
+    public void SetData(int peerId, IReadOnlyDictionary<string, string> values);
+    /// Become a spectator or a player (your own role). The host answers with PlayerChanged or Rejected.
+    public void SetRole(RoomRole role);
+    /// Ask the host to start, go back to the lobby or rematch. It raises the host's Requested and changes nothing by itself.
+    public void Request(RoomRequest what);
+    /// Host: move a player or spectator to the other role (the capacity rules apply; a failure throws its code).
+    public void MoveTo(int peerId, RoomRole role);
+    /// Host: start the game, after the countdown when CountdownMs is above 0. Throws wrong_state or not_enough_players.
+    public void Start();
+    /// Host: stop a running countdown (a no-op otherwise).
+    public void CancelCountdown();
+    /// Host: back to the lobby (ready flags reset, links and roster untouched). A no-op in the lobby.
+    public void BackToLobby();
+    /// Host: back to the lobby, then start again (the countdown applies). Players keep their seats, data and names.
+    public void Rematch();
+    /// Host: changes some settings for everyone (see spec/room.md s.9). The player and spectator caps are fixed when the lobby is created.
+    public void Configure(RoomSettingsChange s);
+    /// Host: remove a player; it may rejoin. code defaults to "kicked"; reason is shown to the player (default sentence of the code).
+    public void Kick(int peerId, string? code = null, string? reason = null);
+    /// Host: remove a player and ban it for good (its player id, and its address when known); see Bans, Unban.
+    public void Ban(int peerId, string? code = null, string? reason = null);
+    /// Host: lift a ban by player id or address; returns how many entries went.
+    public int Unban(string idOrIp);
+```
+
+## OneLobby.Core/RoomRules.cs
+
+```csharp
+public enum RoomRole { Player, Spectator }
+public enum RoomState { Lobby, Countdown, Started }
+/// Left is never stored: it is the status an entry carries in Room.PlayerLeft.
+public enum RoomStatus { Connected, Reconnecting, Left }
+public enum LateJoinPolicy { Allow, Spectate, Refuse }
+public enum AutoStartMode { Off, AllReady, Players }
+public enum SeatDroppedPolicy { Window, Immediate }
+public enum RoomRequest { Start, Lobby, Rematch }
+public enum RoomFilterKind { Name, Chat }
+public enum DataType { String, Int, Enum, Bool, Color }
+/// One declaration of a per-player data key (spec/room.md s.4.2, room.data in onelobby.json).
+public sealed record DataDecl(DataType Type)
+    public int? Min { get; init; }
+    public int? Max { get; init; }
+    public int? MaxLength { get; init; }
+    public IReadOnlyList<string>? Values { get; init; }
+    public string? Default { get; init; }
+    public bool HostOnly { get; init; }
+/// One roster row as the room replicates it (spec/room.md s.1). A snapshot: it does not change after you got it.
+public sealed record RoomEntry(int Id, string Name, RoomRole Role, int Seat, bool Ready, RoomStatus Status, IReadOnlyDictionary<string, string> Data, bool Legacy = false);
+/// The settings a room runs with (the host's; every peer gets them in the snapshot).
+public sealed record RoomSettings(int MaxPlayers, int Spectators, int MinPlayers, AutoStartMode AutoStart, int AutoStartPlayers, int CountdownMs, LateJoinPolicy LateJoin, SeatDroppedPolicy SeatDropped, int RejoinWindowMs, int MaxNameLength, IReadOnlyDictionary<string, DataDecl> Data);
+/// What a host sets in code or in onelobby.json (room); every property is optional.
+public sealed class RoomOptions
+    public AutoStartMode? AutoStart { get; set; }
+    public int? AutoStartPlayers { get; set; }
+    public int? MinPlayers { get; set; }
+    public int? CountdownSeconds { get; set; }
+    /// Spectator cap (not counted in MaxPlayers); 0 or null turns spectating off.
+    public int? Spectators { get; set; }
+    public LateJoinPolicy? LateJoin { get; set; }
+    public SeatDroppedPolicy? SeatDropped { get; set; }
+    public int? RejoinWindowSeconds { get; set; }
+    /// HostAsync fails with password_required when no password is given.
+    public bool? PasswordRequired { get; set; }
+    /// Longest effective name, at most 24.
+    public int? MaxNameLength { get; set; }
+    /// Per-player data keys beyond the built-ins color, avatar and team.
+    public IReadOnlyDictionary<string, DataDecl>? Data { get; set; }
+    /// This set of options with over on top (its set properties win; data keys are merged).
+    public RoomOptions Merge(RoomOptions? over);
+/// What a joiner brings: its role, starting data and the password it knows.
+public sealed class RoomJoinOptions
+    public RoomRole Role { get; set; }
+    public IReadOnlyDictionary<string, string>? Data { get; set; }
+    public string? Password { get; set; }
+/// Host: changes some settings for everyone with Room.Configure; unset properties stay.
+public sealed class RoomSettingsChange
+    public AutoStartMode? AutoStart { get; set; }
+    public int? AutoStartPlayers { get; set; }
+    public int? MinPlayers { get; set; }
+    public int? CountdownMs { get; set; }
+    public LateJoinPolicy? LateJoin { get; set; }
+    public SeatDroppedPolicy? SeatDropped { get; set; }
+    public int? RejoinWindowMs { get; set; }
+/// Why this peer was removed from the lobby (spec/room.md s.5.1).
+public sealed record RemovalInfo(string Code, string Reason, bool Ban);
+public sealed record SeatDroppedInfo(int Seat, int PeerId, string Name, IReadOnlyDictionary<string, string> Data, string Reason, bool AfterWindow);
+public sealed record SeatRestoredInfo(int Seat, int PeerId, string Name, bool Returning);
+/// One ban (spec/room.md s.5.3). At is unix milliseconds.
+public sealed record BanEntry(string? Id, string? Ip, string? Name, string? Reason, string? Code, long At);
+```
+
+## OneLobby.Core/RoomStorage.cs
+
+```csharp
+/// A tiny synchronous key/value store for what a client keeps on the player's machine: the per-install player id and the host's ban list (spec/room.md s.1 and s.5.3). Implement it over PlayerPrefs, a settings file or anything else.
+public interface IKeyValueStore
+    string? GetItem(string key);
+    void SetItem(string key, string value);
+    void RemoveItem(string key);
+/// The stores the kit ships: memory (the process) and one JSON file.
+public static class KeyValueStores
+    /// Keeps values for the life of the process.
+    public static IKeyValueStore Memory();
+    /// A JSON file { key: value } at path: read once, written on every change. A missing or corrupt file reads as empty.
+    public static IKeyValueStore FromFile(string path);
+    /// The store key of a game's player id (same as JS).
+    public static string PlayerIdKey(string gameId);
+    /// The store key of a game's ban list (same as JS).
+    public static string BansKey(string gameId);
+    /// This install's player id for gameId: read from the store, else made (32 hex characters from the CSPRNG) and saved. A store that cannot save still returns a fresh id, so the id then lasts one session. It is not an account or a hardware id (spec/room.md s.1).
+    public static string LoadPlayerId(IKeyValueStore? store, string gameId);
+/// The host's ban list: survives the lobby because it is saved in an IKeyValueStore. Entries are keyed by the player id, with the address as the fallback (spec/room.md s.5.3). A corrupt store loads as empty and is only overwritten by the next change.
+public sealed class BanList
+    /// At most this many entries are kept; the oldest goes first.
+    public const int MaxBans;
+    /// The hub holds at most this many player ids per lobby.
+    public const int HubBanIds;
+    public event Action? Changed;
+    public BanList(IKeyValueStore? store, string gameId);
+    /// Reads the store again.
+    public void Reload();
+    public IReadOnlyList<BanEntry> List();
+    public int Count;
+    /// The entry that bans this id and/or address, if any.
+    public BanEntry? Match(string? id, string? ip);
+    /// Adds a ban for a player id and/or an address. A loopback address is never stored. Throws when neither is usable.
+    public BanEntry Add(string? id = null, string? ip = null, string? name = null, string? reason = null, string? code = null, long? at = null);
+    /// Unban by player id or address; returns how many entries went.
+    public int Remove(string idOrIp);
+    /// Unban every entry with this id or this address.
+    public int Remove(string? id, string? ip);
+    public void Clear();
+    /// The newest player ids, for the hub's bans message.
+    public IReadOnlyList<string> HubIds();
 ```
 
 ## OneLobby.Core/SharedPause.cs
@@ -685,6 +958,8 @@ public static class Wire
     public static byte[] BuildVoice(int route, int seq, byte flags, IReadOnlyList<byte[]> frames);
     public static byte[] BuildChat(int route, uint id, long ts, string text);
     public static byte[] BuildChatHistory(IReadOnlyList<ChatLine> lines);
+    /// One room frame (spec/room.md s.2): the JSON text of a room message, route 0.
+    public static byte[] BuildRoom(string json);
     public static byte[] BuildChatReject(uint id, byte reason);
     /// Joiner to host: pause (1) or resume (0) for everyone.
     public static byte[] BuildPauseRequest(bool paused);

@@ -128,7 +128,7 @@ $repo = Split-Path (Split-Path $here)
 $docDir = Join-Path $pkg 'Documentation~'
 New-Item -ItemType Directory -Force $docDir | Out-Null
 $docs = @('docs/recipes/unity.md', 'docs/recipes/direct-ip.md', 'docs/recipes/pause.md', 'docs/recipes/game-console.md',
-          'docs/recipes/replication.md', 'docs/recipes/voice-and-chat.md', 'spec/nostr-signaling.md', 'AGENTS.md')
+          'docs/recipes/replication.md', 'docs/recipes/voice-and-chat.md', 'docs/recipes/room.md', 'spec/nostr-signaling.md', 'AGENTS.md')
 foreach ($d in $docs) {
     $src = Join-Path $repo $d
     if (Test-Path $src) { Copy-Item $src $docDir -Force } else { Write-Host "doc ${d}: not in this checkout (skipped)" }

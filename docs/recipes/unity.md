@@ -43,7 +43,7 @@ default `Assembly-CSharp` needs nothing (the package asmdef is auto-referenced).
 
 Or build a tarball with `-Pack` (`--pack`) and use Package Manager, "Add package from tarball". Re-run the build script
 after pulling OneLobby changes. The tarball carries the recipes under `Documentation~/` (unity, direct-ip, pause,
-game-console, replication, voice-and-chat, the Nostr spec and AGENTS.md); `-Version 0.6.0-dev.4` (`--version`) stamps the
+game-console, replication, voice-and-chat, room, the Nostr spec and AGENTS.md); `-Version 0.6.0-dev.4` (`--version`) stamps the
 version into the packed `package.json` and the file name. `-Out <dir>` (`--out <dir>`) packs without writing into the
 checkout: it fills a staged copy, keeps dotnet's bin/obj in a temp folder and writes only `<dir>/<tarball>` (implies
 `-Pack`). If another package already ships `System.Text.Json.dll` (or one of the other DLLs in
@@ -204,6 +204,15 @@ tested path.
 `Pause.Changed` (`Time.timeScale = s.Paused ? 0f : 1f`). `OneLobbyRunner` keeps pumping at timeScale 0 (it uses real time), so 
 the pause itself, pings and chat keep working. The host calls `Pause.Clear()` before reloading the scene for a restart. 
 Details: `pause.md`.
+
+## Room: names, ready, countdown, spectators, kick and ban
+
+`runner.Lobby.Room` is the whole room layer (`docs/recipes/room.md`, section C#); the runner adds only two things. Its
+`PlayerIdFile` and `BanFile` fields (default `onelobby-player.json` and `onelobby-bans.json` under
+`Application.persistentDataPath`) keep this install's player id and the host's ban list across runs. `JoinAsync(code,
+new RoomJoinOptions { ... })` joins with a password, as a spectator or with your starting colour and team. Pass
+`LobbyOptions.Room` / `Password` (or `DirectHostOptions.Room`) to `HostAsync` / `HostDirectAsync`. Subscribe to `lobby.Room`
+events in `LobbyChanged`, next to the lobby's own.
 
 ## A friend could not connect (`PeerFailed`)
 

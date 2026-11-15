@@ -29,6 +29,12 @@ bool sent = await lobby.FlushAsync(TimeSpan.FromSeconds(1));   // before LeaveAs
 lobby.Chat.Send("gg"); lobby.Chat.Received += line => { };
 lobby.Pause.Request(true); lobby.Pause.State;              // shared pause: { Paused, ByPeer, PauserLeft }; Changed / Refused events
 lobby.Pause.CanResume; lobby.Pause.Policy = (peer, wantPaused) => true; lobby.Pause.Clear();   // Policy and Clear: host only
+lobby.Room.Entries; lobby.Room.SetData(new Dictionary<string, string> { ["color"] = "#ff8800" }); lobby.Room.SetReady(true);   // roster: Name, Role, Seat, Ready, Status, Data
+lobby.Room.Start(); lobby.Room.CancelCountdown(); lobby.Room.BackToLobby(); lobby.Room.Rematch();   // host; CountdownUpdated / Started / BackedToLobby events
+lobby.Room.Kick(id, reason: "..."); lobby.Room.Ban(id, reason: "..."); lobby.Room.Unban(playerId);   // the player sees lobby.Removal; bans persist (lobby.Room.Bans)
+lobby.Room.SeatDropped += s => { }; lobby.Room.Changed += () => { }; lobby.Room.Filter = (text, kind) => text;   // docs/recipes/room.md
+await client.HostAsync(new LobbyOptions("x", 4) { Password = "x", Room = new RoomOptions { Spectators = 2, AutoStart = AutoStartMode.AllReady } });
+await client.JoinAsync(code, new RoomJoinOptions { Password = "x", Role = RoomRole.Spectator });
 lobby.Voice.Enabled = true; lobby.Voice.PushToTalk(down);
 lobby.Voice.ReleaseHangMs = 150; lobby.Voice.MuteAll(true); lobby.Voice.IsMuted(id); lobby.Voice.InputLevel; lobby.Voice.IsTransmitting;
 lobby.Lockstep!.Submit(cmd); while (lobby.Lockstep.TryNextFrame(out var f)) { /* f.Tick, f.Commands */ }
