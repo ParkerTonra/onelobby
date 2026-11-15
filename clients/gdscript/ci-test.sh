@@ -12,7 +12,7 @@ LOG="$(mktemp -d)"
 SERVER_PID=""
 trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null' EXIT
 PASSED=(); FAILED=()
-godot() { "$GODOT" --headless --audio-driver Dummy --path "$HERE" "$@"; }
+G=("$GODOT" --headless --audio-driver Dummy --path "$HERE")
 step() { # step <name> <cmd...>
   local name="$1"; shift
   echo "::group::$name"
@@ -22,10 +22,10 @@ step() { # step <name> <cmd...>
   if [ $rc -eq 0 ]; then PASSED+=("$name"); echo "PASS $name"; else FAILED+=("$name"); echo "::error::FAIL $name (exit $rc)"; fi
 }
 
-step vectors godot -s res://tests/vectors.gd
-step nostr_unit godot -s res://tests/nostr_unit.gd
-step relay_retry godot -s res://tests/relay_retry.gd
-step sign_bench godot -s res://tests/sign_bench.gd
+step vectors "${G[@]}" -s res://tests/vectors.gd
+step nostr_unit "${G[@]}" -s res://tests/nostr_unit.gd
+step relay_retry "${G[@]}" -s res://tests/relay_retry.gd
+step sign_bench "${G[@]}" -s res://tests/sign_bench.gd
 step direct-test bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
 step nostr-interop env GODOT="$GODOT" node "$ROOT/integration/nostr-interop-gdscript.mjs"
