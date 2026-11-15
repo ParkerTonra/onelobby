@@ -392,5 +392,9 @@ var joined := await other_client.join_direct(lobby.ip_code)   # or "203.0.113.7:
 A range of N ports serves N players at once; the next one fails on the host with an `ice_failed` error that names the
 range, and the joiner's attempt ends with `ice_failed` ("port-forward the UDP range, or use TURN"). UPnP is not used.
 The joiner tries each host candidate it receives at the code's address with the same UDP port (a forwarded port keeps its
-number), so forward the range 1:1. Gaps: JS and .NET hosts pin one port (UDP mux) and expose no range option; GDScript
+number), so forward the range 1:1. Gap: GDScript
 joiners by IP are for native games (no browser `Origin` check on the Godot listener).
+
+JS and C# Direct hosts need no range: they multiplex every peer on ONE UDP port (the same number as the TCP signaling port), so
+forwarding that one TCP port plus that one UDP port is enough there. `udp_port_range` is GDScript-only because Godot's WebRTC
+opens one UDP port per peer.
