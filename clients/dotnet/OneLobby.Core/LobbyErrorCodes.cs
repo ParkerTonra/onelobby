@@ -21,6 +21,8 @@ namespace OneLobby
         public const string Kicked = "kicked";
         /// <summary>Wrong lobby password.</summary>
         public const string BadPassword = "bad_password";
+        /// <summary>The host banned this player (by player id; the ban outlives the lobby, spec/room.md).</summary>
+        public const string Banned = "banned";
         /// <summary>A host-only request from a non-host.</summary>
         public const string NotHost = "not_host";
         /// <summary>Too many requests in a short time, or too many lobbies open from this address.</summary>

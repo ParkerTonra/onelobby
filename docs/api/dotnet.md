@@ -413,6 +413,8 @@ public static class LobbyErrorCodes
     public const string Kicked;
     /// Wrong lobby password.
     public const string BadPassword;
+    /// The host banned this player (by player id; the ban outlives the lobby, spec/room.md).
+    public const string Banned;
     /// A host-only request from a non-host.
     public const string NotHost;
     /// Too many requests in a short time, or too many lobbies open from this address.
