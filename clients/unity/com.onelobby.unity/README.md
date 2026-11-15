@@ -9,7 +9,7 @@ package only adds:
 |---|---|
 | `UnityTransport : ITransport` | `OneLobby.DataChannel.DataChannelTransport` (three negotiated data channels, DESIGN s.8, + `ClientWebSocket` signaling), native log to the console |
 | `UnityVoiceAudio : IVoiceAudio` | `Microphone` capture to 48 kHz mono 20 ms frames, one `AudioSource` per speaker (`OnAudioFilterRead`) |
-| `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread); `HostDirectAsync` / `JoinDirectAsync` host by IP with a join code and no server (`OneLobby.Direct`, `docs/recipes/direct-ip.md`) |
+| `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread); `HostDirectAsync` / `JoinDirectAsync` (also with `JoinDirectOptions`: TURN, Nostr) / `RejoinDirectAsync` host by IP with a join code and no server (`OneLobby.Direct`, `docs/recipes/direct-ip.md`) |
 
 Platforms: whatever natives `Runtime/Plugins` holds. Built and tested here: Windows x64 and Linux x64. The CI workflow
 also builds macOS (universal) and Android arm64 (not yet run). Not yet: iOS (needs a static `__Internal` build) and WebGL;

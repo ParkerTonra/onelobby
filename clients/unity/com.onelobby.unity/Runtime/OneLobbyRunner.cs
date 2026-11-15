@@ -40,6 +40,10 @@ namespace OneLobby.Unity
                  "(real play). Covers the direct host's TCP + UDP listener and the WebRTC sockets of every lobby. Set before the " +
                  "first Host/Join. Command line: --bind-address=127.0.0.1")]
         public string BindAddress = "";
+        [Tooltip("Send and accept only relay (TURN) candidates: hides each player's IP and proves a TURN entry works (pair with " +
+                 "JoinDirectOptions.IceServers / DirectHostOptions.IceServers). Same as OneLobbyConfig.RelayOnly; with a Blueprint, " +
+                 "this ORs with its hosting.relayOnly. Set before the first Host/Join.")]
+        public bool RelayOnly;
 
         private LobbyClient? _client;
         private bool _clientIsDirect;
@@ -88,6 +92,12 @@ namespace OneLobby.Unity
                 System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
         }
 
+        private OneLobbyConfig ApplyConfig(OneLobbyConfig config)
+        {
+            if (RelayOnly) config = config with { RelayOnly = true };
+            return ConfigureConfig != null ? ConfigureConfig(config) : config;
+        }
+
         private LobbyClient CreateClient()
         {
             OneLobbyConfig config = null!;
@@ -100,7 +110,7 @@ namespace OneLobby.Unity
             else
             {
                 config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
-                if (ConfigureConfig != null) config = ConfigureConfig(config);
+                config = ApplyConfig(config);
             }
             var bind = Bind();
             Transport.BindAddress = bind?.ToString();
@@ -114,7 +124,7 @@ namespace OneLobby.Unity
             }
             var c = bp != null
                 ? LobbyClient.FromBlueprint(bp, transport, DisplayName,
-                    string.IsNullOrEmpty(LobbyServer) || LobbyServer == DefaultLobbyServer ? null : LobbyServer, ConfigureConfig)
+                    string.IsNullOrEmpty(LobbyServer) || LobbyServer == DefaultLobbyServer ? null : LobbyServer, ApplyConfig)
                 : new LobbyClient(config, transport);
             c.Error += e => Error?.Invoke(e);
             return c;
@@ -159,7 +169,19 @@ namespace OneLobby.Unity
 
         /// <summary>Join a direct host by its join code (<c>6B01-RGFE-P2B</c>) or address (<c>192.168.1.20</c>, <c>ip:port</c>).</summary>
         public Task<Lobby> JoinDirectAsync(string codeOrAddress, string? password = null) =>
-            Enter(() => DirectClient().JoinDirectAsync(codeOrAddress, password));
+            JoinDirectAsync(codeOrAddress, new JoinDirectOptions { Password = password });
+
+        /// <summary>
+        /// As above, with <see cref="JoinDirectOptions"/>: the password, Nostr relays and STUN servers for a version 1 code, and
+        /// extra ICE servers (a TURN entry the player pasted: <see cref="JoinDirectOptions.IceServers"/>, with
+        /// <see cref="IceServer.RelayOnly"/> to force the relay) for a joiner behind a strict NAT. Goes through the same adopt path
+        /// (<see cref="LobbyChanged"/>, background hold) as every other join here.
+        /// </summary>
+        public Task<Lobby> JoinDirectAsync(string codeOrAddress, JoinDirectOptions options)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            return Enter(() => DirectClient().JoinDirectAsync(codeOrAddress, options));
+        }
 
         /// <summary>
         /// Take a direct seat back after a drop or a restart (the host keeps it 60 s): the code joined before and the
@@ -168,6 +190,13 @@ namespace OneLobby.Unity
         /// </summary>
         public Task<Lobby> RejoinDirectAsync(string codeOrAddress, string resumeToken) =>
             Enter(() => DirectClient().RejoinDirectAsync(codeOrAddress, resumeToken));
+
+        /// <summary>As above, with <see cref="JoinDirectOptions"/> (Nostr relays, extra ICE servers such as a TURN relay; its Password is not used).</summary>
+        public Task<Lobby> RejoinDirectAsync(string codeOrAddress, string resumeToken, JoinDirectOptions options)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            return Enter(() => DirectClient().RejoinDirectAsync(codeOrAddress, resumeToken, options));
+        }
 
         /// <summary>A direct session leaves the client pointed at a direct hub, so going back to a lobby server gets a fresh one.</summary>
         private LobbyClient ServerClient()

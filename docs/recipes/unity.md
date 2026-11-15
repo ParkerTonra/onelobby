@@ -290,6 +290,9 @@ public async Task<bool> JoinByIpAsync(string codeOrAddress, string? password = n
 ```
 
 - Show the code grouped as it comes (`6B01-RGFE-P2B`); `JoinDirectAsync` also takes `192.168.1.20` or `ip:port`.
+- `Runner.JoinDirectAsync(code, new JoinDirectOptions { Password, Nostr, IceServers })` and `RejoinDirectAsync(code, token, options)`
+  reach the same options as the C# client (a pasted TURN entry, Nostr relays/STUN) and still raise `LobbyChanged`. Tick
+  `RelayOnly` on the runner to send and accept relay candidates only (docs/recipes/turn.md).
 - The first host on Windows gets the firewall prompt for the game's exe ("allow on private networks" is enough on a LAN;
   tick public too for internet play). When another program holds 47810 the host takes the next free port up to 47819
   (the code carries it); set `DirectHostOptions.Port` to pick one (`FallbackPorts` to allow others after it),

@@ -92,7 +92,17 @@ public static class TurnNet
 }
 ```
 
-Unity: `OneLobbyRunner.HostDirectAsync(new DirectHostOptions { IceServers = ... })` takes the same host options. In
+Unity: `OneLobbyRunner.HostDirectAsync(new DirectHostOptions { IceServers = ... })` takes the same host options, and the
+join side takes a player-pasted TURN entry the same way, through the runner (so `LobbyChanged` and the background hold still
+happen); tick `OneLobbyRunner.RelayOnly` (before the first Host/Join) to force the relay:
+
+```csharp
+var turn = new IceServer(new[] { "turn:turn.example.com:3478" }, user, credential);
+var lobby = await Runner.JoinDirectAsync(code, new JoinDirectOptions { Password = pw, IceServers = new[] { turn } });
+// after a drop: Runner.RejoinDirectAsync(code, token, new JoinDirectOptions { IceServers = new[] { turn } })
+```
+
+In
 `OneLobby.Godot` (C#) `RelayOnly` still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores, so test the
 relay with the GDScript or DataChannel client instead.
 

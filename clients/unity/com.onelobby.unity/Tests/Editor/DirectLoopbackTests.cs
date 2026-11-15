@@ -86,5 +86,42 @@ namespace OneLobby.Unity.Tests
             yield return Await(joinClient.DisposeAsync().AsTask(), Pump, "dispose");
             yield return Await(hostClient.DisposeAsync().AsTask(), Pump, "dispose");
         }
+
+        /// <summary>The runner's JoinDirectAsync(code, JoinDirectOptions) takes the same adopt path: LobbyChanged fires, Lobby is set.</summary>
+        [UnityTest]
+        public IEnumerator RunnerJoinDirectWithOptionsAdoptsTheLobby()
+        {
+            const int port = Port + 1;
+            var cfg = new OneLobbyConfig("com.onelobby.unitytest", "1", new Uri("ws://127.0.0.1:1/ws"), SyncMode.Raw);
+            var hostClient = new LobbyClient(cfg with { DisplayName = "UnityHost" }, new UnityTransport());
+            var go = new GameObject("OneLobbyRunnerTest");
+            var runner = go.AddComponent<OneLobbyRunner>();
+            runner.KeepAcrossScenes = false;
+            runner.BindAddress = "127.0.0.1";
+            runner.DisplayName = "RunnerJoiner";
+            runner.GameId = cfg.GameId;
+            Lobby? host = null;
+            void Pump() { if (host != null) host.Pump(); else hostClient.Pump(); }
+            var changes = new List<Lobby?>();
+            runner.LobbyChanged += l => changes.Add(l);
+
+            var hostTask = hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = port, MaxPlayers = 2, OpenPort = false, BindAddress = System.Net.IPAddress.Loopback });
+            yield return Await(hostTask, Pump, "host direct");
+            host = hostTask.Result;
+
+            // a TURN entry nobody uses here: the options reach the join without breaking a direct link
+            var turn = new IceServer(new[] { "turn:127.0.0.1:3478" }, "u", "p");
+            var joinTask = runner.JoinDirectAsync("127.0.0.1:" + port, new JoinDirectOptions { IceServers = new[] { turn } });
+            yield return Await(joinTask, Pump, "runner join direct with options");
+            Assert.AreSame(joinTask.Result, runner.Lobby, "the runner adopted the lobby");
+            Assert.AreEqual(1, changes.Count, "LobbyChanged fired once");
+            yield return Await(joinTask.Result.ReadyAsync, Pump, "joiner ready");
+
+            yield return Await(runner.LeaveAsync(), Pump, "runner leave");
+            Assert.IsNull(runner.Lobby);
+            UnityEngine.Object.DestroyImmediate(go);
+            yield return Await(host.LeaveAsync(), Pump, "host leave");
+            yield return Await(hostClient.DisposeAsync().AsTask(), Pump, "dispose");
+        }
     }
 }
