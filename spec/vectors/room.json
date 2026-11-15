@@ -1239,6 +1239,7 @@
   },
   "defaultReasons": {
     "kicked": "The host removed you from the game.",
+    "denied": "The host did not let you in.",
     "disconnected": "The host disconnected you.",
     "banned": "You are banned from this game.",
     "bad_password": "Wrong password.",

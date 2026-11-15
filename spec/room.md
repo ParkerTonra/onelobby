@@ -77,7 +77,7 @@ Host to joiners:
 | `t` | fields | meaning |
 |---|---|---|
 | `snap` | `v`, `rev`, `state`, `countdown` (object or null), `settings`, `players` (all entries) | Full room. Sent to a peer whose `join` was admitted, and in answer to `resync`. |
-| `upd` | `rev`, `players?` (changed or new entries, whole), `gone?` ([{id, why}]), `state?`, `countdown?` (object or null), `settings?` | Delta, broadcast to every admitted peer (the new peer gets `snap` instead). A replica applies it only when `rev` is its `rev + 1`; `rev` at or below its own is a duplicate (ignored); a larger gap means it missed one: it sends `resync` and applies nothing until the `snap`. |
+| `upd` | `rev`, `players?` (changed or new entries, whole), `gone?` ([{id, why}]), `state?`, `countdown?` (object or null), `settings?`, `cancel?` (why a countdown ended without a start: `host`, `too_few`, `condition`) | Delta, broadcast to every admitted peer (the new peer gets `snap` instead). A replica applies it only when `rev` is its `rev + 1`; `rev` at or below its own is a duplicate (ignored); a larger gap means it missed one: it sends `resync` and applies nothing until the `snap`. |
 | `cd` | `seq`, `left` (ms) | Countdown tick, about once a second (4.5). No `rev`. |
 | `deny` | `code`, `reason` | The `join` was refused (4.8). The host then disconnects the peer (5.2). |
 | `nack` | `re` ("set" \| "ready" \| "role" \| "req" \| "join"), `code`, `key?` | A request failed; nothing changed. |
@@ -180,12 +180,13 @@ State machine, host only: `lobby` -> (`countdown` ->) `started` -> `lobby`.
   by its own timer.
 - Cancel: the host's `cancelCountdown()` (reason `host`); fewer than `minPlayers` connected players (`too_few`); for a
   countdown that auto start began, the auto-start condition no longer holding (`condition`). It sends
-  `upd{state:"lobby", countdown:null}`. `countdownCancelled` fires with the reason.
+  `upd{state:"lobby", countdown:null, cancel:reason}`. `countdownCancelled` fires with the reason on every peer.
 - **Auto start** (host evaluates after every roster, ready and settings change, and on each tick, only in state `lobby`):
   `shouldAutoStart` (vectors `autoStart`). Mode `all_ready`: at least `max(minPlayers,1)` eligible players, every eligible
   player ready, and no player reconnecting. Mode `players`: at least `max(autoStartPlayers, minPlayers)` eligible
   players. Eligible = role `player`, status `connected`, not legacy. Mode `off`: never. When true the host runs
-  `start()`.
+  `start()`. After back to lobby (4.7) auto start stays off until the next change of the roster or of a ready flag, so
+  `players` mode does not restart a match at once.
 
 **Time base (decision).** Only host-relative timing exists, and it is enough: `left` is measured on the host at the
 instant it sends. A receiver sets `deadline = receivedAt + left - oneWay`, in its own `clock.now()` base, where
@@ -260,7 +261,7 @@ joiners cannot see or change it (the older receiver-side `chat.filter` still exi
 A removal carries a stable `code` (`^[a-z][a-z0-9_]{0,31}$`) and a free-text `reason` (at most 120 characters, after
 stripping control and bidi characters). An empty reason becomes the default sentence of its code (vectors
 `defaultReasons`). The removed player sees `removed { code, reason, ban }` (the `room` event `removed`; also
-`lobby.removal`) before its `sessionEnded`. The reason is plain text for the player, never a stack or an address.
+`lobby.removal`) before its `sessionEnded`. A host's declined join request has code `denied` ("The host did not let you in."). The reason is plain text for the player, never a stack or an address.
 
 ### 5.2 How it travels
 
@@ -271,8 +272,10 @@ drops `code` still shows the sentence. A refused `join` (4.8) is `deny` on the d
 `ban:false`. `lobby.kick(peerId)` is unchanged: it bans the address for this lobby only.
 
 - `room.kick(peerId, { code?, reason? })`: remove, may rejoin (`ban:false`; default `code` `kicked`).
-- `room.ban(peerId, { code?, reason? })`: remove and ban for good (5.3) (default `code` `banned`); the hub also bans the
-  address for the lobby (`ban` default true).
+- `room.ban(peerId, { code?, reason? })`: remove and ban for good (5.3) (default `code` `banned`). The kick goes out
+  with `ban:false`: the persistent list (and the hub's `bans` id set) does the banning, so `unban` can lift it. The
+  removed player's `removed.ban` is true when the code is `banned`. Banning an address for this lobby only is
+  `lobby.kick(peerId)`, unchanged.
 
 ### 5.3 The ban list
 
