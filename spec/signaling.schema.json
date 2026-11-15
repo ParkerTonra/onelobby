@@ -26,8 +26,10 @@
     "mode": { "enum": ["lockstep", "raw"] },
     "phase": { "enum": ["lobby", "in_game"] },
     "errorCode": {
-      "enum": ["bad_request", "unknown_code", "lobby_full", "in_game", "version_mismatch", "game_not_allowed", "rate_limited", "not_host", "kicked", "server_full"]
+      "enum": ["bad_request", "unknown_code", "lobby_full", "in_game", "version_mismatch", "game_not_allowed", "rate_limited", "not_host", "kicked", "server_full", "bad_password", "banned"]
     },
+    "playerId": { "description": "Per-install random player id (spec/room.md s.1): 32 lower-case hex characters. Not an account or a hardware id.", "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "lobbyPassword": { "type": "string", "maxLength": 64 },
     "sdp": {
       "type": "object",
       "required": ["type", "sdp"],
@@ -77,6 +79,7 @@
         "phase": { "$ref": "#/$defs/phase" },
         "meta": { "$ref": "#/$defs/meta" },
         "region": { "type": "string" },
+        "hasPassword": { "type": "boolean", "description": "Additive: the lobby asks for a password (spec/room.md s.6). Absent = no." },
         "createdAt": { "type": "integer", "description": "server unix ms" }
       }
     },
@@ -85,7 +88,7 @@
       "oneOf": [
         { "$ref": "#/$defs/c_hello" }, { "$ref": "#/$defs/c_create" }, { "$ref": "#/$defs/c_join" }, { "$ref": "#/$defs/c_list" },
         { "$ref": "#/$defs/c_leave" }, { "$ref": "#/$defs/c_signal" }, { "$ref": "#/$defs/c_meta" }, { "$ref": "#/$defs/c_phase" },
-        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }, { "$ref": "#/$defs/c_path" }, { "$ref": "#/$defs/c_set_name" }
+        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }, { "$ref": "#/$defs/c_path" }, { "$ref": "#/$defs/c_set_name" }, { "$ref": "#/$defs/c_bans" }
       ]
     },
     "c_hello": {
@@ -102,7 +105,8 @@
           "properties": { "lib": { "type": "string" }, "ver": { "type": "string" }, "platform": { "type": "string" } }
         },
         "name": { "$ref": "#/$defs/playerName" },
-        "resumeToken": { "type": "string" }
+        "resumeToken": { "type": "string" },
+        "playerId": { "$ref": "#/$defs/playerId", "description": "Additive (spec/room.md s.7): lets the hub refuse a banned player id." }
       }
     },
     "c_create": {
@@ -117,10 +121,16 @@
         "tickRate": { "type": "integer", "minimum": 1, "maximum": 255 },
         "lateJoin": { "type": "boolean" },
         "meta": { "$ref": "#/$defs/meta" },
-        "relayOnly": { "type": "boolean", "description": "Additive (s.10): hide IPs by forcing TURN. Default false." }
+        "relayOnly": { "type": "boolean", "description": "Additive (s.10): hide IPs by forcing TURN. Default false." },
+        "password": { "$ref": "#/$defs/lobbyPassword", "description": "Additive (spec/room.md s.6): joiners must send the same one or get bad_password. Empty = none." },
+        "spectators": { "type": "integer", "minimum": 0, "maximum": 250, "description": "Additive (spec/room.md s.7): spectator slots; the lobby holds maxPlayers + spectators members. Default 0." }
       }
     },
-    "c_join": { "type": "object", "required": ["t", "code"], "properties": { "t": { "const": "join" }, "code": { "$ref": "#/$defs/code" } } },
+    "c_join": {
+      "type": "object",
+      "required": ["t", "code"],
+      "properties": { "t": { "const": "join" }, "code": { "$ref": "#/$defs/code" }, "password": { "$ref": "#/$defs/lobbyPassword", "description": "Additive: the lobby's password (server lobbies and direct hubs)." } }
+    },
     "c_list": {
       "type": "object",
       "required": ["t", "visibility"],
@@ -149,8 +159,15 @@
         "peerId": { "$ref": "#/$defs/peerId" },
         "ban": { "type": "boolean", "description": "default true: the peer cannot rejoin this lobby. false = disconnect only." },
         "closeCode": { "type": "integer", "description": "1000 or 3000-4999, passed to the removed peer (its WebSocket-shaped close code)" },
-        "closeReason": { "type": "string", "maxLength": 120 }
+        "closeReason": { "type": "string", "maxLength": 120 },
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$", "description": "Additive (spec/room.md s.5.2): a stable removal code, passed to the removed peer in error.data.code." }
       }
+    },
+    "c_bans": {
+      "description": "Additive (spec/room.md s.7), host only: replaces the lobby's set of banned player ids; a later join whose hello.playerId is in it gets error banned.",
+      "type": "object",
+      "required": ["t", "ids"],
+      "properties": { "t": { "const": "bans" }, "ids": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/playerId" } } }
     },
     "c_approve": {
       "type": "object",
@@ -187,7 +204,7 @@
         "peerId": { "$ref": "#/$defs/peerId", "description": "Present only when a resumeToken was accepted." },
         "ice": { "type": "array", "items": { "$ref": "#/$defs/iceServer" } },
         "serverTime": { "type": "integer", "description": "unix ms" },
-        "features": { "type": "array", "items": { "type": "string" }, "description": "optional messages this hub handles, e.g. \"set_name\". Missing = none." },
+        "features": { "type": "array", "items": { "type": "string" }, "description": "optional messages this hub handles: \"set_name\"; \"room\" (spec/room.md s.7: passwords, spectator slots, player-id bans, kick codes). Missing = none." },
         "limits": {
           "type": "object",
           "required": ["maxMsg", "maxPlayers"],
@@ -215,7 +232,8 @@
         "name": { "type": "string", "description": "Additive: lobby name as given to create." },
         "maxPlayers": { "type": "integer", "description": "Additive." },
         "visibility": { "$ref": "#/$defs/visibility", "description": "Additive." },
-        "relayOnly": { "type": "boolean", "description": "Additive." }
+        "relayOnly": { "type": "boolean", "description": "Additive." },
+        "spectators": { "type": "integer", "minimum": 0, "description": "Additive: spectator slots (spec/room.md s.7)." }
       }
     },
     "s_peer_joined": { "type": "object", "required": ["t", "peer"], "properties": { "t": { "const": "peer_joined" }, "peer": { "$ref": "#/$defs/peerRef" } } },

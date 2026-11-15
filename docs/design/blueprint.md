@@ -193,6 +193,24 @@ for: codes from the hosted server while it runs, direct codes forever.
 `listed` and `approveJoins` map onto the existing `visibility`: listed → `public`, approveJoins → `private`, neither →
 `unlisted`. Both true is an error (the server has no "listed but approved" type; Steam has no such type either).
 
+### 4d2. `room`
+
+The room layer every lobby gets (`spec/room.md`): ready, countdown, auto start, spectators, seats, late join policy, rejoin
+window, per-player data. All keys are optional; the host can override each in code.
+
+| Key | Type | Default | R/S | Notes |
+|---|---|---|---|---|
+| `room.autoStart` | `"off"` \| `"all_ready"` \| `"players"` | `"off"` | R | start (after the countdown) when every player is ready, or when `autoStartPlayers` are connected |
+| `room.autoStartPlayers` | int 2-64 | 2 | R | used by `autoStart: "players"`; at most `lobby.maxPlayers` |
+| `room.minPlayers` | int 1-64 | 1 | R | fewest connected players a start needs; at most `lobby.maxPlayers` |
+| `room.countdownSeconds` | int 0-60 | 3 | R | 0 starts at once |
+| `room.spectators` | int 0-64 | 0 | R | spectator cap, not counted in `lobby.maxPlayers`; 0 turns spectating off |
+| `room.lateJoin` | `"allow"` \| `"spectate"` \| `"refuse"` | `"allow"` if `lobby.lateJoin` else `"refuse"` | R | joining a game in progress; disagreeing with an explicit `lobby.lateJoin` is `late_join_conflict` |
+| `room.seatDropped` | `"window"` \| `"immediate"` | `"window"` | R | when the game hears a seat is empty so it can put a bot there |
+| `room.rejoinWindowSeconds` | int 0-600 | 60 | R | a dropped player stays `reconnecting` this long |
+| `room.passwordRequired` | bool | `false` | R | `host()` throws `password_required` without a password |
+| `room.data` | object of declarations | `{}` | R | per-player keys beyond the built-ins `color`, `avatar`, `team`: `{ "role": { "type": "enum", "values": ["a","b"] } }` |
+
 ### 4e. `sync`
 
 | Key | Type | Default | R/S | Today | Prior art |

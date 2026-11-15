@@ -189,5 +189,32 @@
     { "name": "replication_no_engine", "input": { "game": { "id": "a" }, "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
     { "name": "migrate_with_replication", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "server": true }, "sync": { "mode": "replication" }, "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_with_replication" } },
     { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } }
+  ],
+  "roomDesc": "roomValid and roomInvalid follow the room section of the schema (spec/room.md s.10) and have the shape of valid and invalid. The C# and GDScript loaders read them when they gain the section; the loaders that do not know it read only valid and invalid.",
+  "roomValid": [
+    {"name": "room_defaults", "input": {"game": {"id": "a"}}, "expect": {"room.passwordRequired": false, "room.autoStart": "off", "room.autoStartPlayers": 2, "room.minPlayers": 1, "room.countdownSeconds": 3, "room.spectators": 0, "room.lateJoin": "allow", "room.seatDropped": "window", "room.rejoinWindowSeconds": 60, "room.data": {}, "lobby.lateJoin": true}},
+    {"name": "room_late_join_follows_lobby", "input": {"game": {"id": "a"}, "lobby": {"lateJoin": false}}, "expect": {"room.lateJoin": "refuse", "lobby.lateJoin": false}},
+    {"name": "room_late_join_alone_sets_lobby", "input": {"game": {"id": "a"}, "room": {"lateJoin": "refuse"}}, "expect": {"room.lateJoin": "refuse", "lobby.lateJoin": false}},
+    {"name": "room_spectate_policy", "input": {"game": {"id": "a"}, "lobby": {"lateJoin": true}, "room": {"lateJoin": "spectate", "spectators": 4}}, "expect": {"room.lateJoin": "spectate", "room.spectators": 4, "lobby.lateJoin": true}},
+    {"name": "room_everything", "input": {"game": {"id": "a"}, "lobby": {"maxPlayers": 6}, "room": {"passwordRequired": true, "autoStart": "players", "autoStartPlayers": 4, "minPlayers": 2, "countdownSeconds": 0, "seatDropped": "immediate", "rejoinWindowSeconds": 0, "data": {"role": {"type": "enum", "values": ["tank", "healer"], "default": "tank"}, "level": {"type": "int", "min": 1, "max": 10, "default": "1", "hostOnly": true}}}}, "expect": {"room.passwordRequired": true, "room.autoStart": "players", "room.autoStartPlayers": 4, "room.minPlayers": 2, "room.countdownSeconds": 0, "room.seatDropped": "immediate", "room.rejoinWindowSeconds": 0, "room.data": {"role": {"type": "enum", "values": ["tank", "healer"], "default": "tank"}, "level": {"type": "int", "min": 1, "max": 10, "default": "1", "hostOnly": true}}}}
+  ],
+  "roomInvalid": [
+    {"name": "room_unknown_key", "input": {"game": {"id": "a"}, "room": {"bogus": 1}}, "error": {"path": "room.bogus", "rule": "unknown_key"}},
+    {"name": "room_auto_start_enum", "input": {"game": {"id": "a"}, "room": {"autoStart": "sometimes"}}, "error": {"path": "room.autoStart", "rule": "enum"}},
+    {"name": "room_countdown_range", "input": {"game": {"id": "a"}, "room": {"countdownSeconds": 61}}, "error": {"path": "room.countdownSeconds", "rule": "range"}},
+    {"name": "room_spectators_type", "input": {"game": {"id": "a"}, "room": {"spectators": "2"}}, "error": {"path": "room.spectators", "rule": "type"}},
+    {"name": "room_late_join_enum", "input": {"game": {"id": "a"}, "room": {"lateJoin": "maybe"}}, "error": {"path": "room.lateJoin", "rule": "enum"}},
+    {"name": "room_data_key_pattern", "input": {"game": {"id": "a"}, "room": {"data": {"Bad": {"type": "int"}}}}, "error": {"path": "room.data.Bad", "rule": "pattern"}},
+    {"name": "room_data_too_many", "input": {"game": {"id": "a"}, "room": {"data": {"k0": {"type": "bool"}, "k1": {"type": "bool"}, "k2": {"type": "bool"}, "k3": {"type": "bool"}, "k4": {"type": "bool"}, "k5": {"type": "bool"}, "k6": {"type": "bool"}, "k7": {"type": "bool"}, "k8": {"type": "bool"}, "k9": {"type": "bool"}, "k10": {"type": "bool"}, "k11": {"type": "bool"}, "k12": {"type": "bool"}, "k13": {"type": "bool"}, "k14": {"type": "bool"}, "k15": {"type": "bool"}, "k16": {"type": "bool"}}}}, "error": {"path": "room.data", "rule": "length"}},
+    {"name": "room_data_type_enum", "input": {"game": {"id": "a"}, "room": {"data": {"x": {"type": "float"}}}}, "error": {"path": "room.data.x.type", "rule": "enum"}},
+    {"name": "room_data_type_required", "input": {"game": {"id": "a"}, "room": {"data": {"x": {}}}}, "error": {"path": "room.data.x.type", "rule": "required"}},
+    {"name": "room_data_unknown_key", "input": {"game": {"id": "a"}, "room": {"data": {"x": {"type": "int", "bogus": 1}}}}, "error": {"path": "room.data.x.bogus", "rule": "unknown_key"}},
+    {"name": "room_data_enum_needs_values", "input": {"game": {"id": "a"}, "room": {"data": {"x": {"type": "enum"}}}}, "error": {"path": "room.data.x.values", "rule": "required"}},
+    {"name": "room_data_min_gt_max", "input": {"game": {"id": "a"}, "room": {"data": {"x": {"type": "int", "min": 5, "max": 2}}}}, "error": {"path": "room.data.x", "rule": "min_gt_max"}},
+    {"name": "room_data_bad_default", "input": {"game": {"id": "a"}, "room": {"data": {"x": {"type": "int", "min": 0, "max": 3, "default": "9"}}}}, "error": {"path": "room.data.x.default", "rule": "bad_default"}},
+    {"name": "room_late_join_conflict", "input": {"game": {"id": "a"}, "lobby": {"lateJoin": false}, "room": {"lateJoin": "allow"}}, "error": {"path": "room.lateJoin", "rule": "late_join_conflict"}},
+    {"name": "room_late_join_conflict_refuse", "input": {"game": {"id": "a"}, "lobby": {"lateJoin": true}, "room": {"lateJoin": "refuse"}}, "error": {"path": "room.lateJoin", "rule": "late_join_conflict"}},
+    {"name": "room_min_exceeds_max", "input": {"game": {"id": "a"}, "lobby": {"maxPlayers": 2}, "room": {"minPlayers": 3}}, "error": {"path": "room.minPlayers", "rule": "min_exceeds_max"}},
+    {"name": "room_autostart_exceeds_players", "input": {"game": {"id": "a"}, "lobby": {"maxPlayers": 4}, "room": {"autoStart": "players", "autoStartPlayers": 5}}, "error": {"path": "room.autoStartPlayers", "rule": "autostart_exceeds_players"}}
   ]
 }

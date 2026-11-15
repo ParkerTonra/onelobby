@@ -55,6 +55,7 @@ with the id of the connection the frame arrived on. **(decision)** `cmd`, `hash`
 | 0x70 | `pause_request` | `paused:u8` | joiner -> host, on `reliable`, `route 0`. 1 = pause, 0 = resume (any non-zero byte reads as 1) |
 | 0x71 | `pause_state` | `paused:u8, byPeer:u16, flags:u8` | host -> every peer that said `hi`, and to a peer right after its `hi` while paused. `flags` bit 0 = the pauser left and the host holds the pause; other bits 0 |
 | 0x72 | `pause_refuse` | `paused:u8, reason:u8` | host -> the requester. `paused` echoes what it asked for. 1 not_in_game, 2 rate_limited, 3 not_allowed |
+| 0x80 | `room` | `rest` = one UTF-8 JSON object `{"t": ...}` | on `reliable`, `route 0`, either direction between the host and one joiner. The room layer (`spec/room.md`; vectors `spec/vectors/room.json` `frames`). A receiver drops a body that is not UTF-8, not a JSON object or has no string `t`, and ignores an unknown `t`. An oversized body is chunked like any large frame |
 
 ## Handshake and late join (lockstep)
 

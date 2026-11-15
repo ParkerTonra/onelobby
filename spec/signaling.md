@@ -15,7 +15,7 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
 - The first message must be `hello`. Anything else before it: `error{bad_request}`. A second `hello`: `error{bad_request}`.
 - `hello.proto` other than `"lk1"`: `error{bad_request, data:{supported:["lk1"]}}`, then close.
 - `hello` reply: `welcome` (always). With a valid `resumeToken` see Resume. `welcome.features` (optional array of
-  strings) names optional messages the hub handles; today only `"set_name"`. A missing array means none.
+  strings) names optional messages the hub handles: `"set_name"` and `"room"` (see "Room additions"). A missing array means none.
 - `ping{n}` is answered with `pong{n}` at any time after `hello`. A socket silent for 30 s is closed by the server;
   clients ping every 10 s.
 - A socket is in at most one lobby. `create`/`join` while already in one: `error{bad_request}`.
@@ -158,11 +158,37 @@ switch never turns off the `signal` limits or the backpressure close.
 way to scale them (stream A: env `ONELOBBY_RATE_SCALE`, default 1; the per-IP socket cap scales with it too; conformance functional suite is run with 20, the
 `--ratelimit` suite with 1 on a fresh server). `conformance/server/README.md` has the exact invocations.
 
+## Room additions (spec/room.md s.7)
+
+All additive; an old hub ignores the fields and does not list `"room"` in `welcome.features`.
+
+- `hello.playerId?`: 32 lower-case hex characters (`^[0-9a-f]{32}$`), the client's per-install random id; anything else is
+  ignored. The hub keeps it on the session for the checks below and never logs or lists it.
+- `create.password?` (string, at most 64 characters; empty or missing = none; a non-string is `bad_request` field
+  `password`) and `create.spectators?` (integer 0..250, default 0; outside, or `maxPlayers + spectators` over 250:
+  `bad_request` field `spectators`). The lobby then holds `maxPlayers + spectators` members: the `lobby_full` check uses
+  that sum. `lobby.maxPlayers` stays the player count and `lobby.spectators` repeats the setting. The hub does not tell
+  players from spectators; the host's room layer enforces that split.
+- `join.password?`: for a lobby with a password a missing or different one is `error{bad_password}`; checked with a
+  constant-time compare. A server lobby's password is per lobby; a direct hub's own `password` option (docs/design/direct-ip.md)
+  is the same check on its one lobby, and wins when both exist. Check order for `join` becomes: 1-2 as above (code,
+  game), then `bad_password` (where direct hubs already check it), then 3 (version), 4 (`kicked`, address), `banned`
+  (below), 5 and 6 (`in_game`, `lobby_full`), then 7 (private approval).
+- `bans{ids}` (host only: `not_host`; more than 256 ids or a malformed id: `bad_request`, field `ids`): replaces the lobby's
+  set of banned player ids. A `join` whose `hello.playerId` is in the set gets `error{banned}` (no data). The set lives
+  with the lobby and ends with it. Members already in the lobby are not removed (the host does that with `kick`).
+- `kick.code?` (`^[a-z][a-z0-9_]{0,31}$`; anything else `bad_request`, field `code`): copied into `error{kicked}.data.code`
+  next to `closeCode` and `closeReason`.
+- `lobbies.items[].hasPassword` (true only when the lobby has a password).
+- `lobby.spectators` (integer, additive).
+- `errorCode` gains `bad_password` (already used by direct hubs) and `banned`.
+
 ## Error `data` summary
 
 | code | data |
 |---|---|
 | `version_mismatch` | `{hostNetVersion, yourNetVersion}` |
 | `rate_limited` | `{retryAfterMs, reason?}` |
-| `kicked` | `{reason?:"denied"}`, or `{ban:false, closeCode?, closeReason?}` (and with a ban, `closeCode?, closeReason?`) |
+| `kicked` | `{reason?:"denied"}`, or `{ban:false, closeCode?, closeReason?}` (and with a ban, `closeCode?, closeReason?`), plus `code?` when the host gave one |
+| `bad_password`, `banned` | none |
 | `bad_request` | `{field?}` or `{supported}` for a bad proto |

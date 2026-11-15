@@ -1,0 +1,1340 @@
+{
+  "desc": "Room layer vectors (spec/room.md). Every list is a table a client port must reproduce exactly. names: effectiveName(input, peerId, others, max, filter). data: applyData(spec, before, set, byHost) with the built-ins merged under spec. seats: chooseSeat over the ops. bans: banMatches(entry, candidate). autoStart: autoStartHolds. countdown: countdownRemaining(left, rtt) in ms (rtt null = none measured). admission: the order of checks of a join. defaultReasons, reasonRules and playerId as named. frames: the exact bytes of a room frame (type 0x80, route 0, then the JSON text).",
+  "names": {
+    "filters": {
+      "none": null,
+      "replace_darn": {
+        "replace": [
+          "darn",
+          "****"
+        ]
+      },
+      "empty": {
+        "replace": [
+          "darn",
+          ""
+        ]
+      }
+    },
+    "cases": [
+      {
+        "name": "plain",
+        "input": "Sam",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "Sam"
+      },
+      {
+        "name": "trim",
+        "input": "  Sam  ",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "Sam"
+      },
+      {
+        "name": "empty_default",
+        "input": "",
+        "peerId": 5,
+        "others": [],
+        "max": 24,
+        "expect": "Player 5"
+      },
+      {
+        "name": "hub_standin_default",
+        "input": "Player",
+        "peerId": 4,
+        "others": [],
+        "max": 24,
+        "expect": "Player 4"
+      },
+      {
+        "name": "only_invisible",
+        "input": "​​",
+        "peerId": 3,
+        "others": [],
+        "max": 24,
+        "expect": "Player 3"
+      },
+      {
+        "name": "dedupe_2",
+        "input": "Sam",
+        "peerId": 2,
+        "others": [
+          "Sam"
+        ],
+        "max": 24,
+        "expect": "Sam 2"
+      },
+      {
+        "name": "dedupe_case",
+        "input": "sam",
+        "peerId": 2,
+        "others": [
+          "Sam"
+        ],
+        "max": 24,
+        "expect": "sam 2"
+      },
+      {
+        "name": "dedupe_3",
+        "input": "Sam",
+        "peerId": 4,
+        "others": [
+          "Sam",
+          "Sam 2"
+        ],
+        "max": 24,
+        "expect": "Sam 3"
+      },
+      {
+        "name": "dedupe_gap_fills",
+        "input": "Sam",
+        "peerId": 4,
+        "others": [
+          "Sam",
+          "Sam 3"
+        ],
+        "max": 24,
+        "expect": "Sam 2"
+      },
+      {
+        "name": "dedupe_latin1_case",
+        "input": "ÉMILE",
+        "peerId": 2,
+        "others": [
+          "émile"
+        ],
+        "max": 24,
+        "expect": "ÉMILE 2"
+      },
+      {
+        "name": "strip_control_bidi",
+        "input": "Sam\u0000‮evil\u0007",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "Samevil"
+      },
+      {
+        "name": "strip_c1_and_bom",
+        "input": "﻿AB",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "AB"
+      },
+      {
+        "name": "collapse_spaces",
+        "input": "a   b\t c",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "a b c"
+      },
+      {
+        "name": "collapse_nbsp",
+        "input": "a  b",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "a b"
+      },
+      {
+        "name": "clamp",
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "xxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "name": "clamp_code_points",
+        "input": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "expect": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      {
+        "name": "clamp_short_max",
+        "input": "Alexander the Great",
+        "peerId": 2,
+        "others": [],
+        "max": 8,
+        "expect": "Alexande"
+      },
+      {
+        "name": "dedupe_truncates_base",
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxx",
+        "peerId": 2,
+        "others": [
+          "xxxxxxxxxxxxxxxxxxxxxxxx"
+        ],
+        "max": 24,
+        "expect": "xxxxxxxxxxxxxxxxxxxxxx 2"
+      },
+      {
+        "name": "dedupe_trims_space_after_cut",
+        "input": "xxxxxxxxxxxxxxxxxxxx yy",
+        "peerId": 2,
+        "others": [
+          "xxxxxxxxxxxxxxxxxxxx yy"
+        ],
+        "max": 23,
+        "expect": "xxxxxxxxxxxxxxxxxxxx 2"
+      },
+      {
+        "name": "filter_replaces",
+        "input": "darnit",
+        "peerId": 2,
+        "others": [],
+        "max": 24,
+        "filter": "replace_darn",
+        "expect": "****it"
+      },
+      {
+        "name": "filter_to_empty_defaults",
+        "input": "darn",
+        "peerId": 6,
+        "others": [],
+        "max": 24,
+        "filter": "empty",
+        "expect": "Player 6"
+      },
+      {
+        "name": "filter_then_dedupe",
+        "input": "darn",
+        "peerId": 2,
+        "others": [
+          "****"
+        ],
+        "max": 24,
+        "filter": "replace_darn",
+        "expect": "**** 2"
+      }
+    ]
+  },
+  "data": {
+    "spec": {
+      "color": {
+        "type": "color"
+      },
+      "avatar": {
+        "type": "int",
+        "min": 0,
+        "max": 7,
+        "default": "0"
+      },
+      "team": {
+        "type": "int",
+        "min": 0,
+        "max": 3,
+        "default": "0"
+      },
+      "nick": {
+        "type": "string",
+        "maxLength": 8
+      },
+      "mood": {
+        "type": "enum",
+        "values": [
+          "happy",
+          "sad"
+        ]
+      },
+      "vip": {
+        "type": "bool",
+        "hostOnly": true
+      }
+    },
+    "cases": [
+      {
+        "name": "color_lowercased",
+        "before": {},
+        "set": {
+          "color": "#FF8800"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "color": "#ff8800"
+          }
+        }
+      },
+      {
+        "name": "color_bad",
+        "before": {},
+        "set": {
+          "color": "orange"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "color"
+        }
+      },
+      {
+        "name": "color_short_bad",
+        "before": {},
+        "set": {
+          "color": "#fff"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "color"
+        }
+      },
+      {
+        "name": "int_ok",
+        "before": {},
+        "set": {
+          "avatar": "7"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "avatar": "7"
+          }
+        }
+      },
+      {
+        "name": "int_zero_ok",
+        "before": {},
+        "set": {
+          "avatar": "0"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "avatar": "0"
+          }
+        }
+      },
+      {
+        "name": "int_leading_zero",
+        "before": {},
+        "set": {
+          "avatar": "07"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "avatar"
+        }
+      },
+      {
+        "name": "int_minus_zero",
+        "before": {},
+        "set": {
+          "avatar": "-0"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "avatar"
+        }
+      },
+      {
+        "name": "int_above_max",
+        "before": {},
+        "set": {
+          "avatar": "8"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "avatar"
+        }
+      },
+      {
+        "name": "int_negative_below_min",
+        "before": {},
+        "set": {
+          "team": "-1"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "team"
+        }
+      },
+      {
+        "name": "int_not_number",
+        "before": {},
+        "set": {
+          "team": "1.5"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "team"
+        }
+      },
+      {
+        "name": "string_cleaned",
+        "before": {},
+        "set": {
+          "nick": "  hi‮  there "
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "nick": "hi there"
+          }
+        }
+      },
+      {
+        "name": "string_too_long",
+        "before": {},
+        "set": {
+          "nick": "abcdefghi"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "nick"
+        }
+      },
+      {
+        "name": "enum_ok",
+        "before": {},
+        "set": {
+          "mood": "sad"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "mood": "sad"
+          }
+        }
+      },
+      {
+        "name": "enum_bad",
+        "before": {},
+        "set": {
+          "mood": "angry"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "mood"
+        }
+      },
+      {
+        "name": "host_only_by_player",
+        "before": {},
+        "set": {
+          "vip": "true"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "not_allowed",
+          "key": "vip"
+        }
+      },
+      {
+        "name": "host_only_by_host",
+        "before": {},
+        "set": {
+          "vip": "true"
+        },
+        "byHost": true,
+        "expect": {
+          "ok": true,
+          "data": {
+            "vip": "true"
+          }
+        }
+      },
+      {
+        "name": "bool_bad",
+        "before": {},
+        "set": {
+          "vip": "yes"
+        },
+        "byHost": true,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "vip"
+        }
+      },
+      {
+        "name": "unknown_key",
+        "before": {},
+        "set": {
+          "zzz": "1"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "unknown_key",
+          "key": "zzz"
+        }
+      },
+      {
+        "name": "bad_key_format",
+        "before": {},
+        "set": {
+          "Bad Key": "1"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "unknown_key",
+          "key": "Bad Key"
+        }
+      },
+      {
+        "name": "empty_unsets",
+        "before": {
+          "color": "#ff8800",
+          "avatar": "3"
+        },
+        "set": {
+          "color": ""
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "avatar": "3"
+          }
+        }
+      },
+      {
+        "name": "atomic_failure_changes_nothing",
+        "before": {
+          "avatar": "1"
+        },
+        "set": {
+          "avatar": "2",
+          "mood": "angry"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "mood"
+        }
+      },
+      {
+        "name": "merge_keeps_other_keys",
+        "before": {
+          "avatar": "1"
+        },
+        "set": {
+          "team": "2"
+        },
+        "byHost": false,
+        "expect": {
+          "ok": true,
+          "data": {
+            "avatar": "1",
+            "team": "2"
+          }
+        }
+      },
+      {
+        "name": "non_string_value",
+        "before": {},
+        "set": {
+          "avatar": 3
+        },
+        "byHost": false,
+        "expect": {
+          "ok": false,
+          "code": "bad_value",
+          "key": "avatar"
+        }
+      }
+    ],
+    "defaultsAtAdmission": [
+      {
+        "name": "defaults_fill_unset_keys",
+        "data": {
+          "color": "#00ff00"
+        },
+        "expect": {
+          "color": "#00ff00",
+          "avatar": "0",
+          "team": "0"
+        }
+      },
+      {
+        "name": "defaults_keep_set_keys",
+        "data": {
+          "avatar": "5"
+        },
+        "expect": {
+          "avatar": "5",
+          "team": "0"
+        }
+      }
+    ]
+  },
+  "seats": [
+    {
+      "name": "stable_across_rejoin_and_dropped_seats_reserved",
+      "maxPlayers": 3,
+      "ops": [
+        [
+          "join",
+          "a",
+          "player"
+        ],
+        [
+          "join",
+          "b",
+          "player"
+        ],
+        [
+          "drop",
+          "a"
+        ],
+        [
+          "join",
+          "c",
+          "player"
+        ],
+        [
+          "join",
+          "a",
+          "player"
+        ]
+      ],
+      "expect": [
+        0,
+        1,
+        null,
+        2,
+        0
+      ]
+    },
+    {
+      "name": "takes_over_a_remembered_seat_only_when_nothing_else_is_free",
+      "maxPlayers": 3,
+      "ops": [
+        [
+          "join",
+          "a",
+          "player"
+        ],
+        [
+          "join",
+          "b",
+          "player"
+        ],
+        [
+          "join",
+          "c",
+          "player"
+        ],
+        [
+          "drop",
+          "c"
+        ],
+        [
+          "join",
+          "d",
+          "player"
+        ],
+        [
+          "join",
+          "c",
+          "player"
+        ]
+      ],
+      "expect": [
+        0,
+        1,
+        2,
+        null,
+        2,
+        -1
+      ]
+    },
+    {
+      "name": "spectators_have_no_seat_and_no_pid_is_not_remembered",
+      "maxPlayers": 2,
+      "ops": [
+        [
+          "join",
+          "s",
+          "spectator"
+        ],
+        [
+          "join",
+          "",
+          "player"
+        ],
+        [
+          "drop",
+          ""
+        ],
+        [
+          "join",
+          "x",
+          "player"
+        ]
+      ],
+      "expect": [
+        -1,
+        0,
+        null,
+        0
+      ]
+    },
+    {
+      "name": "player_to_spectator_and_back",
+      "maxPlayers": 2,
+      "ops": [
+        [
+          "join",
+          "a",
+          "player"
+        ],
+        [
+          "join",
+          "b",
+          "player"
+        ],
+        [
+          "role",
+          "a",
+          "spectator"
+        ],
+        [
+          "join",
+          "c",
+          "player"
+        ],
+        [
+          "role",
+          "a",
+          "player"
+        ]
+      ],
+      "expect": [
+        0,
+        1,
+        -1,
+        0,
+        -1
+      ]
+    }
+  ],
+  "bans": {
+    "cases": [
+      {
+        "name": "same_id",
+        "entry": {
+          "id": "a1",
+          "ip": "10.0.0.1"
+        },
+        "candidate": {
+          "id": "a1",
+          "ip": "10.0.0.9"
+        },
+        "expect": true
+      },
+      {
+        "name": "different_ids_same_ip_are_two_players",
+        "entry": {
+          "id": "a1",
+          "ip": "10.0.0.1"
+        },
+        "candidate": {
+          "id": "b2",
+          "ip": "10.0.0.1"
+        },
+        "expect": false
+      },
+      {
+        "name": "ip_only_entry_matches_any_id",
+        "entry": {
+          "ip": "10.0.0.1"
+        },
+        "candidate": {
+          "id": "b2",
+          "ip": "10.0.0.1"
+        },
+        "expect": true
+      },
+      {
+        "name": "candidate_without_id_matches_by_ip",
+        "entry": {
+          "id": "a1",
+          "ip": "10.0.0.1"
+        },
+        "candidate": {
+          "ip": "10.0.0.1"
+        },
+        "expect": true
+      },
+      {
+        "name": "id_only_entry_ignores_ip",
+        "entry": {
+          "id": "a1"
+        },
+        "candidate": {
+          "id": "b2",
+          "ip": "10.0.0.1"
+        },
+        "expect": false
+      },
+      {
+        "name": "id_only_entry_matches_id",
+        "entry": {
+          "id": "a1"
+        },
+        "candidate": {
+          "id": "a1"
+        },
+        "expect": true
+      },
+      {
+        "name": "no_overlap",
+        "entry": {
+          "id": "a1",
+          "ip": "10.0.0.1"
+        },
+        "candidate": {
+          "ip": "10.0.0.2"
+        },
+        "expect": false
+      },
+      {
+        "name": "ipv4_mapped_ipv6_is_the_same_address",
+        "entry": {
+          "ip": "::ffff:10.0.0.1"
+        },
+        "candidate": {
+          "ip": "10.0.0.1"
+        },
+        "expect": true
+      },
+      {
+        "name": "ip_case_folds",
+        "entry": {
+          "ip": "FE80::1"
+        },
+        "candidate": {
+          "ip": "fe80::1"
+        },
+        "expect": true
+      },
+      {
+        "name": "empty_candidate",
+        "entry": {
+          "id": "a1",
+          "ip": "10.0.0.1"
+        },
+        "candidate": {},
+        "expect": false
+      }
+    ]
+  },
+  "autoStart": {
+    "legend": "p = player, s = spectator; r ready, n not ready, x reconnecting, l legacy. A token is role+flag, e.g. pr, pn, px, pl, sn.",
+    "cases": [
+      {
+        "name": "off_never",
+        "rule": {
+          "mode": "off",
+          "autoStartPlayers": 2,
+          "minPlayers": 1
+        },
+        "players": [
+          "pr",
+          "pr"
+        ],
+        "expect": false
+      },
+      {
+        "name": "all_ready_solo",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 1
+        },
+        "players": [
+          "pr"
+        ],
+        "expect": true
+      },
+      {
+        "name": "all_ready_needs_min",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 2
+        },
+        "players": [
+          "pr"
+        ],
+        "expect": false
+      },
+      {
+        "name": "all_ready_one_not_ready",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 2
+        },
+        "players": [
+          "pr",
+          "pn"
+        ],
+        "expect": false
+      },
+      {
+        "name": "all_ready_ignores_spectators",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 2
+        },
+        "players": [
+          "pr",
+          "pr",
+          "sn"
+        ],
+        "expect": true
+      },
+      {
+        "name": "all_ready_blocked_by_reconnecting",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 1
+        },
+        "players": [
+          "pr",
+          "px"
+        ],
+        "expect": false
+      },
+      {
+        "name": "all_ready_ignores_legacy",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 2
+        },
+        "players": [
+          "pr",
+          "pr",
+          "pl"
+        ],
+        "expect": true
+      },
+      {
+        "name": "all_ready_nobody",
+        "rule": {
+          "mode": "all_ready",
+          "autoStartPlayers": 2,
+          "minPlayers": 1
+        },
+        "players": [],
+        "expect": false
+      },
+      {
+        "name": "players_reached",
+        "rule": {
+          "mode": "players",
+          "autoStartPlayers": 3,
+          "minPlayers": 1
+        },
+        "players": [
+          "pn",
+          "pn",
+          "pn"
+        ],
+        "expect": true
+      },
+      {
+        "name": "players_not_reached",
+        "rule": {
+          "mode": "players",
+          "autoStartPlayers": 3,
+          "minPlayers": 1
+        },
+        "players": [
+          "pn",
+          "pn"
+        ],
+        "expect": false
+      },
+      {
+        "name": "players_reconnecting_not_counted",
+        "rule": {
+          "mode": "players",
+          "autoStartPlayers": 3,
+          "minPlayers": 1
+        },
+        "players": [
+          "pn",
+          "pn",
+          "px"
+        ],
+        "expect": false
+      },
+      {
+        "name": "players_spectators_not_counted",
+        "rule": {
+          "mode": "players",
+          "autoStartPlayers": 3,
+          "minPlayers": 1
+        },
+        "players": [
+          "pn",
+          "pn",
+          "sn"
+        ],
+        "expect": false
+      },
+      {
+        "name": "players_min_wins_when_larger",
+        "rule": {
+          "mode": "players",
+          "autoStartPlayers": 2,
+          "minPlayers": 3
+        },
+        "players": [
+          "pn",
+          "pn"
+        ],
+        "expect": false
+      }
+    ]
+  },
+  "countdown": {
+    "desc": "left = ms the host reported, rtt = the receiver's last round trip (null: none). expect = ms until the end, in the receiver's clock.",
+    "cases": [
+      {
+        "name": "no_rtt",
+        "left": 3000,
+        "rtt": null,
+        "expect": 3000
+      },
+      {
+        "name": "half_rtt_off",
+        "left": 3000,
+        "rtt": 80,
+        "expect": 2960
+      },
+      {
+        "name": "one_way_capped",
+        "left": 3000,
+        "rtt": 5000,
+        "expect": 1000
+      },
+      {
+        "name": "never_negative",
+        "left": 500,
+        "rtt": 5000,
+        "expect": 0
+      },
+      {
+        "name": "zero_left",
+        "left": 0,
+        "rtt": 100,
+        "expect": 0
+      },
+      {
+        "name": "odd_rtt_rounds",
+        "left": 1000,
+        "rtt": 101,
+        "expect": 950
+      }
+    ]
+  },
+  "admission": {
+    "base": {
+      "banned": false,
+      "hasPassword": false,
+      "passwordOk": true,
+      "state": "lobby",
+      "lateJoin": "allow",
+      "role": "player",
+      "players": 1,
+      "maxPlayers": 4,
+      "spectators": 0,
+      "spectatorCap": 2
+    },
+    "cases": [
+      {
+        "name": "open_lobby",
+        "with": {},
+        "expect": {
+          "ok": true,
+          "role": "player"
+        }
+      },
+      {
+        "name": "spectator_ok",
+        "with": {
+          "role": "spectator"
+        },
+        "expect": {
+          "ok": true,
+          "role": "spectator"
+        }
+      },
+      {
+        "name": "banned_first",
+        "with": {
+          "banned": true,
+          "hasPassword": true,
+          "passwordOk": false,
+          "players": 4
+        },
+        "expect": {
+          "ok": false,
+          "code": "banned"
+        }
+      },
+      {
+        "name": "password_before_capacity",
+        "with": {
+          "hasPassword": true,
+          "passwordOk": false,
+          "players": 4
+        },
+        "expect": {
+          "ok": false,
+          "code": "bad_password"
+        }
+      },
+      {
+        "name": "password_ok",
+        "with": {
+          "hasPassword": true,
+          "passwordOk": true
+        },
+        "expect": {
+          "ok": true,
+          "role": "player"
+        }
+      },
+      {
+        "name": "started_refuse",
+        "with": {
+          "state": "started",
+          "lateJoin": "refuse"
+        },
+        "expect": {
+          "ok": false,
+          "code": "in_game"
+        }
+      },
+      {
+        "name": "started_spectate_forces_spectator",
+        "with": {
+          "state": "started",
+          "lateJoin": "spectate"
+        },
+        "expect": {
+          "ok": true,
+          "role": "spectator"
+        }
+      },
+      {
+        "name": "started_spectate_but_no_cap",
+        "with": {
+          "state": "started",
+          "lateJoin": "spectate",
+          "spectatorCap": 0
+        },
+        "expect": {
+          "ok": false,
+          "code": "spectators_full"
+        }
+      },
+      {
+        "name": "started_allow",
+        "with": {
+          "state": "started",
+          "lateJoin": "allow"
+        },
+        "expect": {
+          "ok": true,
+          "role": "player"
+        }
+      },
+      {
+        "name": "countdown_counts_as_lobby",
+        "with": {
+          "state": "countdown",
+          "lateJoin": "refuse"
+        },
+        "expect": {
+          "ok": true,
+          "role": "player"
+        }
+      },
+      {
+        "name": "full_players",
+        "with": {
+          "players": 4
+        },
+        "expect": {
+          "ok": false,
+          "code": "lobby_full"
+        }
+      },
+      {
+        "name": "full_spectators",
+        "with": {
+          "role": "spectator",
+          "spectators": 2
+        },
+        "expect": {
+          "ok": false,
+          "code": "spectators_full"
+        }
+      },
+      {
+        "name": "spectators_off",
+        "with": {
+          "role": "spectator",
+          "spectatorCap": 0
+        },
+        "expect": {
+          "ok": false,
+          "code": "spectators_full"
+        }
+      },
+      {
+        "name": "full_players_but_spectator_fits",
+        "with": {
+          "role": "spectator",
+          "players": 4
+        },
+        "expect": {
+          "ok": true,
+          "role": "spectator"
+        }
+      }
+    ]
+  },
+  "defaultReasons": {
+    "kicked": "The host removed you from the game.",
+    "disconnected": "The host disconnected you.",
+    "banned": "You are banned from this game.",
+    "bad_password": "Wrong password.",
+    "lobby_full": "The game is full.",
+    "spectators_full": "No spectator seats are free.",
+    "in_game": "The game has already started.",
+    "some_other_code": "You were removed from the game."
+  },
+  "reasonRules": {
+    "desc": "removalReason(code, text): the host's text after stripping control and bidi characters and trimming, cut to 120 code points; empty gives the default of the code.",
+    "cases": [
+      {
+        "code": "kicked",
+        "text": "  be nice  ",
+        "expect": "be nice"
+      },
+      {
+        "code": "kicked",
+        "text": "",
+        "expect": "The host removed you from the game."
+      },
+      {
+        "code": "banned",
+        "text": "‮\u0007",
+        "expect": "You are banned from this game."
+      },
+      {
+        "code": "kicked",
+        "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+        "expect": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      }
+    ]
+  },
+  "playerId": {
+    "valid": [
+      "0123456789abcdef0123456789abcdef",
+      "ffffffffffffffffffffffffffffffff",
+      "00000000000000000000000000000000"
+    ],
+    "invalid": [
+      "",
+      "0123456789ABCDEF0123456789ABCDEF",
+      "0123456789abcdef0123456789abcde",
+      "0123456789abcdef0123456789abcdef0",
+      "g123456789abcdef0123456789abcdef",
+      " 0123456789abcdef0123456789abcdef"
+    ]
+  },
+  "frames": [
+    {
+      "name": "join_minimal",
+      "json": {
+        "t": "join",
+        "v": 1
+      },
+      "hex": "8000007b2274223a226a6f696e222c2276223a317d"
+    },
+    {
+      "name": "join_full",
+      "json": {
+        "t": "join",
+        "v": 1,
+        "pid": "0123456789abcdef0123456789abcdef",
+        "role": "spectator",
+        "password": "pw",
+        "data": {
+          "color": "#ff8800"
+        }
+      },
+      "hex": "8000007b2274223a226a6f696e222c2276223a312c22706964223a223031323334353637383961626364656630313233343536373839616263646566222c22726f6c65223a22737065637461746f72222c2270617373776f7264223a227077222c2264617461223a7b22636f6c6f72223a2223666638383030227d7d"
+    },
+    {
+      "name": "ready",
+      "json": {
+        "t": "ready",
+        "ready": true
+      },
+      "hex": "8000007b2274223a227265616479222c227265616479223a747275657d"
+    },
+    {
+      "name": "cd",
+      "json": {
+        "t": "cd",
+        "seq": 1,
+        "left": 2000
+      },
+      "hex": "8000007b2274223a226364222c22736571223a312c226c656674223a323030307d"
+    },
+    {
+      "name": "deny_banned",
+      "json": {
+        "t": "deny",
+        "code": "banned",
+        "reason": "You are banned from this game."
+      },
+      "hex": "8000007b2274223a2264656e79222c22636f6465223a2262616e6e6564222c22726561736f6e223a22596f75206172652062616e6e65642066726f6d20746869732067616d652e227d"
+    }
+  ]
+}
