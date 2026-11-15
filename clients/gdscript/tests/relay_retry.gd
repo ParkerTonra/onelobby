@@ -32,8 +32,45 @@ func _initialize() -> void:
 	_run_case("no TURN: gives up at the full timeout, no retry", [], false, 10000, false)
 	_run_case("TURN: one relay-only retry at half, then gives up", [{"urls": ["stun:s.example:3478"]}, {"urls": ["turn:t.example:3478"], "username": "u", "credential": "p"}], false, 10000, true)
 	_run_case("relay_only config: no retry (already relay-only)", [{"urls": "turn:t.example:3478"}], true, 10000, false)
+	_relay_only_no_turn()
 	print("relay retry: passed" if _fail == 0 else "relay retry: FAILED (%d)" % _fail)
 	quit(0 if _fail == 0 else 1)
+
+
+func _relay_only_no_turn() -> void:
+	# joiner: fails on the first tick with the no-TURN message, long before the 900 s timeout
+	var t := FakeTransport.new()
+	var c := OneLobbyClient.new()
+	c.transport = t
+	c.ice = [{"urls": ["stun:s.example:3478"]}]
+	c.relay_only = true
+	c.ready_timeout_ms = 900000
+	var errors: Array[Array] = []
+	c.error.connect(func(code: String, msg: String) -> void: errors.append([code, msg]))
+	var l := OneLobbyLobby.new(c, {"you": 2, "hostId": 1, "peers": [{"peerId": 1, "name": "h"}, {"peerId": 2, "name": "j"}]})
+	l._start()
+	_check(errors.is_empty(), "relay_only no TURN: joiner quiet before the tick")
+	l._check_ready_timer(t.now + 1)
+	_check(errors.size() == 1 and errors[0][0] == "ice_failed" and errors[0][1] == MSG_NO_RELAY, "relay_only no TURN: joiner ice_failed at once")
+	c.free()
+	# host: the joiner is reported failed at once and no link is made
+	var t2 := FakeTransport.new()
+	var c2 := OneLobbyClient.new()
+	c2.transport = t2
+	c2.ice = []
+	c2.relay_only = true
+	c2.ready_timeout_ms = 900000
+	var errors2: Array[Array] = []
+	var failed: Array[String] = []
+	c2.error.connect(func(code: String, msg: String) -> void: errors2.append([code, msg]))
+	var h := OneLobbyLobby.new(c2, {"you": 1, "hostId": 1, "peers": [{"peerId": 1, "name": "h"}]})
+	h.peer_failed.connect(func(_p: Dictionary, reason: String) -> void: failed.append(reason))
+	h._start()
+	h._on_signaling("peer_joined", {"peer": {"peerId": 2, "name": "j"}})
+	_check(t2.created.is_empty(), "relay_only no TURN: host makes no link")
+	_check(failed == ["ice_failed"], "relay_only no TURN: host peer_failed ice_failed")
+	_check(errors2.size() == 1 and errors2[0][1] == MSG_NO_RELAY, "relay_only no TURN: host error message")
+	c2.free()
 
 
 func _has_relay() -> void:

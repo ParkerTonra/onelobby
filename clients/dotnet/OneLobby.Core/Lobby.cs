@@ -421,6 +421,13 @@ namespace OneLobby
 
         private void ArmReadyTimer()
         {
+            if (_c.Config.RelayOnly && !HasRelay(_c.Ice))
+            {
+                // relay-only with no TURN entry can never connect: give up on the next tick, not after the ready timeout
+                _readyRetryBudgetMs = 0;
+                _readyDeadlineMs = Math.Max(1, NowMs);
+                return;
+            }
             var total = (long)Math.Ceiling(_c.Config.ReadyTimeout.TotalMilliseconds);
             if (total <= 0) return;
             var canRelay = !_c.Config.RelayOnly && HasRelay(_c.Ice);
@@ -474,15 +481,18 @@ namespace OneLobby
         private void GiveUpConnecting()
         {
             // names the next step; same wording as the JS and GDScript clients
-            var msg = HasRelay(_c.Ice)
-                ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
-                : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";
+            var msg = IceFailedMessage(HasRelay(_c.Ice));
             _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg));
             _c.RaiseError(new LobbyError("ice_failed", msg));
             if (_closed) return;
             _c.SendRaw(Signaling.Simple("leave"));
             End("ice_failed");
         }
+
+        private static string IceFailedMessage(bool relayConfigured) =>
+            relayConfigured
+                ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
+                : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";
 
         internal IEnumerable<PeerRec> PeerRecords() => _peers.Values.ToList();
         private IEnumerable<PeerRec> HelloPeers() => _peers.Values.Where(r => r.Id != _you && r.Hello && r.Link != null && r.Link.IsOpen).ToList();
@@ -491,6 +501,18 @@ namespace OneLobby
 
         private void ConnectPeer(PeerRec rec, bool initiator, bool relayOnly = false)
         {
+            if (IsHost && _c.Config.RelayOnly && !HasRelay(_c.Ice))
+            {
+                // relay-only with no TURN entry can never connect: report it now instead of at the ready timeout
+                _c.RaiseError(new LobbyError("ice_failed", IceFailedMessage(false)));
+                if (rec.Watching)
+                {
+                    rec.Watching = false;
+                    rec.WatchDeadlineMs = 0;
+                    PeerFailed?.Invoke(ToPeer(rec), "ice_failed");
+                }
+                return;
+            }
             rec.Link?.Dispose();
             rec.OpenHandled = false;
             rec.Hello = false;

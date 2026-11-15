@@ -108,6 +108,10 @@ message (not `data`) names the next step: with no TURN entry, that strict NATs n
 port-forward; with TURN, that the relay could not be reached (Godot reaches TURN over UDP only) and the host can
 port-forward. The wording is the same in the JS, C# and GDScript clients.
 
+**Relay-only without TURN (all clients).** A link set up relay-only whose effective ICE list (the host's `welcome.ice` plus the
+local entries) has no TURN entry can never connect, so it fails at once with `ice_failed` and the no-TURN message above: a
+joiner rejects `ready` and ends; a host skips the link and raises `peerFailed` (`ice_failed`) for that joiner.
+
 ## 6. Relays
 
 A list of `wss://` URLs: the blueprint's `hosting.nostrRelays`, else the library default. Use them all at once,

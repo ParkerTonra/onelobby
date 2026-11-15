@@ -528,6 +528,14 @@ export class Lobby extends Emitter<LobbyEvents> {
   // ---- joiner connect timeout -------------------------------------------------------------------------------------
 
   private armReadyTimer(): void {
+    if (this.cfg.relayOnly && !hasRelay(this.cfg.ice)) {
+      // Relay-only with no TURN entry can never connect: fail now, not after the ready timeout (next tick, so the
+      // error sink and the join promise are wired by then).
+      this.cancelReadyTimer = this.cfg.clock.setTimeout(() => {
+        if (!this.isReady && !this.ended) this.giveUpConnecting();
+      }, 0);
+      return;
+    }
     const total = this.cfg.readyTimeoutMs ?? 0;
     if (!(total > 0)) return;
     const canRelay = !this.cfg.relayOnly && hasRelay(this.cfg.ice);
@@ -587,6 +595,15 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   /** Host side: offer to a joiner. */
   private offerTo(peerId: number): void {
+    if (this.cfg.relayOnly && !hasRelay(this.cfg.ice)) {
+      // Relay-only with no TURN entry can never connect: report it now instead of at the ready timeout.
+      this.reportError(new OneLobbyError("ice_failed", iceFailedMessage(false)));
+      this.notReady.get(peerId)?.();
+      this.notReady.delete(peerId);
+      const peer = this.roster.get(peerId);
+      if (peer) this.emit("peerFailed", peer, "ice_failed");
+      return;
+    }
     const link = this.makeLink(peerId);
     link.startOffer();
   }

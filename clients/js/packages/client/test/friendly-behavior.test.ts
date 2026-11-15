@@ -314,3 +314,31 @@ describe("defaults", () => {
     expect(used).toBe("advanced");
   });
 });
+
+describe("relay-only without a TURN entry", () => {
+  it("the joiner fails with ice_failed at once, not after the ready timeout", async () => {
+    const w = world();
+    const la = await w.make("alice", { relayOnly: true }).host({ name: "t", maxPlayers: 4 });
+    const errors: OneLobbyError[] = [];
+    const kit = w.make("bob", { relayOnly: true, readyTimeoutMs: 900_000 });
+    kit.on("error", (e) => errors.push(e as OneLobbyError));
+    const lb = await kit.join(la.code);
+    let err: OneLobbyError | null = null;
+    lb.ready.catch((e: OneLobbyError) => (err = e));
+    await w.clock.run(100, 50); // far short of the 900 s ready timeout
+    expect(err).toBeInstanceOf(OneLobbyError);
+    expect(err!.code).toBe("ice_failed");
+    expect(err!.message).toContain("Strict NATs need a relay (TURN)");
+    expect(errors.map((e) => e.code)).toEqual(["ice_failed"]);
+  });
+
+  it("a relay-only host reports peerFailed ice_failed for a joiner at once", async () => {
+    const w = world();
+    const la = await w.make("alice", { relayOnly: true, readyTimeoutMs: 900_000 }).host({ name: "t", maxPlayers: 4 });
+    const failed: string[] = [];
+    la.on("peerFailed", (_p, reason) => failed.push(reason));
+    void w.make("bob").join(la.code).catch(() => {});
+    await settle();
+    expect(failed).toEqual(["ice_failed"]);
+  });
+});

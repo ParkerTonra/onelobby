@@ -334,6 +334,11 @@ func _start() -> void:
 ## Joiner connect timeout (same rules as the JS and C# clients): with a TURN entry and no relay_only, half the budget
 ## goes to the direct attempt and the second half to one relay-only retry.
 func _arm_ready_timer() -> void:
+	if _c.relay_only and not has_relay(_c.ice):
+		# relay-only with no TURN entry can never connect: give up on the next tick, not after the ready timeout
+		_ready_retry_budget_ms = 0
+		_ready_deadline_ms = maxi(1, now_ms())
+		return
 	var total: int = _c.ready_timeout_ms
 	if total <= 0:
 		return
@@ -365,6 +370,14 @@ static func ice_failed_message(relay_configured: bool) -> String:
 
 
 func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void:
+	if is_host and _c.relay_only and not has_relay(_c.ice):
+		# relay-only with no TURN entry can never connect: report it now instead of at the ready timeout
+		_c.raise_error("ice_failed", ice_failed_message(false))
+		if rec.watching:
+			rec.watching = false
+			rec.watch_deadline_ms = 0
+			peer_failed.emit(_to_peer(rec), "ice_failed")
+		return
 	if rec.link != null:
 		rec.link.close()
 	rec.open_handled = false

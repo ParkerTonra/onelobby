@@ -151,6 +151,31 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void RelayOnlyWithNoTurnFailsAtOnceNotAtTheReadyTimeout()
+        {
+            var rig = new Rig();
+            var hc = new LobbyClient(Rig.Config("h", mode: SyncMode.Raw) with { RelayOnly = true }, rig.Net.CreateTransport());
+            rig.Clients.Add(hc);
+            var herrs = new List<LobbyError>();
+            hc.Error += e => herrs.Add(e);
+            var host = rig.Await(hc.HostAsync(new LobbyOptions("raw", 4)));
+            var failed = new List<string>();
+            host.PeerFailed += (p, r) => failed.Add($"{p.PeerId} {r}");
+            var gcfg = Rig.Config("g", mode: SyncMode.Raw) with { RelayOnly = true, ReadyTimeout = TimeSpan.FromSeconds(900) };
+            var gc = new LobbyClient(gcfg, rig.Net.CreateTransport());
+            rig.Clients.Add(gc);
+            var g = rig.Await(gc.JoinAsync(host.Code));
+            Assert.True(rig.Until(() => g.ReadyAsync.IsCompleted, 100)); // 4 s, not 900
+            var ex = Assert.IsType<OneLobbyException>(g.ReadyAsync.Exception!.InnerException);
+            Assert.Equal("ice_failed", ex.Code);
+            Assert.EndsWith("Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.", ex.Message);
+            rig.Step(40);
+            Assert.True(herrs.Count > 0, "no host error");
+            Assert.Equal(new[] { "2 ice_failed" }, failed.ToArray());
+            Assert.Equal("ice_failed", herrs[0].Code);
+        }
+
+        [Fact]
         public void ZeroWaitsForever()
         {
             var (rig, host, gc) = Setup(TimeSpan.Zero);
