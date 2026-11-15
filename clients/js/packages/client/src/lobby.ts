@@ -127,6 +127,9 @@ export const MIN_PEER_TIMEOUT_MS = 6000;
 export const KICK_LINGER_MS = 3000;
 /** How long an offer held during a possible migration stays answerable. */
 const HELD_OFFER_MS = 20_000;
+/** Host: a link that dies this soon after its offer, before opening, is offered again (at most REOFFER_MAX times). */
+const REOFFER_WINDOW_MS = 5_000;
+const REOFFER_MAX = 2;
 
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export function seatName(p: PeerInfo): PeerInfo {
@@ -234,6 +237,10 @@ export class Lobby extends Emitter<LobbyEvents> {
   private isReady = false;
   private cancelReadyTimer: (() => void) | null = null;
   private relayRetry = false;
+  /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
+  private readonly everOpen = new WeakSet<PeerLink>();
+  /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
+  private readonly offeredAt = new Map<number, { at: number; retries: number }>();
   /** clock.now() of the last frame from each peer (peerTimeoutMs). */
   private lastHeard = new Map<number, number>();
   /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
@@ -605,10 +612,14 @@ export class Lobby extends Emitter<LobbyEvents> {
       return;
     }
     const link = this.makeLink(peerId);
+    const prev = this.offeredAt.get(peerId);
+    this.offeredAt.set(peerId, { at: this.cfg.clock.now(), retries: prev?.retries ?? 0 });
     link.startOffer();
   }
 
   private onLinkOpen(peerId: number, link: PeerLink): void {
+    this.everOpen.add(link);
+    this.offeredAt.delete(peerId);
     if (this.isHost) {
       // Joiner speaks first (`hi`). After a migration the new host announces itself so the joiner knows who won.
       if (this.epoch > 0) this.sendTo(peerId, { type: "host_claim", epoch: this.epoch, hostId: this.localPeerId, tick: this.lockstep.lastTick }, 0);
@@ -638,6 +649,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.links.delete(peerId);
     this.hiSentTo.delete(link);
     if (this.ended) return;
+    if (this.isHost && this.reofferQuickFailure(peerId, link)) return;
     if (this.isHost) {
       this.connected.delete(peerId);
       this.lockstep.onPeerLeft(peerId);
@@ -649,6 +661,22 @@ export class Lobby extends Emitter<LobbyEvents> {
       if (!this.isReady && this.cancelReadyTimer) return;
       this.handleHostLost("link closed");
     }
+  }
+
+  /**
+   * A link that dies within seconds of its offer, before it ever opened, is a negotiation that broke, not a peer that
+   * left: on a fast path (loopback, LAN) the joiner can start its DTLS handshake before the host has applied the answer,
+   * and libdatachannel then rejects the joiner's certificate against a remote description it has not stored yet
+   * ("DTLS handshake failed ... certificate verify failed", the link ends connecting -> closed within milliseconds).
+   * The host offers again (up to twice); the joiner answers the new offer on a fresh link.
+   */
+  private reofferQuickFailure(peerId: number, link: PeerLink): boolean {
+    const o = this.offeredAt.get(peerId);
+    if (!o || this.everOpen.has(link) || !this.roster.has(peerId) || this.lingering.has(link)) return false;
+    if (o.retries >= REOFFER_MAX || this.cfg.clock.now() - o.at > REOFFER_WINDOW_MS) return false;
+    o.retries++;
+    this.offerTo(peerId);
+    return true;
   }
 
   // ---- data channel dispatch -------------------------------------------------------------------------------------
@@ -1009,6 +1037,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     if (peer) this.roster.delete(peerId);
     this.earlyIce.delete(peerId);
+    this.offeredAt.delete(peerId);
     const cancelWatch = this.notReady.get(peerId);
     if (cancelWatch) {
       cancelWatch();

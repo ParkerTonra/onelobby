@@ -607,6 +607,31 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     }
   }, 30000);
 
+  it("a host link that dies before it opens is offered again, so the joiner still gets in", async () => {
+    // What a DTLS-vs-answer race looks like to the host: the first link to the joiner ends connecting -> closed.
+    const port = await freePort();
+    let created = 0;
+    const flaky: LinkFactory = {
+      create(o) {
+        if (++created > 1) return links.create(o);
+        const dead: PeerLink = {
+          remoteId: o.remoteId, isOpen: false, onSignal: null, onOpen: null, onClose: null, onMessage: null,
+          startOffer: () => void setTimeout(() => dead.onClose?.("failed"), 20),
+          handleSignal: () => {}, send: () => {}, close: () => {},
+        };
+        return dead;
+      },
+    };
+    const hostKit = new OneLobby({ gameId: "com.onelobby.directtest", netVersion: "1", lobbyServer: "", mode: "raw", rememberSeat: false, advanced: { linkFactory: flaky } });
+    const host = await hostIp(hostKit, { port, openPort: false });
+    cleanup.push(() => host.leave());
+    const a = await kit("A").joinDirect(`127.0.0.1:${port}`);
+    cleanup.push(() => a.leave());
+    await a.ready;
+    await until(() => host.peers.length === 2, "host sees the joiner");
+    expect(created).toBe(2);
+  }, 30000);
+
   it("mistyped code is bad_code at once; nobody listening is direct_unreachable", async () => {
     await expect(kit("x").joinDirect("6B01-RGFE-P2C")).rejects.toMatchObject({ code: "bad_code" });
     await expect(kit("x").joinDirect("nope nope")).rejects.toMatchObject({ code: "bad_address" });
