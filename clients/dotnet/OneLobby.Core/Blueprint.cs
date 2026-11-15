@@ -292,7 +292,7 @@ namespace OneLobby
                             else Str(gv, gp, 0, 64);
                         });
                         break;
-                    case "engine": Enum(v, "engine", "web", "node-browser", "godot-csharp", "unity", "dotnet"); break;
+                    case "engine": Enum(v, "engine", "web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"); break;
                     case "hosting":
                         Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
                         {

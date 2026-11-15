@@ -47,6 +47,12 @@ var ice: Array = []
 var _extra_ice: Array = []
 ## Optional messages the hub handles (`welcome.features`, e.g. "set_name"); empty for an older hub.
 var features: Array = []
+## The onelobby.json this client runs from (`from_config`), or null. With one, host / host_direct / join / join_direct / list
+## take their defaults from the file (explicit options win) and enforce its switches.
+var config: OneLobbyConfig = null
+## {code, path, rule, message} when `config` cannot be used (an invalid file, a name the file refuses, a sync mode GDScript
+## lacks); host / join / list then fail with that code and message. {} otherwise.
+var config_error := {}
 
 var _socket: OneLobbyTransport.OLSocket
 ## Direct mode: builds the signaling socket instead of a WebSocket to lobby_server (valid while a direct lobby is open).
@@ -90,9 +96,58 @@ func _exit_tree() -> void:
 		_direct_host = null
 
 
+## A client that runs from onelobby.json (docs/design/blueprint.md; the GDScript twin of JS `OneLobby.fromConfig` and C#
+## `LobbyClient.FromBlueprint`). `source` is an OneLobbyConfig, a path to the file (default res://onelobby.json) or a
+## parsed Dictionary. `overrides`: `display_name` (checked against `players.*`), `lobby_server` (wins over
+## `hosting.lobbyServer`; the file is the bottom layer, so a settings screen or an environment variable goes here),
+## Always returns a client: when the file is invalid
+## (or asks for a sync mode other than "raw"), `config_error` is set and its first host / join / list fails with it.
+##
+##     var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Sam"})
+##     add_child(client)
+##     var lobby := await client.host()    # a lobby server when hosting.server is true, else a direct lobby with a Nostr code
+##     var lobby := await client.join(code) # a lobby code goes to the server, a direct code or an address to host_direct
+static func from_config(source: Variant = OneLobbyConfig.DEFAULT_PATH, overrides: Dictionary = {}) -> OneLobbyClient:
+	var cfg: OneLobbyConfig
+	if source is OneLobbyConfig:
+		cfg = source
+	elif source is Dictionary:
+		cfg = OneLobbyConfig.parse(source)
+	else:
+		cfg = OneLobbyConfig.load_file(str(source))
+	var c := OneLobbyClient.new()
+	c.config = cfg
+	if not cfg.ok:
+		c.config_error = cfg.error
+		return c
+	var who := str(overrides.get("display_name", "")).strip_edges()
+	c.config_error = cfg.check_display_name(who)
+	if c.config_error.is_empty():
+		c.config_error = cfg.check_gdscript()
+	c.game_id = cfg.game_id
+	c.net_version = cfg.net_version
+	c.lobby_server = str(overrides.get("lobby_server", cfg.hosting["lobby_server"]))
+	c.display_name = who
+	c.tick_rate = cfg.sync["tick_rate"]
+	c.relay_only = cfg.hosting["relay_only"]
+	c.ready_timeout_ms = cfg.session["ready_timeout_ms"]
+	c.peer_timeout_ms = cfg.session["peer_timeout_ms"]
+	return c
+
+
 ## Creates a lobby. `options`: name, max_players (4), visibility ("public" | "unlisted" | "private"), late_join (true),
 ## meta ({} of strings), rate_limit ({messages, per_ms}: host-side cap on raw messages per peer).
 func host(options: Dictionary = {}) -> OneLobbyLobby:
+	if config != null:
+		# with a config: the file's lobby settings are the defaults; no lobby server in the file (the GDScript default) hosts direct
+		if not _config_usable():
+			return null
+		if not config.hosting["server"]:
+			return await host_direct(options)
+		if lobby_server.is_empty():
+			_fail("no_server", "hosting.server is true but there is no lobby server address (hosting.lobbyServer in onelobby.json, or the lobby_server override)")
+			return null
+		options = _with_defaults(config.host_options(display_name), options)
 	var rl: Dictionary = options.get("rate_limit", {})
 	var o := options.duplicate()
 	o["relay_only"] = relay_only
@@ -104,6 +159,15 @@ func host(options: Dictionary = {}) -> OneLobbyLobby:
 
 ## Joins by code ("7HQ 4K2", "7hq-4k2" and look-alike letters are fine).
 func join(join_code: String) -> OneLobbyLobby:
+	if config != null:
+		# with a config a lobby code goes to the lobby server, anything else (direct code, address) to join_direct
+		if not _config_usable():
+			return null
+		if OneLobbyJoinCode.normalize(join_code) == "":
+			return await join_direct(join_code)
+		if not config.hosting["server"] or lobby_server.is_empty():
+			_fail("no_server", "this game has no lobby server (hosting.server is false in onelobby.json): join with a direct code or an address")
+			return null
 	var norm := OneLobbyJoinCode.normalize(join_code)
 	if norm == "":
 		_fail("unknown_code", "not a valid join code")
@@ -115,6 +179,8 @@ func join(join_code: String) -> OneLobbyLobby:
 ## still up (a lobby you left, or a seat you want to take over from another socket) it is closed and reopened first, so
 ## the server sees a fresh hello carrying the token.
 func rejoin(token: String) -> OneLobbyLobby:
+	if not _config_usable():
+		return null
 	return await _run(token, "", ["lobby"], _enter_lobby)
 
 
@@ -132,6 +198,10 @@ func rejoin(token: String) -> OneLobbyLobby:
 ## logins). Godot's WebRTC reaches TURN over UDP only (libjuice): turn:...?transport=tcp and turns: are skipped.
 ## Fails with no_relay when no relay can be reached.
 func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
+	if config != null:
+		if not _config_usable():
+			return null
+		options = _with_defaults(config.direct_options(display_name), options)
 	if not _op.is_empty():
 		_fail("busy", "another request is in flight")
 		return null
@@ -183,12 +253,20 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 ##
 ##     var lobby := await client.join_direct("D1PB-1X9S-FPV")
 func join_direct(join_code: String, options: Dictionary = {}) -> OneLobbyLobby:
+	if config != null:
+		if not _config_usable():
+			return null
+		options = _with_defaults(_direct_join_defaults(), options)
 	return await _direct_join(join_code, options, "", OneLobbySignaling.join_direct(str(options.get("password", ""))))
 
 
 ## Direct mode: takes your seat back after the connection dropped (lobby.resume_token and the code from before). Works
 ## only while the host is still running that lobby (60 s after the drop).
 func rejoin_direct(join_code: String, token: String, options: Dictionary = {}) -> OneLobbyLobby:
+	if config != null:
+		if not _config_usable():
+			return null
+		options = _with_defaults(_direct_join_defaults(), options)
 	return await _direct_join(join_code, options, token, "")
 
 
@@ -250,6 +328,11 @@ func flush_signaling(timeout_ms: int = 1500) -> void:
 
 ## Public lobbies of this game: Dictionaries {code, name, host_name, players, max_players, phase, meta, region}.
 func list(meta_filter: Dictionary = {}) -> Array:
+	if not _config_usable():
+		return []
+	if config != null and not config.hosting["server"]:
+		_fail("listing_disabled", "this game has no lobby server (hosting.server is false in onelobby.json)")
+		return []
 	var r: Variant = await _run("", OneLobbySignaling.list(meta_filter), ["lobbies"], func(e: Dictionary) -> Variant:
 		var items: Array = []
 		var arr: Variant = e.get("items")
@@ -299,6 +382,29 @@ func pump() -> void:
 func send_signaling(json: String) -> void:
 	if _socket != null and _socket.state == OneLobbyTransport.OLSocket.OPEN:
 		_socket.send_text(json)
+
+
+## False (after failing with the config's own error) when `config` is invalid or refuses this client; true without a config.
+func _config_usable() -> bool:
+	if config == null:
+		return true
+	if not config_error.is_empty():
+		_fail(str(config_error["code"]), str(config_error["message"]))
+		return false
+	return true
+
+
+## `defaults` with every key of `options` on top.
+static func _with_defaults(defaults: Dictionary, options: Dictionary) -> Dictionary:
+	var o := defaults.duplicate()
+	for k: Variant in options:
+		o[k] = options[k]
+	return o
+
+
+func _direct_join_defaults() -> Dictionary:
+	var relays: Array = config.hosting["nostr_relays"]
+	return {"relays": relays.duplicate()} if not relays.is_empty() else {}
 
 
 func raise_error(code: String, message: String) -> void:

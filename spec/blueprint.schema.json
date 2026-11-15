@@ -33,7 +33,7 @@
     },
     "engine": {
       "description": "Picks the recipe, package and transport. Shapes the defaults of hosting.direct, hosting.server, lobby.joinLink and ui.kind.",
-      "enum": ["web", "node-browser", "godot-csharp", "unity", "dotnet"]
+      "enum": ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]
     },
     "hosting": {
       "type": "object",

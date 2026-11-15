@@ -155,7 +155,7 @@ generated code; both: the library enforces it and the UI reflects it) and **Toda
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `engine` | `"web"` \| `"node-browser"` \| `"godot-csharp"` \| `"unity"` \| `"dotnet"` | surveyed or `--template` | S | new (the recipes exist per engine) | create-vite `--template` |
+| `engine` | `"web"` \| `"node-browser"` \| `"godot-csharp"` \| `"godot-gdscript"` \| `"unity"` \| `"dotnet"` | surveyed or `--template` | S | new (the recipes exist per engine) | create-vite `--template` |
 
 The agent fills it from the survey; the scaffolder from `--template`. It picks the recipe, the package to install and
 the transport (`DataChannelTransport`, `GodotTransport`, `UnityTransport`, browser WebRTC, node-datachannel).
@@ -164,7 +164,7 @@ the transport (`DataChannelTransport`, `GodotTransport`, `UnityTransport`, brows
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `hosting.direct` | bool | `true` where the engine can listen (`node-browser`, `godot-csharp`, `unity`, `dotnet`); `false` for `web` (a browser cannot listen on a port) | both | exists (`HostDirectAsync`, `hostDirect`) | Terraria Host & Play, Minecraft Open to LAN (direct-ip recipe); Stop Killing Games "private servers" |
+| `hosting.direct` | bool | `true` where the engine can listen (`node-browser`, `godot-csharp`, `godot-gdscript`, `unity`, `dotnet`); `false` for `web` (a browser cannot listen on a port) | both | exists (`HostDirectAsync`, `hostDirect`) | Terraria Host & Play, Minecraft Open to LAN (direct-ip recipe); Stop Killing Games "private servers" |
 | `hosting.server` | bool | `true` for `web`; `false` otherwise | both | exists (`HostAsync`, `kit.host`) | Photon / Nakama hosted rooms |
 | `hosting.lobbyServer` | URL string | `""` | R | exists (`lobbyServer`) | AGENTS.md rule 5: a setting, never a constant |
 | `hosting.directPort` | int 1024-65535 | 47810 | R | exists (`DirectPort`, `port`) | Godot `create_server(port, ...)`; Factorio documents its port |
@@ -392,6 +392,7 @@ prompt library in the CLI only.
 | `web` | browser game, hosted lobby server, drop-in or generated UI | v1 |
 | `node-browser` | Node host serves the page, direct codes, browser joiners (browser-game recipe) | v2 |
 | `godot-csharp` | autoload `Net.cs`, `OneLobby.Godot` | v2 |
+| `godot-gdscript` | autoload `net.gd`, the `addons/onelobby` add-on (the loader exists; the template is planned) | v2 |
 | `unity` | `OneLobbyRunner`, `com.onelobby.unity` package | v2 |
 | `dotnet` | console / MonoGame, `OneLobby.DataChannel` + `OneLobby.Direct` | v2 |
 
@@ -401,7 +402,7 @@ Every question has a flag, named after the schema key (create-next-app's pattern
 
 ```
 create-onelobby [dir] [options]
-  --template <web|node-browser|godot-csharp|unity|dotnet>
+  --template <web|node-browser|godot-csharp|godot-gdscript|unity|dotnet>
   --into <dir>                 add to an existing project instead of creating one
   --from <onelobby.json>       take every answer from this file (hand-edit path, CI)
   --game-id <reverse.dns>  --title <text>
@@ -491,6 +492,14 @@ if (bp.Chat.Voice) voiceButton.Visible = true;
 - Unity: `OneLobbyRunner.Blueprint` (a `TextAsset` field in the inspector, default `Assets/onelobby.json`); the runner's
   `LobbyServer` field becomes the override layer above the file, same precedence as JS. Godot: `res://onelobby.json`,
   `--lobby-server=` flag on top, as the recipe already does.
+- GDScript: `OneLobbyConfig.load_file()` (default `res://onelobby.json`) or `OneLobbyConfig.parse(text or dictionary)`
+  validates with the same rules and defaults and never throws: `cfg.ok`, `cfg.error` (`{code, path, rule, message}`), the
+  sections as snake_case dictionaries (`cfg.lobby["max_players"]`) and `cfg.data` as in the file.
+  `OneLobbyClient.from_config(cfg or path, {display_name, lobby_server})` is `fromConfig` / `FromBlueprint`; `host()` then
+  defaults from the file (a direct lobby when `hosting.server` is false) and `join()` sends a lobby code to the server and a
+  direct code or address to `join_direct`. GDScript is raw-mode only: `sync.mode` `lockstep` or `replication` parses (other
+  engines read the file) but fails `from_config` with `bad_config`, rule `gdscript_raw_only`. Chat, pause, voice and
+  host-migration keys are read, not enforced yet (GDScript has no such features).
 - Enforcement mirrors JS with the same error codes (`LobbyErrorCodes.VoiceDisabled`, ...), tested by the shared
   vectors.
 

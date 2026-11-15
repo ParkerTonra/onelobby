@@ -489,7 +489,7 @@ namespace OneLobby
             End("ice_failed");
         }
 
-        private static string IceFailedMessage(bool relayConfigured) =>
+        internal static string IceFailedMessage(bool relayConfigured) =>
             relayConfigured
                 ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
                 : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";

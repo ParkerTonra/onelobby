@@ -1,7 +1,7 @@
 # Recipe: Godot 4 GDScript (desktop)
 
 A GDScript-only addon, no .NET: `clients/gdscript/addons/onelobby/`. It is raw mode (your own messages over the host's
-star, host migration included); lockstep, voice and replication are C# / JS only for now. Godot 4.4 or newer. Its
+star, host migration included); lockstep, voice and replication are C# / JS only for now. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
 `gdscript compile` snippets below are parse-checked by `check-snippets.mjs` when `GODOT` points at a Godot executable.
 
 ## 1. Add the addon
@@ -129,6 +129,45 @@ No lobby server? Direct mode: `await client.host_direct({"name": "My game", "max
 `clients/gdscript/README.md`.
 
 To pump from `_physics_process` instead, set `client.auto_pump = false` and call `client.pump()` yourself.
+
+## 5. From onelobby.json (optional)
+
+Every multiplayer choice can live in one file, `onelobby.json` (schema `spec/blueprint.schema.json`; smallest file
+`{ "game": { "id": "com.you.yourgame" }, "engine": "godot-gdscript" }`). `OneLobbyClient.from_config` reads it and
+`host()` / `join()` take their defaults from it, so the autoload shrinks to a few lines:
+
+```gdscript compile file=net_blueprint.gd
+extends Node
+
+var client: OneLobbyClient
+var lobby: OneLobbyLobby
+
+
+func _ready() -> void:
+	client = OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Sam"})
+	if not client.config_error.is_empty():
+		push_error(client.config_error["message"]) # path and rule are in the dictionary too
+	add_child(client)
+
+
+func host() -> String:
+	lobby = await client.host() # a lobby server when hosting.server is true, else a direct lobby with a Nostr code
+	return lobby.code if lobby != null else ""
+
+
+func join(code: String) -> bool:
+	lobby = await client.join(code) # a lobby code goes to the server, a direct code or an address to join_direct
+	if lobby == null:
+		push_error(OneLobbyFriendly.describe_error(client.last_error)["message"]) # plain words for the player
+	return lobby != null
+```
+
+- Add `*.json` (or `onelobby.json`) to the export preset's "Filters to export non-resource files", or the exported game has no file.
+- GDScript speaks `sync.mode` `"raw"` only: `lockstep` and `replication` fail `from_config` with `bad_config`, rule
+  `gdscript_raw_only` (C# and JS read the same file fully).
+- `OneLobbyConfig.load_file()` gives the validated fields (`cfg.lobby["max_players"]`, `cfg.hosting["lobby_server"]`, ...) and
+  `ok` / `error` without making a client; `OneLobbyFriendly.describe_error(...)` and `OneLobbyInvite.make(code, base_url)` /
+  `OneLobbyInvite.parse(text)` are the player-facing helpers (same text and link format as JS and C#).
 
 ## Testing headless
 

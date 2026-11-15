@@ -2,7 +2,7 @@
 
 A pure GDScript client for Godot 4.4+, no .NET. Raw mode (through a lobby server) and Direct mode (no server, Nostr join codes): your own messages over the host's star (a joiner's
 send goes through the host, `from` is always the real sender), host migration, chunking of big payloads, join codes,
-lobby browse, kick/approve, rejoin. Lockstep, voice and replication are in the C# and JS clients. Written from `spec/`;
+lobby browse, kick/approve, rejoin, and `onelobby.json` (`OneLobbyConfig`, below). Lockstep, voice and replication are in the C# and JS clients. Written from `spec/`;
 the API mirrors `OneLobby.Core`'s, with signals for events. Recipe: [docs/recipes/godot-gdscript.md](../../docs/recipes/godot-gdscript.md).
 
 ```gdscript
@@ -14,6 +14,48 @@ var lobby := await client.host({"name": "My game"})   # or: await client.join("7
 lobby.message_received.connect(func(from: int, bytes: PackedByteArray, channel: int) -> void: print(from, bytes))
 lobby.broadcast("hi".to_utf8_buffer())
 ```
+
+## From onelobby.json
+
+One settings file for the game's multiplayer (`spec/blueprint.schema.json`, `docs/design/blueprint.md`; the same file JS and C#
+read). `from_config` makes a client from it and `host()` / `join()` do the rest:
+
+```gdscript
+var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Sam"})   # path, OneLobbyConfig or Dictionary
+if not client.config_error.is_empty(): push_error(client.config_error["message"])           # {code, path, rule, message}
+add_child(client)
+var lobby := await client.host()        # max players, visibility, late join, meta, rate limit from the file; hosting.server false = direct lobby
+var lobby := await client.join(code)    # lobby code -> server; direct code or "ip:port" -> join_direct
+```
+
+`OneLobbyConfig.load_file(path = "res://onelobby.json")` / `parse(text_or_dictionary)` give the validated file with every default
+filled in and never throw: check `cfg.ok` and read `cfg.error`. Fields: `game_id`, `net_version`, `title`, `engine`, and the sections
+`hosting`, `lobby`, `sync`, `players`, `chat`, `session`, `platforms`, `ui` as snake_case dictionaries (`cfg.hosting["lobby_server"]`);
+`cfg.data` is the camelCase tree of the file. `engine` may be `godot-gdscript` (a direct-only game by default). The rules, defaults and
+failures are the shared ones (`spec/vectors/blueprint.json`), with these GDScript specifics:
+
+- `from_config` overrides: `display_name` (checked against `players.identity` / `players.maxNameLength`), `lobby_server` (wins over the file).
+- Raw mode only. `sync.mode` `lockstep` or `replication` parses, but `from_config` records `config_error` with `bad_config`, rule
+  `gdscript_raw_only`, and the first `host()` / `join()` / `list()` fails with it. `chat`, `session.pause`, `chat.voice` and
+  `session.hostLeaves` are read but not enforced: GDScript has no chat, pause, voice or lockstep yet (a later release).
+- `list()` with `hosting.server` false fails `listing_disabled`; a lobby code with no server fails `no_server`; a name for an
+  anonymous game fails `identity_anonymous`. All arrive as `client.last_error` and the `error` signal like any other failure.
+- The file must be in the export (export preset, "Filters to export non-resource files": `*.json`). JSON comments are not allowed (GDScript's parser has none).
+- `hosting.openPort` (UPnP) and `lobby.password` are read but not applied; pass `upnp_port` / `password` to `host_direct` yourself.
+
+### Plain-language errors and invite links
+
+```gdscript
+var d := OneLobbyFriendly.describe_error(client.last_error)   # {code, message, hint?}: the JS describeError text, word for word
+label.text = d["message"] + (" " + d["hint"] if d.has("hint") else "")
+var link := OneLobbyInvite.make(lobby.code, "https://game.example/play")   # "https://game.example/play?join=7HQ-4K2" ("" if invalid)
+var code := OneLobbyInvite.parse(pasted)    # "7HQ4K2" from a pasted link (query or #fragment, "+" or "%20" for a space), else ""
+```
+
+`describe_error` also takes a bare code, a `"code: text"` string, or a Dictionary `{code, data, message, name}`. Invite links carry
+lobby codes of a server lobby only and are not registered with the OS (a deep link is the game's job). Both match JS (`describeError`,
+`shareUrl`, `codeFromUrl`) and C# (`Friendly.DescribeError`, `InviteLink.Make` / `Parse`) through `spec/vectors/describe-error.json` and
+`invite-link.json`.
 
 ## Direct mode (no lobby server)
 
@@ -103,6 +145,8 @@ both directions).
 | Path | What |
 |---|---|
 | `addons/onelobby/client.gd` | `OneLobbyClient` (Node): signaling, host / join / rejoin / list coroutines, `error` signal |
+| `addons/onelobby/config.gd` | `OneLobbyConfig`: load and validate `onelobby.json`; `OneLobbyClient.from_config` (in client.gd) runs from it |
+| `addons/onelobby/friendly.gd`, `invite.gd` | `OneLobbyFriendly.describe_error`; `OneLobbyInvite.make` / `parse` |
 | `addons/onelobby/lobby.gd` | `OneLobbyLobby`: peers, send / broadcast, phase, meta, kick, approve, migration; signals |
 | `addons/onelobby/wire.gd` | `OneLobbyWire`: the binary codec (`spec/binary.md`), channel and type constants |
 | `addons/onelobby/chunker.gd` | `OneLobbyChunker`: split / reassemble frames over 16 KB |
@@ -115,6 +159,8 @@ both directions).
 | `tests/nostr_unit.gd`, `direct-test.sh`, `tests/direct_e2e.gd`, `tests/direct_interop.gd` | Direct unit tests, two-instance test, interop peer |
 | `tests/relay_retry.gd` | ready-timeout relay-only retry and the ice_failed message (no network) |
 | `tests/vectors.gd` | the shared spec vectors (frames, invalid, chunking, join codes) |
+| `tests/blueprint.gd` | `OneLobbyConfig` against `spec/vectors/blueprint.json`, `from_config`, one-call host and join on 127.0.0.1 |
+| `tests/friendly.gd` | `describe_error`, the `ice_failed` messages and invite links against their shared vectors |
 | `tests/conformance_adapter.gd`, `conformance-adapter.mjs` | `conformance/peer` adapter |
 | `tests/e2e.gd`, `headless-test.sh` | two instances host/join by code through a real server and exchange a message |
 

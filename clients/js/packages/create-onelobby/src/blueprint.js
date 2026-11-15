@@ -10,7 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** The npm version of `onelobby` the generated project depends on and the $schema URL pins (first with fromConfig). */
 export const ONELOBBY_VERSION = "0.7.2";
 export const SCHEMA_URL = `https://unpkg.com/onelobby@${ONELOBBY_VERSION}/blueprint.schema.json`;
-export const TEMPLATES = ["web", "node-browser", "godot-csharp", "unity", "dotnet"];
+export const TEMPLATES = ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"];
 export const IMPLEMENTED_TEMPLATES = ["web"];
 
 let loader;

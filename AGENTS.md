@@ -201,6 +201,9 @@ Full reference (generated): `docs/api/`.
   with `players.identity: "anonymous"` refuses it (`identity_anonymous`), and `players.maxNameLength` applies.
 - Player-facing helpers: `describeError(e)` gives `{ code, message, hint? }` in plain language for any kit or server
   error; `shareUrl(code)` makes a `?join=7HQ-4K2` link to the current page; `codeFromUrl()` reads it back (or null).
+  The same in C# (`Friendly.DescribeError(e)`, `InviteLink.Make(code, baseUrl)` / `InviteLink.Parse(text)`) and GDScript
+  (`OneLobbyFriendly.describe_error(client.last_error)`, `OneLobbyInvite.make(code, base_url)` / `.parse(text)`), word for
+  word and link for link, tested by `spec/vectors/describe-error.json` and `invite-link.json`.
 
 ## Integrate a game: the blueprint flow
 
@@ -221,7 +224,14 @@ var client = LobbyClient.FromBlueprint(bp, new DataChannelTransport(), displayNa
 Lobby lobby = await client.HostAsync();                    // or HostDirectAsync() from OneLobby.Direct
 ```
 
-A bad file throws `bad_config` with the key's path. Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
+```gdscript
+var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Ann"})   # engine "godot-gdscript"; raw mode only
+add_child(client)                                          # client.config_error is {} unless the file is bad (or asks for lockstep)
+var lobby := await client.host()                           # from the file; a direct lobby when hosting.server is false
+var lobby := await client.join(code)                       # a lobby code to the server, a direct code or "ip:port" to join_direct
+```
+
+A bad file throws `bad_config` with the key's path (GDScript never throws: `cfg.error` / `client.config_error` hold `{code, path, rule, message}`; a file that asks GDScript for `lockstep` or `replication` fails with rule `gdscript_raw_only`). Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
 with `chat.voice` false), `chat_disabled` (`lobby.chat.send` with `chat.text` false), `listing_disabled` (`list()` with
 `hosting.server` false) and `identity_anonymous`. No lobby server address at all (empty `hosting.lobbyServer`, no
 `lobbyServer` override) makes `host()` / `join()` fail with `no_server`. Browser wiring with the player's server

@@ -225,7 +225,7 @@ export const USAGE = `create-onelobby: scaffold a multiplayer game with OneLobby
 
 Usage: create-onelobby [dir] [options]
 
-  --template <web|node-browser|godot-csharp|unity|dotnet>   only "web" in this release; the rest are planned for v2
+  --template <web|node-browser|godot-csharp|godot-gdscript|unity|dotnet>   only "web" in this release; the rest are planned for v2
   --into <dir>                 add to an existing project: writes onelobby.json, multiplayer/ and test/ only
   --from <onelobby.json>       take every answer from this file (flags still override it)
   --game-id <reverse.dns>  --title <text>  --net-version <text>

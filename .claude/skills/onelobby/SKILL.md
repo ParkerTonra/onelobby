@@ -18,8 +18,8 @@ Run the phases in order. Never skip Verify.
 Find and note, with the file and line that told you:
 
 - **Engine**: browser JS (`web`), browser page served by a Node host (`node-browser`), Godot 4 C# (`godot-csharp`),
-  Unity (`unity`), any other .NET (`dotnet`). Godot GDScript, Unreal and others: stop and tell the user OneLobby has no
-  client for it yet.
+  Godot 4 GDScript (`godot-gdscript`: raw mode only, `docs/recipes/godot-gdscript.md` section 5), Unity (`unity`), any
+  other .NET (`dotnet`). Unreal and others: stop and tell the user OneLobby has no client for it yet.
 - **Loop**: fixed tick (`setInterval`, accumulator, `_PhysicsProcess`, `FixedUpdate`) or frame-driven
   (`requestAnimationFrame`, `_Process`, `Update`).
 - **Determinism**: seeded RNG kept in game state vs `Math.random` / `UnityEngine.Random` / `GD.Randf`; wall clock in

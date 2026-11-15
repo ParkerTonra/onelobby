@@ -6,7 +6,7 @@
 import { OneLobbyError } from "./signaling.js";
 import { DEFAULT_NOSTR_RELAYS } from "./nostr/relays.js";
 
-export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
+export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "godot-gdscript" | "unity" | "dotnet";
 
 export interface Blueprint {
   readonly version: 1;
@@ -147,7 +147,7 @@ const ROOT: Node = obj(
       { id: str({ pattern: /^[A-Za-z0-9._-]{1,64}$/ }), netVersion: str({ min: 1, max: 32 }), title: str({ max: 64 }) },
       ["id"],
     ),
-    engine: en("web", "node-browser", "godot-csharp", "unity", "dotnet"),
+    engine: en("web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"),
     hosting: obj({
       direct: bool,
       server: bool,

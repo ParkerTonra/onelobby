@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ErrorCodes, OneLobbyError, codeFromUrl, describeError, shareUrl } from "../src/index.js";
+import { iceFailedMessage } from "../src/lobby.js";
+import { specJson } from "./spec.js";
 
 describe("ErrorCodes", () => {
   const values: string[] = Object.values(ErrorCodes);
@@ -80,5 +82,47 @@ describe("shareUrl / codeFromUrl", () => {
     expect(codeFromUrl("https://g.example/?room=7HQ4K2", "room")).toBe("7HQ4K2");
     expect(codeFromUrl("https://g.example/?join=hello")).toBeNull();
     expect(codeFromUrl("https://g.example/")).toBeNull();
+  });
+});
+
+describe("shared vectors (spec/vectors/describe-error.json)", () => {
+  const v = specJson<{
+    cases: { name: string; input: unknown; expect: { code: string; message: string; hint?: string } }[];
+    iceFailedMessages: { name: string; relayConfigured?: boolean; byIp?: boolean; portRange?: number[]; clients?: string[]; message: string }[];
+  }>("vectors/describe-error.json");
+
+  it("describeError gives exactly the shared text for every case", () => {
+    expect(v.cases.length).toBeGreaterThan(60);
+    for (const c of v.cases) expect(describeError(c.input), c.name).toEqual(c.expect);
+  });
+
+  it("every ErrorCodes value has friendly text", () => {
+    const generic = describeError(null).message;
+    for (const code of Object.values(ErrorCodes)) expect(describeError({ code }).message, code).not.toBe(generic);
+  });
+
+  it("iceFailedMessage matches the shared text", () => {
+    const mine = v.iceFailedMessages.filter((m) => !m.clients || m.clients.includes("js"));
+    expect(mine.length).toBe(3);
+    for (const m of mine) expect(iceFailedMessage(!!m.relayConfigured), m.name).toBe(m.message);
+  });
+});
+
+describe("shared vectors (spec/vectors/invite-link.json)", () => {
+  const v = specJson<{
+    make: { name: string; code: string; base: string; param?: string; url?: string; error?: boolean }[];
+    parse: { name: string; input: string; param?: string; code: string | null }[];
+  }>("vectors/invite-link.json");
+
+  it("shareUrl builds exactly the shared links and throws on the shared bad input", () => {
+    for (const c of v.make) {
+      if (c.error) expect(() => shareUrl(c.code, c.base, c.param), c.name).toThrow();
+      else expect(shareUrl(c.code, c.base, c.param), c.name).toBe(c.url);
+    }
+  });
+
+  it("codeFromUrl reads exactly the shared codes, messy input included", () => {
+    expect(v.parse.length).toBeGreaterThan(30);
+    for (const c of v.parse) expect(codeFromUrl(c.input, c.param), c.name).toBe(c.code);
   });
 });

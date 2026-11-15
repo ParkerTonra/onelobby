@@ -261,7 +261,7 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
  * object. Errors carry the dotted `path` and the `rule` id the shared vectors (spec/vectors/blueprint.json) expect.
  */
 import { OneLobbyError } from "./signaling.js";
-export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
+export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "godot-gdscript" | "unity" | "dotnet";
 export interface Blueprint {
     readonly version: 1;
     readonly game: {
@@ -593,6 +593,8 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     notifyJoinCodeChanged(): void;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
+    /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
+    /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
     /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
     /** Host: joiners that joined but are not ready yet, with the cancel of their readyTimeoutMs timer (peerFailed). */
@@ -680,6 +682,13 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     linkAddressSink: ((peerId: number, ip: string) => void) | null;
     /** Host side: offer to a joiner. */
     /** Why and how the joiner's last link to the host ended (shown when the join gives up). */
+    /**
+     * A link that dies within seconds of its offer, before it ever opened, is a negotiation that broke, not a peer that
+     * left. On a fast path (loopback, LAN) the joiner connects and starts its DTLS handshake before the host has applied
+     * the answer, and libdatachannel (libjuice) sometimes rejects the joiner's certificate ("DTLS handshake failed ...
+     * certificate verify failed": the link ends connecting -> closed within milliseconds, on both sides).
+     * The host offers again after a short pause (up to twice); the joiner answers the new offer on a fresh link.
+     */
     /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
     /** Offers that came from roster members while the host link was still open: now the host is lost, answer them. */
     /**

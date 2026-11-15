@@ -120,6 +120,23 @@ public static class Crockford
     public static string FromValue(uint value);
 ```
 
+## OneLobby.Core/Friendly.cs
+
+```csharp
+/// A player-facing error: a stable code, one short sentence and, when there is one, what the player can do.
+public sealed record FriendlyError(string Code, string Message, string? Hint = null);
+/// Plain-language error text for players. The wording is the JS client's describeError word for word (spec/vectors/describe-error.json is the shared test); nothing here touches the network.
+public static class Friendly
+    /// Text for a caught exception: a OneLobbyException by its OneLobbyException.Code; timeouts and socket / HTTP failures as timeout / connect_failed; anything else (a stack trace or a raw technical message is never shown) as unknown.
+    public static FriendlyError DescribeError(Exception? error);
+    /// Text for a LobbyError (the client's Error event).
+    public static FriendlyError DescribeError(LobbyError error);
+    /// Text for a bare code or a code: text string such as "lobby_full: lobby is full"; null gives unknown.
+    public static FriendlyError DescribeError(string? codeOrText);
+    /// Text for an error given as its parts. data is the server's error data (reason "denied" / "max_lobbies", retryAfterMs); numbers may be any numeric type or a System.Text.Json.JsonElement. With no usable code, a code: text message naming a known code, then a name of NetworkError / TimeoutError or such a message, pick the code.
+    public static FriendlyError DescribeError(string? code, IReadOnlyDictionary<string, object?>? data, string? message = null, string? name = null);
+```
+
 ## OneLobby.Core/ITransport.cs
 
 ```csharp
@@ -214,6 +231,17 @@ public sealed class InMemoryNetwork
     public void ShutdownServer();
     /// Pumps every client once and advances the clock by ms. Test helper.
     public void Step(IEnumerable<LobbyClient> clients, long ms = 25);
+```
+
+## OneLobby.Core/InviteLink.cs
+
+```csharp
+/// Invite links: a web address that opens a game straight into a lobby, e.g. https://game.example/?join=7HQ-4K2. Same format and behaviour as the JS client's shareUrl / codeFromUrl (spec/vectors/invite-link.json is the shared test). Only the lobby code of a server lobby travels in a link; registering the link with the operating system (a deep link) is the game's job. Nothing here touches the network.
+public static class InviteLink
+    /// A link that opens the game into lobby code: baseUrl (an absolute http or https address) with any existing param replaced by the code in display form with a hyphen (7HQ-4K2), so the link survives chat apps that turn a space into + or %20. The fragment is kept. Throws ArgumentException for a code that is not a lobby code or a base that is not absolute http(s).
+    public static string Make(string code, string baseUrl, string param = "join");
+    /// The lobby code (canonical form, 7HQ4K2) carried by a pasted link, or null when there is none or it is not a code. Reads the first param entry of the query, else (only when the query has no such key) of the fragment; + and %20 are spaces, case and i / l / o look-alikes are forgiven, surrounding whitespace is trimmed. A relative link (?join=...) works too. Nothing else is cleaned: a trailing dot or angle brackets make the code invalid.
+    public static string? Parse(string? text, string param = "join");
 ```
 
 ## OneLobby.Core/JoinCode.cs

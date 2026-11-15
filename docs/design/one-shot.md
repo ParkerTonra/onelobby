@@ -24,7 +24,7 @@ Missing or half there:
 
 | Area | Gap |
 |---|---|
-| GDScript | Raw bytes only: no blueprint loader, chat, pause, lockstep helper. Schema `engine` has no `godot-gdscript`. The skill refuses GDScript games. |
+| GDScript | Raw bytes only: no chat, pause, lockstep helper (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
 | UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
 | Room layer | No ready toggle, per-player data (colour, team, seat), spectators, countdown, rematch, name dedupe. |
