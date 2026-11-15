@@ -665,17 +665,20 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   /**
    * A link that dies within seconds of its offer, before it ever opened, is a negotiation that broke, not a peer that
-   * left: on a fast path (loopback, LAN) the joiner can start its DTLS handshake before the host has applied the answer,
-   * and libdatachannel then rejects the joiner's certificate against a remote description it has not stored yet
-   * ("DTLS handshake failed ... certificate verify failed", the link ends connecting -> closed within milliseconds).
-   * The host offers again (up to twice); the joiner answers the new offer on a fresh link.
+   * left. On a fast path (loopback, LAN) the joiner connects and starts its DTLS handshake before the host has applied
+   * the answer, and libdatachannel (libjuice) sometimes rejects the joiner's certificate ("DTLS handshake failed ...
+   * certificate verify failed": the link ends connecting -> closed within milliseconds, on both sides).
+   * The host offers again after a short pause (up to twice); the joiner answers the new offer on a fresh link.
    */
   private reofferQuickFailure(peerId: number, link: PeerLink): boolean {
     const o = this.offeredAt.get(peerId);
     if (!o || this.everOpen.has(link) || !this.roster.has(peerId) || this.lingering.has(link)) return false;
     if (o.retries >= REOFFER_MAX || this.cfg.clock.now() - o.at > REOFFER_WINDOW_MS) return false;
     o.retries++;
-    this.offerTo(peerId);
+    // not at once: a retry right behind the failure tends to hit the same bad moment, so the gap grows (150 ms, 600 ms)
+    this.cfg.clock.setTimeout(() => {
+      if (!this.ended && this.offeredAt.get(peerId) === o && this.roster.has(peerId) && !this.links.has(peerId)) this.offerTo(peerId);
+    }, o.retries === 1 ? 150 : 600);
     return true;
   }
 
