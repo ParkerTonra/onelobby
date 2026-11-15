@@ -20,6 +20,8 @@ namespace OneLobby
         private sealed class Op
         {
             public string? Request;
+            /// <summary>Builds the request once the hub's welcome (its features) is known.</summary>
+            public Func<string>? Build;
             public string[] Expect = Array.Empty<string>();
             public Action<JsonElement> Complete = _ => { };
             public Action<Exception> Fail = _ => { };
@@ -85,8 +87,35 @@ namespace OneLobby
         }
 
         /// <summary>Direct-IP join: the hub runs one lobby, so no code; the optional password is checked by the hub.</summary>
-        internal Task<Lobby> JoinSingleLobbyAsync(string? password, CancellationToken ct = default) =>
-            Run(null, Signaling.JoinDirect(password), new[] { "lobby" }, EnterLobby, ct);
+        internal Task<Lobby> JoinSingleLobbyAsync(string? password, CancellationToken ct = default) => JoinSingleLobbyAsync(password, null, ct);
+
+        /// <summary>As above, with the room layer's join options (role, starting data); the password is also sent to the host's room.</summary>
+        internal Task<Lobby> JoinSingleLobbyAsync(string? password, RoomJoinOptions? room, CancellationToken ct)
+        {
+            var setup = new RoomSetup { Join = JoinSetup(room, password) };
+            return Run(null, Signaling.JoinDirect(password), new[] { "lobby" }, e => EnterLobby(e, setup), ct);
+        }
+
+        private static RoomJoinOptions JoinSetup(RoomJoinOptions? o, string? password) =>
+            new RoomJoinOptions { Role = o?.Role ?? RoomRole.Player, Data = o?.Data, Password = password ?? o?.Password };
+
+        private IKeyValueStore? _idStore, _banStore;
+        private BanList? _bans;
+        private string? _pid;
+
+        /// <summary>
+        /// This install's player id for the game (32 hex characters, made once and kept: spec/room.md s.1). It is sent in the
+        /// hello so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
+        /// </summary>
+        public string PlayerId => _pid ??= KeyValueStores.LoadPlayerId(
+            _idStore ??= Config.PlayerIdStore ?? (Config.PlayerIdFile != null ? KeyValueStores.FromFile(Config.PlayerIdFile) : KeyValueStores.Memory()), Config.GameId);
+
+        /// <summary>The host-side ban list (also <c>lobby.Room.Bans</c>): persistent per game, see <see cref="OneLobbyConfig.BanFile"/>.</summary>
+        public BanList Bans => _bans ??= new BanList(
+            _banStore ??= Config.BanStore ?? (Config.BanFile != null ? KeyValueStores.FromFile(Config.BanFile) : KeyValueStores.Memory()), Config.GameId);
+
+        /// <summary>The room options every lobby this client hosts starts from: the blueprint's <c>room</c>, then <see cref="OneLobbyConfig.Room"/>.</summary>
+        internal RoomOptions RoomDefaults => (Blueprint?.Room.ToOptions(Blueprint.Players.MaxNameLength) ?? new RoomOptions()).Merge(Config.Room);
 
         /// <summary>The blueprint this client was built from (<see cref="FromBlueprint"/>), or null. A blueprint client enforces it.</summary>
         public Blueprint? Blueprint { get; private set; }
@@ -120,23 +149,44 @@ namespace OneLobby
             return HostAsync(Blueprint.ToLobbyOptions(null, Config.DisplayName), ct);
         }
 
-        public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default) =>
-            Run(null, Signaling.Create(Config, options), new[] { "lobby" }, e =>
+        public Task<Lobby> HostAsync(LobbyOptions options, CancellationToken ct = default)
+        {
+            var room = RoomDefaults.Merge(options.Room);
+            if (room.PasswordRequired == true && string.IsNullOrEmpty(options.Password))
+                return Task.FromException<Lobby>(new OneLobbyException(RoomErrorCodes.PasswordRequired, "this game requires a lobby password (room.passwordRequired); pass LobbyOptions.Password"));
+            if (options.Password != null && options.Password.Length > 64)
+                return Task.FromException<Lobby>(new ArgumentOutOfRangeException(nameof(options), "password must be at most 64 characters"));
+            var setup = new RoomSetup { Options = room, Password = options.Password ?? "", MaxPlayers = options.MaxPlayers };
+            return Run<Lobby>(null, null, new[] { "lobby" }, e =>
             {
-                var lobby = EnterLobby(e);
+                var lobby = EnterLobby(e, setup);
                 lobby.RateLimit = options.RateLimit;
                 return lobby;
-            }, ct);
+            }, ct, () =>
+            {
+                var roomHub = Features.Contains("room");
+                var spectators = Math.Max(0, Math.Min(64, room.Spectators ?? 0));
+                if (roomHub && options.MaxPlayers + spectators > 250) throw new ArgumentOutOfRangeException(nameof(options), "MaxPlayers + spectators is more than the hub allows (250)");
+                // a hub without the room feature has no spectator slots: it gets the sum as its capacity and the room splits it
+                return Signaling.Create(Config, options, roomHub ? options.MaxPlayers : options.MaxPlayers + spectators,
+                    room.LateJoin is { } lj ? lj != LateJoinPolicy.Refuse : options.LateJoin,
+                    roomHub && !Direct ? options.Password : null, roomHub ? spectators : 0);
+            });
+        }
 
-        public Task<Lobby> JoinAsync(string code, CancellationToken ct = default)
+        public Task<Lobby> JoinAsync(string code, CancellationToken ct = default) => JoinAsync(code, null, ct);
+
+        /// <summary>Joins a lobby with a password, a role (spectator) and your starting per-player data (spec/room.md s.4.2).</summary>
+        public Task<Lobby> JoinAsync(string code, RoomJoinOptions? options, CancellationToken ct = default)
         {
             var norm = Crockford.Normalize(code);
             if (norm == null) return Task.FromException<Lobby>(new OneLobbyException("unknown_code", "not a valid join code"));
-            return Run(null, Signaling.Join(norm), new[] { "lobby" }, EnterLobby, ct);
+            var setup = new RoomSetup { Join = JoinSetup(options, null) };
+            return Run(null, Signaling.Join(norm, options?.Password), new[] { "lobby" }, e => EnterLobby(e, setup), ct);
         }
 
         public Task<Lobby> RejoinAsync(string resumeToken, CancellationToken ct = default) =>
-            Run(resumeToken, null, new[] { "lobby" }, EnterLobby, ct);
+            Run(resumeToken, null, new[] { "lobby" }, e => EnterLobby(e), ct);
 
         public Task<IReadOnlyList<LobbySummary>> ListAsync(IReadOnlyDictionary<string, string>? metaFilter = null,
             CancellationToken ct = default) =>
@@ -151,16 +201,18 @@ namespace OneLobby
                 return items;
             }, ct);
 
-        private Lobby EnterLobby(JsonElement reply)
+        private Lobby EnterLobby(JsonElement reply, RoomSetup? setup = null)
         {
-            var lobby = new Lobby(this, Signaling.ParseLobby(reply));
+            var msg = Signaling.ParseLobby(reply);
+            if (setup == null && msg.You == msg.HostId) setup = new RoomSetup { Options = RoomDefaults };
+            var lobby = new Lobby(this, msg, setup);
             if (Blueprint != null) lobby.Voice.Mode = Blueprint.Chat.VoiceMode == "voiceActivity" ? VoiceMode.VoiceActivity : VoiceMode.PushToTalk;
             _lobby = lobby;
             lobby.Start();
             return lobby;
         }
 
-        private Task<T> Run<T>(string? resume, string? request, string[] expect, Func<JsonElement, T> finish, CancellationToken ct)
+        private Task<T> Run<T>(string? resume, string? request, string[] expect, Func<JsonElement, T> finish, CancellationToken ct, Func<string>? build = null)
         {
             if (_op != null) return Task.FromException<T>(new InvalidOperationException("another request is in flight"));
             if (!Direct && ReferenceEquals(Config.LobbyServer, OneLobby.Blueprint.NoServer))
@@ -168,7 +220,7 @@ namespace OneLobby
                     "no lobby server address (set hosting.lobbyServer in onelobby.json or pass lobbyServerOverride; direct-only games use HostDirectAsync)"));
             if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
             var tcs = new TaskCompletionSource<T>();
-            var op = new Op { Request = request, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
+            var op = new Op { Request = request, Build = build, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
             if (Direct) op.ConnectDeadlineMs = Transport.NowMs + DirectConnectTimeout;
             op.Complete = e =>
             {
@@ -194,7 +246,14 @@ namespace OneLobby
         private void Send(Op op)
         {
             op.Sent = true;
-            if (op.Request != null) Socket!.Send(op.Request);
+            if (op.Build != null)
+            {
+                string req;
+                try { req = op.Build(); }
+                catch (Exception ex) { FailOp(ex); return; }
+                Socket!.Send(req);
+            }
+            else if (op.Request != null) Socket!.Send(op.Request);
             else if (_stashedLobby is { } s) { _stashedLobby = null; FinishOp(s); }
         }
 
@@ -246,7 +305,7 @@ namespace OneLobby
                 if (sock.State == SocketState.Open && !_helloWired && (_op != null || _lobby != null))
                 {
                     _helloWired = true;
-                    sock.Send(Signaling.Hello(Config, _helloResume));
+                    sock.Send(Signaling.Hello(Config, _helloResume, PlayerId));
                 }
                 while (sock.TryReceive(out var text)) Dispatch(text);
                 if (Direct && _op != null && !_welcomed && (sock.State == SocketState.Closed
@@ -293,7 +352,7 @@ namespace OneLobby
                             : Array.Empty<string>();
                         _welcomed = true;
                         // a resume answered without a seat: the token is unknown or expired (no lobby message follows)
-                        if (_op != null && !_op.Sent && _op.Request == null && _helloResume != null && !e.TryGetProperty("peerId", out _))
+                        if (_op != null && !_op.Sent && _op.Request == null && _op.Build == null && _helloResume != null && !e.TryGetProperty("peerId", out _))
                         {
                             _helloResume = null;
                             FailOp(new OneLobbyException("invalid_token", "resume token unknown or expired"));
@@ -314,7 +373,7 @@ namespace OneLobby
                                             d.TryGetProperty("ban", out var ban) && ban.ValueKind == JsonValueKind.False;
                         FailOp(new OneLobbyException(err.Code, err.Message));
                         Error?.Invoke(err);
-                        _lobby?.OnServerError(err, disconnected);
+                        _lobby?.OnServerError(err, disconnected, e.TryGetProperty("data", out var edata) ? edata : default);
                         return;
                     }
                 }

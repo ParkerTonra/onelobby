@@ -142,6 +142,20 @@ namespace OneLobby
     /// <summary>The pure rules of the room layer (spec/room.md): names, per-player data, seats, bans, auto start, admission. No I/O.</summary>
     internal static class RoomRules
     {
+        // ---- settings -----------------------------------------------------------------------------------------------
+
+        private static int ClampInt(int? v, int d, int lo, int hi) => Math.Min(hi, Math.Max(lo, v ?? d));
+
+        /// <summary>The settings a room starts with, from <see cref="RoomOptions"/> and the lobby's player count.</summary>
+        public static RoomSettings ResolveSettings(RoomOptions? o, int maxPlayers, bool lateJoinFlag)
+        {
+            o ??= new RoomOptions();
+            return new RoomSettings(maxPlayers, ClampInt(o.Spectators, 0, 0, 64), ClampInt(o.MinPlayers, 1, 1, Math.Max(1, maxPlayers)),
+                o.AutoStart ?? AutoStartMode.Off, ClampInt(o.AutoStartPlayers, 2, 2, 64), ClampInt(o.CountdownSeconds, 3, 0, 60) * 1000,
+                o.LateJoin ?? (lateJoinFlag ? LateJoinPolicy.Allow : LateJoinPolicy.Refuse), o.SeatDropped ?? SeatDroppedPolicy.Window,
+                ClampInt(o.RejoinWindowSeconds, 60, 0, 600) * 1000, ClampInt(o.MaxNameLength, 24, 1, 24), MergeDataSpec(o.Data));
+        }
+
         // ---- names (4.1) ---------------------------------------------------------------------------------------------
 
         private static bool IsStrip(char c) =>

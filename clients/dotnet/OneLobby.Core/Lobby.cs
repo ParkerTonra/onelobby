@@ -1296,6 +1296,14 @@ namespace OneLobby
         internal void OnServerError(LobbyError err, bool disconnected = false, JsonElement data = default)
         {
             if (err.Code != "kicked") return;
+            // a room deny the host sent over the data channel just before the kick carries the precise code (an old hub drops it): read it first
+            if (!IsHost && _peers.TryGetValue(_hostId, out var host) && host.Link != null)
+                while (host.Link != null && host.Link.TryReceive(out var hch, out var hdata))
+                {
+                    try { HandleFrame(host, hch, hdata); }
+                    catch (FormatException) { /* malformed frame: drop */ }
+                    if (_closed) return;
+                }
             var rawCode = Signaling.Str(data, "code");
             var denied = Signaling.Str(data, "reason") == "denied";
             var rc = RoomRules.IsCode(rawCode) ? rawCode : denied ? "denied" : disconnected ? "disconnected" : "kicked";

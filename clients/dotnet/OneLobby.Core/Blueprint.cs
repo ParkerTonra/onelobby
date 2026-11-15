@@ -31,6 +31,23 @@ namespace OneLobby
     }
     public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin,
         bool JoinLink, IReadOnlyDictionary<string, string> Meta);
+    /// <summary>The room layer's defaults (<c>room</c> in onelobby.json, spec/room.md s.10).</summary>
+    public sealed record RoomSection(bool PasswordRequired, AutoStartMode AutoStart, int AutoStartPlayers, int MinPlayers, int CountdownSeconds,
+        int Spectators, LateJoinPolicy LateJoin, SeatDroppedPolicy SeatDropped, int RejoinWindowSeconds, IReadOnlyDictionary<string, DataDecl> Data)
+    {
+        /// <summary>Every default of the section.</summary>
+        public static readonly RoomSection Defaults = new RoomSection(false, AutoStartMode.Off, 2, 1, 3, 0, LateJoinPolicy.Allow, SeatDroppedPolicy.Window, 60,
+            new Dictionary<string, DataDecl>());
+
+        /// <summary>The same as <see cref="RoomOptions"/> for the client (<paramref name="maxNameLength"/> is <c>players.maxNameLength</c>).</summary>
+        public RoomOptions ToOptions(int maxNameLength = 24) => new RoomOptions
+        {
+            AutoStart = AutoStart, AutoStartPlayers = AutoStartPlayers, MinPlayers = MinPlayers, CountdownSeconds = CountdownSeconds, Spectators = Spectators,
+            LateJoin = LateJoin, SeatDropped = SeatDropped, RejoinWindowSeconds = RejoinWindowSeconds, PasswordRequired = PasswordRequired,
+            MaxNameLength = maxNameLength, Data = Data,
+        };
+    }
+
     /// <summary><see cref="Mode"/> is "raw", "lockstep" or "replication".</summary>
     public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
     /// <summary><see cref="Identity"/> is "name", "anonymous" or "platform".</summary>
@@ -56,6 +73,9 @@ namespace OneLobby
     {
         /// <summary>Stand-in server URL used by <see cref="ToConfig"/> when the file names no lobby server (direct-only games).</summary>
         public static readonly Uri NoServer = new Uri("onelobby-none://no-lobby-server/");
+
+        /// <summary>The room layer's defaults (<c>room</c>; spec/room.md s.10).</summary>
+        public RoomSection Room { get; init; } = RoomSection.Defaults;
 
         /// <summary>
         /// Default public Nostr relays (the JS <c>DEFAULT_NOSTR_RELAYS</c>, same URLs in the same order; probed 2026-10-26,
@@ -164,6 +184,16 @@ namespace OneLobby
                 w.WriteBoolean("joinLink", Lobby.JoinLink);
                 w.WriteStartObject("meta");
                 foreach (var kv in Lobby.Meta) w.WriteString(kv.Key, kv.Value);
+                w.WriteEndObject();
+                w.WriteEndObject();
+                w.WriteStartObject("room");
+                w.WriteBoolean("passwordRequired", Room.PasswordRequired);
+                w.WriteString("autoStart", RoomRules.Name(Room.AutoStart)); w.WriteNumber("autoStartPlayers", Room.AutoStartPlayers);
+                w.WriteNumber("minPlayers", Room.MinPlayers); w.WriteNumber("countdownSeconds", Room.CountdownSeconds);
+                w.WriteNumber("spectators", Room.Spectators); w.WriteString("lateJoin", RoomRules.Name(Room.LateJoin));
+                w.WriteString("seatDropped", RoomRules.Name(Room.SeatDropped)); w.WriteNumber("rejoinWindowSeconds", Room.RejoinWindowSeconds);
+                w.WriteStartObject("data");
+                foreach (var kv in Room.Data) { w.WritePropertyName(kv.Key); RoomWire.WriteDecl(w, kv.Value); }
                 w.WriteEndObject();
                 w.WriteEndObject();
                 w.WriteStartObject("sync");
@@ -275,7 +305,7 @@ namespace OneLobby
 
         private static void Structure(JsonElement root)
         {
-            Object(root, "", new[] { "game" }, new[] { "version", "game", "engine", "hosting", "lobby", "sync", "players", "chat", "session", "platforms", "ui" }, (k, v) =>
+            Object(root, "", new[] { "game" }, new[] { "version", "game", "engine", "hosting", "lobby", "room", "sync", "players", "chat", "session", "platforms", "ui" }, (k, v) =>
             {
                 switch (k)
                 {
@@ -327,6 +357,25 @@ namespace OneLobby
                                 }
                             }
                             else Bool(lv, lp);
+                        });
+                        break;
+                    case "room":
+                        Object(v, "room", Array.Empty<string>(), new[] { "passwordRequired", "autoStart", "autoStartPlayers", "minPlayers", "countdownSeconds", "spectators", "lateJoin", "seatDropped", "rejoinWindowSeconds", "data" }, (rk, rv) =>
+                        {
+                            var rp = "room." + rk;
+                            switch (rk)
+                            {
+                                case "passwordRequired": Bool(rv, rp); break;
+                                case "autoStart": Enum(rv, rp, "off", "all_ready", "players"); break;
+                                case "autoStartPlayers": Int(rv, rp, 2, 64); break;
+                                case "minPlayers": Int(rv, rp, 1, 64); break;
+                                case "countdownSeconds": Int(rv, rp, 0, 60); break;
+                                case "spectators": Int(rv, rp, 0, 64); break;
+                                case "lateJoin": Enum(rv, rp, "allow", "spectate", "refuse"); break;
+                                case "seatDropped": Enum(rv, rp, "window", "immediate"); break;
+                                case "rejoinWindowSeconds": Int(rv, rp, 0, 600); break;
+                                default: RoomData(rv, rp); break;
+                            }
                         });
                         break;
                     case "sync":
@@ -398,6 +447,56 @@ namespace OneLobby
             });
         }
 
+        private static void RoomData(JsonElement v, string path)
+        {
+            if (v.ValueKind != JsonValueKind.Object) throw Err(path, "type", "must be an object of data declarations");
+            var props = v.EnumerateObject().Where(p => p.Name != "$comment").ToList();
+            if (props.Count > 16) throw Err(path, "length", "at most 16 keys");
+            foreach (var p in props)
+            {
+                var kp = P(path, p.Name);
+                if (!RoomRules.IsDataKey(p.Name)) throw Err(kp, "pattern", "key must match ^[a-z][a-z0-9_]{0,23}$");
+                string type = "";
+                long? min = null, max = null;
+                string? dflt = null;
+                var values = new List<string>();
+                Object(p.Value, kp, new[] { "type" }, new[] { "type", "min", "max", "maxLength", "values", "default", "hostOnly" }, (dk, dv) =>
+                {
+                    var dp = P(kp, dk);
+                    switch (dk)
+                    {
+                        case "type": type = Enum(dv, dp, "string", "int", "enum", "bool", "color"); break;
+                        case "min": min = Int(dv, dp, -2147483647, 2147483647); break;
+                        case "max": max = Int(dv, dp, -2147483647, 2147483647); break;
+                        case "maxLength": Int(dv, dp, 1, 64); break;
+                        case "values":
+                            if (dv.ValueKind != JsonValueKind.Array) throw Err(dp, "type", "must be an array");
+                            var i = 0;
+                            foreach (var item in dv.EnumerateArray()) values.Add(Str(item, P(dp, (i++).ToString())));
+                            break;
+                        case "default": dflt = Str(dv, dp); break;
+                        default: Bool(dv, dp); break;
+                    }
+                });
+                if (type == "enum")
+                {
+                    if (values.Count == 0) throw Err(P(kp, "values"), "required", "an enum needs values");
+                    if (values.Count > 16) throw Err(P(kp, "values"), "length", "at most 16 values");
+                    for (var i = 0; i < values.Count; i++)
+                        if (values[i].Length < 1 || values[i].Length > 32) throw Err(P(P(kp, "values"), i.ToString()), "length", "1 to 32 characters");
+                }
+                if (min is long a && max is long b && a > b) throw Err(kp, "min_gt_max", "min is more than max");
+                if (!string.IsNullOrEmpty(dflt) && RoomRules.CheckDataValue(ReadDecl(p.Value), dflt!) == null)
+                    throw Err(P(kp, "default"), "bad_default", "default fails its own type");
+            }
+        }
+
+        private static DataDecl ReadDecl(JsonElement d)
+        {
+            var decl = RoomWire.ParseDecl(d);
+            return decl with { Min = decl.Min ?? 0, Max = decl.Max ?? 255 };
+        }
+
         // ---- defaults + model ------------------------------------------------------------------------------------------
 
         private static JsonElement? Sec(JsonElement o, string k) => o.TryGetProperty(k, out var v) ? v : (JsonElement?)null;
@@ -405,6 +504,19 @@ namespace OneLobby
         private static int I(JsonElement? o, string k, int d) => o is { } e && e.TryGetProperty(k, out var v) ? (int)Int(v, k) : d;
         private static string S(JsonElement? o, string k, string d) => o is { } e && e.TryGetProperty(k, out var v) ? v.GetString()! : d;
         private static string? SN(JsonElement? o, string k) => o is { } e && e.TryGetProperty(k, out var v) ? v.GetString() : null;
+
+        private static RoomSection BuildRoom(JsonElement? room, JsonElement? lobby)
+        {
+            var d = RoomSection.Defaults;
+            var lobbyLate = B(lobby, "lateJoin", true);
+            var data = new Dictionary<string, DataDecl>();
+            if (room is { } r && r.TryGetProperty("data", out var dj))
+                foreach (var p in dj.EnumerateObject()) if (p.Name != "$comment") data[p.Name] = RoomWire.ParseDecl(p.Value);
+            return new RoomSection(B(room, "passwordRequired", false), RoomRules.ParseAutoStart(SN(room, "autoStart")), I(room, "autoStartPlayers", d.AutoStartPlayers),
+                I(room, "minPlayers", d.MinPlayers), I(room, "countdownSeconds", d.CountdownSeconds), I(room, "spectators", d.Spectators),
+                room is { } rl && rl.TryGetProperty("lateJoin", out var lj) ? RoomRules.ParseLateJoin(lj.GetString()) : lobbyLate ? LateJoinPolicy.Allow : LateJoinPolicy.Refuse,
+                RoomRules.ParseSeatDropped(SN(room, "seatDropped")), I(room, "rejoinWindowSeconds", d.RejoinWindowSeconds), data);
+        }
 
         internal static Blueprint Build(JsonElement root)
         {
@@ -419,6 +531,7 @@ namespace OneLobby
             var session = Sec(root, "session");
             var platforms = Sec(root, "platforms");
             var ui = Sec(root, "ui");
+            var roomJson = Sec(root, "room");
 
             var web = engine == "web";
             var tick = I(sync, "tickRate", 20);
@@ -461,7 +574,7 @@ namespace OneLobby
                     I(hosting, "directPort", 47810), B(hosting, "openPort", true), B(hosting, "relayOnly", false), origins,
                     B(hosting, "nostr", true), relays),
                 new LobbySection(I(lobby, "maxPlayers", 4), B(lobby, "listed", false), B(lobby, "approveJoins", false),
-                    B(lobby, "password", false), B(lobby, "lateJoin", true), B(lobby, "rejoin", true),
+                    B(lobby, "password", false), B(lobby, "lateJoin", roomJson is { } rj0 && rj0.TryGetProperty("lateJoin", out var rl0) ? rl0.GetString() != "refuse" : true), B(lobby, "rejoin", true),
                     B(lobby, "joinLink", web || engine == "node-browser"), meta),
                 new SyncSection(S(sync, "mode", "raw"), tick, I(sync, "hashEveryTicks", tick)),
                 new PlayersSection(S(players, "identity", "name"), I(players, "maxNameLength", 24)),
@@ -469,7 +582,10 @@ namespace OneLobby
                 new SessionSection(S(session, "hostLeaves", "end"), S(session, "pause", "off"), I(session, "readyTimeoutMs", 15000),
                     I(session, "peerTimeoutMs", 0), rate, B(session, "runInBackground", true)),
                 new PlatformsSection(steam, epic, B(platforms, "discord", false)),
-                new UiSection(S(ui, "kind", web ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")));
+                new UiSection(S(ui, "kind", web ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
+            {
+                Room = BuildRoom(roomJson, lobby),
+            };
 
             // cross-key rules (spec/blueprint.schema.json x-rules), in order
             if (!bp.Hosting.Direct && !bp.Hosting.Server)
@@ -482,6 +598,14 @@ namespace OneLobby
                 throw Err("sync.mode", "replication_needs_csharp", "replication needs engine godot-csharp, unity or dotnet");
             if (bp.Sync.Mode == "replication" && bp.Session.HostLeaves == "migrate")
                 throw Err("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
+            var lateJoinGiven = lobby is { } lg && lg.TryGetProperty("lateJoin", out _);
+            var roomLateGiven = roomJson is { } rg && rg.TryGetProperty("lateJoin", out _);
+            if (roomLateGiven && lateJoinGiven && (bp.Lobby.LateJoin ? bp.Room.LateJoin == LateJoinPolicy.Refuse : bp.Room.LateJoin != LateJoinPolicy.Refuse))
+                throw Err("room.lateJoin", "late_join_conflict", "lobby.lateJoin and room.lateJoin disagree");
+            if (bp.Room.MinPlayers > bp.Lobby.MaxPlayers)
+                throw Err("room.minPlayers", "min_exceeds_max", "more than lobby.maxPlayers");
+            if (bp.Room.AutoStart == AutoStartMode.Players && bp.Room.AutoStartPlayers > bp.Lobby.MaxPlayers)
+                throw Err("room.autoStartPlayers", "autostart_exceeds_players", "more than lobby.maxPlayers");
             if (bp.Session.HostLeaves == "migrate" && !bp.Hosting.Server)
                 throw Err("session.hostLeaves", "migrate_needs_server", "migrate needs hosting.server (direct lobbies always end)");
             return bp;

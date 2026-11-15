@@ -16,6 +16,11 @@ namespace OneLobby.Tests
         public static IEnumerable<object[]> Invalid() =>
             Vectors.RootElement.GetProperty("invalid").EnumerateArray().Select(v => new object[] { v.GetProperty("name").GetString()! });
 
+        public static IEnumerable<object[]> RoomValid() =>
+            Vectors.RootElement.GetProperty("roomValid").EnumerateArray().Select(v => new object[] { v.GetProperty("name").GetString()! });
+        public static IEnumerable<object[]> RoomInvalid() =>
+            Vectors.RootElement.GetProperty("roomInvalid").EnumerateArray().Select(v => new object[] { v.GetProperty("name").GetString()! });
+
         private static JsonElement Vector(string list, string name) =>
             Vectors.RootElement.GetProperty(list).EnumerateArray().First(v => v.GetProperty("name").GetString() == name);
 
@@ -49,9 +54,14 @@ namespace OneLobby.Tests
         }
 
         [Theory, MemberData(nameof(Valid))]
-        public void ValidVectorFillsDefaults(string name)
+        public void ValidVectorFillsDefaults(string name) => CheckValid("valid", name);
+
+        [Theory, MemberData(nameof(RoomValid))]
+        public void RoomValidVectorFillsDefaults(string name) => CheckValid("roomValid", name);
+
+        private static void CheckValid(string list, string name)
         {
-            var v = Vector("valid", name);
+            var v = Vector(list, name);
             var bp = Blueprint.Parse(v.GetProperty("input").GetRawText());
             using var filled = JsonDocument.Parse(bp.ToJson());
             foreach (var e in v.GetProperty("expect").EnumerateObject())
@@ -76,9 +86,14 @@ namespace OneLobby.Tests
         }
 
         [Theory, MemberData(nameof(Invalid))]
-        public void InvalidVectorGivesPathAndRule(string name)
+        public void InvalidVectorGivesPathAndRule(string name) => CheckInvalid("invalid", name);
+
+        [Theory, MemberData(nameof(RoomInvalid))]
+        public void RoomInvalidVectorGivesPathAndRule(string name) => CheckInvalid("roomInvalid", name);
+
+        private static void CheckInvalid(string list, string name)
         {
-            var v = Vector("invalid", name);
+            var v = Vector(list, name);
             var ex = Assert.Throws<BlueprintException>(() => Blueprint.Parse(v.GetProperty("input").GetRawText()));
             var want = v.GetProperty("error");
             Assert.Equal(want.GetProperty("path").GetString(), ex.Path);

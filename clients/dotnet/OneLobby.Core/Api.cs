@@ -45,6 +45,20 @@ namespace OneLobby
         /// 6 s (<see cref="Lobby.MinPeerTimeoutMs"/>) are raised to 6 s.
         /// </summary>
         public TimeSpan PeerTimeout { get; init; } = TimeSpan.Zero;
+
+        /// <summary>
+        /// Where the per-install player id is kept (spec/room.md s.1; engine-specific stores such as PlayerPrefs implement
+        /// <see cref="IKeyValueStore"/>). Default: <see cref="PlayerIdFile"/> when given, else memory (the id then lasts one process).
+        /// </summary>
+        public IKeyValueStore? PlayerIdStore { get; init; }
+        /// <summary>A JSON file path that keeps the per-install player id across runs. It is a random id made once, not an account or a hardware id.</summary>
+        public string? PlayerIdFile { get; init; }
+        /// <summary>Where the host's ban list is kept (spec/room.md s.5.3). Default: <see cref="BanFile"/> when given, else memory.</summary>
+        public IKeyValueStore? BanStore { get; init; }
+        /// <summary>A JSON file path that keeps the host's ban list across lobbies and runs.</summary>
+        public string? BanFile { get; init; }
+        /// <summary>The room layer's defaults for every lobby this client hosts (the blueprint's <c>room</c> fills the same); <see cref="LobbyOptions.Room"/> wins.</summary>
+        public RoomOptions? Room { get; init; }
     }
 
     /// <summary>At most <see cref="Messages"/> raw messages per peer in any <see cref="PerMs"/> window (a fixed window, reset every PerMs).</summary>
@@ -56,6 +70,13 @@ namespace OneLobby
     {
         /// <summary>Host: per-joiner cap on incoming raw messages; the excess is dropped before <see cref="Lobby.MessageReceived"/> fires or is relayed.</summary>
         public RateLimit? RateLimit { get; init; }
+        /// <summary>
+        /// Joiners must give this password (at most 64 characters) or get <c>bad_password</c>: the hub checks it when it knows
+        /// (<c>welcome.features</c> has "room"), and the host's room layer checks it on every route (spec/room.md s.6).
+        /// </summary>
+        public string? Password { get; init; }
+        /// <summary>Room layer settings: ready, countdown, auto start, spectators, late join policy, per-player data.</summary>
+        public RoomOptions? Room { get; init; }
     }
 
     public sealed record LobbySummary(string Code, string Name, string HostName, int Players, int MaxPlayers,

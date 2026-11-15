@@ -10,7 +10,7 @@ namespace OneLobby
 
     internal sealed record LobbyMsg(string Code, string GameId, string NetVersion, int HostId, int You, SyncMode Mode,
         int TickRate, bool LateJoin, LobbyPhase Phase, Dictionary<string, string> Meta, List<LobbyPeerInfo> Peers,
-        string ResumeToken, string Name = "");
+        string ResumeToken, string Name = "", int MaxPlayers = 0);
 
     /// <summary>JSON signaling messages (DESIGN s.7): builders and tolerant parsers.</summary>
     internal static class Signaling
@@ -29,7 +29,7 @@ namespace OneLobby
             return Encoding.UTF8.GetString(ms.ToArray());
         }
 
-        public static string Hello(OneLobbyConfig c, string? resumeToken) => Build(w =>
+        public static string Hello(OneLobbyConfig c, string? resumeToken, string? playerId = null) => Build(w =>
         {
             w.WriteString("t", "hello");
             w.WriteString("proto", Proto);
@@ -41,6 +41,7 @@ namespace OneLobby
             w.WriteString("platform", "dotnet");
             w.WriteEndObject();
             w.WriteString("name", c.DisplayName);
+            if (!string.IsNullOrEmpty(playerId)) w.WriteString("playerId", playerId);
             if (resumeToken != null) w.WriteString("resumeToken", resumeToken);
         });
 
@@ -51,17 +52,19 @@ namespace OneLobby
             _ => "unlisted",
         };
 
-        public static string Create(OneLobbyConfig c, LobbyOptions o) => Build(w =>
+        public static string Create(OneLobbyConfig c, LobbyOptions o, int? maxPlayers = null, bool? lateJoin = null, string? password = null, int spectators = 0) => Build(w =>
         {
             w.WriteString("t", "create");
             w.WriteString("name", o.Name);
-            w.WriteNumber("maxPlayers", o.MaxPlayers);
+            w.WriteNumber("maxPlayers", maxPlayers ?? o.MaxPlayers);
             w.WriteString("visibility", VisibilityName(o.Visibility));
             w.WriteString("mode", c.Mode == SyncMode.Raw ? "raw" : "lockstep");
             w.WriteNumber("tickRate", c.TickRate);
-            w.WriteBoolean("lateJoin", o.LateJoin);
+            w.WriteBoolean("lateJoin", lateJoin ?? o.LateJoin);
             WriteMeta(w, "meta", o.Meta);
             if (c.RelayOnly) w.WriteBoolean("relayOnly", true);
+            if (!string.IsNullOrEmpty(password)) w.WriteString("password", password);
+            if (spectators > 0) w.WriteNumber("spectators", spectators);
         });
 
         public static void WriteMeta(Utf8JsonWriter w, string name, IReadOnlyDictionary<string, string>? meta)
@@ -71,7 +74,12 @@ namespace OneLobby
             w.WriteEndObject();
         }
 
-        public static string Join(string code) => Build(w => { w.WriteString("t", "join"); w.WriteString("code", code); });
+        public static string Join(string code, string? password = null) => Build(w =>
+        {
+            w.WriteString("t", "join");
+            w.WriteString("code", code);
+            if (!string.IsNullOrEmpty(password)) w.WriteString("password", password);
+        });
         /// <summary>Direct IP: the hub runs one lobby, so no code (docs/design/direct-ip.md s.2).</summary>
         public static string JoinDirect(string? password) => Build(w =>
         {
@@ -161,7 +169,7 @@ namespace OneLobby
                 foreach (var p in ps.EnumerateArray()) peers.Add(new LobbyPeerInfo(Int(p, "peerId"), Str(p, "name")));
             return new LobbyMsg(Str(e, "code"), Str(e, "gameId"), Str(e, "netVersion"), Int(e, "hostId", 1), Int(e, "you", 1),
                 Str(e, "mode") == "raw" ? SyncMode.Raw : SyncMode.Lockstep, Int(e, "tickRate", 20), Bool(e, "lateJoin", true),
-                PhaseOf(e), MetaOf(e), peers, Str(e, "resumeToken"), Str(e, "name"));
+                PhaseOf(e), MetaOf(e), peers, Str(e, "resumeToken"), Str(e, "name"), Int(e, "maxPlayers"));
         }
 
         public static LobbySummary ParseSummary(JsonElement e)

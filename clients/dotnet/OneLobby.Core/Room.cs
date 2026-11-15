@@ -22,6 +22,19 @@ namespace OneLobby
         public string JoinPassword = "";
     }
 
+    /// <summary>What the client hands a lobby for its room layer.</summary>
+    internal sealed class RoomSetup
+    {
+        /// <summary>Host: settings (blueprint <c>room</c> plus code options).</summary>
+        public RoomOptions? Options;
+        /// <summary>Host: the lobby password.</summary>
+        public string? Password;
+        /// <summary>Host: the player count when the hub's capacity is larger (a hub without spectator slots got the sum).</summary>
+        public int? MaxPlayers;
+        /// <summary>Joiner: role, starting data and password sent in the room <c>join</c>.</summary>
+        public RoomJoinOptions? Join;
+    }
+
     /// <summary>A countdown as a replica sees it: <see cref="RemainingMs"/> counts down to the host's start in this peer's clock.</summary>
     public sealed class RoomCountdown
     {
@@ -346,9 +359,12 @@ namespace OneLobby
 
         // ---- internals called by Lobby ------------------------------------------------------------------------------
 
+        /// <summary>Test seams: play a host that predates the room layer (ignores its frames) and a joiner that sends no <c>join</c>.</summary>
+        internal bool TestIgnoreFrames, TestNoJoin;
+
         internal void HandleFrame(int from, ReadOnlySpan<byte> body)
         {
-            if (_closed) return;
+            if (_closed || TestIgnoreFrames) return;
             using var doc = RoomWire.Parse(body);
             if (doc == null) return;
             var m = doc.RootElement;
@@ -359,7 +375,7 @@ namespace OneLobby
         /// <summary>Joiner: the link to the host is open and <c>hi</c> went out: introduce ourselves.</summary>
         internal void OnHostLink()
         {
-            if (_l.IsHost || _closed) return;
+            if (_l.IsHost || _closed || TestNoJoin) return;
             SendToHost(RoomWire.Join(RoomRules.IsPlayerId(_cfg.Pid) ? _cfg.Pid : null, _cfg.JoinRole, _cfg.JoinPassword, _cfg.JoinData));
             if (Supported == null && _supportDeadline < 0) _supportDeadline = _l.NowMs + JoinWaitMs;
         }

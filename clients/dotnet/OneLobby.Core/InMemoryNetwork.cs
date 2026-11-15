@@ -29,7 +29,7 @@ namespace OneLobby
             public readonly Queue<string> Inbox = new();
             public SocketState State { get; set; } = SocketState.Open;
             public string? CloseReason { get; set; }
-            public string GameId = "", NetVersion = "", Name = "";
+            public string GameId = "", NetVersion = "", Name = "", PlayerId = "";
             public int PeerId;
             public SrvLobby? Lobby;
             public Sock(InMemoryNetwork n) { Net = n; }
@@ -46,7 +46,9 @@ namespace OneLobby
         private sealed class SrvLobby
         {
             public string Code = "", Name = "", GameId = "", NetVersion = "", Mode = "lockstep";
-            public int TickRate = 20, MaxPlayers = 4, HostId = 1, NextPeer = 2;
+            public int TickRate = 20, MaxPlayers = 4, HostId = 1, NextPeer = 2, Spectators;
+            public string Password = "";
+            public HashSet<string> BannedIds = new();
             public Visibility Visibility;
             public bool LateJoin = true;
             public string Phase = "lobby";
@@ -218,8 +220,12 @@ namespace OneLobby
 
         /// <summary>Allowed (gameId) values; empty means any.</summary>
         public ISet<string> AllowedGames { get; } = new HashSet<string>();
-        /// <summary>What <c>welcome.features</c> lists (empty plays an older hub that cannot rename).</summary>
-        public IReadOnlyList<string> Features { get; set; } = new[] { "set_name" };
+        /// <summary>
+        /// What <c>welcome.features</c> lists: <c>set_name</c> (rename) and <c>room</c> (passwords, spectator slots, player id bans,
+        /// kick codes). Empty plays an older hub, <c>{ "set_name" }</c> one from before the room layer.
+        /// </summary>
+        public IReadOnlyList<string> Features { get; set; } = new[] { "set_name", "room" };
+        private bool RoomFeature => Features.Contains("room");
 
         public void Advance(long ms) => NowMs += ms;
 
@@ -278,6 +284,7 @@ namespace OneLobby
                         s.GameId = Signaling.Str(e, "gameId");
                         s.NetVersion = Signaling.Str(e, "netVersion");
                         s.Name = Signaling.Str(e, "name");
+                        s.PlayerId = Signaling.Str(e, "playerId");
                         if (AllowedGames.Count > 0 && !AllowedGames.Contains(s.GameId)) { Error(s, "game_not_allowed", s.GameId); return; }
                         Reply(s, Signaling.Build(w =>
                         {
@@ -299,7 +306,17 @@ namespace OneLobby
                         if (e.TryGetProperty("resumeToken", out var rt) && rt.ValueKind == JsonValueKind.String) Resume(s, rt.GetString() ?? "");
                         break;
                     case "create": Create(s, e); break;
-                    case "join": Join(s, Signaling.Str(e, "code")); break;
+                    case "join": Join(s, Signaling.Str(e, "code"), Signaling.Str(e, "password")); break;
+                    case "bans":
+                    {
+                        var bl = s.Lobby;
+                        if (bl == null || !RoomFeature) return;
+                        if (bl.HostId != s.PeerId) { Error(s, "not_host", "only the host"); return; }
+                        bl.BannedIds = new HashSet<string>();
+                        if (e.TryGetProperty("ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
+                            foreach (var id in ids.EnumerateArray()) if (id.ValueKind == JsonValueKind.String) bl.BannedIds.Add(id.GetString()!);
+                        break;
+                    }
                     case "list": List(s, e); break;
                     case "leave": Leave(s, "left"); break;
                     case "signal":
@@ -331,13 +348,23 @@ namespace OneLobby
                         bool ban = !(e.TryGetProperty("ban", out var b) && b.ValueKind == JsonValueKind.False);
                         if (l.Members.TryGetValue(Signaling.Int(e, "peerId"), out var victim))
                         {
-                            Remove(victim, ban ? "kicked" : "disconnected");
-                            if (ban) Error(victim, "kicked", "kicked by host");
-                            else Reply(victim, Signaling.Build(w =>
+                            var closeCode = e.TryGetProperty("closeCode", out var cc) && cc.ValueKind == JsonValueKind.Number ? cc.GetInt32() : (int?)null;
+                            var closeReason = e.TryGetProperty("closeReason", out var cr) && cr.ValueKind == JsonValueKind.String ? cr.GetString() : null;
+                            var removal = RoomFeature && e.TryGetProperty("code", out var rc) && rc.ValueKind == JsonValueKind.String ? rc.GetString() : null;
+                            Reply(victim, Signaling.Build(w =>
                             {
-                                w.WriteString("t", "error"); w.WriteString("code", "kicked"); w.WriteString("msg", "disconnected by host");
-                                w.WriteStartObject("data"); w.WriteBoolean("ban", false); w.WriteEndObject();
+                                w.WriteString("t", "error"); w.WriteString("code", "kicked"); w.WriteString("msg", ban ? "kicked by host" : "disconnected by host");
+                                if (!ban || closeCode != null || closeReason != null || removal != null)
+                                {
+                                    w.WriteStartObject("data");
+                                    if (!ban) w.WriteBoolean("ban", false);
+                                    if (closeCode != null) w.WriteNumber("closeCode", closeCode.Value);
+                                    if (closeReason != null) w.WriteString("closeReason", closeReason);
+                                    if (removal != null) w.WriteString("code", removal);
+                                    w.WriteEndObject();
+                                }
                             }));
+                            Remove(victim, ban ? "kicked" : "disconnected"); // the notice first, as the hub sends it
                         }
                         break;
                     }
@@ -373,6 +400,7 @@ namespace OneLobby
                 Mode = Signaling.Str(e, "mode", "lockstep"), TickRate = Signaling.Int(e, "tickRate", 20),
                 MaxPlayers = Math.Max(2, Math.Min(250, Signaling.Int(e, "maxPlayers", 4))),
                 LateJoin = Signaling.Bool(e, "lateJoin", true), Meta = Signaling.MetaOf(e),
+                Password = RoomFeature ? Signaling.Str(e, "password") : "", Spectators = RoomFeature ? Math.Max(0, Signaling.Int(e, "spectators")) : 0,
                 Visibility = Signaling.Str(e, "visibility") switch { "public" => Visibility.Public, "private" => Visibility.Private, _ => Visibility.Unlisted },
                 Created = DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000 + NowMs),
             };
@@ -381,14 +409,16 @@ namespace OneLobby
             Reply(s, LobbyJson(l, 1));
         }
 
-        private void Join(Sock s, string code)
+        private void Join(Sock s, string code, string password = "")
         {
             var norm = Crockford.Normalize(code);
             if (norm == null || !_lobbies.TryGetValue(norm, out var l)) { Error(s, "unknown_code", code); return; }
             if (l.GameId != s.GameId) { Error(s, "unknown_code", code); return; }
+            if (l.Password.Length > 0 && password != l.Password) { Error(s, "bad_password", "wrong password for this lobby"); return; }
             if (l.NetVersion != s.NetVersion) { Error(s, "version_mismatch", "host is on " + l.NetVersion); return; }
-            if (l.Members.Count >= l.MaxPlayers) { Error(s, "lobby_full", "full"); return; }
+            if (s.PlayerId.Length > 0 && l.BannedIds.Contains(s.PlayerId)) { Error(s, "banned", "you are banned from this lobby"); return; }
             if (l.Phase == "in_game" && !l.LateJoin) { Error(s, "in_game", "game in progress"); return; }
+            if (l.Members.Count >= l.MaxPlayers + l.Spectators) { Error(s, "lobby_full", "full"); return; }
             var id = l.NextPeer++;
             if (l.Visibility == Visibility.Private)
             {
@@ -444,6 +474,8 @@ namespace OneLobby
             w.WriteEndArray();
             w.WriteString("resumeToken", "tok-" + l.Code + "-" + you);
             w.WriteString("name", l.Name);
+            w.WriteNumber("maxPlayers", l.MaxPlayers);
+            if (l.Spectators > 0) w.WriteNumber("spectators", l.Spectators);
         });
 
         private void BroadcastLobby(SrvLobby l)
