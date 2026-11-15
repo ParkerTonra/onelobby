@@ -60,7 +60,7 @@ Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TUR
 `iceServers: [{ urls: "turn:turn.example.com:3478", username, credential }]` to `hostDirect` / `hostNostr` (every joiner gets
 it in `welcome.ice`) or to `kit.joinDirect(code, { iceServers })` (added to the host's list). For a TURN server with a shared
 secret, `turnLogin(secret, id, ttlSeconds)` mints a short-lived login (spec/turn-rest.md). `relayOnly` sends and accepts only
-relay candidates. Keep TURN passwords out of your repo.
+relay candidates. Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
 ## Seams
 

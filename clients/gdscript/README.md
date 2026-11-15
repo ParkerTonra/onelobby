@@ -41,7 +41,7 @@ Pass `ice_servers` (`[{urls, username, credential}]`) to `host_direct` (every jo
 `join_direct` (added to the host's list). For a TURN server with a shared secret, `OneLobbyTurn.login(secret, id, ttl)`
 mints a short-lived login. Godot's WebRTC reaches TURN over UDP only (libjuice): `?transport=tcp` and `turns:` URLs
 are skipped, so a network that blocks all UDP still cannot connect. `client.relay_only = true` forces the relay (to
-test it). Keep TURN passwords out of your repo: read them from an environment variable at export time.
+test it). Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo: read them from an environment variable at export time.
 
 Tests, no lobby server: `GODOT=... clients/gdscript/direct-test.sh` (two instances, real WebRTC, a local test relay;
 pass `public` to use the real relays) and `GODOT=... node integration/nostr-interop-gdscript.mjs` (against the JS client,

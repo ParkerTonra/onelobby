@@ -144,7 +144,7 @@ function hasRelay(ice: IceServer[]): boolean {
 export function iceFailedMessage(relayConfigured: boolean): string {
   return relayConfigured
     ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
-    : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.";
+    : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";
 }
 
 const HOST_WATCHDOG_MS = 250;

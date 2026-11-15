@@ -361,7 +361,7 @@ static func has_relay(ice: Array) -> bool:
 static func ice_failed_message(relay_configured: bool) -> String:
 	if relay_configured:
 		return "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
-	return "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward."
+	return "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward."
 
 
 func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void:

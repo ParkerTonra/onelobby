@@ -110,7 +110,7 @@ namespace OneLobby.Tests
             Assert.True(g.ReadyAsync.IsFaulted);
             var ex = Assert.IsType<OneLobbyException>(g.ReadyAsync.Exception!.InnerException);
             Assert.Equal("ice_failed", ex.Code);
-            Assert.EndsWith("Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.", ex.Message);
+            Assert.EndsWith("Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.", ex.Message);
             Assert.Equal(new[] { "ice_failed" }, ended.ToArray());
             Assert.Equal(new[] { "ice_failed" }, errors.Select(e => e.Code).ToArray());
             Assert.True(rig.Until(() => left.Count == 1, 40));

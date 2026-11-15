@@ -100,7 +100,7 @@ describe("joiner ready timeout (ice_failed)", () => {
     expect(describeError(errors[0]).message).toBe("Couldn't connect to the other players.");
     expect(blocked.relayTries).toBe(0); // no TURN offered: no relay retry
     expect((rejected as OneLobbyError).message).toContain(
-      "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.",
+      "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.",
     );
     expect(ended).toEqual(["ice_failed"]);
     await settle();

@@ -476,7 +476,7 @@ namespace OneLobby
             // names the next step; same wording as the JS and GDScript clients
             var msg = HasRelay(_c.Ice)
                 ? "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
-                : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward.";
+                : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";
             _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg));
             _c.RaiseError(new LobbyError("ice_failed", msg));
             if (_closed) return;

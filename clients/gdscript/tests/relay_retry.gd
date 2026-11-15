@@ -2,7 +2,7 @@ extends SceneTree
 ## Unit test (no network): a joiner whose host link stalls retries once relay-only when a TURN entry exists, and
 ## ice_failed names the next step. Run: godot --headless --path clients/gdscript -s res://tests/relay_retry.gd
 
-const MSG_NO_RELAY := "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/self-host.md; the host can also port-forward."
+const MSG_NO_RELAY := "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward."
 const MSG_RELAY := "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
 
 var _fail := 0

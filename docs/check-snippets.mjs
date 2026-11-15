@@ -70,7 +70,7 @@ if (ts.length) {
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM", "DOM.Iterable"],
         strict: true, noEmit: true, skipLibCheck: true, types: [],
-        baseUrl: fwd(dir), paths: { "onelobby": [fwd(entry)] },
+        baseUrl: fwd(dir), paths: { "onelobby": [fwd(entry)], "onelobby/direct": [fwd(path.join(path.dirname(entry), "direct", "index.ts"))] },
       },
       files,
     }, null, 1));

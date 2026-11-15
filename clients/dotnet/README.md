@@ -59,7 +59,7 @@ Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TUR
 `DirectHostOptions.IceServers` (every joiner gets it in `welcome.ice`) or pass `JoinDirectOptions.IceServers` to
 `JoinDirectAsync(address, options)` (added to the host's list). `TurnLogin.Mint(secret, id, ttl)` mints a coturn shared-secret
 login (spec/turn-rest.md). `RelayOnly` sends and accepts only relay candidates in `OneLobby.DataChannel`; `OneLobby.Godot`
-still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores. Keep TURN passwords out of your repo.
+still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores. Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
 ## Deviations and notes
 
