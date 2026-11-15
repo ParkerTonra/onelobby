@@ -1,6 +1,6 @@
 extends SceneTree
 ## Join by IP, all on 127.0.0.1 (no Nostr, no internet, nothing listens beyond this machine): one process, a host with a
-## 3-port UDP range and a joiner that uses its v0 code. Then a 2nd joiner (still in range), and checks the range
+## 3-port UDP range and joiners that use its v0 code or the typed "ip:port" address. Then more joiners, and checks the range
 ## error when more peers than ports come. Also unit checks for v0 codes. Exit 0 and "ip loopback ok" on success.
 ##   godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/ip_loopback.gd
 
@@ -49,10 +49,12 @@ func _run() -> void:
 		return
 	_check(lobby_h.ip_code != "" and lobby_h.code == lobby_h.ip_code, "host shows its ip code")
 	print("host ip code ", lobby_h.ip_code, " ", OneLobbyJoinCode.decode_dc1(lobby_h.ip_code))
+	# joiner 1 types the plain address a player would ("127.0.0.1:<tcp port>"), the others use the v0 code
+	var typed := "127.0.0.1:%d" % int(OneLobbyJoinCode.decode_dc1(lobby_h.ip_code).get("port", 0))
 	var joiners := []
 	for i in 3:
 		var j := _mk("join%d" % i)
-		var lj: OneLobbyLobby = await j.join_direct(lobby_h.ip_code, {"timeout_ms": 15000})
+		var lj: OneLobbyLobby = await j.join_direct(typed if i == 1 else lobby_h.ip_code, {"timeout_ms": 15000})
 		if lj == null:
 			print("ip loopback FAIL: joiner %d: %s" % [i, j.last_error])
 			quit(1)
