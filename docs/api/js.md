@@ -37,6 +37,7 @@ export { normalizeCode, formatCode } from "./crockford.js";
 export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";
 export { webRtcLinkFactoryFor } from "./webrtc.js";
+export { turnLogin, turnCredential } from "./turn.js";
 export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
@@ -56,7 +57,7 @@ import { type Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
 import { Lobby, type RateLimit } from "./lobby.js";
 import { type LobbySummary } from "./signaling.js";
-import { type LinkFactory, type SocketFactory } from "./transport.js";
+import { type IceServer, type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 import { type RelayConnect } from "./nostr/relays.js";
 import { type Blueprint } from "./blueprint.js";
@@ -171,6 +172,11 @@ export interface JoinDirectOptions {
     nostrRelays?: string[];
     /** STUN servers for a Nostr code when the host offers none; default Google's and Cloudflare's public ones. */
     stun?: string[];
+    /**
+     * Extra ICE servers (a TURN relay), added to the list the host's `welcome` offers (the host's own `iceServers` reach every
+     * joiner already). For a joiner behind a strict NAT whose host gave none. See spec/nostr-signaling.md s.5.
+     */
+    iceServers?: IceServer[];
 }
 /** @internal How onelobby/direct makes a host lobby: its own socket and link factory, and direct mode. */
 export interface DirectLobbyHooks {
@@ -221,7 +227,10 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      */
     rejoinDirect(codeOrAddress: string, resumeToken: string, opts?: JoinDirectOptions): Promise<Lobby>;
     /** Opens the signaling socket of a direct target: TCP to the host's address, or Nostr relays for a version 1 code. */
-    /** A Nostr joiner needs STUN; take the host's list (it comes in `welcome`), else the public defaults. */
+    /**
+     * A Nostr joiner needs STUN; take the host's list (it comes in `welcome`), else the public defaults. The joiner's own
+     * `iceServers` come last.
+     */
     /** @internal onelobby/direct's Nostr host: the relay seam and the kit's clocks. */
     nostrHostEnv(): {
         connect: RelayConnect | undefined;
@@ -429,7 +438,7 @@ import { Emitter } from "./emitter.js";
 import { Lockstep } from "./lockstep.js";
 import { Pause } from "./pause.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
-import type { ChannelName, IceServer, LinkFactory, PeerLink } from "./transport.js";
+import { type ChannelName, type IceServer, type LinkFactory, type PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 import { type LobbySocket, type LobbySocketOptions } from "./socket.js";
 export type Phase = "lobby" | "in_game";
@@ -668,6 +677,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** @internal A direct host's hub learns where each joiner's link comes from (Nostr kick bans the address too). */
     linkAddressSink: ((peerId: number, ip: string) => void) | null;
     /** Host side: offer to a joiner. */
+    /** Why and how the joiner's last link to the host ended (shown when the join gives up). */
     /** The host is gone (link closed, no frames for 3 s, or the server said so): run the s.9 rule. */
     /** Offers that came from roster members while the host link was still open: now the host is lost, answer them. */
     /**
@@ -1272,6 +1282,8 @@ export declare function looksLikeJoinCode(input: string): boolean;
 
 ```ts
 import { type ChannelName, type LinkFactory, type LinkOptions, type PeerLink, type SignalPayload } from "./transport.js";
+/** An ICE candidate line (or SDP `a=candidate:` line) of type relay (a TURN allocation). */
+export declare function isRelayCandidate(candidate: string): boolean;
 /** Browser (or any WebRTC-capable runtime) PeerLink over RTCPeerConnection with three negotiated channels. */
 export declare class WebRtcLink implements PeerLink {
     readonly remoteId: number;
@@ -1288,12 +1300,18 @@ export declare class WebRtcLink implements PeerLink {
      */
     /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
     constructor(opts: LinkOptions, rtc?: typeof RTCPeerConnection);
+    /** What a "could not connect" report adds: the peer connection's states and the signals seen so far. */
+    diagnostics(): string;
     /**
      * The offerer creates the channels just before its offer, the answerer once the remote offer is set. Creating them
      * any earlier makes libdatachannel (node-datachannel) start an offer of its own on the answering side, which then
      * collides with the real one (both ICE agents controlling, the link never opens).
      */
     startOffer(): void;
+    /**
+     * Relay-only is enforced here too, not left to `iceTransportPolicy` (some stacks, like Godot's webrtc-native, ignore it):
+     * an SDP that crosses the wire carries no candidate lines but relay ones.
+     */
     handleSignal(s: SignalPayload): Promise<void>;
     /** Selected candidate pair has a relay candidate -> "relayed", else "direct". Retries while stats settle. */
     send(channel: ChannelName, bytes: Uint8Array): void;
@@ -1302,6 +1320,28 @@ export declare class WebRtcLink implements PeerLink {
 export declare const webRtcLinkFactory: LinkFactory;
 /** A link factory over a given RTCPeerConnection class, e.g. `import { RTCPeerConnection } from "node-datachannel/polyfill"`. */
 export declare function webRtcLinkFactoryFor(rtc: typeof RTCPeerConnection): LinkFactory;
+```
+
+## turn
+
+```ts
+/**
+ * TURN logins in the coturn shared-secret scheme (spec/turn-rest.md, vectors in spec/vectors/turn-rest.json): for a TURN
+ * server that hands out logins this way, mint one per session instead of storing a fixed password:
+ *
+ *     const login = turnLogin(secret, "p1", 6 * 3600);
+ *     const lobby = await hostDirect(kit, { iceServers: [{ urls: "turn:turn.example.com:3478", ...login }] });
+ *
+ * The secret ships inside your game, so anyone with the build can mint logins: use a server whose secret you may share, or
+ * one with a spend cap.
+ */
+import { turnCredential } from "./direct/sha1.js";
+export { turnCredential };
+/** `{ username, credential }` valid for `ttlSeconds` from `nowSeconds` (default: the clock). Any `:` is dropped from `userId`. */
+export declare function turnLogin(secret: string, userId: string, ttlSeconds: number, nowSeconds?: number): {
+    username: string;
+    credential: string;
+};
 ```
 
 ## signaling
@@ -1412,6 +1452,8 @@ export interface IceServer {
     credential?: string;
     ttl?: number;
 }
+/** Whether an ICE server entry has a `turn:` or `turns:` URL. */
+export declare function hasTurn(s: IceServer): boolean;
 export interface SdpInit {
     type: "offer" | "answer";
     sdp: string;
@@ -1445,6 +1487,8 @@ export interface PeerLink {
     handleSignal(s: SignalPayload): void | Promise<void>;
     send(channel: ChannelName, bytes: Uint8Array): void;
     close(): void;
+    /** Optional one-line state for a "could not connect" report (connection states, signals seen); never parsed. */
+    diagnostics?(): string;
 }
 export interface LinkOptions {
     remoteId: number;

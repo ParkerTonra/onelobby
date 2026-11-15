@@ -518,6 +518,19 @@ public sealed class TextChat
     public void HostMute(int peerId, bool muted);
 ```
 
+## OneLobby.Core/TurnLogin.cs
+
+```csharp
+/// TURN logins in the coturn shared-secret scheme (spec/turn-rest.md, vectors in spec/vectors/turn-rest.json): username = "&lt;expiry unix seconds&gt;:&lt;userId&gt;", credential = base64(HMAC-SHA1(secret, username)). For a TURN server that hands out logins this way, mint one per session and give it to DirectHostOptions.IceServers: var (user, cred) = TurnLogin.Mint(secret, "p1", TimeSpan.FromHours(6)); options.IceServers = new[] { new IceServer(new[] { "turn:turn.example.com:3478" }, user, cred) }; The secret ships inside your game, so anyone with the build can mint logins: use a server whose secret you may share, or one with a spend cap.
+public static class TurnLogin
+    /// A login valid for ttl from now (null = the system clock). A : in userId is dropped.
+    public static (string Username, string Credential) Mint(string secret, string userId, TimeSpan ttl, DateTimeOffset? now = null);
+    /// As above, in unix seconds: expiry = nowSeconds + ttlSeconds.
+    public static (string Username, string Credential) Mint(string secret, string userId, long ttlSeconds, long nowSeconds);
+    /// base64(HMAC-SHA1(secret, username)), both as UTF-8.
+    public static string Credential(string secret, string username);
+```
+
 ## OneLobby.Core/Voice.cs
 
 ```csharp
