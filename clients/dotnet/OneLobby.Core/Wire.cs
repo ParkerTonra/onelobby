@@ -18,7 +18,7 @@ namespace OneLobby
         public const byte Hi = 0x01, WelcomeDc = 0x02, Cmd = 0x10, FrameMsg = 0x11, Hash = 0x12, Desync = 0x13,
             SnapshotReq = 0x14, Snapshot = 0x15, Chunk = 0x16, Raw = 0x20, Ping = 0x30, Pong = 0x31,
             HostClaim = 0x40, Voice = 0x50, Chat = 0x60, ChatHistory = 0x61, ChatReject = 0x62,
-            PauseRequest = 0x70, PauseState = 0x71, PauseRefuse = 0x72;
+            PauseRequest = 0x70, PauseState = 0x71, PauseRefuse = 0x72, Room = 0x80;
 
         public const byte ModeLockstep = 1, ModeRaw = 2;
         public const byte SnapshotDeflate = 1;
@@ -107,6 +107,7 @@ namespace OneLobby
                     case PauseRequest: r.U8(); break;
                     case PauseState: r.U8(); r.U16(); r.U8(); break;
                     case PauseRefuse: r.U8(); r.U8(); break;
+                    case Room: r.Rest(); break;
                     default: return null;
                 }
             }
@@ -204,6 +205,9 @@ namespace OneLobby
             }
             return w.ToArray();
         }
+
+        /// <summary>One room frame (spec/room.md s.2): the JSON text of a room message, route 0.</summary>
+        public static byte[] BuildRoom(string json) => new Writer(Room, 0).Bytes(Encoding.UTF8.GetBytes(json)).ToArray();
 
         public static byte[] BuildChatReject(uint id, byte reason) => new Writer(ChatReject, 0).U32(id).U8(reason).ToArray();
 

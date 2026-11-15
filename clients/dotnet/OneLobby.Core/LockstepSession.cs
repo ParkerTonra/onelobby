@@ -233,6 +233,27 @@ namespace OneLobby
             _lobby.BroadcastFrame(frame);
         }
 
+        /// <summary>
+        /// Back to the lobby (the room's back to lobby and rematch): forgets the match so the next start begins at tick 1 again.
+        /// The host keeps its role; the game builds a fresh sim when the next start comes.
+        /// </summary>
+        internal void Reset()
+        {
+            _buf.Clear();
+            _log.Clear();
+            _pending.Clear();
+            _ownHash.Clear();
+            _hostHash.Clear();
+            _peerHash.Clear();
+            Tick = 0;
+            _head = 0;
+            _emitting = false;
+            _held = false;
+            _graceFix = false;
+            _emitStartMs = 0;
+            _emitStartTick = 0;
+        }
+
         internal void RaiseDesync(DesyncInfo info) => Desync?.Invoke(info);
 
         internal bool ShouldRequestSnapshot(long nowMs)

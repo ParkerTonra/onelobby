@@ -75,7 +75,7 @@ namespace OneLobby
         private LobbyPhase _phase;
         private Dictionary<string, string> _meta;
 
-        internal Lobby(LobbyClient client, LobbyMsg msg)
+        internal Lobby(LobbyClient client, LobbyMsg msg, RoomSetup? setup = null)
         {
             _c = client;
             _t = client.Transport;
@@ -99,6 +99,20 @@ namespace OneLobby
             Chat = new TextChat(this);
             Pause = new SharedPause(this);
             if (Mode == SyncMode.Lockstep) Lockstep = new LockstepSession(this);
+            var rs = setup ?? new RoomSetup();
+            var join = rs.Join ?? new RoomJoinOptions();
+            Room = new Room(this, new RoomConfig
+            {
+                Settings = RoomRules.ResolveSettings(rs.Options, rs.MaxPlayers ?? (msg.MaxPlayers > 0 ? msg.MaxPlayers : Math.Max(2, msg.Peers.Count)), LateJoin),
+                Password = rs.Password ?? "",
+                Pid = client.PlayerId,
+                Bans = client.Bans,
+                JoinRole = join.Role,
+                JoinData = join.Data != null ? new Dictionary<string, string>(join.Data) : new Dictionary<string, string>(),
+                JoinPassword = join.Password ?? "",
+            });
+            Chat.HostFilter = t => RoomRules.ApplyFilter(Room.Filter, t, RoomFilterKind.Chat);
+            if (IsHost && Room.Bans.HubIds().Count > 0) SendBans(Room.Bans.HubIds());
         }
 
         /// <summary>The blueprint of the client that made this lobby, or null for a plain client.</summary>
@@ -122,6 +136,14 @@ namespace OneLobby
         public TextChat Chat { get; }
         /// <summary>The shared co-op pause (docs/recipes/pause.md).</summary>
         public SharedPause Pause { get; }
+        /// <summary>
+        /// The room layer (docs/recipes/room.md, spec/room.md): roster with per-player data, ready, countdown and auto start, back
+        /// to lobby and rematch, spectators and seats, reconnecting state, kick and ban with reasons. Every lobby has one; a game
+        /// that never touches it behaves as before.
+        /// </summary>
+        public Room Room { get; }
+        /// <summary>Why this peer was removed (a kick, a ban, a refused join), once it has been; null otherwise.</summary>
+        public RemovalInfo? Removal { get; private set; }
         /// <summary>Host: the per-joiner cap on incoming raw messages (<see cref="LobbyOptions.RateLimit"/>); null = none.</summary>
         public RateLimit? RateLimit { get; internal set; }
 
@@ -258,10 +280,90 @@ namespace OneLobby
         public Task StartAsync()
         {
             if (!IsHost) throw new InvalidOperationException("only the host starts the game");
-            SetPhase(LobbyPhase.InGame);
-            _c.SendRaw(Signaling.Phase(LobbyPhase.InGame));
-            Lockstep?.BeginEmitting(NowMs);
+            if (_phase == LobbyPhase.InGame) return Task.CompletedTask;
+            BeginGame();
             return Task.CompletedTask;
+        }
+
+        /// <summary>Host: the phase goes to in game (the room calls this at the end of its countdown).</summary>
+        internal void BeginGame()
+        {
+            if (_phase == LobbyPhase.InGame) return;
+            _c.SendRaw(Signaling.Phase(LobbyPhase.InGame));
+            SentPhase(LobbyPhase.InGame);
+            SetPhase(LobbyPhase.InGame);
+            Lockstep?.BeginEmitting(NowMs);
+        }
+
+        /// <summary>Host: the phase goes back to lobby without touching any link (back to lobby, rematch).</summary>
+        internal void EndGame()
+        {
+            if (_phase == LobbyPhase.Lobby) return;
+            _c.SendRaw(Signaling.Phase(LobbyPhase.Lobby));
+            SentPhase(LobbyPhase.Lobby);
+            SetPhase(LobbyPhase.Lobby);
+        }
+
+        /// <summary>Host: phases this lobby sent whose echo (a <c>lobby</c> message) has not come back yet, oldest first.</summary>
+        private readonly List<LobbyPhase> _phaseSent = new();
+        private readonly Dictionary<int, string> _addrs = new();
+        private long _lastAddrPollMs;
+
+        private void SentPhase(LobbyPhase p)
+        {
+            _phaseSent.Add(p);
+            if (_phaseSent.Count > 16) _phaseSent.RemoveAt(0);
+        }
+
+        // ---- room plumbing (see Room) -------------------------------------------------------------------------------
+
+        internal string? RoomPeerName(int id) => _peers.TryGetValue(id, out var r) ? r.Name : null;
+        internal IReadOnlyList<int> RoomPeerIds() => _peers.Keys.ToList();
+        internal IReadOnlyList<int> RoomOpenPeers() => HelloPeers().Select(r => r.Id).ToList();
+        internal void RoomSend(int peerId, byte[] frame) => SendToPeer(peerId, PeerChannel.Reliable, frame);
+        internal void RoomSendToHost(byte[] frame) => SendToHost(PeerChannel.Reliable, frame);
+        internal int RoomRttMs() => _peers.TryGetValue(_hostId, out var h) ? h.PingMs : 0;
+        internal void RoomReportError(string code, string message) => _c.RaiseError(new LobbyError(code, message));
+        internal void SetRemoval(RemovalInfo info) => Removal ??= info;
+        internal string? RoomLinkAddress(int id) =>
+            _addrs.TryGetValue(id, out var a) ? a : _peers.TryGetValue(id, out var r) && r.Link is IRemoteAddressPeerLink ra ? ra.RemoteAddress : null;
+
+        /// <summary>Host: tells the hub the banned player ids, when the hub understands <c>bans</c>.</summary>
+        internal void SendBans(IReadOnlyList<string> ids)
+        {
+            if (_c.Features.Contains("room")) _c.SendRaw(Signaling.Bans(ids));
+        }
+
+        /// <summary>The one place that sends <c>kick</c> with a code and a reason and removes the peer locally (the room's kick, ban and deny).</summary>
+        internal void RemovePeerWith(int peerId, bool ban, string code, string reason)
+        {
+            var text = FitUtf16(reason, 120);
+            _c.SendRaw(Signaling.Kick(peerId, ban, null, text, code));
+            if (_peers.TryGetValue(peerId, out var rec)) DropPeer(rec, ban ? "kicked" : "disconnected", linger: true);
+        }
+
+        private static string FitUtf16(string s, int n)
+        {
+            if (s.Length <= n) return s;
+            var cut = n;
+            if (char.IsHighSurrogate(s[cut - 1])) cut--;
+            return s.Substring(0, cut);
+        }
+
+        /// <summary>Host: reads each link's remote address once it is known (a banned address is removed at once).</summary>
+        private void PollAddresses(long now)
+        {
+            if (!IsHost || now - _lastAddrPollMs < 500) return;
+            _lastAddrPollMs = now;
+            foreach (var rec in _peers.Values.ToList())
+            {
+                if (rec.Id == _you || _addrs.ContainsKey(rec.Id) || rec.Link is not IRemoteAddressPeerLink ra) continue;
+                var ip = ra.RemoteAddress;
+                if (string.IsNullOrEmpty(ip)) continue;
+                _addrs[rec.Id] = ip!;
+                Room.OnLinkAddress(rec.Id, ip!);
+                if (_closed) return;
+            }
         }
 
         /// <summary>
@@ -569,8 +671,15 @@ namespace OneLobby
         {
             if (_phase == p) return;
             _phase = p;
-            if (p == LobbyPhase.Lobby) Pause.OnLobbyPhase();
+            if (p == LobbyPhase.Lobby)
+            {
+                Pause.OnLobbyPhase();
+                Lockstep?.Reset(); // back to lobby: the next start is a fresh match
+                _hasState = false;
+                _lastFrameRxMs = 0;
+            }
             PhaseChanged?.Invoke(p);
+            Room.OnPhase(p);
         }
 
         // ---- the pump ------------------------------------------------------------------------------------------
@@ -617,6 +726,10 @@ namespace OneLobby
             CheckPeerWatches(now);
             if (_closed) return;
             Timeouts(now);
+            if (_closed) return;
+            PollAddresses(now);
+            Room.Tick(now);
+            if (_closed) return;
             if (now - _lastPingMs >= PingEveryMs)
             {
                 _lastPingMs = now;
@@ -714,6 +827,7 @@ namespace OneLobby
             rec.HiSent = true;
             var fresh = !_hasState && (Lockstep?.Head ?? 0) == 0;
             SendLink(rec, PeerChannel.Reliable, Wire.BuildHi(_you, fresh ? -1 : Lockstep?.Head ?? 0));
+            if (!IsHost && rec.Id == _hostId) Room.OnHostLink(); // right behind hi, before any game code sees Ready
         }
 
         // ---- inbound frames ------------------------------------------------------------------------------------
@@ -778,6 +892,7 @@ namespace OneLobby
                         Mode == SyncMode.Raw ? Wire.ModeRaw : Wire.ModeLockstep, _you));
                     SendLink(rec, PeerChannel.Reliable, Wire.BuildChatHistory(Chat.History));
                     Pause.SendTo(rec);
+                    Room.OnPeerHi(rec.Id);
                     if (Lockstep != null && _phase == LobbyPhase.InGame && (Lockstep.Head > 0 || lastTick >= 0))
                     {
                         if (lastTick >= 0 && Lockstep.LogCovers(lastTick))
@@ -857,6 +972,9 @@ namespace OneLobby
                 }
                 case Wire.PauseRequest:
                     if (rec.Hello) Pause.HostHandle(rec.Id, body[0] != 0);
+                    return;
+                case Wire.Room:
+                    if (rec.Hello) Room.HandleFrame(rec.Id, body);
                     return;
                 case Wire.Voice:
                 {
@@ -975,6 +1093,9 @@ namespace OneLobby
                     Pause.OnRefuse(r.U8());
                     return;
                 }
+                case Wire.Room:
+                    Room.HandleFrame(rec.Id, body);
+                    return;
                 case Wire.Voice:
                     if (ch == PeerChannel.Voice) Voice.OnPacket(route, body, NowMs);
                     return;
@@ -1096,7 +1217,10 @@ namespace OneLobby
                     _meta = m.Meta;
                     if (!string.IsNullOrEmpty(m.Name)) Name = m.Name;
                     if (!string.IsNullOrEmpty(m.ResumeToken)) ResumeToken = m.ResumeToken;
-                    SetPhase(m.Phase);
+                    // the host is the source of the phase: while phase changes it sent are still echoing back, a late echo must not undo them
+                    if (!IsHost) SetPhase(m.Phase);
+                    else if (_phaseSent.Count > 0) { if (m.Phase == _phaseSent[0]) _phaseSent.RemoveAt(0); }
+                    else SetPhase(m.Phase);
                     foreach (var p in m.Peers)
                         if (_peers.TryGetValue(p.PeerId, out var known))
                         {
@@ -1104,6 +1228,7 @@ namespace OneLobby
                             string old = known.Name;
                             known.Name = p.Name;
                             PeerRenamed?.Invoke(ToPeer(known), old);
+                            Room.OnRenamed(known.Id, known.Name);
                         }
                         else
                         {
@@ -1168,9 +1293,15 @@ namespace OneLobby
             return !hostLinkAlive;
         }
 
-        internal void OnServerError(LobbyError err, bool disconnected = false)
+        internal void OnServerError(LobbyError err, bool disconnected = false, JsonElement data = default)
         {
-            if (err.Code == "kicked") End(disconnected ? "disconnected" : "kicked");
+            if (err.Code != "kicked") return;
+            var rawCode = Signaling.Str(data, "code");
+            var denied = Signaling.Str(data, "reason") == "denied";
+            var rc = RoomRules.IsCode(rawCode) ? rawCode : denied ? "denied" : disconnected ? "disconnected" : "kicked";
+            Removal ??= new RemovalInfo(rc, RoomRules.RemovalReason(rc, Signaling.Str(data, "closeReason")), (!disconnected || rc == "banned") && !denied);
+            Room.OnRemoved(Removal);
+            End(disconnected ? "disconnected" : "kicked");
         }
 
         internal void OnSocketClosed()
@@ -1202,6 +1333,8 @@ namespace OneLobby
             Lockstep?.DropPending(rec.Id);
             Voice.OnPeerGone(rec.Id);
             Pause.OnPeerGone(rec.Id);
+            _addrs.Remove(rec.Id);
+            Room.OnPeerLeft(rec.Id, reason, linger);
             if (rec.Watching)
             {
                 rec.Watching = false;
@@ -1318,6 +1451,8 @@ namespace OneLobby
                 _migrationHold = true;
             }
             Pause.OnBecameHost();
+            _phaseSent.Clear();
+            Room.OnBecameHost();
             _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "host_changed"); w.WriteNumber("hostId", _you); w.WriteNumber("epoch", _epoch); }));
             HostChanged?.Invoke(_you);
         }
@@ -1327,6 +1462,7 @@ namespace OneLobby
             _epoch = epoch;
             _hostId = newHost;
             Lockstep?.StopEmitting();
+            Room.OnBecameJoiner();
             foreach (var r in _peers.Values.ToList())
                 if (r.Id != newHost && r.Link != null) { r.Link.Dispose(); r.Link = null; r.Hello = false; }
             _awaitingClaim = false;
@@ -1347,6 +1483,7 @@ namespace OneLobby
         private void Close()
         {
             _closed = true;
+            Room.Close();
             foreach (var r in _peers.Values) { r.Link?.Dispose(); r.Link = null; }
             foreach (var (link, _) in _lingering) link.Dispose();
             _lingering.Clear();

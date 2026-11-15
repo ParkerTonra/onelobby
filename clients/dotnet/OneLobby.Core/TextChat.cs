@@ -26,6 +26,8 @@ namespace OneLobby
 
         public IReadOnlyList<ChatLine> History => _history;
         public Func<string, string>? Filter { get; set; }
+        /// <summary>Host only: filters each line before it is stamped and broadcast (set from <see cref="Room.Filter"/>); an empty result drops the line.</summary>
+        internal Func<string, string>? HostFilter { get; set; }
         public event Action<ChatLine>? Received;
         public event Action<uint, string>? Rejected;
 
@@ -55,6 +57,7 @@ namespace OneLobby
             if (Encoding.UTF8.GetByteCount(text) > MaxBytes) { Reject(from, senderId, Wire.ChatLength); return; }
             if (!TakeToken(from)) { Reject(from, senderId, Wire.ChatRate); return; }
             text = Wire.SanitizeChat(text);
+            if (HostFilter != null) text = HostFilter(text);
             if (text.Length == 0) return;
             var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var line = new ChatLine(from, ++_hostId, ts, text);
