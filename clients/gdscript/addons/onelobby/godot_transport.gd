@@ -182,8 +182,13 @@ class OLRtcLink:
 			var sdp := str(sig["sdp"])
 			_pc.set_remote_description(str(sig["type"]), _relay_sdp(sdp) if relayed else sdp)
 			if _remote_ip != "":
-				for line in sdp.split("
-"):
+				var lines := sdp.split("
+")
+				for line in lines: # ports the offer already has at the code's address get no rewritten copy, whatever the line order
+					var c := line.strip_edges().trim_prefix("a=")
+					if is_at_address(c, _remote_ip):
+						_seen_remote[c.split(" ")[5]] = true
+				for line in lines:
 					_add_at_remote_ip(line.strip_edges().trim_prefix("a="))
 		elif str(sig.get("candidate", "")) != "":
 			if relayed and not _is_relay(str(sig["candidate"])):
@@ -207,9 +212,10 @@ class OLRtcLink:
 		var f := candidate.split(" ")
 		if f.size() < 8:
 			return
-		if is_at_address(candidate, _remote_ip):
-			return # the host offers this address itself
 		var port := f[5]
+		if is_at_address(candidate, _remote_ip):
+			_seen_remote[port] = true # the host offers this address itself: no rewritten copy, now or from a later line
+			return
 		if _seen_remote.has(port):
 			return
 		_seen_remote[port] = true
