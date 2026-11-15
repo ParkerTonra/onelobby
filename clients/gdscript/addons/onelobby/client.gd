@@ -54,6 +54,11 @@ var _socket_factory := Callable()
 ## The join code (display form) of the direct lobby being hosted, joined or rejoined; "" outside Direct mode.
 var _direct_code := ""
 var _direct_host: OneLobbyDirectHost = null
+## Direct mode: the host's fixed UDP port range [begin, end] (set by host_direct's udp_port_range), applied to every
+## peer connection this client makes.
+var port_range: Array = []
+## Direct mode, joiner by IP: the host's address from a v0 code; its host candidates are also tried there.
+var remote_ip := ""
 ## A direct joiner's socket after its lobby ended: kept polled until its last message (the leave) is out.
 var _retiring: OneLobbyTransport.OLSocket = null
 var _retire_deadline := 0
@@ -133,10 +138,18 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	if lobby != null:
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
+	var range: Array = options.get("udp_port_range", [])
+	if options.has("udp_port_range") and (range.size() != 2 or int(range[0]) < 1 or int(range[1]) > 65535 or int(range[0]) > int(range[1])):
+		_fail("bad_request", "udp_port_range must be [begin, end] with 1 <= begin <= end <= 65535")
+		return null
 	var d := OneLobbyDirectHost.start(options)
 	if d == null:
-		_fail("bad_code", "could not make a join code")
+		if OneLobbyIpListener.last_error != "" and (options.has("tcp_port") or options.has("udp_port_range") or not bool(options.get("nostr", true))):
+			_fail("port_in_use", "could not listen for joiners by IP: " + OneLobbyIpListener.last_error)
+		else:
+			_fail("bad_code", "could not make a join code")
 		return null
+	port_range = range
 	_direct_host = d
 	_direct_code = d.code
 	# the relays connect while we wait; pump() polls the host meanwhile
@@ -148,7 +161,7 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 		_fail("no_relay", "no Nostr relay reachable; check the internet connection")
 		return null
 	var rest := transport.now_ms() + OneLobbyNostrLimits.RELAY_REST_WAIT_MS
-	while not d.nostr.relays_settled() and transport.now_ms() < rest and is_inside_tree():
+	while d.nostr != null and not d.nostr.relays_settled() and transport.now_ms() < rest and is_inside_tree():
 		await get_tree().process_frame
 	_socket_factory = d.connect_local
 	var rl: Dictionary = options.get("rate_limit", {})
@@ -181,9 +194,11 @@ func rejoin_direct(join_code: String, token: String, options: Dictionary = {}) -
 
 func _direct_join(join_code: String, options: Dictionary, resume: String, request: String) -> OneLobbyLobby:
 	var dec := OneLobbyJoinCode.decode_dc1(join_code)
-	if dec.has("error") or not dec.has("room"):
-		if dec.get("error", "") == "unknown_version" or dec.has("ip"):
-			_fail("unsupported_code", "this build joins Nostr codes only (a code of the D1 family, version 1)")
+	if not dec.has("room") and not dec.has("ip"):
+		dec = OneLobbyJoinCode.parse_address(join_code) # "1.2.3.4" or "1.2.3.4:47810", for hosts that show an address
+	if dec.has("error") or (not dec.has("room") and not dec.has("ip")):
+		if dec.get("error", "") == "unknown_version":
+			_fail("unsupported_code", "this code is from a newer version of the game (an unknown code version)")
 		else:
 			_fail("unknown_code", "not a valid join code")
 		return null
@@ -193,11 +208,18 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 	if lobby != null:
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
-	var norm := OneLobbyJoinCode.normalize_dc1(join_code)
 	_extra_ice = options.get("ice_servers", [])
-	var relays: Array = options.get("relays", [])
-	_direct_code = OneLobbyJoinCode.group(norm)
-	_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
+	if dec.has("ip"):
+		# join by IP: the host's TCP port carries signaling, no Nostr
+		var url := "ws://%s:%d/" % [dec["ip"], dec["port"]]
+		remote_ip = str(dec["ip"])
+		_direct_code = OneLobbyJoinCode.encode_ip(remote_ip, int(dec["port"]))
+		_socket_factory = func() -> OneLobbyTransport.OLSocket: return transport.connect_signaling(url)
+	else:
+		var norm := OneLobbyJoinCode.normalize_dc1(join_code)
+		var relays: Array = options.get("relays", [])
+		_direct_code = OneLobbyJoinCode.group(norm)
+		_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
 	var result: Variant = await _run(resume, request, ["lobby"], _enter_lobby, int(options.get("timeout_ms", DIRECT_TIMEOUT_MS)))
 	if result == null:
 		_clear_direct()
@@ -289,6 +311,8 @@ func _enter_lobby(e: Dictionary) -> OneLobbyLobby:
 	if _direct_code != "":
 		l._direct = true
 		l.code = _direct_code
+		if _direct_host != null:
+			l.ip_code = _direct_host.ip_code
 	lobby = l
 	l._start()
 	return l
@@ -305,6 +329,8 @@ func _lobby_closed(l: OneLobbyLobby) -> void:
 func _clear_direct() -> void:
 	_direct_code = ""
 	_extra_ice = []
+	port_range = []
+	remote_ip = ""
 	_socket_factory = Callable()
 	if _direct_host != null:
 		_direct_host.close()

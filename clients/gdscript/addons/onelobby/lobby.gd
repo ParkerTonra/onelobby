@@ -44,6 +44,8 @@ const MAX_HELD_ICE := 32
 const MAX_PENDING := 1024
 
 var code := ""
+## Direct host with an IP path (udp_port_range / tcp_port / nostr false): the version 0 code of its address and port, else "".
+var ip_code := ""
 var local_peer_id := 0
 var host_peer_id: int:
 	get: return _host_id
@@ -363,10 +365,17 @@ static func has_relay(ice: Array) -> bool:
 
 
 ## The ice_failed message: names the next step. Same wording in the JS and C# clients (keep in step).
-static func ice_failed_message(relay_configured: bool) -> String:
+static func ice_failed_message(relay_configured: bool, by_ip := false) -> String:
+	if by_ip:
+		return "Could not connect to the host by its IP address. The host must port-forward its UDP port range as well as the TCP port, or the players can use a relay (TURN), see docs/recipes/turn.md."
 	if relay_configured:
 		return "Could not connect to the host, even through the relay (TURN). Check the relay is reachable (Godot reaches TURN over UDP only); the host can also port-forward."
 	return "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward."
+
+
+## Host side: every peer connection takes one UDP port of the forwarded range, so a range of N ports serves N players.
+static func port_range_full_message(range: Array) -> String:
+	return "No free UDP port left in the host's port range %d-%d (one port per player). Widen udp_port_range, port-forward it, or use a relay (TURN), see docs/recipes/turn.md." % [int(range[0]), int(range[1])]
 
 
 func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void:
@@ -385,7 +394,10 @@ func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void
 	rec.hi_sent = false
 	rec.link = _c.transport.create_link({
 		"remote_id": rec.id, "initiator": initiator, "ice_servers": _c.ice, "relay_only": relay_only or _c.relay_only,
+		"port_range": _c.port_range, "remote_ip": _c.remote_ip,
 	})
+	if rec.link is OneLobbyGodotTransport.OLRtcLink and rec.link.fail_reason == "port_range_full":
+		_c.raise_error("ice_failed", port_range_full_message(_c.port_range))
 	rec.last_rx_ms = now_ms()
 	if initiator:
 		rec.link.start_offer()
@@ -514,7 +526,7 @@ func _check_ready_timer(now: int) -> void:
 		_connect_peer(_peers[_host_id], true, true)
 		return
 	_ready_deadline_ms = 0
-	var msg := ice_failed_message(has_relay(_c.ice))
+	var msg := ice_failed_message(has_relay(_c.ice), _c.remote_ip != "")
 	_c.raise_error("ice_failed", msg)
 	if _closed:
 		return

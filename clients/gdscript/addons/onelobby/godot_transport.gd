@@ -17,9 +17,20 @@ func connect_signaling(url: String) -> OneLobbyTransport.OLSocket:
 
 
 func create_link(opts: Dictionary) -> OneLobbyTransport.OLLink:
-	var l := OLRtcLink.new(opts)
+	var l := OLRtcLink.new(opts, _range_links(opts))
 	_links.append(l)
 	return l
+
+
+## Links that hold one UDP port of the host's fixed range (each peer connection binds one), not yet closed.
+func _range_links(opts: Dictionary) -> int:
+	if opts.get("port_range", []).size() != 2:
+		return 0
+	var n := 0
+	for l in _links:
+		if l.in_range and not l.closed:
+			n += 1
+	return n
 
 
 func poll() -> void:
@@ -86,8 +97,15 @@ class OLRtcLink:
 	var _out: Array[Dictionary] = []
 	var _initiator := false
 	var _was_connected := false
+	## True when this link bound a port of the fixed UDP range.
+	var in_range := false
+	## "port_range_full" when the fixed UDP range has no free port left for this link; "" otherwise.
+	var fail_reason := ""
+	## The host's address from a v0 IP code: its host candidates are also tried at this address (same UDP port).
+	var _remote_ip := ""
+	var _seen_remote := {}
 
-	func _init(opts: Dictionary) -> void:
+	func _init(opts: Dictionary, range_in_use := 0) -> void:
 		_initiator = bool(opts.get("initiator", false))
 		# Godot does not expose the selected candidate pair, so a link counts as relayed only when the lobby is
 		# relay-only (the server's path telemetry then counts it as relayed).
@@ -98,6 +116,18 @@ class OLRtcLink:
 		var config := {"iceServers": ice}
 		if relayed:
 			config["iceTransportPolicy"] = "relay"
+		_remote_ip = str(opts.get("remote_ip", ""))
+		var range: Array = opts.get("port_range", [])
+		if range.size() == 2:
+			var size := int(range[1]) - int(range[0]) + 1
+			if range_in_use >= size:
+				fail_reason = "port_range_full"
+				is_failed = true
+				return
+			# webrtc-native reads libdatachannel's own settings from a nested "libdatachannel" dictionary; a top-level
+			# portRangeBegin/End is silently ignored (checked against the 1.2.2 binary, see the README)
+			config["libdatachannel"] = {"portRangeBegin": int(range[0]), "portRangeEnd": int(range[1])}
+			in_range = true
 		if _pc.initialize(config) != OK:
 			is_failed = true
 			return
@@ -140,7 +170,10 @@ class OLRtcLink:
 
 	func start_offer() -> void:
 		if _initiator and not is_failed:
-			_pc.create_offer()
+			if _pc.create_offer() != OK:
+				is_failed = true
+				if in_range:
+					fail_reason = "port_range_full"
 
 	func apply_signal(sig: Dictionary) -> void:
 		if closed or is_failed:
@@ -148,10 +181,30 @@ class OLRtcLink:
 		if sig.has("sdp"):
 			var sdp := str(sig["sdp"])
 			_pc.set_remote_description(str(sig["type"]), _relay_sdp(sdp) if relayed else sdp)
+			if _remote_ip != "":
+				for line in sdp.split("
+"):
+					_add_at_remote_ip(line.strip_edges().trim_prefix("a="))
 		elif str(sig.get("candidate", "")) != "":
 			if relayed and not _is_relay(str(sig["candidate"])):
 				return
 			_pc.add_ice_candidate(str(sig.get("sdpMid", "0")), int(sig.get("sdpMLineIndex", 0)), str(sig["candidate"]))
+			if _remote_ip != "":
+				_add_at_remote_ip(str(sig["candidate"]))
+
+	# Join by IP (docs/design/direct-ip.md s.2): the host only knows its own (LAN) addresses, but a forwarded port keeps its
+	# number, so each host candidate "ADDR PORT" is also tried as "<code's address> PORT".
+	func _add_at_remote_ip(candidate: String) -> void:
+		if not candidate.begins_with("candidate:") or not candidate.contains(" typ host") or not candidate.contains(" UDP "):
+			return
+		var f := candidate.split(" ")
+		if f.size() < 8:
+			return
+		var port := f[5]
+		if _seen_remote.has(port):
+			return
+		_seen_remote[port] = true
+		_pc.add_ice_candidate("0", 0, "candidate:1 1 UDP 2122317823 %s %s typ host" % [_remote_ip, port])
 
 	func take_signals() -> Array[Dictionary]:
 		var out := _out

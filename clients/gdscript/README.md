@@ -33,8 +33,33 @@ var lobby := await client.join_direct("D1PB-1X9S-FPV")
 Options: `max_players` (2 to 250), `password`, `relays` (default: seven public relays), `stun` (default: public STUN; `[]`
 for none, fine on a LAN), `upnp_port` (opt-in, off by default; asks the router via UPnP to forward that UDP port; untested,
 and Godot's WebRTC picks its own ports, so it rarely helps). Direct mode has no host migration: when the host leaves,
-joiners get `session_ended("host_left")`. `rejoin_direct(code, token)` takes a seat back. Version 0 (IP address) codes
-are not supported yet and fail with `unsupported_code`.
+joiners get `session_ended("host_left")`. `rejoin_direct(code, token)` takes a seat back.
+
+### Join by IP (no relay, no Nostr)
+
+For players a relay cannot help (or when you would rather not use one), the host port-forwards a known UDP range and
+friends join by the host's address:
+
+```gdscript
+# host: forward TCP 47810 and UDP 47900-47909 on the router (UPnP is not used)
+var lobby := await client.host_direct({"udp_port_range": [47900, 47909], "public_ip": "203.0.113.7"})
+print(lobby.ip_code)    # version 0 code of 203.0.113.7:47810, e.g. "6B01-RGFE-P2B"; lobby.code is still the Nostr code
+
+# joiner: the v0 code, or a plain address ("203.0.113.7" or "203.0.113.7:47810")
+var lobby := await client.join_direct("6B01-RGFE-P2B")
+```
+
+Options: `udp_port_range` `[begin, end]` (turns the IP path on; applies to every peer connection the host makes),
+`tcp_port` (signaling, default 47810; 0 picks a free one), `public_ip` (the address put in the code; default: this
+machine's first private IPv4, which only works on the same network), `listen_address` (default `"*"`; `"127.0.0.1"`
+keeps it on this machine), `nostr: false` (skip the relays: no internet needed, `lobby.code` is the IP code).
+**One UDP port per player:** a range of N ports serves N joiners at once (ports free up when a player leaves). When the
+range is used up the host gets an `ice_failed` error naming the range ("No free UDP port left in the host's port range
+..."), not a hang; widen the range or use TURN. A joiner that cannot connect gets `ice_failed` saying the host must
+port-forward its UDP range or use TURN. webrtc-native only honours the range inside a nested `{"libdatachannel":
+{"portRangeBegin", "portRangeEnd"}}` config dictionary (a top-level key is ignored); the addon does that for you.
+Browser joiners are not supported on this path (Godot's WebSocket server checks no `Origin`, so a rebound page could
+connect: keep `listen_address` private when testing).
 
 Players behind a strict NAT (symmetric, carrier-grade) cannot open a direct link to anyone; a TURN relay gets them in.
 Pass `ice_servers` (`[{urls, username, credential}]`) to `host_direct` (every joiner gets it in the welcome) or to

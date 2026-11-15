@@ -126,6 +126,21 @@ static func decode_dc1(input: String) -> Dictionary:
 	return {"ip": "%d.%d.%d.%d" % [ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255], "port": port}
 
 
+## {ip, port} for a typed IPv4 address "1.2.3.4" or "1.2.3.4:47810" (port default 47810), {error: "bad_address"} otherwise.
+static func parse_address(input: String) -> Dictionary:
+	var s := input.strip_edges()
+	var port := 47810
+	if s.contains(":"):
+		var halves := s.split(":")
+		if halves.size() != 2 or not halves[1].is_valid_int():
+			return {"error": "bad_address"}
+		s = halves[0]
+		port = int(halves[1])
+	if encode_ip(s, port) == "":
+		return {"error": "bad_address"}
+	return {"ip": s, "port": port}
+
+
 static func encode_ip(ip: String, port: int) -> String:
 	var parts := ip.split(".")
 	if parts.size() != 4 or port < 1 or port > 65535:

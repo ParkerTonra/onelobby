@@ -9,7 +9,7 @@ Design and sources: [docs/design/direct-ip.md](../design/direct-ip.md) (s.2a for
 Hosts: .NET desktop through `OneLobby.DataChannel` (any .NET app), **Unity** desktop (`com.onelobby.unity` 0.2.0+:
 `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync`, see the [Unity recipe](unity.md)), and **Node** through `onelobby/direct`
 (a Node game server). Joiners: .NET (`JoinDirectAsync`), Node or a browser page (`kit.joinDirect`). All of them speak the
-same protocol, so they mix. Godot hosts come later. Snippets tagged `csharp compile` are compiled by
+same protocol, so they mix. Godot (GDScript) hosts and joiners use the IP path too, see [section 5](#5-godot-gdscript-ip-code-and-a-port-range); it shares the TCP port but takes a UDP range, not the one-port mux. Snippets tagged `csharp compile` are compiled by
 `docs/check-snippets.mjs`.
 
 ## 1. .NET: reference
@@ -376,3 +376,21 @@ Facts a game can run into with `hostDirect` / `hostNostr` (same numbers in C# an
 4. From outside the network with an internet code: `join-direct <code>` passes, and the joiner's `pair` line shows the
    public address as `remote[...]`. No second network? `join-direct <code> --only-typed` (both smokes) drops every
    candidate the host offers, so the code's address is the only way in; it passes with that address as `remote[...]`.
+
+## 5. Godot (GDScript): IP code and a port range
+
+The GDScript client cannot pin one UDP port for every peer (no UDP mux, which would also drop TURN), so the host
+forwards a **range**: one UDP port per joiner. Forward TCP `47810` (signaling) and UDP `47900-47909` (say) to the host's
+machine, then:
+
+```gdscript
+var lobby := await client.host_direct({"udp_port_range": [47900, 47909], "public_ip": "203.0.113.7"})
+print(lobby.ip_code)                                   # the v0 code of 203.0.113.7:47810
+var joined := await other_client.join_direct(lobby.ip_code)   # or "203.0.113.7:47810"
+```
+
+A range of N ports serves N players at once; the next one fails on the host with an `ice_failed` error that names the
+range, and the joiner's attempt ends with `ice_failed` ("port-forward the UDP range, or use TURN"). UPnP is not used.
+The joiner tries each host candidate it receives at the code's address with the same UDP port (a forwarded port keeps its
+number), so forward the range 1:1. Gaps: JS and .NET hosts pin one port (UDP mux) and expose no range option; GDScript
+joiners by IP are for native games (no browser `Origin` check on the Godot listener).
