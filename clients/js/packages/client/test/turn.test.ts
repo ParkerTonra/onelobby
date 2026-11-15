@@ -112,6 +112,15 @@ describe("relay-only enforcement", () => {
     await link.handleSignal({ ice: cand("candidate:6 1 UDP 1 6.6.6.6 1 typ relay") });
     expect(pc().added.map((c) => c.candidate)).toEqual(["candidate:6 1 UDP 1 6.6.6.6 1 typ relay"]);
   });
+  it("a typed address the offer already carries as a host candidate is not added twice", async () => {
+    const offer = "v=0\r\na=candidate:1 1 UDP 2114977791 10.0.0.1 5000 typ host\r\n";
+    const same = mk(false, ["candidate:1 1 UDP 2122317823 10.0.0.1 5000 typ host"]);
+    await same.link.handleSignal({ sdp: { type: "offer", sdp: offer } });
+    expect(same.pc().added.length).toBe(0);
+    const other = mk(false, ["candidate:1 1 UDP 2122317823 203.0.113.7 5000 typ host"]);
+    await other.link.handleSignal({ sdp: { type: "offer", sdp: offer } });
+    expect(other.pc().added.length).toBe(1);
+  });
   it("a normal link passes everything through", async () => {
     const { link, sent, pc } = mk(false, ["candidate:9 1 UDP 1 9.9.9.9 47810 typ host"]);
     link.startOffer();

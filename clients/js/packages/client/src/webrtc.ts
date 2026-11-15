@@ -157,7 +157,13 @@ export class WebRtcLink implements PeerLink {
         if (this.extra.length) {
           // docs/design/direct-ip.md s.2: the address the joiner typed is the host's reachable candidate
           const mid = /^a=mid:(\S+)/m.exec(s.sdp.sdp)?.[1] ?? "0";
-          for (const candidate of this.extra.splice(0)) await this.pc.addIceCandidate({ candidate, sdpMid: mid, sdpMLineIndex: 0 });
+          for (const candidate of this.extra.splice(0)) {
+            // The host already offers this address as a host candidate (the usual case: same network, or a host that
+            // knows its address): adding it again makes a second, identical remote candidate, and on loopback that
+            // duplicate repeatedly broke the DTLS handshake of the joiner's link (certificate verify failed).
+            if (offersHostAddress(s.sdp.sdp, candidate)) continue;
+            await this.pc.addIceCandidate({ candidate, sdpMid: mid, sdpMLineIndex: 0 });
+          }
         }
         if (s.sdp.type === "offer") {
           this.openChannels();
@@ -228,6 +234,16 @@ export class WebRtcLink implements PeerLink {
     void wasOpen;
     this.onClose?.(reason);
   }
+}
+
+/** Whether `sdp` already holds a host candidate with the same address and port as the candidate line `candidate`. */
+function offersHostAddress(sdp: string, candidate: string): boolean {
+  const m = /(\S+) (\d+) typ host/.exec(candidate);
+  if (!m) return false;
+  return sdp.split(/\r?\n/).some((l) => {
+    const c = /^a=candidate:\S+ \d+ \S+ \d+ (\S+) (\d+) typ host/i.exec(l);
+    return c !== null && c[1] === m[1] && c[2] === m[2];
+  });
 }
 
 export const webRtcLinkFactory: LinkFactory = { create: (opts) => new WebRtcLink(opts) };

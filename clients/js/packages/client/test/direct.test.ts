@@ -629,7 +629,7 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     cleanup.push(() => a.leave());
     await a.ready;
     await until(() => host.peers.length === 2, "host sees the joiner");
-    expect(created).toBe(2);
+    expect(created).toBeGreaterThanOrEqual(2); // more only if the real second link also hits the race and is offered again
   }, 30000);
 
   it("mistyped code is bad_code at once; nobody listening is direct_unreachable", async () => {
