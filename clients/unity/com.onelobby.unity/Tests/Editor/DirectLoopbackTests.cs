@@ -91,7 +91,8 @@ namespace OneLobby.Unity.Tests
         [UnityTest]
         public IEnumerator RunnerJoinDirectWithOptionsAdoptsTheLobby()
         {
-            const int port = Port + 1;
+            // not Port + 1: GameConsoleServerTests owns 47833
+            const int port = Port + 2;
             var cfg = new OneLobbyConfig("com.onelobby.unitytest", "1", new Uri("ws://127.0.0.1:1/ws"), SyncMode.Raw);
             var hostClient = new LobbyClient(cfg with { DisplayName = "UnityHost" }, new UnityTransport());
             var go = new GameObject("OneLobbyRunnerTest");
@@ -101,27 +102,50 @@ namespace OneLobby.Unity.Tests
             runner.DisplayName = "RunnerJoiner";
             runner.GameId = cfg.GameId;
             Lobby? host = null;
-            void Pump() { if (host != null) host.Pump(); else hostClient.Pump(); }
+            var joining = false;
+            // EditMode never calls the runner's Update, so the test pumps the runner's side too (once its join has made a client)
+            void Pump()
+            {
+                if (host != null) host.Pump(); else hostClient.Pump();
+                if (runner == null) return; // destroyed (Unity null)
+                if (runner.Lobby != null) runner.Lobby.Pump(); else if (joining) runner.Client.Pump();
+            }
             var changes = new List<Lobby?>();
             runner.LobbyChanged += l => changes.Add(l);
+            var clean = false;
 
-            var hostTask = hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = port, MaxPlayers = 2, OpenPort = false, BindAddress = System.Net.IPAddress.Loopback });
-            yield return Await(hostTask, Pump, "host direct");
-            host = hostTask.Result;
+            try
+            {
+                var hostTask = hostClient.HostDirectAsync(new DirectHostOptions { Nostr = new OneLobby.Direct.Nostr.NostrOptions { Enabled = false }, Port = port, MaxPlayers = 2, OpenPort = false, BindAddress = System.Net.IPAddress.Loopback });
+                yield return Await(hostTask, Pump, "host direct");
+                host = hostTask.Result;
 
-            // a TURN entry nobody uses here: the options reach the join without breaking a direct link
-            var turn = new IceServer(new[] { "turn:127.0.0.1:3478" }, "u", "p");
-            var joinTask = runner.JoinDirectAsync("127.0.0.1:" + port, new JoinDirectOptions { IceServers = new[] { turn } });
-            yield return Await(joinTask, Pump, "runner join direct with options");
-            Assert.AreSame(joinTask.Result, runner.Lobby, "the runner adopted the lobby");
-            Assert.AreEqual(1, changes.Count, "LobbyChanged fired once");
-            yield return Await(joinTask.Result.ReadyAsync, Pump, "joiner ready");
+                // a TURN entry nobody uses here: the options reach the join without breaking a direct link
+                var turn = new IceServer(new[] { "turn:127.0.0.1:3478" }, "u", "p");
+                var joinTask = runner.JoinDirectAsync("127.0.0.1:" + port, new JoinDirectOptions { IceServers = new[] { turn } });
+                joining = true;
+                yield return Await(joinTask, Pump, "runner join direct with options");
+                Assert.AreSame(joinTask.Result, runner.Lobby, "the runner adopted the lobby");
+                Assert.AreEqual(1, changes.Count, "LobbyChanged fired once");
+                yield return Await(joinTask.Result.ReadyAsync, Pump, "joiner ready");
 
-            yield return Await(runner.LeaveAsync(), Pump, "runner leave");
-            Assert.IsNull(runner.Lobby);
-            UnityEngine.Object.DestroyImmediate(go);
-            yield return Await(host.LeaveAsync(), Pump, "host leave");
-            yield return Await(hostClient.DisposeAsync().AsTask(), Pump, "dispose");
+                yield return Await(runner.LeaveAsync(), Pump, "runner leave");
+                Assert.IsNull(runner.Lobby);
+                UnityEngine.Object.DestroyImmediate(go);
+                yield return Await(host.LeaveAsync(), Pump, "host leave");
+                yield return Await(hostClient.DisposeAsync().AsTask(), Pump, "dispose");
+                clean = true;
+            }
+            finally
+            {
+                // a failed assert must not leave the host holding the port for the next test
+                if (!clean)
+                {
+                    if (go != null) UnityEngine.Object.DestroyImmediate(go); // OnDestroy drops the runner's client
+                    try { hostClient.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); }
+                    catch (Exception e) { Debug.LogWarning("[OneLobby test] host cleanup: " + e.Message); }
+                }
+            }
         }
     }
 }
