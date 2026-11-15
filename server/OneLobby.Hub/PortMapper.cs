@@ -456,10 +456,14 @@ public sealed class PortMapper : IDisposable
 
     private static int ResultCode(byte[] r) => (r[2] << 8) | r[3];
 
+    /// <summary>A client socket for <paramref name="to"/>: bound to loopback when the peer is (tests, a local gateway), so it never listens on every interface.</summary>
+    private static UdpClient Client(IPEndPoint to) =>
+        IPAddress.IsLoopback(to.Address) ? new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)) : new UdpClient(AddressFamily.InterNetwork);
+
     /// <summary>RFC 6886 s.3.1 retransmission: 250 ms, doubling, 3 tries here (under 2 s). Null when nobody answers.</summary>
     private async Task<byte[]?> NatPmpRequest(IPEndPoint to, byte[] req, int replyLength, CancellationToken ct)
     {
-        using var udp = new UdpClient(AddressFamily.InterNetwork);
+        using var udp = Client(to);
         var wait = 250;
         for (var attempt = 0; attempt < 3; attempt++, wait *= 2)
         {
@@ -558,7 +562,7 @@ public sealed class PortMapper : IDisposable
 
     private async Task NatPmpOnce(byte[] req)
     {
-        using var udp = new UdpClient(AddressFamily.InterNetwork);
+        using var udp = Client(_natPmp!);
         await udp.SendAsync(req, req.Length, _natPmp!).ConfigureAwait(false);
     }
 }

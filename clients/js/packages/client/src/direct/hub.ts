@@ -125,6 +125,17 @@ export function sanitize(s: string | null | undefined, max: number, fallback = "
   return r.length === 0 ? fallback : r;
 }
 
+const PLAYER_ID = /^[0-9a-f]{32}$/;
+const REMOVAL_CODE = /^[a-z][a-z0-9_]{0,31}$/;
+
+/** Constant-time string comparison (lengths are not hidden). */
+function safeEqual(a: string, b: string): boolean {
+  let d = a.length ^ b.length;
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return d === 0;
+}
+
 function normalizeCode(input: unknown): string | null {
   if (typeof input !== "string") return null;
   let out = "";
@@ -153,6 +164,8 @@ export class Session {
   member: Member | null = null;
   pendingIn: HubLobby | null = null;
   pendingMember: Member | null = null;
+  /** `hello.playerId` (spec/room.md s.1), or "" when none or malformed. */
+  playerId = "";
   constructor(
     readonly id: number,
     readonly ip: string,
@@ -203,6 +216,11 @@ class HubLobby {
   pendingClaimPeer = 0;
   pendingClaimEpoch = 0;
   nextPeerId = 1;
+  /** `create.password` ("" = none) and `create.spectators` (extra slots; the lobby holds maxPlayers + spectators). */
+  password = "";
+  spectators = 0;
+  /** Player ids the host banned (`bans`, spec/room.md s.7). */
+  bannedIds = new Set<string>();
   find(peerId: number): Member | undefined {
     return this.members.find((m) => m.peerId === peerId);
   }
@@ -215,7 +233,7 @@ interface IpState {
   sockets: number;
 }
 
-const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name"]);
+const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans"]);
 
 const str = (o: Json, k: string): string | null => (typeof o[k] === "string" ? (o[k] as string) : null);
 const int = (o: Json, k: string): number | null => {
@@ -431,6 +449,7 @@ export class SignalingHub {
       case "host_changed": return this.claimHost(s, msg);
       case "path": return this.pathReport(s, msg);
       case "set_name": return this.setName(s, msg);
+      case "bans": return this.hostBans(s, msg);
       default: return; // unknown types are ignored
     }
   }
@@ -459,6 +478,8 @@ export class SignalingHub {
     s.gameId = gameId;
     s.netVersion = netVersion;
     s.name = sanitize(str(m, "name"), NAME_MAX, "Player");
+    const pid = str(m, "playerId");
+    s.playerId = pid !== null && PLAYER_ID.test(pid) ? pid : "";
     s.helloDone = true;
 
     let resumed: Member | null = null;
@@ -483,7 +504,7 @@ export class SignalingHub {
       ice: this.iceList(s),
       serverTime: this.now(),
       limits: { maxMsg: this.o.maxMessageBytes, maxPlayers: this.o.hardMaxPlayers },
-      features: ["set_name"],
+      features: ["set_name", "room"],
     };
     if (resumed) w.peerId = resumed.peerId;
     this.send(s, w);
@@ -555,6 +576,10 @@ export class SignalingHub {
     if (has(m, "relayOnly") && bool(m, "relayOnly") === null) return this.error(s, "bad_request", "relayOnly must be a boolean", field("relayOnly"));
     const meta = readMeta(m.meta);
     if ("err" in meta) return this.error(s, "bad_request", meta.err, field("meta"));
+    if (has(m, "password") && (str(m, "password") === null || str(m, "password")!.length > 64)) return this.error(s, "bad_request", "password must be a string of at most 64 characters", field("password"));
+    if (has(m, "spectators") && int(m, "spectators") === null) return this.error(s, "bad_request", "spectators must be an integer", field("spectators"));
+    const spectators = int(m, "spectators") ?? 0;
+    if (spectators < 0 || spectators > 250 || maxPlayers + spectators > 250) return this.error(s, "bad_request", "spectators must be 0-250 and maxPlayers + spectators at most 250", field("spectators"));
 
     const code = this.newCode();
     if (code === null) return this.error(s, "server_full", "could not allocate a join code");
@@ -563,7 +588,7 @@ export class SignalingHub {
     Object.assign(lobby, {
       code, gameId: s.gameId, netVersion: s.netVersion, name: sanitize(str(m, "name"), LOBBY_NAME_MAX, `${s.name}'s lobby`),
       visibility: vis, mode, tickRate: tick, lateJoin: bool(m, "lateJoin") ?? false, relayOnly: bool(m, "relayOnly") ?? false,
-      maxPlayers, createdAt: now, ownerIp: s.ip, meta: meta.meta,
+      maxPlayers, createdAt: now, ownerIp: s.ip, meta: meta.meta, password: str(m, "password") ?? "", spectators,
     });
     this.lobbies.set(code, lobby);
     this.createdOnce = true;
@@ -592,12 +617,14 @@ export class SignalingHub {
       lobby = this.lobbies.get(code);
       if (!lobby || lobby.gameId !== s.gameId) return this.error(s, "unknown_code", "no lobby with that code");
     }
-    if (this.o.password !== null && str(m, "password") !== this.o.password) return this.error(s, "bad_password", "wrong password for this lobby");
+    const pw = this.o.password !== null ? this.o.password : lobby.password !== "" ? lobby.password : null;
+    if (pw !== null && !safeEqual(str(m, "password") ?? "", pw)) return this.error(s, "bad_password", "wrong password for this lobby");
     if (lobby.netVersion !== s.netVersion)
       return this.error(s, "version_mismatch", `host is on ${lobby.netVersion}, you are on ${s.netVersion}`, { hostNetVersion: lobby.netVersion, yourNetVersion: s.netVersion });
     if (lobby.kicked.has(s.ip)) return this.error(s, "kicked", "you were removed from this lobby");
+    if (s.playerId && lobby.bannedIds.has(s.playerId)) return this.error(s, "banned", "you are banned from this lobby");
     if (lobby.phase === "in_game" && !lobby.lateJoin) return this.error(s, "in_game", "the game has already started");
-    if (lobby.members.length >= lobby.maxPlayers) return this.error(s, "lobby_full", "lobby is full");
+    if (lobby.members.length >= lobby.maxPlayers + lobby.spectators) return this.error(s, "lobby_full", "lobby is full");
     if (this.members >= this.o.maxPeers) return this.error(s, "server_full", "server is at its peer limit");
 
     if (lobby.visibility === "private") {
@@ -679,6 +706,7 @@ export class SignalingHub {
     const items = page.map((l) => ({
       code: l.code, gameId: l.gameId, netVersion: l.netVersion, name: l.name, hostName: l.find(l.hostId)?.name ?? "",
       players: l.members.length, maxPlayers: l.maxPlayers, phase: l.phase, meta: { ...l.meta }, region: this.o.region, createdAt: l.createdAt,
+      ...(l.password !== "" ? { hasPassword: true } : {}),
     }));
     const reply: Json = { t: "lobbies", items };
     if (offset + page.length < all.length) reply.cursor = String(offset + page.length);
@@ -795,10 +823,13 @@ export class SignalingHub {
     const closeReason = str(m, "closeReason");
     if (has(m, "closeReason") && (closeReason === null || closeReason.length > 120))
       return this.error(s, "bad_request", "closeReason must be a string of at most 120 characters", field("closeReason"));
+    const removalCode = str(m, "code");
+    if (has(m, "code") && (removalCode === null || !REMOVAL_CODE.test(removalCode))) return this.error(s, "bad_request", "code must be lower-case letters, digits and underscores", field("code"));
     const data: Json = {};
     if (ban === false) data.ban = false;
     if (code !== null) data.closeCode = code;
     if (closeReason !== null) data.closeReason = closeReason;
+    if (removalCode !== null) data.code = removalCode;
     if (ban !== false) {
       lobby.kicked.add(target.ip);
       // a Nostr joiner picks its own key, so also ban the address its WebRTC link came from, when the host saw it
@@ -806,6 +837,15 @@ export class SignalingHub {
       if (link && target.ip.startsWith(NOSTR_ADDR)) lobby.kicked.add(link);
     }
     this.removeMember(lobby, target, ban === false ? "disconnected" : "kicked", Object.keys(data).length ? data : undefined);
+  }
+
+  /** Host only: replaces the lobby's banned player ids (spec/room.md s.7). */
+  private hostBans(s: Session, m: Json): void {
+    const lobby = this.requireHost(s);
+    if (!lobby) return;
+    const ids = m.ids;
+    if (!Array.isArray(ids) || ids.length > 256 || !ids.every((x) => typeof x === "string" && PLAYER_ID.test(x))) return this.error(s, "bad_request", "ids must be at most 256 player ids", field("ids"));
+    lobby.bannedIds = new Set(ids as string[]);
   }
 
   private approve(s: Session, m: Json): void {
@@ -820,7 +860,7 @@ export class SignalingHub {
     js.pendingIn = null;
     js.pendingMember = null;
     if (bool(m, "ok") !== true) return this.error(js, "kicked", "the host declined your request", { reason: "denied" });
-    if (lobby.members.length >= lobby.maxPlayers) return this.error(js, "lobby_full", "lobby is full");
+    if (lobby.members.length >= lobby.maxPlayers + lobby.spectators) return this.error(js, "lobby_full", "lobby is full");
     if (lobby.phase === "in_game" && !lobby.lateJoin) return this.error(js, "in_game", "the game has already started");
     this.admit(lobby, js, pm);
   }
@@ -949,7 +989,7 @@ export class SignalingHub {
     return {
       t: "lobby", code: this.o.issueCodes ? l.code : "", gameId: l.gameId, netVersion: l.netVersion, hostId: l.hostId, you: you.peerId,
       mode: l.mode, tickRate: l.tickRate, lateJoin: l.lateJoin, phase: l.phase, meta: { ...l.meta }, peers, resumeToken: you.token,
-      name: l.name, maxPlayers: l.maxPlayers, visibility: l.visibility, relayOnly: l.relayOnly,
+      name: l.name, maxPlayers: l.maxPlayers, visibility: l.visibility, relayOnly: l.relayOnly, spectators: l.spectators,
     };
   }
 

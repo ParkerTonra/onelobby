@@ -815,7 +815,7 @@ public class HubTests
     {
         var (hub, clock) = T.NewHub(o => o.IdleTimeoutMs = long.MaxValue / 4);
         var (h, j, _) = T.Pair(hub);
-        Assert.Equal("set_name", (string)h.Last("welcome")["features"]!.AsArray().Single()!);
+        Assert.Contains("set_name", h.Last("welcome")["features"]!.AsArray().Select(x => (string?)x));
         static string NameOf(JsonObject lobby, int id) =>
             (string)lobby["peers"]!.AsArray().Single(p => (int)p!["peerId"]! == id)!["name"]!;
 

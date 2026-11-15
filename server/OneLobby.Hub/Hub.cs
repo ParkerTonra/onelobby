@@ -22,6 +22,8 @@ public sealed class Hub
     public const int PendingMax = 8;
 
     private static readonly Regex GameIdRx = new("^[A-Za-z0-9._-]{1,64}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PlayerIdRx = new("^[0-9a-f]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex RemovalCodeRx = new("^[a-z][a-z0-9_]{0,31}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly object _gate = new();
     private readonly HubOptions _o;
@@ -169,7 +171,7 @@ public sealed class Hub
 
     private static readonly HashSet<string> KnownTypes = new(StringComparer.Ordinal)
     {
-        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name",
+        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans",
     };
 
     public void Receive(Session s, string text)
@@ -215,6 +217,7 @@ public sealed class Hub
                 case "host_changed": ClaimHost(s, msg); break;
                 case "path": PathReport(s, msg); break;
                 case "set_name": SetName(s, msg); break;
+                case "bans": HostBans(s, msg); break;
                 default: break; // unknown types are ignored
             }
         }
@@ -246,6 +249,7 @@ public sealed class Hub
         }
         s.GameId = gameId; s.NetVersion = netVersion;
         s.Name = Text.Sanitize(Str(m, "name"), NameMax, "Player");
+        s.PlayerId = Str(m, "playerId") is { } pid && PlayerIdRx.IsMatch(pid) ? pid : "";
         s.HelloDone = true;
 
         Member? resumed = null; Lobby? rl = null;
@@ -271,7 +275,7 @@ public sealed class Hub
             ["ice"] = IceList(s),
             ["serverTime"] = _clock.NowMs,
             ["limits"] = new JsonObject { ["maxMsg"] = _o.MaxMessageBytes, ["maxPlayers"] = _o.HardMaxPlayers },
-            ["features"] = new JsonArray("set_name"),
+            ["features"] = new JsonArray("set_name", "room"),
         };
         if (resumed is not null) w["peerId"] = resumed.PeerId;
         Send(s, w);
@@ -359,6 +363,10 @@ public sealed class Hub
         if (m["lateJoin"] is not null && Bool(m, "lateJoin") is null) { Error(s, "bad_request", "lateJoin must be a boolean", Field("lateJoin")); return; }
         if (m["relayOnly"] is not null && Bool(m, "relayOnly") is null) { Error(s, "bad_request", "relayOnly must be a boolean", Field("relayOnly")); return; }
         if (!ReadMeta(m["meta"], out var meta, out string? metaErr)) { Error(s, "bad_request", metaErr!, Field("meta")); return; }
+        if (m["password"] is not null && (Str(m, "password") is not { } pw0 || pw0.Length > 64)) { Error(s, "bad_request", "password must be a string of at most 64 characters", Field("password")); return; }
+        if (m["spectators"] is not null && Int(m, "spectators") is null) { Error(s, "bad_request", "spectators must be an integer", Field("spectators")); return; }
+        int spectators = Int(m, "spectators") ?? 0;
+        if (spectators < 0 || spectators > 250 || maxPlayers + spectators > 250) { Error(s, "bad_request", "spectators must be 0-250 and maxPlayers + spectators at most 250", Field("spectators")); return; }
 
         string? code = NewCode();
         if (code is null) { Error(s, "server_full", "could not allocate a join code"); return; }
@@ -370,6 +378,7 @@ public sealed class Hub
             Visibility = vis, Mode = mode, TickRate = tick, LateJoin = Bool(m, "lateJoin") ?? false,
             RelayOnly = Bool(m, "relayOnly") ?? false,
             MaxPlayers = maxPlayers, CreatedAt = now, OwnerIp = s.Ip, Meta = meta!,
+            Password = Str(m, "password") ?? "", Spectators = spectators,
         };
         _lobbies[code] = lobby;
         _createdOnce = true;
@@ -402,7 +411,8 @@ public sealed class Hub
             if (!_lobbies.TryGetValue(code, out lobby) || lobby.GameId != s.GameId)
             { Error(s, "unknown_code", "no lobby with that code"); return; }
         }
-        if (_o.Password is { } pw && !string.Equals(Str(m, "password"), pw, StringComparison.Ordinal))
+        string? lobbyPw = _o.Password ?? (lobby.Password.Length > 0 ? lobby.Password : null);
+        if (lobbyPw is not null && !SafeEqual(Str(m, "password") ?? "", lobbyPw))
         { Error(s, "bad_password", "wrong password for this lobby"); return; }
         if (lobby.NetVersion != s.NetVersion)
         {
@@ -411,8 +421,9 @@ public sealed class Hub
             return;
         }
         if (lobby.Kicked.Contains(s.Ip)) { Error(s, "kicked", "you were removed from this lobby"); return; }
+        if (s.PlayerId.Length > 0 && lobby.BannedIds.Contains(s.PlayerId)) { Error(s, "banned", "you are banned from this lobby"); return; }
         if (lobby.Phase == "in_game" && !lobby.LateJoin) { Error(s, "in_game", "the game has already started"); return; }
-        if (lobby.Members.Count >= lobby.MaxPlayers) { Error(s, "lobby_full", "lobby is full"); return; }
+        if (lobby.Members.Count >= lobby.MaxPlayers + lobby.Spectators) { Error(s, "lobby_full", "lobby is full"); return; }
         if (_members >= _o.MaxPeers) { Error(s, "server_full", "server is at its peer limit"); return; }
 
         if (lobby.Visibility == "private")
@@ -488,12 +499,14 @@ public sealed class Hub
         foreach (var l in page)
         {
             var host = l.Find(l.HostId);
-            items.Add(new JsonObject
+            var entry = new JsonObject
             {
                 ["code"] = l.Code, ["gameId"] = l.GameId, ["netVersion"] = l.NetVersion, ["name"] = l.Name,
                 ["hostName"] = host?.Name ?? "", ["players"] = l.Members.Count, ["maxPlayers"] = l.MaxPlayers,
                 ["phase"] = l.Phase, ["meta"] = MetaObj(l), ["region"] = _o.Region, ["createdAt"] = l.CreatedAt,
-            });
+            };
+            if (l.Password.Length > 0) entry["hasPassword"] = true;
+            items.Add(entry);
         }
         var reply = new JsonObject { ["t"] = "lobbies", ["items"] = items };
         if (offset + page.Count < all.Count) reply["cursor"] = (offset + page.Count).ToString(CultureInfo.InvariantCulture);
@@ -600,10 +613,14 @@ public sealed class Hub
         string? closeReason = Str(m, "closeReason");
         if (m["closeReason"] is not null && (closeReason is null || closeReason.Length > 120))
         { Error(s, "bad_request", "closeReason must be a string of at most 120 characters", Field("closeReason")); return; }
+        string? removalCode = Str(m, "code");
+        if (m["code"] is not null && (removalCode is null || !RemovalCodeRx.IsMatch(removalCode)))
+        { Error(s, "bad_request", "code must be lower-case letters, digits and underscores", Field("code")); return; }
         var data = new JsonObject();
         if (ban == false) data["ban"] = false;
         if (code is not null) data["closeCode"] = code;
         if (closeReason is not null) data["closeReason"] = closeReason;
+        if (removalCode is not null) data["code"] = removalCode;
         if (ban != false)
         {
             lobby.Kicked.Add(target.Ip);
@@ -630,6 +647,25 @@ public sealed class Hub
         }
     }
 
+    /// <summary>Host only: replaces the lobby's banned player ids (spec/room.md s.7).</summary>
+    private void HostBans(Session s, JsonObject m)
+    {
+        if (!RequireHost(s, out var lobby)) return;
+        if (m["ids"] is not JsonArray ids || ids.Count > 256
+            || ids.Any(x => x is not JsonValue v || !v.TryGetValue<string>(out var id) || !PlayerIdRx.IsMatch(id)))
+        { Error(s, "bad_request", "ids must be at most 256 player ids", Field("ids")); return; }
+        lobby.BannedIds = new HashSet<string>(ids.Select(x => x!.GetValue<string>()), StringComparer.Ordinal);
+    }
+
+    /// <summary>Constant-time string comparison (lengths are not hidden).</summary>
+    private static bool SafeEqual(string a, string b)
+    {
+        int d = a.Length ^ b.Length;
+        int n = Math.Max(a.Length, b.Length);
+        for (int i = 0; i < n; i++) d |= (i < a.Length ? a[i] : 0) ^ (i < b.Length ? b[i] : 0);
+        return d == 0;
+    }
+
     private void Approve(Session s, JsonObject m)
     {
         if (!RequireHost(s, out var lobby)) return;
@@ -644,7 +680,7 @@ public sealed class Hub
             Error(js, "kicked", "the host declined your request", new JsonObject { ["reason"] = "denied" });
             return;
         }
-        if (lobby.Members.Count >= lobby.MaxPlayers) { Error(js, "lobby_full", "lobby is full"); return; }
+        if (lobby.Members.Count >= lobby.MaxPlayers + lobby.Spectators) { Error(js, "lobby_full", "lobby is full"); return; }
         if (lobby.Phase == "in_game" && !lobby.LateJoin) { Error(js, "in_game", "the game has already started"); return; }
         Admit(lobby, js, pm);
     }
@@ -777,7 +813,7 @@ public sealed class Hub
             ["hostId"] = l.HostId, ["you"] = you.PeerId, ["mode"] = l.Mode, ["tickRate"] = l.TickRate,
             ["lateJoin"] = l.LateJoin, ["phase"] = l.Phase, ["meta"] = MetaObj(l), ["peers"] = peers,
             ["resumeToken"] = you.Token, ["name"] = l.Name, ["maxPlayers"] = l.MaxPlayers,
-            ["visibility"] = l.Visibility, ["relayOnly"] = l.RelayOnly,
+            ["visibility"] = l.Visibility, ["relayOnly"] = l.RelayOnly, ["spectators"] = l.Spectators,
         };
     }
 

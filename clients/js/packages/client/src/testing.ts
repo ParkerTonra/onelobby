@@ -241,6 +241,10 @@ interface MLobby {
   next: number;
   kicked: Set<number>;
   reserved: Map<string, MPeer>;
+  /** Room feature: `create.password`, `create.spectators`, ids from `bans`. */
+  password: string;
+  spectators: number;
+  bannedIds: Set<string>;
 }
 
 /** Minimal onelobby-server (lk1) for client tests. Not a conformance target: stream A owns the real server. */
@@ -251,8 +255,12 @@ export class MemoryServer {
   readonly socketFactory: SocketFactory = () => this.connect();
   private n = 0;
   iceServers = [{ urls: ["stun:stun.example:3478"] }];
-  /** What `welcome.features` lists; `[]` plays an older hub that cannot rename. */
+  /** What `welcome.features` lists; `[]` plays an older hub that cannot rename, `["set_name", "room"]` one with the room feature (passwords, spectator slots, bans, kick codes). */
   features: string[] = ["set_name"];
+  /** True when the room feature is listed. */
+  get roomFeature(): boolean {
+    return this.features.includes("room");
+  }
   /** Log of every client message, for assertions. */
   readonly received: Json[] = [];
 
@@ -335,6 +343,7 @@ export class MemorySocket implements SocketLike {
       name: l.name,
       maxPlayers: l.maxPlayers,
       visibility: l.visibility,
+      ...(this.srv.roomFeature ? { spectators: l.spectators } : {}),
     };
   }
 
@@ -398,6 +407,9 @@ export class MemorySocket implements SocketLike {
           code, gameId, netVersion, name: String(m.name), hostId: 1, epoch: 0, mode: String(m.mode), tickRate: Number(m.tickRate),
           lateJoin: !!m.lateJoin, phase: "lobby", meta: (m.meta as Record<string, string>) ?? {}, visibility: String(m.visibility),
           maxPlayers: Number(m.maxPlayers), peers: new Map([[1, p]]), next: 2, kicked: new Set(), reserved: new Map(),
+          password: this.srv.roomFeature && typeof m.password === "string" ? m.password : "",
+          spectators: this.srv.roomFeature && typeof m.spectators === "number" ? m.spectators : 0,
+          bannedIds: new Set(),
         };
         this.srv.lobbies.set(code, l);
         this.lobby = l;
@@ -410,8 +422,11 @@ export class MemorySocket implements SocketLike {
         const l = this.srv.lobbies.get(code);
         if (!l || l.gameId !== gameId) return this.err("unknown_code");
         if (l.netVersion !== netVersion) return this.err("version_mismatch", "", { hostNetVersion: l.netVersion, yourNetVersion: netVersion });
+        if (l.password && String(m.password ?? "") !== l.password) return this.err("bad_password");
+        const pid = this.hello.playerId;
+        if (typeof pid === "string" && l.bannedIds.has(pid)) return this.err("banned");
         if (l.phase === "in_game" && !l.lateJoin) return this.err("in_game");
-        if (l.peers.size >= l.maxPlayers) return this.err("lobby_full");
+        if (l.peers.size >= l.maxPlayers + l.spectators) return this.err("lobby_full");
         const id = l.next++;
         const p: MPeer = { peerId: id, name: String(this.hello.name), joinedAt: Date.now(), sock: this, token: `tok-${code}-${id}` };
         l.peers.set(id, p);
@@ -470,10 +485,18 @@ export class MemorySocket implements SocketLike {
         if (!ban) data.ban = false;
         if (typeof m.closeCode === "number") data.closeCode = m.closeCode;
         if (typeof m.closeReason === "string") data.closeReason = m.closeReason;
+        if (this.srv.roomFeature && typeof m.code === "string") data.code = m.code;
         if (ban) l.kicked.add(victim.peerId);
         l.peers.delete(victim.peerId);
         victim.sock?.push({ t: "error", code: "kicked", msg: "kicked", ...(Object.keys(data).length ? { data } : {}) });
         this.broadcast(l, { t: "peer_left", peerId: victim.peerId, reason: ban ? "kicked" : "disconnected" });
+        return;
+      }
+      case "bans": {
+        const l = this.lobby;
+        if (!l || !this.peer || !this.srv.roomFeature) return;
+        if (l.hostId !== this.peer.peerId) return this.err("not_host");
+        l.bannedIds = new Set(Array.isArray(m.ids) ? (m.ids as unknown[]).filter((x): x is string => typeof x === "string") : []);
         return;
       }
       case "host_changed": {

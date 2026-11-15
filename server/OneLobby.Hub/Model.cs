@@ -18,6 +18,8 @@ public sealed class Session
     public string GameId = "";
     public string NetVersion = "";
     public string Name = "";
+    /// <summary><c>hello.playerId</c> (spec/room.md s.1): 32 lower-case hex characters, or "" when none or malformed.</summary>
+    public string PlayerId = "";
     public Lobby? Lobby;
     public Member? Member;
     /// <summary>Private lobby this session has asked to join and awaits approval for.</summary>
@@ -66,6 +68,12 @@ public sealed class Lobby
     /// <summary>Highest valid host_changed claim a member made while the host was still connected; applied when the host goes.</summary>
     public int PendingClaimPeer, PendingClaimEpoch;
     public int NextPeerId = 1;
+    /// <summary><c>create.password</c> ("" = none).</summary>
+    public string Password = "";
+    /// <summary><c>create.spectators</c>: extra slots; the lobby holds <see cref="MaxPlayers"/> + this many members.</summary>
+    public int Spectators;
+    /// <summary>Player ids the host banned (<c>bans</c>, spec/room.md s.7).</summary>
+    public HashSet<string> BannedIds = new(StringComparer.Ordinal);
 
     public Member? Find(int peerId)
     {
