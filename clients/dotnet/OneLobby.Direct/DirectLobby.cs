@@ -34,6 +34,8 @@ namespace OneLobby.Direct
         public IReadOnlyDictionary<string, string>? Meta { get; set; }
         /// <summary>Per-joiner cap on incoming raw messages (<see cref="LobbyOptions.RateLimit"/>); null = none.</summary>
         public RateLimit? RateLimit { get; set; }
+        /// <summary>Room layer settings (ready, countdown, spectators, per-player data...); the blueprint's <c>room</c> fills the defaults. Spectators ride on extra hub slots.</summary>
+        public RoomOptions? Room { get; set; }
         /// <summary>
         /// Ask the home router to forward TCP + UDP P (UPnP, then NAT-PMP) so the join code works from the internet
         /// (docs/design/direct-ip.md s.2a). Show it as the host-menu toggle "Open port automatically". Default on, except with
@@ -86,6 +88,10 @@ namespace OneLobby.Direct
     {
         /// <summary>The host's password, if it set one; a wrong one fails with <c>bad_password</c>.</summary>
         public string? Password { get; set; }
+        /// <summary>Join as a spectator instead of a player (when the host allows spectators).</summary>
+        public RoomRole Role { get; set; } = RoomRole.Player;
+        /// <summary>Your starting per-player data (colour, avatar, team, game keys); the host validates it (spec/room.md s.4.2).</summary>
+        public IReadOnlyDictionary<string, string>? Data { get; set; }
         /// <summary>Relays and STUN servers for a version 1 code; null = the blueprint's relays, else the defaults.</summary>
         public NostrOptions? Nostr { get; set; }
         /// <summary>
@@ -172,11 +178,13 @@ namespace OneLobby.Direct
                 return Task.FromException<Lobby>(new OneLobbyException("bad_address",
                     "PublicAddress must be an IPv4 address like 203.0.113.7, got \"" + manual + "\""));
             var nostr = HostNostr(client, o.Nostr);
+            // spectators ride on the hub's capacity; the room layer splits it (spec/room.md s.4.6)
+            var capacity = o.MaxPlayers + Math.Max(0, Math.Min(64, client.RoomDefaults.Merge(o.Room).Spectators ?? 0));
             DirectHubHost? hub = null;
             bool anyBusy = false, anyReserved = false;
             for (var p = port; hub == null; p++)
             {
-                try { hub = new DirectHubHost(p, HubFor(o, nostr), allowedOrigins: o.AllowedOrigins, bindAddress: o.BindAddress); }
+                try { hub = new DirectHubHost(p, HubFor(o, nostr, capacity), allowedOrigins: o.AllowedOrigins, bindAddress: o.BindAddress); }
                 catch (SocketException e)
                 {
                     // AccessDenied: Windows reserved the port (Hyper-V, WSL, Docker exclusion ranges); try the next one too
@@ -200,7 +208,7 @@ namespace OneLobby.Direct
                     ulong room = 0;
                     foreach (var b in roomBytes) room = (room << 8) | b;
                     nostrCode = OneLobby.JoinCode.EncodeRoom(room);
-                    bridge = new NostrHostBridge(hub.Hub, OneLobby.JoinCode.Normalize(nostrCode)!, nostr, o.MaxPlayers);
+                    bridge = new NostrHostBridge(hub.Hub, OneLobby.JoinCode.Normalize(nostrCode)!, nostr, capacity);
                     hub.Own(bridge);
                 }
                 client.UseDirect(inner => transport = new DirectHostTransport(inner, hub, nostr.Enabled), new Uri("onelobby-direct://host/"), hub);
@@ -218,7 +226,7 @@ namespace OneLobby.Direct
             Task<PortMapResult?> mapping = ask
                 ? MapAsync(hub, mapOptions)
                 : Task.FromResult<PortMapResult?>(null);
-            var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit }, ct);
+            var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit, Password = o.Password, Room = o.Room }, ct);
             return FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode);
         }
 
@@ -270,9 +278,9 @@ namespace OneLobby.Direct
         }
 
         /// <summary>The hub's settings: direct IP (no codes, no list), plus the STUN list in <c>welcome.ice</c> when Nostr joiners are welcome.</summary>
-        internal static HubOptions HubFor(DirectHostOptions o, NostrOptions nostr)
+        internal static HubOptions HubFor(DirectHostOptions o, NostrOptions nostr, int? capacity = null)
         {
-            var ho = HubOptions.ForDirect(o.MaxPlayers, o.Password);
+            var ho = HubOptions.ForDirect(capacity ?? o.MaxPlayers, o.Password);
             if (nostr.Enabled) ho.StunUrls = new List<string>(nostr.EffectiveStun);
             if (o.IceServers != null)
                 foreach (var s in o.IceServers)
@@ -473,7 +481,7 @@ namespace OneLobby.Direct
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (!TryUseDirect(client, address, options.Nostr, out var code, out var fail, options.IceServers)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.JoinSingleLobbyAsync(options.Password, ct), code);
+            return WithJoinCode(client.JoinSingleLobbyAsync(options.Password, new RoomJoinOptions { Role = options.Role, Data = options.Data }, ct), code);
         }
 
         /// <summary>As <see cref="RejoinDirectAsync(LobbyClient, string, string, CancellationToken)"/>, with <see cref="JoinDirectOptions"/> (its Password is not used).</summary>

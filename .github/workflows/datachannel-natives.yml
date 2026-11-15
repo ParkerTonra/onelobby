@@ -32,6 +32,7 @@ jobs:
         shell: pwsh
         run: clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1 -WorkDir "$env:RUNNER_TEMP/ldc"
       - name: Live WebRTC test (two peers through an in-process OneLobby.Server)
+        env: { ONELOBBY_TEST_ANY_INTERFACE: "1" }   # the few tests that listen on every interface run here (a desktop skips them)
         run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests
       - uses: actions/upload-artifact@v4
         with: { name: native-win-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/win-x64/native/ }
@@ -46,7 +47,7 @@ jobs:
       - name: Build libdatachannel.so
         run: TARGET=linux-x64 bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
       - name: Live WebRTC test
-        env: { ONELOBBY_LIVE_REPEAT: "${{ inputs.live_repeat || 1 }}" }
+        env: { ONELOBBY_LIVE_REPEAT: "${{ inputs.live_repeat || 1 }}", ONELOBBY_TEST_ANY_INTERFACE: "1" }
         run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests --logger "console;verbosity=detailed"
       - uses: actions/upload-artifact@v4
         with: { name: native-linux-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/linux-x64/native/ }
@@ -62,6 +63,7 @@ jobs:
         run: TARGET=osx bash clients/dotnet/OneLobby.DataChannel/native/build-posix.sh
       - run: lipo -info clients/dotnet/OneLobby.DataChannel/runtimes/osx/native/libdatachannel.dylib
       - name: Live WebRTC test
+        env: { ONELOBBY_TEST_ANY_INTERFACE: "1" }
         run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests
       - uses: actions/upload-artifact@v4
         with: { name: native-osx, path: clients/dotnet/OneLobby.DataChannel/runtimes/osx/native/ }

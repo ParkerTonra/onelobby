@@ -16,6 +16,7 @@ using OneLobby.Server;
 //                                       0 after a joiner says "bye" (or 1 after 120 s with nobody).
 //   join-direct <code|address> [pw]     joins by join code (6B01-RGFE-P2B) or address, prints the selected ICE pair, sends "hello direct" (reliable) and
 //                                       "fast direct" (fast, repeated), waits for both echoes, prints PASS/FAIL, says bye.
+//     --loopback                        (both) every socket on 127.0.0.1: no firewall prompt, the host's code is 127.0.0.1:port.
 //     --no-upnp                         (host) do not ask the router; the code is then a same-network code.
 //     --wait=<s>                        (host) how long to wait for a joiner (default 120).
 //     --nostr-relays=<url,url>          (host and join) Nostr relays instead of the default public ones (integration/nostr-interop.mjs
@@ -27,7 +28,7 @@ using OneLobby.Server;
 // should be the typed public address.
 internal static class DirectSmoke
 {
-    public static int Run(string[] args)
+    public static int Run(string[] args, bool loopback = false)
     {
         var onlyTyped = args.Contains("--only-typed");
         var waitS = int.Parse(args.FirstOrDefault(a => a.StartsWith("--wait=", StringComparison.Ordinal))?.Substring(7) ?? "120");
@@ -45,7 +46,7 @@ internal static class DirectSmoke
             while (!done()) { pump(); Thread.Sleep(2); if (sw.ElapsedMilliseconds > until) return false; }
             return true;
         }
-        var transport = new DataChannelTransport();
+        var transport = new DataChannelTransport { BindAddress = loopback ? "127.0.0.1" : null };
         var cfg = new OneLobbyConfig("com.onelobby.directsmoke", "1", new Uri("ws://unused.invalid/"), SyncMode.Raw,
             DisplayName: Environment.MachineName + " " + args[0]);
         var filter = onlyTyped ? new OnlyTypedTransport(transport) : null;
@@ -62,6 +63,7 @@ internal static class DirectSmoke
                 var port = args.Length > 1 ? int.Parse(args[1]) : DirectLobby.DefaultPort;
                 var t = client.HostDirectAsync(new DirectHostOptions
                 {
+                    BindAddress = loopback ? System.Net.IPAddress.Loopback : null, PublicAddress = loopback ? "127.0.0.1" : null,
                     Port = port, Password = args.Length > 2 && args[2] != "-" ? args[2] : null, MaxPlayers = 8, OpenPort = !args.Contains("--no-upnp"), Nostr = nostr,
                     PortMapping = new PortMapperOptions { Description = "OneLobby " + cfg.GameId, Log = Say },
                 });

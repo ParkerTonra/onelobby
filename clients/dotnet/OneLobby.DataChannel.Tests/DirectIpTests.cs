@@ -541,7 +541,9 @@ public sealed class DirectIpTests
     [Fact]
     public void JoinByTheSameNetworkCode()
     {
-        // Exception to the loopback-only rule: the code names this machine's LAN address, so this host listens on every interface.
+        // Exception to the loopback-only rule: the code names this machine's LAN address, so this host listens on every interface
+        // (Windows prompts for the firewall): it runs only with ONELOBBY_TEST_ANY_INTERFACE=1, as in CI.
+        if (Environment.GetEnvironmentVariable("ONELOBBY_TEST_ANY_INTERFACE") != "1") return;
         var port = FreePort();
         var hostClient = new LobbyClient(Cfg with { DisplayName = "Host" }, new DataChannelTransport());
         var joinClient = new LobbyClient(Cfg with { DisplayName = "Ann" }, new DataChannelTransport());

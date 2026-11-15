@@ -72,8 +72,9 @@ public sealed class LiveWebRtcTests : IAsyncLifetime
     {
         NativeLib.Require();
         var cfg = new OneLobbyConfig("com.onelobby.dctest", "1", new Uri(_ws), SyncMode.Raw);
-        var hostClient = new LobbyClient(cfg with { DisplayName = "Host" }, new DataChannelTransport());
-        var joinClient = new LobbyClient(cfg with { DisplayName = "Joiner" }, new DataChannelTransport());
+        // every socket on 127.0.0.1: the signaling server above and both peers' ICE (no Windows firewall prompt on a desktop)
+        var hostClient = new LobbyClient(cfg with { DisplayName = "Host" }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        var joinClient = new LobbyClient(cfg with { DisplayName = "Joiner" }, new DataChannelTransport { BindAddress = "127.0.0.1" });
         Lobby? host = null, joiner = null;
         void Pump()
         {
