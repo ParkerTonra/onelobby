@@ -1,0 +1,23 @@
+{
+  "desc": "What a player pastes into a 'my TURN relay' settings field -> one ice_servers entry. Format: '<url> <username> <credential>' split on whitespace (spaces, tabs, newlines), or a JSON object {urls, username, credential}. turn:/turns: need both username and credential; stun:/stuns: take none. Scheme is case-insensitive, text is trimmed. 'ok' cases give the expected entry (urls is always a list; username/credential absent when not given); 'error' cases only need to fail (the message is each client's own). All credentials here are fakes.",
+  "cases": [
+    { "input": "turn:relay.example.com:3478 alice s3cret", "ok": { "urls": ["turn:relay.example.com:3478"], "username": "alice", "credential": "s3cret" } },
+    { "input": "  turn:relay.example.com:3478\n alice\n\ts3cret  \n", "ok": { "urls": ["turn:relay.example.com:3478"], "username": "alice", "credential": "s3cret" } },
+    { "input": "TURNS:relay.example.com:443 alice s3cret", "ok": { "urls": ["TURNS:relay.example.com:443"], "username": "alice", "credential": "s3cret" } },
+    { "input": "turn:relay.example.com:3478?transport=udp 1761267600:p1 c2VjcmV0", "ok": { "urls": ["turn:relay.example.com:3478?transport=udp"], "username": "1761267600:p1", "credential": "c2VjcmV0" } },
+    { "input": "stun:stun.example.com:3478", "ok": { "urls": ["stun:stun.example.com:3478"] } },
+    { "input": "{\"urls\":\"turn:relay.example.com:3478\",\"username\":\"alice\",\"credential\":\"s3cret\"}", "ok": { "urls": ["turn:relay.example.com:3478"], "username": "alice", "credential": "s3cret" } },
+    { "input": "{ \"urls\": [\"turn:a.example.com:3478\", \"turns:a.example.com:443\"], \"username\": \"alice\", \"credential\": \"s3cret\" }", "ok": { "urls": ["turn:a.example.com:3478", "turns:a.example.com:443"], "username": "alice", "credential": "s3cret" } },
+    { "input": "", "error": true },
+    { "input": "   \n ", "error": true },
+    { "input": "turn:relay.example.com:3478", "error": true },
+    { "input": "turn:relay.example.com:3478 alice", "error": true },
+    { "input": "turn:relay.example.com:3478 alice s3cret extra", "error": true },
+    { "input": "relay.example.com:3478 alice s3cret", "error": true },
+    { "input": "http://relay.example.com alice s3cret", "error": true },
+    { "input": "turn: alice s3cret", "error": true },
+    { "input": "{\"urls\":\"turn:relay.example.com:3478\",\"username\":\"alice\"}", "error": true },
+    { "input": "{\"username\":\"alice\",\"credential\":\"s3cret\"}", "error": true },
+    { "input": "{not json", "error": true }
+  ]
+}

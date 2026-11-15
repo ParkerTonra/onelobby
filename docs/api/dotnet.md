@@ -529,6 +529,10 @@ public static class TurnLogin
     public static (string Username, string Credential) Mint(string secret, string userId, long ttlSeconds, long nowSeconds);
     /// base64(HMAC-SHA1(secret, username)), both as UTF-8.
     public static string Credential(string secret, string username);
+    /// Turn what a player pastes into a "my TURN relay" settings field into one ice server entry. Format: the URL, the username, the credential, split on any whitespace (turn:relay.example.com:3478 alice s3cret), or a JSON object {"urls": ..., "username": ..., "credential": ...}. turn:/turns: need both username and credential; stun:/stuns: need none. Throws FormatException with a message fit to show the player. Vectors: spec/vectors/turn-paste.json. Add the result after the host's entries in IceServers; never commit what the player typed.
+    public static IceServer Parse(string? text);
+    /// As Parse, without the exception: false and a message in error.
+    public static bool TryParse(string? text, out IceServer? server, out string? error);
 ```
 
 ## OneLobby.Core/Voice.cs

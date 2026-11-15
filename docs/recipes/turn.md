@@ -164,7 +164,53 @@ failure as "no TURN": the game still works for the players who do not need the r
 A static secret inside the client (`OneLobbyTurn.login`, `turnLogin`, `TurnLogin.Mint`) is fine only for private
 playtests among people you trust, or against a server with a spend cap. Rotate the secret afterwards.
 
-## 5. Troubleshooting
+## 5. Let players set their own relay
+
+A game can offer a settings field where a player pastes a TURN relay they have (a friend runs coturn, or the player has a
+hosted login). The kit parses it, so the game writes no parsing of its own. One format, the same in every client:
+
+```
+turn:relay.example.com:3478 alice s3cret
+```
+
+The URL, the username, the credential, separated by any whitespace (spaces, tabs or newlines, so a multi-line text box
+works). `turn:` and `turns:` need both username and credential; a `stun:` or `stuns:` URL alone is fine. A JSON object
+`{"urls": "turn:...", "username": "...", "credential": "..."}` (`urls` a string or a list) is accepted too. The credential
+cannot contain spaces. Anything else is a validation error with a message you can show the player. Shared test inputs:
+`spec/vectors/turn-paste.json`.
+
+| Client | Parse | Result |
+|---|---|---|
+| JavaScript | `parseTurnLine(text)` | an `IceServer`; throws `Error` |
+| C# | `TurnLogin.Parse(text)` / `TurnLogin.TryParse(text, out server, out error)` | an `IceServer`; `Parse` throws `FormatException` |
+| GDScript | `OneLobbyTurn.parse_line(text)` | `{ok, server, error, warnings}` |
+
+**How it combines.** The player's entry is added to the ICE list, never a replacement. A joiner's `iceServers` /
+`IceServers` / `ice_servers` is appended after the list the host's `welcome` gives (host entries first). A host's own entries go
+in `welcome.ice` for every joiner and the host uses them too. So a player who sets a relay and joins a host with its own
+relay has both; a player who hosts shares theirs with everyone who joins. If a player only wants to protect themselves,
+set it as a joiner entry and leave host entries to the game.
+
+**Where to keep it.** In the game's per-player settings file (or a settings field), never in the project and never
+committed. The credential is the player's own; do not log it or send it anywhere but into the ICE list.
+
+```ts compile file=player-turn.ts
+import { parseTurnLine, type IceServer } from "onelobby";
+
+// `text` is the settings field; show the message when it throws
+export function playerRelay(text: string): IceServer[] {
+  if (text.trim() === "") return [];
+  return [parseTurnLine(text)];
+}
+```
+
+GDScript: `var r := OneLobbyTurn.parse_line(field.text)`; if `r.ok`, pass `{"ice_servers": [r.server]}` to `host_direct` or
+`join_direct`, otherwise show `r.error`. Godot reaches TURN over UDP only (libjuice), so for a `turns:` URL or a
+`?transport=tcp` URL `parse_line` still succeeds but returns a message in `r.warnings` ("... Godot reaches TURN over UDP
+only"); show it, since that entry will be skipped. C#: `var ok = TurnLogin.TryParse(text, out var server, out var error);`
+then `IceServers = new[] { server }`.
+
+## 6. Troubleshooting
 
 - `ice_failed`, "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can
   also port-forward." No TURN entry was configured. Add one (section 2), or have the host port-forward its UDP port.

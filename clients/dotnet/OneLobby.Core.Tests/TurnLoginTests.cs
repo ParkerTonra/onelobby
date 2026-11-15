@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.Json;
 using Xunit;
 
@@ -33,6 +34,29 @@ namespace OneLobby.Tests
             Assert.Equal("160:ab", TurnLogin.Mint("s", "a:b", 60, 100).Username);
             var (u, _) = TurnLogin.Mint("s", "p", TimeSpan.FromMinutes(1));
             Assert.True(long.Parse(u.Split(':')[0]) > DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        }
+
+        [Fact]
+        public void Parse_matches_the_paste_vectors()
+        {
+            using var doc = Spec.Load("vectors/turn-paste.json");
+            foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
+            {
+                var input = c.GetProperty("input").GetString()!;
+                var ok = TurnLogin.TryParse(input, out var s, out var err);
+                if (c.TryGetProperty("error", out _))
+                {
+                    Assert.False(ok, input);
+                    Assert.False(string.IsNullOrEmpty(err));
+                    Assert.Throws<FormatException>(() => TurnLogin.Parse(input));
+                    continue;
+                }
+                Assert.True(ok, input + " -> " + err);
+                var e = c.GetProperty("ok");
+                Assert.Equal(e.GetProperty("urls").EnumerateArray().Select(x => x.GetString()), s!.Urls);
+                Assert.Equal(e.TryGetProperty("username", out var u) ? u.GetString() : null, s.Username);
+                Assert.Equal(e.TryGetProperty("credential", out var cr) ? cr.GetString() : null, s.Credential);
+            }
         }
     }
 }

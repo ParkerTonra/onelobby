@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SignalingHub, directHubOptions } from "../src/direct/hub.js";
-import { turnCredential, turnLogin } from "../src/turn.js";
+import { parseTurnLine, turnCredential, turnLogin } from "../src/turn.js";
 import { WebRtcLink, isRelayCandidate } from "../src/webrtc.js";
 import { hasTurn } from "../src/transport.js";
 import { OneLobby } from "../src/onelobby.js";
@@ -22,6 +22,15 @@ describe("TURN logins (spec/vectors/turn-rest.json)", () => {
     const l = turnLogin("s", "p", 60);
     expect(Number(l.username.split(":")[0])).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
+});
+
+describe("parseTurnLine (spec/vectors/turn-paste.json)", () => {
+  for (const c of specJson("vectors/turn-paste.json").cases) {
+    it(JSON.stringify(c.input), () => {
+      if (c.error) expect(() => parseTurnLine(c.input)).toThrow();
+      else expect(parseTurnLine(c.input)).toEqual(c.ok);
+    });
+  }
 });
 
 describe("Direct hub welcome.ice", () => {

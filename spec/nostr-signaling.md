@@ -93,7 +93,7 @@ extra remote candidate. The host still pins its peer links to the direct UDP por
 (`urls` a string or a list; same shape as `welcome.ice`). The host's embedded hub puts them in `welcome.ice` after the STUN
 entry (when there is one), unchanged, so every joiner gets them whatever its client version, over IP and over Nostr. A
 joiner's own `ice_servers` option is appended to the list the host's `welcome` gives; the host sees only its own list. A
-TURN entry makes the link's relay-only retry available as in lobby-server mode. An IP-code joiner (no STUN) uses the TURN
+A player-pasted relay (settings field) is parsed by each client's `parseTurnLine` / `TurnLogin.Parse` / `OneLobbyTurn.parse_line` into one such entry: `<url> <username> <credential>` split on whitespace, or a JSON object `{urls, username, credential}`; `turn:`/`turns:` need both username and credential, `stun:`/`stuns:` need none (vectors: `vectors/turn-paste.json`). A TURN entry makes the link's relay-only retry available as in lobby-server mode. An IP-code joiner (no STUN) uses the TURN
 entries of the list and no STUN.
 
 `relayOnly` must force the relay: a link sends and accepts only `typ relay` candidates, both as trickled `ice` signals and

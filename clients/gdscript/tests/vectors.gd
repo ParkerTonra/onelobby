@@ -14,6 +14,7 @@ func _init() -> void:
 	_chunking(_load(spec.path_join("vectors/chunking.json")))
 	_codes(_load(spec.path_join("codes.json")))
 	_turn_rest(_load(spec.path_join("vectors/turn-rest.json")))
+	_turn_paste(_load(spec.path_join("vectors/turn-paste.json")))
 	_u64()
 	print("vectors: %d passed, %d failed" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
@@ -35,6 +36,22 @@ func _turn_rest(d: Dictionary) -> void:
 	var m: Dictionary = d.get("mint", {})
 	var l := OneLobbyTurn.login(m["secret"], m["userId"], int(m["ttl"]), int(m["nowSeconds"]))
 	_check(l.username == m["expectUsername"] and l.credential == m["expectCredential"], "turn login mint, got " + JSON.stringify(l))
+
+func _turn_paste(d: Dictionary) -> void:
+	for c: Dictionary in d.get("cases", []):
+		var r := OneLobbyTurn.parse_line(c["input"])
+		if c.has("error"):
+			_check(not r.ok and not String(r.error).is_empty(), "turn paste should fail: " + JSON.stringify(c["input"]))
+		else:
+			var want: Dictionary = c["ok"]
+			_check(r.ok and JSON.stringify(r.server) == JSON.stringify(want), "turn paste %s, got %s" % [JSON.stringify(c["input"]), JSON.stringify(r)])
+	var w := OneLobbyTurn.parse_line("turns:r.example.com:443 a b")
+	_check(w.ok and w.warnings.size() == 1, "turns: warns")
+	w = OneLobbyTurn.parse_line("turn:r.example.com:3478?transport=tcp a b")
+	_check(w.ok and w.warnings.size() == 1, "transport=tcp warns")
+	w = OneLobbyTurn.parse_line("turn:r.example.com:3478 a b")
+	_check(w.ok and w.warnings.is_empty(), "udp turn does not warn")
+
 
 func _check(ok: bool, what: String) -> void:
 	if ok:

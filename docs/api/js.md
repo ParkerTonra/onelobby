@@ -37,7 +37,7 @@ export { normalizeCode, formatCode } from "./crockford.js";
 export { decodeJoinCode, looksLikeJoinCode } from "./joincode.js";
 export type { DecodedJoinCode, JoinCodeError } from "./joincode.js";
 export { webRtcLinkFactoryFor } from "./webrtc.js";
-export { turnLogin, turnCredential } from "./turn.js";
+export { turnLogin, turnCredential, parseTurnLine } from "./turn.js";
 export { OneLobbyError } from "./signaling.js";
 export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
@@ -541,6 +541,8 @@ export declare const MIN_PEER_TIMEOUT_MS = 6000;
 export declare const KICK_LINGER_MS = 3000;
 /** The name shown for a peer that chose none: "Player N", N = its seat (peer id, join order). */
 export declare function seatName(p: PeerInfo): PeerInfo;
+/** The ice_failed message: names the next step. Same wording in the C# and GDScript clients (keep in step). */
+export declare function iceFailedMessage(relayConfigured: boolean): string;
 /** One joined lobby: roster, star of peer links, and the lockstep/chat/voice engines riding on them. */
 export declare class Lobby extends Emitter<LobbyEvents> {
     readonly code: string;
@@ -1336,12 +1338,23 @@ export declare function webRtcLinkFactoryFor(rtc: typeof RTCPeerConnection): Lin
  * one with a spend cap.
  */
 import { turnCredential } from "./direct/sha1.js";
+import type { IceServer } from "./transport.js";
 export { turnCredential };
 /** `{ username, credential }` valid for `ttlSeconds` from `nowSeconds` (default: the clock). Any `:` is dropped from `userId`. */
 export declare function turnLogin(secret: string, userId: string, ttlSeconds: number, nowSeconds?: number): {
     username: string;
     credential: string;
 };
+/**
+ * Turn what a player pastes into a "my TURN relay" settings field into one `iceServers` entry. Format: the URL, the
+ * username, the credential, split on any whitespace (`turn:relay.example.com:3478 alice s3cret`), or a JSON object
+ * `{ "urls": ..., "username": ..., "credential": ... }`. `turn:`/`turns:` need both username and credential; `stun:`/`stuns:`
+ * need none. Throws an Error whose message is fit to show the player. Vectors: spec/vectors/turn-paste.json.
+ *
+ *     const entry = parseTurnLine(settings.turn);               // never commit what the player typed
+ *     await hostDirect(kit, { iceServers: [...hostTurn, entry] });
+ */
+export declare function parseTurnLine(text: string): IceServer;
 ```
 
 ## signaling
