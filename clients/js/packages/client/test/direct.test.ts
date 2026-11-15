@@ -599,12 +599,12 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     cleanup.push(() => a.leave(), () => b.leave());
     await Promise.all([a.ready, b.ready]);
     await until(() => host.peers.length === 3, "host sees both");
-    expect(hostPcs.length).toBe(2);
-    for (const pc of hostPcs) {
-      const ports = [...(pc.localDescription?.sdp ?? "").matchAll(/^a=candidate:\S+ \d \S+ \d+ \S+ (\d+) typ host/gm)].map((m) => Number(m[1]));
-      expect(ports.length).toBeGreaterThan(0);
-      expect(new Set(ports)).toEqual(new Set([port]));
-    }
+    // a link that dies before it opens is re-offered on a new connection (the host's retry), so there can be more than two
+    const used = hostPcs
+      .map((pc) => [...(pc.localDescription?.sdp ?? "").matchAll(/^a=candidate:\S+ \d \S+ \d+ \S+ (\d+) typ host/gm)].map((m) => Number(m[1])))
+      .filter((ports) => ports.length > 0);
+    expect(used.length).toBeGreaterThanOrEqual(2);
+    for (const ports of used) expect(new Set(ports)).toEqual(new Set([port]));
   }, 30000);
 
   it("a relay-only host does not pin its links to the UDP port (libjuice has no TURN in mux mode)", async () => {
