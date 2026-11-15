@@ -12,7 +12,7 @@ sections are the modules it re-exports.
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, FromConfigOverrides, HostOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { parseBlueprint, defineBlueprint, BlueprintError } from "./blueprint.js";
@@ -26,6 +26,11 @@ export { Lockstep } from "./lockstep.js";
 export type { Frame, DesyncInfo, LockstepEvents } from "./lockstep.js";
 export { Chat, CHAT_MAX_BYTES } from "./chat.js";
 export { Pause } from "./pause.js";
+export { Room } from "./room.js";
+export type { RoomOptions, RoomJoinOptions, RoomEvents, RoomEntry, RoomSettings, RoomRole, RoomState, RoomStatus, LateJoinPolicy, AutoStartMode, SeatDroppedPolicy, DataSpec, DataDecl, TextFilter, CountdownView, CountdownInfo, SeatDroppedInfo, SeatRestoredInfo, RemovalInfo, LeftEntry, } from "./room.js";
+export { BanList } from "./bans.js";
+export type { BanEntry } from "./room-rules.js";
+export type { KeyValueStore } from "./storage.js";
 export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";
@@ -56,6 +61,9 @@ export type { BrowserHostOptions, VisibilityDoc } from "./direct/browser-host.js
 import { type Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
 import { Lobby, type RateLimit } from "./lobby.js";
+import { BanList } from "./bans.js";
+import type { RoomJoinOptions, RoomOptions } from "./room.js";
+import { type KeyValueStore } from "./storage.js";
 import { type LobbySummary } from "./signaling.js";
 import { type IceServer, type LinkFactory, type SocketFactory } from "./transport.js";
 import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
@@ -85,6 +93,13 @@ export interface AdvancedOptions {
     storage?: SeatStorage | null;
     /** WebSocket to a Nostr relay (default: the runtime's `WebSocket`); for Node older than 22 or tests. */
     nostrConnect?: RelayConnect;
+    /**
+     * Where the per-install player id is kept (spec/room.md s.1). Default: `playerIdFile` when given, else `localStorage`
+     * where the page has one, else memory (the id then lasts one process).
+     */
+    playerIdStore?: KeyValueStore | null;
+    /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
+    banStore?: KeyValueStore | null;
 }
 export interface OneLobbyOptions {
     gameId: string;
@@ -116,6 +131,15 @@ export interface OneLobbyOptions {
      * instead of joining as a new player. Cleared when the session ends. Default true where sessionStorage exists.
      */
     rememberSeat?: boolean;
+    /**
+     * Node and other runtimes without `localStorage`: a JSON file path that keeps the per-install player id across runs.
+     * It is a random id made once, not an account or a hardware id (spec/room.md s.1).
+     */
+    playerIdFile?: string;
+    /** Node: a JSON file path that keeps the host's ban list across lobbies and runs (spec/room.md s.5.3). */
+    banFile?: string;
+    /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
+    room?: RoomOptions;
     /** Test and runtime seams (see AdvancedOptions). */
     advanced?: AdvancedOptions;
     /** @deprecated use `advanced.socketFactory` */
@@ -155,6 +179,18 @@ export interface HostOptions {
     meta?: Record<string, string>;
     /** Per-joiner cap on incoming raw messages, e.g. `{ messages: 60, perMs: 1000 }`; the excess is dropped before `message` fires or is relayed. */
     rateLimit?: RateLimit;
+    /**
+     * Joiners must give this password (at most 64 characters) or get `bad_password`: the hub checks it when it knows
+     * (`welcome.features` has "room"), and the host's room layer checks it on every route (spec/room.md s.6).
+     */
+    password?: string;
+    /** Room layer settings: ready, countdown, auto start, spectators, late join policy, per-player data (`RoomOptions`). */
+    room?: RoomOptions;
+}
+/** What a joiner brings to `join()`. */
+export interface JoinOptions extends RoomJoinOptions {
+    /** The lobby's password, if it has one; a wrong one fails with `bad_password`. */
+    password?: string;
 }
 export interface ListOptions {
     meta?: Record<string, string>;
@@ -164,6 +200,10 @@ export interface ListOptions {
 export interface JoinDirectOptions {
     /** The host's password, if it set one; a wrong one fails with `bad_password`. */
     password?: string;
+    /** Join as a spectator instead of a player (when the host allows spectators). */
+    role?: "player" | "spectator";
+    /** Your starting per-player data (colour, avatar, team, game keys); the host validates it (spec/room.md s.4.2). */
+    data?: Record<string, string>;
     /** Port for an address typed without one (default 47810, docs/design/direct-ip.md s.2). */
     defaultPort?: number;
     /** No answer on the host's TCP port within this long fails with `direct_unreachable` (default 5000). */
@@ -201,6 +241,15 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     static fromConfig(json: unknown, overrides?: FromConfigOverrides): OneLobby;
     /** @internal Host options the blueprint implies (empty without one). */
     blueprintHostDefaults(): Partial<HostOptions>;
+    /** The room layer options for a lobby this kit hosts: the kit's (`room`, the blueprint) under the explicit ones. */
+    roomOptionsFor(explicit?: RoomOptions): RoomOptions;
+    /**
+     * This install's player id for the game (32 hex characters, made once and kept: spec/room.md s.1). It is sent in
+     * `hello` so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
+     */
+    get playerId(): string;
+    /** The host-side ban list (also `lobby.room.bans`): persistent per game, see `banFile` and `advanced.banStore`. */
+    get bans(): BanList;
     constructor(o: OneLobbyOptions);
     /** The lobby code of the seat this tab can take back (rememberSeat), or null. */
     get rememberedCode(): string | null;
@@ -212,7 +261,8 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
     /** With a blueprint (`fromConfig`) every option defaults from `lobby.*`; explicit options win. */
     host(opts?: Partial<HostOptions>): Promise<Lobby>;
-    join(code: string): Promise<Lobby>;
+    /** The room options of a host call, checked: `password_required` and the password length. */
+    join(code: string, opts?: JoinOptions): Promise<Lobby>;
     /**
      * Join a direct-IP host (docs/design/direct-ip.md): a join code from the host's screen (`6B01-RGFE-P2B`, any case, spaces
      * or hyphens) or, advanced, an address (`ip`, `ip:port`, `[v6]:port`). No lobby server is involved: the code is
@@ -261,7 +311,8 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
  * object. Errors carry the dotted `path` and the `rule` id the shared vectors (spec/vectors/blueprint.json) expect.
  */
 import { OneLobbyError } from "./signaling.js";
-export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "godot-gdscript" | "unity" | "dotnet";
+import { type AutoStartMode, type DataDecl, type LateJoinPolicy, type SeatDroppedPolicy } from "./room-rules.js";
+export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
 export interface Blueprint {
     readonly version: 1;
     readonly game: {
@@ -290,6 +341,19 @@ export interface Blueprint {
         readonly rejoin: boolean;
         readonly joinLink: boolean;
         readonly meta: Readonly<Record<string, string>>;
+    };
+    /** The room layer's defaults (spec/room.md s.10). */
+    readonly room: {
+        readonly passwordRequired: boolean;
+        readonly autoStart: AutoStartMode;
+        readonly autoStartPlayers: number;
+        readonly minPlayers: number;
+        readonly countdownSeconds: number;
+        readonly spectators: number;
+        readonly lateJoin: LateJoinPolicy;
+        readonly seatDropped: SeatDroppedPolicy;
+        readonly rejoinWindowSeconds: number;
+        readonly data: Readonly<Record<string, Readonly<DataDecl>>>;
     };
     readonly sync: {
         readonly mode: "raw" | "lockstep" | "replication";
@@ -366,6 +430,21 @@ export interface BlueprintInput {
         joinLink?: boolean;
         meta?: Record<string, string>;
     };
+    room?: {
+        $comment?: string;
+        passwordRequired?: boolean;
+        autoStart?: AutoStartMode;
+        autoStartPlayers?: number;
+        minPlayers?: number;
+        countdownSeconds?: number;
+        spectators?: number;
+        lateJoin?: LateJoinPolicy;
+        seatDropped?: SeatDroppedPolicy;
+        rejoinWindowSeconds?: number;
+        data?: Record<string, DataDecl & {
+            $comment?: string;
+        }>;
+    };
     sync?: {
         $comment?: string;
         mode?: "raw" | "lockstep" | "replication";
@@ -437,6 +516,8 @@ import { PROTO } from "./codec.js";
 import { Emitter } from "./emitter.js";
 import { Lockstep } from "./lockstep.js";
 import { Pause } from "./pause.js";
+import { BanList } from "./bans.js";
+import { Room, type RemovalInfo, type RoomJoinOptions, type RoomOptions } from "./room.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
 import { type ChannelName, type IceServer, type LinkFactory, type PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -457,6 +538,21 @@ export interface KickOptions {
     reason?: string;
 }
 export type Peer = PeerInfo;
+/** What the kit hands a lobby for its room layer (spec/room.md). */
+export interface RoomSetup {
+    /** Host: settings (blueprint `room` plus code options). */
+    options?: RoomOptions;
+    /** Host: the lobby password ("" = none). */
+    password?: string;
+    /** Host: the player count when the hub's capacity is larger (a hub without spectator slots got the sum). */
+    maxPlayers?: number;
+    /** This install's player id. */
+    pid?: string;
+    /** Host: the persistent ban list; memory only when absent. */
+    bans?: BanList;
+    /** Joiner: role, starting data and password sent in the room `join`. */
+    join?: RoomJoinOptions;
+}
 /** What a direct host's `joinCode` is: see {@link Lobby.joinCodeKind}. */
 export type { JoinCodeKind };
 export type LobbyEvents = {
@@ -529,6 +625,10 @@ export interface LobbyConfig {
     peerTimeoutMs?: number;
     /** Host: per-peer cap on incoming raw messages; the excess is dropped before `message` fires or is relayed. */
     rateLimit?: RateLimit;
+    /** The room layer's inputs (see `RoomSetup`). */
+    room?: RoomSetup;
+    /** The game id, for the ban list key. */
+    gameId?: string;
 }
 /** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
 export interface RateLimit {
@@ -552,6 +652,14 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     readonly chat: Chat;
     /** The shared co-op pause (docs/recipes/pause.md). */
     readonly pause: Pause;
+    /**
+     * The room layer (docs/recipes/room.md, spec/room.md): roster with per-player data, ready, countdown and auto start,
+     * back to lobby and rematch, spectators and seats, reconnecting state, kick and ban with reasons. Every lobby has one;
+     * a game that never touches it behaves as before.
+     */
+    readonly room: Room;
+    /** Why this peer was removed (a kick, a ban, a refused join), once it has been; null otherwise. */
+    removal: RemovalInfo | null;
     readonly voice: Voice;
     localPeerId: number;
     hostPeerId: number;
@@ -596,6 +704,8 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
     /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
+    /** Host: phases this lobby sent whose echo (a `lobby` message) has not come back yet, oldest first. */
+    /** Remote address of each peer's WebRTC link, once known (the room's ban check). */
     /** Host: links of kicked / disconnected peers, kept open briefly (removePeer `linger`). */
     /** Host: joiners that joined but are not ready yet, with the cancel of their readyTimeoutMs timer (peerFailed). */
     /** Host: per-peer fixed window for rateLimit. */
@@ -643,6 +753,9 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** @internal Called by OneLobby right after construction: the host waits for joiners, a joiner waits for the host's offer. */
     _begin(): void;
     start(): Promise<void>;
+    /** Host: the phase goes to in_game (the room calls this at the end of its countdown). */
+    /** Host: the phase goes back to lobby without touching any link (back to lobby, rematch). */
+    /** Host: tells the hub the banned player ids, when the hub understands `bans`. */
     /**
      * Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
      * you included, gets `peerRenamed`. Names need not be unique. At most one rename per second; a refusal
@@ -657,6 +770,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
      * `asWebSocket()` onclose (and `sessionEnded`'s second argument); without them its socket closes with 4000 "kicked".
      */
     kick(peerId: number, opts?: KickOptions): Promise<void>;
+    /** The one place that sends `kick` and removes the peer locally (kick, disconnect, and the room's kick / ban / deny). */
     /**
      * Host: ends one player's connection without a ban, like a server closing one WebSocket. The player's
      * `asWebSocket()` gets onclose with `code` (default 1000) and `reason` (default "disconnected"), its lobby ends with
@@ -871,6 +985,11 @@ export declare class Lockstep extends Emitter<LockstepEvents> {
     becomeHost(): void;
     /** Losing a claim, or a new host appeared: stop emitting. Keep history; the new host decides replay vs snapshot. */
     becomeJoiner(): void;
+    /**
+     * Back to the lobby (the room's back to lobby and rematch): forgets the match so the next `hostStart()` / first frame
+     * begins at tick 1 again. The host keeps its role and the peers that said hi; the game builds a fresh sim on `started`.
+     */
+    reset(): void;
     /** A joiner just learned the session is in game (first frame, snapshot, or phase from the server). */
     markStarted(): void;
     /** The shared pause is on: the host emits no frames and a joiner expects none (no silent-host check). */
@@ -943,6 +1062,8 @@ export type ChatEvents = {
 export declare class Chat extends Emitter<ChatEvents> {
     /** Game-provided profanity hook; applied to every line a player is shown. */
     filter: (text: string) => string;
+    /** Host only: filters each line before it is stamped and broadcast (set from `lobby.room.filter`); empty drops the line. */
+    hostFilter: ((text: string) => string) | null;
     constructor(hub: Hub, wall: () => number, isLocallyMuted: (peerId: number) => boolean);
     get history(): readonly ChatMessage[];
     /** Returns the local message id (what `rejected` will refer to). */
@@ -1036,6 +1157,473 @@ export declare class Pause extends Emitter<PauseEvents> {
     /** The lobby went back to the lobby phase: nothing stays paused. */
     onLobbyPhase(): void;
 }
+```
+
+## room
+
+```ts
+import { BanList } from "./bans.js";
+import { Emitter } from "./emitter.js";
+import type { Hub } from "./hub.js";
+import { type AutoStartMode, type DataSpec, type LateJoinPolicy, type RoomRole, type RoomState, type SeatDroppedPolicy, type TextFilter } from "./room-rules.js";
+import { type RoomEntry, type RoomSettings } from "./room-wire.js";
+export type { RoomEntry, RoomSettings, CountdownInfo } from "./room-wire.js";
+export type { RoomRole, RoomState, RoomStatus, LateJoinPolicy, AutoStartMode, SeatDroppedPolicy, DataSpec, DataDecl, TextFilter } from "./room-rules.js";
+/** How long a joiner waits for the host's room reply, and a host for a peer's `join`, before calling the other side old. */
+export declare const ROOM_JOIN_WAIT_MS = 3000;
+/** Host: the `cd` countdown tick. */
+export declare const COUNTDOWN_TICK_MS = 1000;
+/** A replica asks for a fresh `snap` at most this often. */
+export declare const RESYNC_GAP_MS = 1000;
+/** Host: per peer, at most this many `join`/`set`/`ready`/`role`/`req` per second. */
+export declare const ROOM_REQUESTS_PER_SECOND = 10;
+/** What a host sets in code or in `onelobby.json` (`room`); every key is optional. */
+export interface RoomOptions {
+    autoStart?: AutoStartMode;
+    autoStartPlayers?: number;
+    minPlayers?: number;
+    countdownSeconds?: number;
+    /** Spectator cap (not counted in `maxPlayers`); 0 or none turns spectating off. */
+    spectators?: number;
+    lateJoin?: LateJoinPolicy;
+    seatDropped?: SeatDroppedPolicy;
+    rejoinWindowSeconds?: number;
+    /** Per-player data keys beyond the built-ins `color`, `avatar` and `team`. */
+    data?: DataSpec;
+    /** `host()` throws `password_required` unless a password is given. */
+    passwordRequired?: boolean;
+    /** Longest effective name, at most 24. */
+    maxNameLength?: number;
+}
+/** What a joiner brings: its role, starting data and the password it knows. */
+export interface RoomJoinOptions {
+    role?: RoomRole;
+    data?: Record<string, string>;
+    password?: string;
+}
+/** The settings a room starts with, from `RoomOptions` and the lobby's `maxPlayers`. */
+export declare function resolveSettings(o: RoomOptions | undefined, maxPlayers: number, lateJoinFlag: boolean): RoomSettings;
+/** A countdown as a replica sees it: `remaining()` counts down to the host's start in this peer's clock. */
+export interface CountdownView {
+    readonly seq: number;
+    readonly total: number;
+    /** In this peer's `clock.now()` base. */
+    readonly deadline: number;
+    /** Milliseconds left now. */
+    remaining(): number;
+}
+export interface SeatDroppedInfo {
+    seat: number;
+    peerId: number;
+    name: string;
+    data: Record<string, string>;
+    /** "timeout" (past the rejoin window), "left", "kicked", "disconnected". */
+    reason: string;
+    /** True when the rejoin window ran out; false when the hook fired at once (policy `immediate`, or a leave). */
+    afterWindow: boolean;
+}
+export interface SeatRestoredInfo {
+    seat: number;
+    peerId: number;
+    name: string;
+    /** The same player (same player id) took its seat back. */
+    returning: boolean;
+}
+/** Why this peer was removed from the lobby (spec/room.md s.5.1). */
+export interface RemovalInfo {
+    code: string;
+    reason: string;
+    ban: boolean;
+}
+/** An entry that has left the room (the last state a `playerLeft` listener sees). */
+export type LeftEntry = Omit<RoomEntry, "status"> & {
+    status: "left";
+};
+export type RoomEvents = {
+    /** Anything in the room changed (after the matching specific events). */
+    changed: [];
+    playerJoined: [RoomEntry];
+    /** `why`: "left", "kicked", "disconnected" or "timeout". The entry has status "left". */
+    playerLeft: [LeftEntry, why: string];
+    /** `keys`: "name", "role", "seat", "ready", "status", "legacy" and "data.<key>". */
+    playerChanged: [RoomEntry, keys: string[]];
+    stateChanged: [state: RoomState, prev: RoomState];
+    /** The state became "started" (the lobby phase is in_game). */
+    started: [];
+    allReadyChanged: [allReady: boolean];
+    /** A countdown began, or the host sent its once-a-second tick. */
+    countdown: [CountdownView];
+    /** "host", "too_few" or "condition". */
+    countdownCancelled: [reason: string];
+    /** The room went from started or countdown back to lobby (a rematch comes through here too). */
+    backToLobby: [];
+    settingsChanged: [RoomSettings];
+    /** Host only: put a bot in this seat. */
+    seatDropped: [SeatDroppedInfo];
+    /** Host only: a player took a dropped seat; take the bot out. */
+    seatRestored: [SeatRestoredInfo];
+    /** Host only: a joiner asked for start, back to lobby or a rematch. Nothing changed. */
+    requested: [peerId: number, what: "start" | "lobby" | "rematch"];
+    /** This peer was removed from the lobby; `lobby.removal` holds the same. Fires once, before `sessionEnded`. */
+    removed: [RemovalInfo];
+    /** A request of this peer was refused by the host. */
+    rejected: [code: string, re: string, key?: string];
+    bansChanged: [];
+    /** The host speaks the room layer (first `snap` arrived; the host itself is supported from the start). */
+    supported: [];
+    /** The host never answered: it predates the room layer. `room.players` lists the hub roster; calls throw `room_unsupported`. */
+    unsupported: [];
+};
+export interface RoomDeps {
+    hub: Hub;
+    /** The latest round trip to the host in ms (0 when none). */
+    rtt: () => number;
+    /** The hub's name for a peer, or undefined when it is not in the roster. */
+    peerName: (peerId: number) => string | undefined;
+    /** Every peer id in the lobby roster, this peer included. */
+    peerIds: () => number[];
+    /** The lobby phase now. */
+    phase: () => "lobby" | "in_game";
+    /** Host: move the lobby phase to in_game (signaling `phase`, lockstep start). */
+    startGame: () => void;
+    /** Host: move the lobby phase back to lobby (signaling `phase`, lockstep reset). */
+    endGame: () => void;
+    /** Host: remove a peer: signaling `kick` with the code and reason, local roster and link. */
+    removePeer: (peerId: number, o: {
+        ban: boolean;
+        code: string;
+        reason: string;
+    }) => void;
+    /** Host: tell the hub the banned player ids (`bans`), when the hub understands it. */
+    syncBans: (ids: string[]) => void;
+    /** Host: a peer's WebRTC remote address when known. */
+    linkAddress: (peerId: number) => string | undefined;
+    reportError: (e: Error) => void;
+    /** This peer's removal reason became known (a room `deny`); the lobby keeps it as `lobby.removal`. */
+    setRemoval: (info: RemovalInfo) => void;
+}
+export interface RoomConfig {
+    /** The host's settings; a joiner's are replaced by the host's `snap`. */
+    settings: RoomSettings;
+    /** Host: the lobby password ("" = none). */
+    password: string;
+    /** This install's player id. */
+    pid: string;
+    bans: BanList;
+    /** Joiner: what to send in `join`. */
+    join: Required<RoomJoinOptions>;
+}
+/**
+ * The room layer (spec/room.md): one host-authoritative roster with per-player data, ready, a start countdown, spectators,
+ * seats, a reconnecting state, kick and ban with reasons. The host holds the truth and replicates it to every peer over
+ * the room frame (0x80); a joiner's calls are requests the host validates. `lobby.room` exists on every lobby.
+ */
+export declare class Room extends Emitter<RoomEvents> {
+    /** Host only: filters names (kind "name") and chat lines (kind "chat"). Nothing is filtered by default. */
+    filter: TextFilter | null;
+    /** Host only: the persistent ban list (spec/room.md s.5.3). */
+    readonly bans: BanList;
+    /** undefined until known: true once the host answered (the host itself: always), false when it never did (an older host). */
+    supported: boolean | undefined;
+    /** After back to lobby, auto start waits for the next roster or ready change. */
+    constructor(deps: RoomDeps, cfg: RoomConfig);
+    get state(): RoomState;
+    get settings(): RoomSettings;
+    /** Every entry (players, spectators, reconnecting ones), by peer id. Before the host's `snap`, or on an older host, the hub roster. */
+    get entries(): RoomEntry[];
+    /** Entries with role player, by seat. */
+    get players(): RoomEntry[];
+    get spectators(): RoomEntry[];
+    player(peerId: number): RoomEntry | undefined;
+    /** This peer's own entry. */
+    get me(): RoomEntry | undefined;
+    /** The countdown now running, or null. */
+    get countdown(): CountdownView | null;
+    /** Every non-legacy player is connected and ready, and there is at least one. */
+    get allReady(): boolean;
+    /** Replica revision (spec/room.md s.1). */
+    get revision(): number;
+    /** Your own ready flag. Players only; the result is the next `playerChanged`, or `rejected`. */
+    setReady(ready: boolean): void;
+    /** Flips your ready flag. */
+    toggleReady(): void;
+    /** Your own data (colour, avatar index, team, game keys). Atomic; "" unsets a key. The host can also pass a peer id first. */
+    setData(values: Record<string, string>): void;
+    setData(peerId: number, values: Record<string, string>): void;
+    /** Become a spectator or a player (your own role). The host answers with `playerChanged` or `rejected`. */
+    setRole(role: RoomRole): void;
+    /** Ask the host to start, go back to the lobby or rematch. It raises the host's `requested` event and changes nothing by itself. */
+    request(what: "start" | "lobby" | "rematch"): void;
+    /** Host: move a player or spectator to the other role (the capacity rules apply; a failure throws its code). */
+    moveTo(peerId: number, role: RoomRole): void;
+    /** Host: start the game, after the countdown when `countdownMs` is above 0. Throws `wrong_state` or `not_enough_players`. */
+    start(): void;
+    /** Host: stop a running countdown (a no-op otherwise). */
+    cancelCountdown(): void;
+    /** Host: back to the lobby (ready flags reset, links and roster untouched). A no-op in the lobby. */
+    backToLobby(): void;
+    /** Host: back to the lobby, then start again (the countdown applies). Players keep their seats, data and names. */
+    rematch(): void;
+    /** Host: changes some settings for everyone (see spec/room.md s.9). */
+    configure(s: Partial<Pick<RoomSettings, "autoStart" | "autoStartPlayers" | "minPlayers" | "countdownMs" | "lateJoin" | "seatDropped" | "rejoinWindowMs">>): void;
+    /** Host: remove a player; it may rejoin. `code` defaults to "kicked"; `reason` is shown to the player (default sentence of the code). */
+    kick(peerId: number, o?: {
+        code?: string;
+        reason?: string;
+    }): void;
+    /** Host: remove a player and ban it for good (its player id, and its address when known); see `bans`, `unban`. */
+    ban(peerId: number, o?: {
+        code?: string;
+        reason?: string;
+    }): void;
+    /** Host: lift a ban by player id or address; returns how many entries went. */
+    unban(idOrIp: string): number;
+    /** A room frame arrived from `from`. */
+    handleFrame(from: number, body: Uint8Array): void;
+    /** Joiner: the link to the host is open and `hi` went out: introduce ourselves. */
+    onHostLink(): void;
+    /** Host: a joiner finished its handshake (`hi`). It has ROOM_JOIN_WAIT_MS to send `join`. */
+    onPeerHi(peerId: number): void;
+    /** A peer left the roster. `final`: it was removed for good (a kick, a drop), so there is no rejoin window. */
+    onPeerLeft(peerId: number, reason: string, final: boolean): void;
+    /** Host: the hub renamed a peer. */
+    onRenamed(peerId: number, name: string): void;
+    /** Host: the lobby phase changed under the room (a game that calls `lobby.start()` directly, or a hub echo). */
+    onPhase(phase: "lobby" | "in_game"): void;
+    /** Host: a joiner's link address became known; a banned address is removed. */
+    onLinkAddress(peerId: number, ip: string): void;
+    /** This peer is the host now (migration): the replica becomes the truth. */
+    onBecameHost(): void;
+    /** This peer lost a host claim: it is a joiner again. */
+    onBecameJoiner(): void;
+    /** The signaling `error{kicked}` (or a room `deny`) reached this peer. */
+    onRemoved(info: RemovalInfo): void;
+    close(): void;
+    /** Peers that can read room frames and have a link now (the host's own entry excluded). */
+    /**
+     * Host: run `fn` (which edits the roster, state, countdown or settings), then replicate one `upd` to everyone and raise
+     * the local events. `except` is a peer that gets a `snap` instead (a fresh joiner).
+     */
+    /** Returns an error code, or null when the move happened. */
+    /** Gives a player entry its seat (4.3); raises `seatRestored` when it was a dropped one. */
+    /** After every change: auto start, and countdown conditions. */
+}
+```
+
+## bans
+
+```ts
+import { Emitter } from "./emitter.js";
+import { type BanCandidate, type BanEntry } from "./room-rules.js";
+import { type KeyValueStore } from "./storage.js";
+/** At most this many entries are kept; the oldest is dropped first (spec/room.md s.5.3). */
+export declare const MAX_BANS = 1000;
+/** The hub holds at most this many player ids per lobby (`bans` message). */
+export declare const HUB_BAN_IDS = 256;
+export type BanListEvents = {
+    changed: [];
+};
+/**
+ * The host's ban list: survives the lobby because it is saved in a `KeyValueStore` (JS default: `localStorage`, else a
+ * file the game names, else memory). Entries are keyed by the player id, with the address as the fallback (spec/room.md
+ * s.5.3). A corrupt store loads as empty and is only overwritten by the next change.
+ */
+export declare class BanList extends Emitter<BanListEvents> {
+    constructor(store: KeyValueStore | null, gameId: string);
+    /** Reads the store again (another process may have changed the file). */
+    reload(): void;
+    list(): readonly BanEntry[];
+    get size(): number;
+    /** The entry that bans `c`, if any. */
+    match(c: BanCandidate): BanEntry | undefined;
+    /** Adds a ban for a player id and/or an address. A loopback address is never stored. Returns the entry. */
+    add(e: {
+        id?: string;
+        ip?: string;
+        name?: string;
+        reason?: string;
+        code?: string;
+        at?: number;
+    }): BanEntry;
+    /** Unban: by player id, by address, or by a `{ id?, ip? }` selector (every entry with either). Returns how many went. */
+    remove(sel: string | {
+        id?: string;
+        ip?: string;
+    }): number;
+    clear(): void;
+    /** The newest player ids, for the hub's `bans` message. */
+    hubIds(): string[];
+}
+```
+
+## room-rules
+
+```ts
+/**
+ * Pure rules of the room layer (spec/room.md): names, per-player data, seats, ban matching, auto start, the countdown
+ * time base and join admission. No I/O, no clock: every function is pinned by spec/vectors/room.json.
+ */
+export type RoomRole = "player" | "spectator";
+export type RoomState = "lobby" | "countdown" | "started";
+export type RoomStatus = "connected" | "reconnecting";
+export type LateJoinPolicy = "allow" | "spectate" | "refuse";
+export type AutoStartMode = "off" | "all_ready" | "players";
+export type SeatDroppedPolicy = "window" | "immediate";
+/** Stable codes of the room layer (`nack.code`, `deny.code`, `OneLobbyError.code`). */
+export type RoomErrorCode = "bad_value" | "unknown_key" | "not_allowed" | "too_large" | "rate_limited" | "wrong_state" | "not_enough_players" | "lobby_full" | "spectators_full" | "in_game" | "banned" | "bad_password" | "kicked" | "disconnected" | "room_unsupported" | "password_required";
+/** Steps 1-2 of the name rules: strip control, bidi and zero-width characters, collapse whitespace, trim. */
+export declare function cleanText(s: string): string;
+/** `s` cut to at most `n` code points. */
+export declare function clampCodePoints(s: string, n: number): string;
+export declare function codePointLength(s: string): number;
+export type TextFilter = (text: string, kind: "name" | "chat") => string;
+/** Runs a host filter hook; a hook that throws or returns a non-string counts as no hook. */
+export declare function applyFilter(filter: TextFilter | null | undefined, text: string, kind: "name" | "chat"): string;
+/** Steps 1-5 of the name rules (no dedupe). `peerId` makes the default `Player N`. */
+export declare function baseName(input: string, peerId: number, maxLength?: number, filter?: TextFilter | null): string;
+/** Step 6: `name` made unique among `others` (case-insensitive): "Name 2", "Name 3", ... within `maxLength`. */
+export declare function dedupeName(name: string, others: readonly string[], maxLength?: number): string;
+/** The whole name pipeline (spec/room.md 4.1). */
+export declare function effectiveName(input: string, peerId: number, others: readonly string[], maxLength?: number, filter?: TextFilter | null): string;
+export declare const DEFAULT_REASONS: Readonly<Record<string, string>>;
+export declare const CODE_PATTERN: RegExp;
+export declare const REASON_MAX = 120;
+/** The plain sentence for a removal: the host's text when it has one, else the default of the code. */
+export declare function removalReason(code: string, text?: string | null): string;
+export declare const PLAYER_ID_PATTERN: RegExp;
+export declare const isPlayerId: (s: unknown) => s is string;
+/** A fresh player id: 16 random bytes as 32 lower-case hex characters. */
+export declare function newPlayerId(random?: (n: number) => Uint8Array): string;
+/** Lower-case; an IPv4-mapped IPv6 address becomes its IPv4 form. */
+export declare function normalizeIp(ip: string): string;
+export declare function isLoopbackIp(ip: string): boolean;
+export interface BanEntry {
+    id?: string;
+    ip?: string;
+    name?: string;
+    reason?: string;
+    code?: string;
+    at: number;
+}
+export interface BanCandidate {
+    id?: string;
+    ip?: string;
+}
+/** Whether `entry` bans `c`: equal ids, or equal addresses when at least one side has no id. */
+export declare function banMatches(entry: BanEntry, c: BanCandidate): boolean;
+export type DataType = "string" | "int" | "enum" | "bool" | "color";
+export interface DataDecl {
+    type: DataType;
+    min?: number;
+    max?: number;
+    maxLength?: number;
+    values?: string[];
+    default?: string;
+    hostOnly?: boolean;
+}
+export type DataSpec = Record<string, DataDecl>;
+export declare const DATA_KEY_PATTERN: RegExp;
+export declare const DATA_MAX_BYTES = 1024;
+export declare const BUILTIN_DATA: Readonly<DataSpec>;
+/** The built-ins with the game's declarations on top (a declaration of the same key replaces it). */
+export declare function mergeDataSpec(custom?: DataSpec | null): DataSpec;
+/** One value against its declaration: the stored text, or null when invalid. "" (unset) is always valid. */
+export declare function checkDataValue(decl: DataDecl, value: string): string | null;
+export type DataResult = {
+    ok: true;
+    data: Record<string, string>;
+} | {
+    ok: false;
+    code: RoomErrorCode;
+    key?: string;
+};
+/**
+ * Applies `set` to `before` under `spec`, atomically. `byHost` lets hostOnly keys through. "" removes a key.
+ */
+export declare function applyData(spec: DataSpec, before: Readonly<Record<string, string>>, set: Readonly<Record<string, unknown>>, byHost: boolean): DataResult;
+/** The declared defaults, applied at admission to the keys a player did not set. */
+export declare function dataDefaults(spec: DataSpec, data: Record<string, string>): Record<string, string>;
+/**
+ * The seat for a player entering. `held`: seats of connected or reconnecting players. `memory`: `pid -> seat` of everyone
+ * the host remembers (the caller removes the entry it returns `takeOver` for). Returns -1 when every seat is held.
+ */
+export declare function chooseSeat(maxPlayers: number, held: ReadonlySet<number>, memory: ReadonlyMap<string, number>, pid: string): {
+    seat: number;
+    returning: boolean;
+    takeOver?: string;
+};
+export interface StartPlayer {
+    role: RoomRole;
+    status: RoomStatus;
+    ready: boolean;
+    legacy?: boolean;
+}
+export interface AutoStartRule {
+    mode: AutoStartMode;
+    autoStartPlayers: number;
+    minPlayers: number;
+}
+/** Players that count for starting: role player, connected, not legacy. */
+export declare const isEligible: (p: StartPlayer) => boolean;
+/** True when the auto-start condition holds now (the caller checks the state is "lobby"). */
+export declare function autoStartHolds(rule: AutoStartRule, players: readonly StartPlayer[]): boolean;
+export declare const MAX_ONE_WAY_MS = 2000;
+/** Milliseconds from now until the countdown ends, for a receiver that got `left` and last measured `rtt` (null = none). */
+export declare function countdownRemaining(left: number, rtt: number | null): number;
+export interface AdmitInput {
+    banned: boolean;
+    hasPassword: boolean;
+    passwordOk: boolean;
+    state: RoomState;
+    lateJoin: LateJoinPolicy;
+    role: RoomRole;
+    players: number;
+    maxPlayers: number;
+    spectators: number;
+    spectatorCap: number;
+}
+export type Admission = {
+    ok: true;
+    role: RoomRole;
+} | {
+    ok: false;
+    code: RoomErrorCode;
+};
+/** The order of checks on a `join`: banned, password, late join, capacity. */
+export declare function admit(i: AdmitInput): Admission;
+/** Constant-time string comparison (length is not hidden; passwords are at most 64 characters). */
+export declare function safeEqual(a: string, b: string): boolean;
+```
+
+## storage
+
+```ts
+/** The subset of the Web Storage API the kit uses. */
+export interface KeyValueStore {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
+/** Keeps values for the life of the process. */
+export declare function memoryStore(): KeyValueStore;
+/** `localStorage` when the runtime has one and it works (a sandboxed iframe or blocked cookies make it throw), else null. */
+export declare function localStore(): KeyValueStore | null;
+/**
+ * A JSON file `{ key: value }` at `path` (Node and other runtimes with a file system). Read once, written on every change.
+ * An unreadable or corrupt file reads as empty and is replaced by the next write. Throws `no_filesystem` where there is no
+ * Node file system (a browser has none): use `localStore()` there.
+ */
+export declare function fileStore(path: string): KeyValueStore;
+/** The store key of a game's player id. */
+export declare const playerIdKey: (gameId: string) => string;
+/** The store key of a game's ban list. */
+export declare const bansKey: (gameId: string) => string;
+/**
+ * This install's player id for `gameId`: read from `store`, else made (32 hex characters from the CSPRNG) and saved.
+ * A store that cannot save still returns a fresh id, so the id then lasts one session. It is not an account, a hardware
+ * id or derived from anything on the machine (spec/room.md s.1).
+ */
+export declare function loadPlayerId(store: KeyValueStore | null, gameId: string): string;
 ```
 
 ## voice

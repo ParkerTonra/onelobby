@@ -67,6 +67,11 @@ await lobby.start(); await lobby.kick(id); await lobby.leave();   // kick bans t
 lobby.chat.send("gg"); lobby.chat.on("message", ({ peerId, text }) => {});
 lobby.pause.request(true); lobby.pause.state;              // shared pause: { paused, byPeer, pauserLeft }; "changed" / "refused" events
 lobby.pause.canResume; lobby.pause.policy = (peer, wantPaused) => true; lobby.pause.clear();   // policy and clear: host only
+lobby.room.entries; lobby.room.setData({ color: "#ff8800", team: "1" }); lobby.room.setReady(true);   // roster: name, role, seat, ready, status, data
+lobby.room.start(); lobby.room.cancelCountdown(); lobby.room.backToLobby(); lobby.room.rematch();     // host; "countdown" / "started" / "backToLobby" events
+lobby.room.kick(id, { reason }); lobby.room.ban(id, { reason }); lobby.room.unban(playerId);          // reason shown to the player; bans persist (kit.bans)
+lobby.room.on("seatDropped" | "seatRestored" | "changed" | "removed" | "requested", handler); lobby.room.filter = (text, kind) => text;   // docs/recipes/room.md
+await kit.host({ password: "x", room: { spectators: 2, autoStart: "all_ready" } }); await kit.join(code, { password: "x", role: "spectator" });
 const ws = lobby.asWebSocket();                            // joiner: WebSocket-shaped link to the host (text; { binary: true })
 lobby.onConnection((conn) => { conn.onmessage = (e) => conn.send(e.data); });   // host: one WebSocket-shaped conn per joiner
 lobby.voice.enabled = true; lobby.voice.pushToTalk(down);
