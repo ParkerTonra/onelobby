@@ -60,6 +60,9 @@ with the refusal reason in plain words.
 **Chat.** Text chat everywhere (GDScript gains it), voice where the engine has audio capture (JS, C#/Unity, Godot C#),
 mute per player, speaking indicator.
 
+**Players in the world (section 7).** Binary packets, smooth remote players, and the player's actions (what they hold,
+shooting, melee, jumping, and so on) synced without the game writing any of it.
+
 **Tells the player why (section 4).** Plain cause and next step on screen for every failure, connection check, copyable
 logs, the joiner's diagnosis also shown to the host.
 
@@ -102,8 +105,13 @@ Each is one lane unless noted; order matters for the first three.
 9. **Skill rewrite.** Accept GDScript; one pass: survey, propose `onelobby.json` with reasons, build with the templates and
    drop-in menu, verify with `create-onelobby verify`, report. Fix stale lines (pause exists).
 10. **Proof (section 6)**, then move the existing games onto the drop-in pieces where it removes their own code.
+11. **Binary by default (section 7.1).** Shared codec spec + vectors; JS and GDScript encoders matching the C# bit-packer;
+    every snapshot, input and event path uses it; JSON only behind a debug switch. 2 lanes (spec+JS, GDScript).
+12. **Networked player (sections 7.2-7.4).** The player preset (state + action events), smoothing and prediction, the
+    Godot node and the Unity component that read the character and animator with no game code. 2 lanes (Godot, Unity+JS).
+13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
-Estimate (a guess): about 13 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.
+Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.
 Built after phase 1 lands in the games.
 
 ---
@@ -165,4 +173,87 @@ everywhere the engine can listen (games outlive any server), lobby server option
 3. The section 4 "Done when" test.
 4. engine-smoke stays green, plus Unity in batchmode where the runner has it.
 
+5. The section 7 "Done when" test.
+
 0.7.2 ships after phase 1 (network routes, already merged and adopted) and this phase both pass, in one release.
+
+---
+
+## 7. Players in the world by default
+
+Today a game gets a pipe and writes its own player sync: what to send, how to pack it, how to hide lag. Every game that
+did it hit the same problems (JSON outgrowing the link, remote players stuttering, a jump or a shot that never showed
+up on the other screen). OneLobby ships the answer.
+
+### 7.1 Binary packets
+
+- One wire codec for all three clients, spec'd with shared vectors: bit-packed, quantised (positions to ~1 cm in a
+  game-set range, angles to 16 bits, velocities to 8-12 bits), booleans as single bits, small ints as varints.
+- Deltas against the last baseline the receiver acked; a reliable keyframe every few seconds and on late join.
+- Inputs and one-shot events ride the fast channel with the last few ticks repeated, so one lost packet costs nothing
+  (the lockstep lesson in section 5).
+- JSON stays available behind a debug switch for reading packets by eye; the net stats overlay shows bytes per second
+  both ways.
+
+### 7.2 Smooth remote players
+
+- **Remote players:** snapshot interpolation, rendered a short delay behind (two snapshot intervals, grown on jitter,
+  shrunk when the link is calm). Short gaps are extrapolated for at most ~250 ms, then the player holds still rather
+  than flying off. A teleport flag (respawn, portal) snaps instead of sliding across the map.
+- **Own player:** moves at once (owner prediction); when the host corrects it, the correction is blended over ~100 ms
+  unless it is larger than the teleport threshold.
+- **Clock:** a shared session clock (ping-based offset, smoothed) so every peer agrees on tick times and countdowns.
+- **Rotation and aim** interpolate on the shortest arc; animation follows the interpolated state, never raw packets.
+
+### 7.3 What every player sends by default (the player preset)
+
+State, sent every snapshot (only what changed):
+position, velocity, facing (yaw), aim (pitch), on-ground, movement mode (idle, walk, run, crouch, jump, fall, swim, climb,
+fly), held item or slot, aiming down sights or blocking, health and alive, team or colour.
+
+Action events, each with its tick so the other screens play it at the right moment:
+jump, land, shoot (with aim direction), melee (with swing id), reload, use or interact, item switch, throw, hit taken,
+death, respawn, emote.
+
+The game can add its own fields and events in `onelobby.json`, and remove any it does not need.
+
+### 7.4 No game code for the common case
+
+- **Godot:** a `NetPlayer` node. Put it under a `CharacterBody2D` or `CharacterBody3D`; it reads the body and the
+  `AnimationTree` / `AnimationPlayer` on the owner's machine and drives them on everyone else's. Signals for each
+  action event (`shot`, `melee`, ...) so the game plays its own sounds and effects.
+- **Unity:** a `NetPlayer` component that does the same with a `CharacterController` or `Rigidbody` and an `Animator`
+  (parameters mapped by name), built on Replication.
+- **Web:** the same preset in JS, with an adapter for the common engines added as games need them.
+- Host authority stays: the host checks movement speed and fire rate against the game's limits and corrects the player,
+  and hits are judged on the host with the existing rewind.
+
+Done when: two headless peers on 127.0.0.1 behind the fake-network shim (100 ms, 20 ms jitter, 3% loss) show the remote
+player's path within a set error of the owner's path with no frame of standing still longer than the extrapolation cap,
+every jump, shot and melee arrives exactly once at the right tick, and bytes per second stay under a per-player budget.
+
+---
+
+## 8. More defaults before the freeze (proposed)
+
+Each of these is something players expect and at least one game would otherwise write by hand. Proposed as default
+unless noted.
+
+1. **Late join gets the whole world.** A joiner mid-match gets a keyframe of every networked object, not only players.
+2. **Networked objects and ownership.** Spawn and despawn by id, ownership handoff (pick up an item, enter a vehicle),
+   host decides conflicts.
+3. **Dropped player stays visible.** During the rejoin window their character freezes with a "reconnecting" tag
+   instead of vanishing; a bot or the host takes over after it if the game set one.
+4. **Name tags.** Name above each player, speaking icon, ping colour; one toggle off.
+5. **Scoreboard with ping.** Hold Tab (or the platform's button): names, ping, team, host's kick and mute.
+6. **Bandwidth priority.** When a link is tight, nearer and more important players and objects update first and far
+   ones less often, instead of everyone stuttering.
+7. **Desync detector.** For lockstep and replication, a periodic state hash; on a mismatch, the log names the tick and
+   the first object that differs.
+8. **Host sanity limits.** Speed, fire rate and teleport distance checked on the host (section 7.4). Basic protection
+   from cheats and glitches, not a full anti-cheat.
+9. **Quick chat and map ping.** "Over here" pings and a few canned lines, so players can talk without typing (optional,
+   off by default).
+10. **Name and chat filter hook.** A hook for the game's own word filter; nothing filtered by default.
+
+Not proposed: local split-screen, saving a co-op world (game-specific), matchmaking by skill (needs a server we run).
