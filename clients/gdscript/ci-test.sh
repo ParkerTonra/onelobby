@@ -26,7 +26,7 @@ step vectors godot -s res://tests/vectors.gd
 step nostr_unit godot -s res://tests/nostr_unit.gd
 step relay_retry godot -s res://tests/relay_retry.gd
 step sign_bench godot -s res://tests/sign_bench.gd
-step direct-test "$HERE/direct-test.sh"
+step direct-test bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
 step nostr-interop env GODOT="$GODOT" node "$ROOT/integration/nostr-interop-gdscript.mjs"
 
@@ -37,7 +37,7 @@ SERVER_PID=$!
 UP=0
 for _ in $(seq 1 120); do curl -fs http://127.0.0.1:8787/healthz > /dev/null 2>&1 && { UP=1; break; }; sleep 1; done
 tail -n 5 "$LOG/server.out"; echo "::endgroup::"
-if [ $UP -eq 1 ]; then step headless-test "$HERE/headless-test.sh" ws://127.0.0.1:8787/ws
+if [ $UP -eq 1 ]; then step headless-test bash "$HERE/headless-test.sh" ws://127.0.0.1:8787/ws
 else FAILED+=("headless-test(server did not start)"); echo "::error::lobby server did not start"; fi
 
 echo "gdscript: ${#PASSED[@]} passed, ${#FAILED[@]} failed${FAILED:+ (${FAILED[*]})}"

@@ -56,7 +56,7 @@ jobs:
           key: webrtc-native-${{ env.WEBRTC_NATIVE_VERSION }}
       - name: Fetch webrtc-native
         if: steps.webrtc-cache.outputs.cache-hit != 'true'
-        run: clients/gdscript/fetch-webrtc.sh
+        run: bash clients/gdscript/fetch-webrtc.sh
       - name: Import project (registers the extension)
         working-directory: clients/gdscript
         run: |
@@ -72,4 +72,4 @@ jobs:
       - name: Build lobby server
         run: dotnet build server/OneLobby.Server -c Release
       - name: GDScript tests
-        run: GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" clients/gdscript/ci-test.sh
+        run: GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" bash clients/gdscript/ci-test.sh
