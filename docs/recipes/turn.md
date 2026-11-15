@@ -130,7 +130,7 @@ player uses one port, so size the range to your concurrent players). Port 443 mu
 `turnutils_uclient`, see `spec/turn-rest.md`.
 
 **Use a hosted TURN provider.** Several companies sell or give TURN access, for example Cloudflare Realtime TURN, Twilio
-Network Traversal, Metered, Xirsys and Open Relay. This is a list of options, not a recommendation. Free tiers, limits and
+Network Traversal, Metered and Xirsys. This is a list of options, not a recommendation. Free tiers, limits and
 prices change; check each provider's current terms, whether it hands out a fixed username and password or a login you mint
 through its API, and what a traffic spike would cost. Because the entry is plain `{urls, username, credential}`, switching
 provider later is one config change.
