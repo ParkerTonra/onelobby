@@ -1,4 +1,16 @@
 // Argument parsing: no dependencies. Every answer flag maps to one blueprint key (docs/design/blueprint.md s.6).
+import { isAbsolute, relative, resolve } from "node:path";
+
+/**
+ * The folder of a "Next:" `cd` line: "." when the target is the working folder, the relative path when it lies below it, else the
+ * absolute path (a game outside the working folder would otherwise print a climb of `..\..\..` that means nothing to the reader).
+ */
+export function cdPath(cwd, target) {
+  const rel = relative(cwd, target) || ".";
+  if (rel === "." || (!rel.startsWith("..") && !isAbsolute(rel))) return rel;
+  const abs = resolve(target).split("\\").join("/");
+  return /\s/.test(abs) ? `"${abs}"` : abs;
+}
 
 export class CliError extends Error {
   constructor(code, message, path, details) {

@@ -1,9 +1,9 @@
 // create-onelobby: scaffold a OneLobby game (docs/design/blueprint.md s.6).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CliError, USAGE, builtList, getPath, parseArgs, setPath } from "./flags.js";
+import { CliError, USAGE, builtList, cdPath, getPath, parseArgs, setPath } from "./flags.js";
 import {
   IMPLEMENTED_TEMPLATES,
   ONELOBBY_VERSION,
@@ -329,7 +329,7 @@ export async function run(argv, io) {
       }
     }
 
-    const rel = relative(io.cwd, target) || ".";
+    const rel = cdPath(io.cwd, target);
     const willInstall = !into && !opts.noInstall && !opts.dryRun;
     const next = [];
     if (!into) {

@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CliError } from "./flags.js";
+import { CliError, cdPath } from "./flags.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { ONELOBBY_VERSION, SCHEMA_URL } from "./blueprint.js";
 import { PACKAGE_NAME, addDependencies, newManifest } from "./manifest.js";
@@ -481,7 +481,7 @@ export async function runUnity(ctx) {
   const editor = chooseEditor({ opts, env: io.env, resolve: io.resolveUnity });
   const netPlayer = resolveNetPlayer({ wanted: ctx.netPlayer === true, blueprint, target, into, force: opts.force, blueprintPath: BLUEPRINT_PATH });
   const plan = planUnity({ into, target, dirName, blueprint, opts, cwd: io.cwd, editor, netPlayer });
-  const rel = relative(io.cwd, target) || ".";
+  const rel = cdPath(io.cwd, target);
   const listed = plan.files.filter((f) => f.action === "create" || f.action === "update" || f.action === "overwrite");
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
   const unchanged = plan.files.filter((f) => f.action === "unchanged").map((f) => f.path);
