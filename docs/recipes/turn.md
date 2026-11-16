@@ -102,9 +102,7 @@ var lobby = await Runner.JoinDirectAsync(code, new JoinDirectOptions { Password 
 // after a drop: Runner.RejoinDirectAsync(code, token, new JoinDirectOptions { IceServers = new[] { turn } })
 ```
 
-In
-`OneLobby.Godot` (C#) `RelayOnly` still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores, so test the
-relay with the GDScript or DataChannel client instead.
+`OneLobby.Godot` (C#) enforces `RelayOnly` itself (it sends and accepts only relay candidates), because webrtc-native ignores Godot's `iceTransportPolicy`.
 
 `relay_only` / `relayOnly` / `RelayOnly` hides each player's IP from the others (everything goes through the relay), at the
 cost of latency. Use it to prove your TURN server works, or as a privacy setting; with no TURN entry a relay-only link

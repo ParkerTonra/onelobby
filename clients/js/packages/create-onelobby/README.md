@@ -174,7 +174,7 @@ A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `bl
 | `blueprint` | `onelobby.json` loads through the JS loader and through the game's C# loader (`Blueprint.Parse`, run by `tests/MultiplayerTest`) | locally, CI |
 | `direct` | two peers on 127.0.0.1, host and join by address, a message each way (the game's `tests/MultiplayerTest`) | locally, CI |
 | `nostr` | the same through a LOCAL Nostr relay, when `hosting.nostr` is on | locally, CI |
-| `turn` | relay-only through a LOCAL TURN server. **Known gap:** on Godot 4.7.2 (.NET) `OneLobby.Godot`'s links gather host candidates although `iceTransportPolicy relay` is set, and connect with a wrong TURN password, so the TURN server sees no relayed packets. The check is `skipped` with that text, and a `FAIL` when `hosting.relayOnly` is true | locally, CI (skipped) |
+| `turn` | relay-only through a LOCAL TURN server: the peers connect and the TURN server counts allocations and relayed packets above 0. Connected with 0 relayed packets is a `FAIL` (the links are not relay-only) | locally, CI |
 | `server` | host and join through a lobby server you started, with `--server`; else `skipped` | never run (it needs a lobby server process) |
 
 How the routes run in a C# game: the game's code runs only from its own assembly, and MSBuild leaves folders that start with a dot out of the build,

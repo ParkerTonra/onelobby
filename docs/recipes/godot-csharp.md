@@ -25,8 +25,8 @@ The packages of a version reach the public registry only with its release. Befor
 `--packages-from <folder>`: the references get that version and a `nuget.config` takes `OneLobby.*` from the folder.
 
 `npx create-onelobby verify` is THE test command: Godot is the .NET build, the game builds, the menu matches `PIN.json`, the natives are registered,
-`onelobby.json` loads in JS and in C#, then two peers on 127.0.0.1 directly and through a local Nostr relay (the relay-only route through a local TURN server
-is skipped for C# for now: `OneLobby.Godot` does not enforce relay-only on Godot's C# build, see the package README); the last line is `VERIFY_OK` or
+`onelobby.json` loads in JS and in C#, then two peers on 127.0.0.1 directly and through a local Nostr relay, then the relay-only route through a local TURN server
+(it must show allocations and relayed packets above 0); the last line is `VERIFY_OK` or
 `VERIFY_FAIL <check>: <next step>`. `npx create-onelobby update` re-vendors the menu when a new one is out (it stops on files you edited unless `--force`) and moves the
 `OneLobby.*` versions in the `.csproj`.
 
