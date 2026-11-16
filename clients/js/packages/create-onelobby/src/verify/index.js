@@ -1,6 +1,7 @@
 // `create-onelobby verify`: prove a game's multiplayer on this machine, 127.0.0.1 only, and say so in one verdict line.
 //   godot-gdscript: godot, addon-pin, natives, blueprint, wiring, direct, nostr, turn, server   (godot.js)
 //   godot-csharp:   godot, dotnet, menu-pin, natives, blueprint, wiring, direct, nostr, turn, server   (csharp.js)
+//   unity:          unity, package, blueprint, wiring, direct, nostr, turn, server        (unity.js)
 //   web:            blueprint, wiring, project-test, nostr, turn                         (web.js)
 // Helpers (a local Nostr relay: built in, relay.js; a local TURN server: npm node-turn, turn.js) are used only while this runs.
 // Everything it starts is stopped again, also on a failed check and on Ctrl+C. It writes only inside the game folder
@@ -12,6 +13,7 @@ import { runChecks } from "./core.js";
 import { csharpChecks } from "./csharp.js";
 import { godotChecks, writeProbe } from "./godot.js";
 import { killAll } from "./procs.js";
+import { unityChecks } from "./unity.js";
 import { webChecks } from "./web.js";
 
 /** `create-onelobby verify [dir] [--into dir] [options]`. Returns the exit code (0 only for VERIFY_OK). */
@@ -21,10 +23,10 @@ export async function runVerify({ dir, opts, io }) {
   if (found.kind === null) throw notAProject(found, "verify");
 
   const injected = typeof io.verifyChecks === "function"; // a test seam: fake checks, no Godot, no files written
-  const checks = injected ? io.verifyChecks(found.kind) : found.kind === "web" ? webChecks() : found.kind === "godot-csharp" ? csharpChecks() : godotChecks();
+  const checks = injected ? io.verifyChecks(found.kind) : found.kind === "web" ? webChecks() : found.kind === "godot-csharp" ? csharpChecks() : found.kind === "unity" ? unityChecks() : godotChecks();
   const ctx = { dir: target, opts, env: io.env, services: {}, kind: found.kind };
   const notes = [];
-  if ((found.kind === "godot-gdscript" || found.kind === "godot-csharp") && !injected) {
+  if ((found.kind === "godot-gdscript" || found.kind === "godot-csharp" || found.kind === "unity") && !injected) {
     const ignore = existsSync(join(target, ".gitignore")) ? readFileSync(join(target, ".gitignore"), "utf8") : "";
     if (!/^\.onelobby\/?\s*$/m.test(ignore)) notes.push("the .gitignore does not ignore .onelobby/ (verify's scratch folder); run: npx create-onelobby update (it refreshes the managed block)");
     if (found.kind === "godot-gdscript") writeProbe(target); // a C# game has no probe file: its own tests/MultiplayerTest.cs takes the routes
@@ -71,6 +73,7 @@ export async function runVerify({ dir, opts, io }) {
         verdict: outcome.verdict,
         kind: found.kind,
         dir: target,
+        ...(ctx.unity ? { unity: { exe: ctx.unity.exe, version: ctx.unity.version, from: ctx.unity.from } } : {}),
         ...(ctx.godot ? { godot: { exe: ctx.godot.exe, version: ctx.godot.version, from: ctx.godot.from } } : {}),
         checks: outcome.results.map(({ name, status, detail, warning, next, ms }) => ({ name, status, ...(detail ? { detail } : {}), ...(warning ? { warning } : {}), ...(next ? { next } : {}), ms })),
         ...(outcome.firstFailure ? { firstFailure: outcome.firstFailure } : {}),

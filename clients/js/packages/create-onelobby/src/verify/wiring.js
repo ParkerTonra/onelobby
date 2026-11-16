@@ -3,6 +3,7 @@
 //   godot-gdscript, ui.kind drop-in: a scene or script outside addons/ and tests/ names the menu (res://addons/onelobby/menu/menu.tscn, OneLobbyMenu)
 //   godot-csharp,   ui.kind drop-in: the same for OneLobbyMenu.tscn / OneLobbyMenu (not OneLobbyNet.cs, which the scaffolder wrote)
 //   godot, ui.kind none or generated: a script outside addons/ and tests/ uses the client (OneLobbyClient; not net.gd, the scaffolder's autoload)
+//   unity: a .cs file outside Packages/, Library/ and Assets/OneLobby/ (the scaffolder's test and build script) uses OneLobbyMenu, OneLobbyRunner or the client
 //   web: a file outside test/ and node_modules/ imports the glue (session.js) or onelobby (not the glue file itself)
 // Every project the scaffolder writes passes untouched; a fresh `--into` fails until the game is wired.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -11,6 +12,7 @@ import { WEB_GLUE_PATHS } from "../project.js";
 
 const SKIP_DIRS = new Set(["addons", "tests", "test", "node_modules"]);
 const GODOT_FILES = /\.(tscn|gd|cs|tres)$/i;
+const UNITY_SKIP = new Set(["Packages", "Library", "Temp", "Logs", "UserSettings", "Builds", "obj", "node_modules"]);
 const WEB_FILES = /\.(html?|[cm]?[jt]sx?)$/i;
 
 /** Every file of the game (relative posix paths) that `pattern` accepts, skipping dot folders and `skipDirs`. */
@@ -52,6 +54,17 @@ export function wiringCheck() {
           status: "fail",
           detail: `no file outside test/ and node_modules/ imports ${glue} or onelobby, so the game never opens a lobby (the routes pass on their own two peers).`,
           next: `Wire the page: import { loadBlueprint, makeKit, bindSession } from "./${glue}" and call them (docs/recipes/js-web.md).`,
+        };
+      }
+
+      if (ctx.kind === "unity") {
+        const files = gameFiles(dir, /\.cs$/i, UNITY_SKIP).filter((f) => !f.startsWith("Assets/OneLobby/"));
+        const hit = firstMatch(dir, files, /\b(?:OneLobbyMenu|OneLobbyRunner|LobbyClient)\b/);
+        if (hit) return { status: "ok", detail: `${hit} uses the menu or the client` };
+        return {
+          status: "fail",
+          detail: "no script outside Packages/ and Assets/OneLobby/ uses OneLobbyMenu, OneLobbyRunner or the client, so the game never shows a menu or opens a lobby (the routes pass on their own two peers).",
+          next: 'Add the menu where your game starts: new GameObject("Menu").AddComponent<OneLobbyMenu>(); with using OneLobby.Unity; and connect its GameStarted event (docs/recipes/menu.md, "Unity").',
         };
       }
 
