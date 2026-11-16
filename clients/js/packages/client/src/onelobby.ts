@@ -31,6 +31,7 @@ import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 import { diagnose, type DiagnoseFacts, type Reached } from "./diagnose.js";
 import { NetLog, maskText } from "./netlog.js";
+import { LanFinder, type LanFinderOptions } from "./lan.js";
 import { checkConnection, probeRelay, type CheckOptions, type CheckResult } from "./connection-check.js";
 import { PlayerSettings, RELAY_SKIPPED_WARNING, cleanLastCode, cleanName, redactUrl, type EnvSource, type SettingsUse } from "./settings.js";
 
@@ -483,6 +484,22 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     if (!this.settingsUse.lastCode) return;
     const c = cleanLastCode(code);
     if (c) this.settings.save({ lastCode: c });
+  }
+
+  /**
+   * A finder for LAN games (spec/lan-discovery.md): `start()` asks the local network, `games` is the list, `on("changed")`
+   * fires when it changes, `stop()` closes its socket. Nothing is opened before `start()`. With a blueprint whose
+   * `hosting.lan` is false the finder stays off (`status` "off"); in a browser `status` is "browser". Options: `targets`
+   * (default: the broadcast addresses; a test passes `["127.0.0.1"]`), `port`.
+   */
+  lanFinder(options: Partial<Omit<LanFinderOptions, "gameId" | "netVersion">> = {}): LanFinder {
+    return new LanFinder({
+      gameId: this.options.gameId,
+      netVersion: this.options.netVersion,
+      enabled: this.blueprint ? this.blueprint.hosting.lan : true,
+      log: (line) => this.netLog.add("info", line),
+      ...options,
+    });
   }
 
   /**

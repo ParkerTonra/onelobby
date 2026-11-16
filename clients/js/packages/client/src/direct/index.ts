@@ -23,6 +23,7 @@ import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from
 import { directHubOptions } from "./hub.js";
 import { isPublicIPv4, lanIPv4, localAddresses, type PortMapper, type PortMapResult, type PortMapperOptions } from "./portmap.js";
 import { OneLobbyError } from "../signaling.js";
+import { LanHost, type LanUdp } from "../lan.js";
 
 export { DirectHubHost, LocalHubSocket, PortInUseError, originAllowed } from "./hub-host.js";
 export type { HttpHandler, HttpReply, DirectJoinInfo } from "./hub-host.js";
@@ -88,6 +89,13 @@ export interface DirectHostOptions {
   rateLimit?: RateLimit;
   /** Room layer settings (ready, countdown, spectators, per-player data...); the blueprint's `room` fills the defaults. */
   room?: RoomOptions;
+  /**
+   * LAN discovery (spec/lan-discovery.md), default: the blueprint's `hosting.lan`, else off. On: this host answers the
+   * questions of players' games on the same local network, on one UDP port (47840, `{ port }` changes it) that exists only
+   * while the lobby is open. Off: no socket is opened. If the port is taken the host goes on without it and the net log
+   * says so. With `bindHost: "127.0.0.1"` the socket binds the loopback only. `udp` is a test seam.
+   */
+  lan?: boolean | { port?: number; udp?: () => LanUdp | null };
   /** Receives the startup line (`lobby.directHostLog`) once the host is up. Default `console.log`; `false` prints nothing. */
   log?: ((line: string) => void) | false;
 }
@@ -120,6 +128,8 @@ export type DirectLobby = Lobby & {
   directHub: DirectHubHost;
   /** With the `http` option: `http://<the code's address>:<port>/`, the link a browser opens to join. Else null. */
   joinUrl: string | null;
+  /** The LAN discovery answerer when `lan` is on and its port could be taken, else null. */
+  lanHost: LanHost | null;
 };
 
 /**
@@ -139,6 +149,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   const o: DirectHostOptions = bp
     ? {
         port: bp.hosting.directPort,
+        lan: bp.hosting.lan,
         openPort: bp.hosting.openPort,
         nostr: bp.hosting.nostr ? { relays: [...bp.hosting.nostrRelays] } : false,
         allowedOrigins: [...bp.hosting.allowedOrigins],
@@ -203,6 +214,27 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     await hub.close();
     throw e;
   }
+  // LAN discovery: one UDP socket, only while this lobby is open and the switch is on; failing to open it never stops hosting
+  let lanHost: LanHost | null = null;
+  if (o.lan) {
+    const cfg = typeof o.lan === "object" ? o.lan : {};
+    const host = new LanHost({
+      gameId: kit.options.gameId,
+      netVersion: kit.options.netVersion,
+      port: cfg.port,
+      bindHost: o.bindHost === "127.0.0.1" ? "127.0.0.1" : "0.0.0.0",
+      udp: cfg.udp,
+      log: (line) => kit.netLog.add("info", line),
+      info: () => {
+        const me = lobby.peer(lobby.localPeerId);
+        return { lobbyName: lobby.name, hostName: me?.name ?? kit.options.displayName ?? "", players: lobby.peers.length, maxPlayers, password: !!o.password, port: hub.port };
+      },
+    });
+    if (await host.start()) {
+      lanHost = host;
+      lobby.on("sessionEnded", () => host.close());
+    }
+  }
   lobby.linkAddressSink = (peerId, ip) => hub.hub.reportLinkAddress(peerId, ip);
   lobby.on("sessionEnded", () => void hub.close());
   // leave() resolves once the router mapping is deleted, so a host that exits right after it does not leave the port
@@ -212,6 +244,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     try {
       await leave();
     } finally {
+      lanHost?.close();
       await hub.close();
     }
   };
@@ -242,7 +275,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
     }
   }
   const map = await mapping;
-  const direct = Object.assign(lobby, { directHub: hub, joinUrl: null as string | null });
+  const direct = Object.assign(lobby, { directHub: hub, joinUrl: null as string | null, lanHost });
   direct.directAddresses = localAddresses(hub.port);
   const log = o.log === false ? null : (o.log ?? console.log);
   // Sets joinCode / joinCodeKind / directCode / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
