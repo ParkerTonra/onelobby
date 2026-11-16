@@ -295,7 +295,9 @@ namespace OneLobby.Tests
         // A relay that answers late: the probe says "refused" 3.5 s after it starts. The joiner used to wait 2.5 s for it and
         // reported relay_unreachable; the wait is now RelayProbeWaitMs (4.5 s). The probe is a stand-in (LobbyClient.RelayProbeForTests),
         // so the real probe's own time limits play no part, and the joiner is relay-only, so there is no relay retry and the
-        // probe starts in the same call as the wait: 1 s to spare against the old wait and 1 s against the new one.
+        // probe starts in the same call as the wait: 1 s to spare against the old wait. The stand-in is answered by the pump loop
+        // (not by a timer on the thread pool, which a busy CI runner can hold up for a second) and the loop waits until the
+        // client has taken the answer before it pumps again, so a late thread cannot make the wait run out first.
         private const int SlowProbeMs = 3500;
 
         [Fact]
@@ -304,20 +306,30 @@ namespace OneLobby.Tests
             Assert.True(SlowProbeMs - 2500 >= 1000 && Lobby.RelayProbeWaitMs - SlowProbeMs >= 1000);
             using var turn = FakeUdpServer.Silent(); // only its address is used: nothing is sent to it
             System.Diagnostics.Stopwatch? probe = null;
+            var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var answered = false;
             var calls = 0;
             var waited = RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", relayOnly: true, probe: _ =>
             {
                 calls++;
                 probe = System.Diagnostics.Stopwatch.StartNew();
-                return Task.Delay(SlowProbeMs).ContinueWith(_ => "refused", TaskScheduler.Default);
-            }, sinceProbe: () => probe?.ElapsedMilliseconds ?? -1);
+                return answer.Task;
+            }, sinceProbe: () => probe?.ElapsedMilliseconds ?? -1, each: jc =>
+            {
+                if (answered || probe == null || probe.ElapsedMilliseconds < SlowProbeMs) return;
+                answered = true;
+                answer.SetResult("refused");
+                var until = System.Diagnostics.Stopwatch.StartNew();
+                while (!jc.NetLog.Export().Contains("relay probe refused") && until.Elapsed < TimeSpan.FromSeconds(20)) Thread.Sleep(2);
+            });
             Assert.Equal(1, calls);
+            Assert.True(answered);
             Assert.Empty(turn.Received);
-            Assert.InRange(waited, SlowProbeMs - 100, Lobby.RelayProbeWaitMs - 1); // it waited for the answer, and the answer ended the wait
+            Assert.True(waited >= SlowProbeMs - 100, waited + " ms"); // it waited for the answer; the cause shows the answer ended the wait
         }
 
         /// <summary>Returns <paramref name="sinceProbe"/> read when the joiner gave up (0 without one).</summary>
-        private static long RunRelay(FakeUdpServer turn, string cause, string linePrefix, bool relayOnly = false, Func<IceServer, Task<string>>? probe = null, Func<long>? sinceProbe = null)
+        private static long RunRelay(FakeUdpServer turn, string cause, string linePrefix, bool relayOnly = false, Func<IceServer, Task<string>>? probe = null, Func<long>? sinceProbe = null, Action<LobbyClient>? each = null)
         {
             var rig = new Rig();
             rig.Net.IceServers.Add(new IceServer(new[] { "turn:127.0.0.1:" + turn.Port }, "sam", "secret"));
@@ -331,7 +343,7 @@ namespace OneLobby.Tests
             rig.Clients.Add(jc);
             var jl = rig.Await(jc.JoinAsync(hl.Code));
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20)) { rig.Step(1, 100); Thread.Sleep(2); }
+            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20)) { each?.Invoke(jc); rig.Step(1, 100); Thread.Sleep(2); }
             var waited = sinceProbe?.Invoke() ?? 0;
             Assert.True(jl.ReadyAsync.IsFaulted);
             rig.Step(8);
