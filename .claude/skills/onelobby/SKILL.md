@@ -1,117 +1,118 @@
 ---
 name: onelobby
-description: Make a game multiplayer with OneLobby. Surveys the game, writes onelobby.json (the blueprint) with a reason per setting, plans where Host / Join / Browse go in the game's menus, builds it through the engine's recipe and verifies two players headless. Use when the user says "make it multiplayer", "add OneLobby", "add co-op", "host and join", "online play", or edits onelobby.json and wants the game to match.
+description: Make a game multiplayer with OneLobby in one pass. Surveys the game, asks the scaffolder (create-onelobby) for a recommendation, proposes onelobby.json with a reason per setting, builds with the scaffolder's templates and the drop-in menu, proves it with `create-onelobby verify` and reports. Use when the user says "make it multiplayer", "add OneLobby", "add co-op", "host and join", "online play", or edits onelobby.json and wants the game to match.
 ---
 
 # OneLobby: make this game multiplayer
 
-You turn a single-player game into one that players can host and join, and that keeps working after any server is
-gone (players host from their own machine with a join code). The user drives the choices; you propose them with
-reasons. One file holds every choice: `onelobby.json` at the game's root. Schema:
-`spec/blueprint.schema.json` in the OneLobby repo (shipped as `onelobby/blueprint.schema.json` on npm). Design and the
-reasons behind each key: `docs/design/blueprint.md`. API and rules: the OneLobby `AGENTS.md`.
-
-Run the phases in order. Never skip Verify.
+You turn a single-player game into one that players can host and join, and that keeps working after any server is gone
+(a player hosts from their own machine and shares a join code). The user drives the choices; you propose them with
+reasons. One file holds every choice: `onelobby.json` at the game's root (schema: `onelobby/blueprint.schema.json` in the
+npm package; design: `docs/design/blueprint.md`). Commands below are `npx create-onelobby ...`; in a clone of the OneLobby
+repo run the same as `node clients/js/packages/create-onelobby/bin/create-onelobby.js ...` (after `npm ci && npm run build`
+in `clients/js`, then `node scripts/build.mjs` in that package). The scaffolder's own rules are not repeated here: it answers,
+you explain its answer. Run the phases in order. Never skip Verify. Never write "works": name the checks that ran.
 
 ## 1. Survey (read only, change nothing)
 
-Find and note, with the file and line that told you:
+Note each finding with the file and line that told you:
 
-- **Engine**: browser JS (`web`), browser page served by a Node host (`node-browser`), Godot 4 C# (`godot-csharp`),
-  Godot 4 GDScript (`godot-gdscript`: raw mode only, `docs/recipes/godot-gdscript.md` section 5), Unity (`unity`), any
-  other .NET (`dotnet`). Unreal and others: stop and tell the user OneLobby has no client for it yet.
-- **Loop**: fixed tick (`setInterval`, accumulator, `_PhysicsProcess`, `FixedUpdate`) or frame-driven
-  (`requestAnimationFrame`, `_Process`, `Update`).
-- **Determinism**: seeded RNG kept in game state vs `Math.random` / `UnityEngine.Random` / `GD.Randf`; wall clock in
-  the sim (`Date.now`, `performance.now`, `Time.time`); iteration over unordered maps or sets; physics engine.
-- **Genre and pace**: real-time action, arcade, RTS / strategy, turn-based, long co-op, a world one player runs.
-- **Players** the design implies (map slots, spawn points, UI seats), else 4.
-- **Menus**: where a "Play together" or "Multiplayer" entry fits (main menu, pause menu, a settings tab).
-- **Pause**: the function the Escape / pause menu calls.
-- **Settings storage** and the **build and test commands**.
+- **Engine**: `project.godot` alone = Godot GDScript (`godot-gdscript`); `project.godot` with a `.csproj` = Godot C#
+  (`godot-csharp`); an HTML page and JS = browser (`web`); a Node server that serves the page = `node-browser`; `ProjectSettings/`
+  = Unity (`unity`); other .NET = `dotnet`. Anything else (Unreal, ...): stop, tell the user OneLobby has no client for it yet.
+- **Loop**: fixed tick (`setInterval`, accumulator, `_physics_process`, `_PhysicsProcess`, `FixedUpdate`) or frame-driven.
+- **Determinism**: RNG seeded and kept in game state vs `Math.random` / `randf()` / `UnityEngine.Random`; wall clock in the
+  sim (`Date.now`, `Time.get_ticks_msec`, `Time.time`); unordered iteration; physics engine; floats.
+- **Genre and pace**; **players** the design implies (map slots, spawns, else 4); **menus** (where a "Play together" entry fits);
+  **pause** (what the Escape menu calls); **settings storage**; **build and test commands**.
+- **One plain sentence** for the recommender: genre, engine, player count, tick rate. Write "deterministic" only for what the
+  survey proved (fixed tick, state-held seed, no wall clock, no unordered iteration), never as a hope.
 
-## 2. Propose (write onelobby.json)
+## 2. Recommend
 
-Write the full file (every key, defaults included: a file you can read beats a default you have to look up), with a
-`"$comment"` beside each non-default key giving the one-line reason from the survey. `"$schema"` points at the
-schema of the onelobby version you install: `"./node_modules/onelobby/blueprint.schema.json"` in a JS project; in a C#
-project, the `spec/blueprint.schema.json` of the OneLobby release you use (a relative path into a clone, or its raw
-GitHub URL at that release tag).
+`npx create-onelobby --recommend "<the sentence>" --json` writes nothing and needs no network. Read the one object:
 
-| Key | Choose |
-|---|---|
-| `engine` | from the survey |
-| `sync.mode` | `lockstep` only when the loop is fixed-tick AND the RNG is seeded in state AND the sim reads no wall clock and iterates nothing unordered. `replication` for a real-time C# game whose host owns physics or AI. Otherwise `raw`. |
-| `sync.tickRate` | the game's own tick if it has one, else 20 |
-| `hosting` | `direct: true` wherever the engine can listen (everything but `web`): that is what outlives the servers. `server: true` for `web`, or when the user has a lobby server URL. Both is fine. |
-| `hosting.nostr`, `hosting.nostrRelays` | `nostr: true` (the default) when `hosting.direct`: the Nostr code works with no port forwarded. **Refresh the relay list now:** run `checkNostrRelays` (JS: `import { checkNostrRelays } from "onelobby"`, e.g. `node -e "import('onelobby').then(async m => console.log(JSON.stringify(await m.checkNostrRelays([...m.DEFAULT_NOSTR_RELAYS, 'wss://relay.example'], 8000))))"` with the candidates you want; anonymous, random keys, no personal information) and write the `ok` URLs, fastest first, to `hosting.nostrRelays` (5-8 of them) with a `$comment` naming the date. Keep the default list when the probe cannot run (offline). |
-| `lobby.maxPlayers` | from the survey, else 4 |
-| `lobby.listed` | `false` (join by code or link) unless the game wants strangers to find each other |
-| `chat.text` | `true` |
-| `chat.voice` | `false` unless you can name a reason the game needs it (co-op that needs callouts). Say the reason in `$comment`. |
-| `session.hostLeaves` | `end`; `migrate` only with `hosting.server` and a lockstep game that has snapshot/restore |
-| `session.hostLeaves` handling | `end` means the game must handle the session ending: JS `sessionEnded` with reason `host_left` (a server lobby whose host leaves, or any direct lobby), C# `SessionEnded`. Show it, return to the menu, keep the board playable offline. |
-| `session.pause` | `off` for real-time action (a pause there is griefing) and for short turn-based games (a turn is already a pause); `anyone` for RTS, strategy and long co-op ("life happens"); `host` when one player runs the world |
-| `players.identity` | `name`; `anonymous` for games aimed at young players or with no chat |
-| `ui.kind`, `ui.entry` | `generated`, with the entry from the survey (a "Play together" panel or menu item). Not `drop-in`: the `<one-lobby>` element does not read onelobby.json yet and carries its own JSON message format (`el.send`, `el.shared`), so it cannot sit beside the game's own bytes. |
+- `answers`: `[key, value, why]` rows, each a blueprint key; they become the proposal. `shape` names the game type
+  (`lockstep`, `coop-snapshots`, `replication`, `turn-based`, `own-server`); keep it for the report.
+- `shape: null`: the sentence matched nothing clearly. Answer each of `questions` from the survey where a file and line
+  settle it, ask the user the rest, add the `add` words to the sentence and run again. Do not guess a shape.
+- `limits`: what this engine's client or template cannot do yet (it wanted X, wrote Y). Tell the user, do not hide it.
+- `advice`: `built-in` is a client feature to use; `by-hand` is work the game must do; `depends` waits on the engine.
+- `engine.template` `"planned"` or `runCommand: null`: the scaffolder cannot write this engine yet; take the by-hand path (4.5).
+- **The survey wins over the sentence.** The matcher reads words and ignores code facts ("deterministic ... calls `Math.random`"
+  still gives `lockstep`). When they disagree, fix the sentence ("not deterministic", the real tick rate) and run again; if that is
+  not enough, correct a value with a flag (`--mode raw`, `--max-players 2`) or `--set key=value`: a flag beats the recommendation
+  and the run lists it under `overridden` / `dropped`. Say each override in the report.
 
-Not built yet, but recorded so the game is ready when they are: `session.pause` (the file keeps the choice; nothing
-pauses over the network yet), `platforms.*` (Steam, Epic, Discord). Say so in the report.
+## 3. Propose
 
-## 3. Plan
+Preview, writing and downloading nothing: `npx create-onelobby --into . --template <engine> --recommend "<sentence>" <flags> --yes
+--dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). **Always pass `--template`**: without it
+`--into` treats any folder, a Unity one too, as `web`. `--yes` invents the game id `com.example.<folder>`; give the real one with
+`--game-id`. The result holds `blueprint` (the file to be written), `files` (added or updated) and `recommendation`.
 
-List: the recipe you follow (AGENTS.md "Recipes"), each file you will add or change, where Host / Join / Browse /
-lobby settings appear in the menus, and the checks you will run in Verify.
+Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
+(the command, the files it adds or changes, where the menu goes and which scene or page opens it) and the `limits`. If every value
+is a schema default, build without stopping; otherwise stop for the user's go or edits. After the build, put each reason in the
+file as a `"$comment"` beside its key (the loaders ignore it).
 
-## 4. Approve
+## 4. Build
 
-If every key in the file is its default (no `$comment` reasons), build without stopping. Otherwise show the proposal
-(the Settings table from the Report format below: key, value, why) and the plan, and stop for the user to say go or
-edit the file.
+1. Run the previewed command without `--dry-run`; its "Next:" lines are part of the job. Godot downloads the WebRTC natives once
+   (pinned, SHA-256 checked, anonymous; offline: `--webrtc-zip <file>`). Godot C# needs the .NET build of Godot and the .NET 8 SDK,
+   and until a release is on NuGet `--packages-from <folder of .nupkg>`. Then `godot --headless --import --path .` (C#: first
+   `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with `exists`: edit by hand.
+2. **Wire the drop-in menu where the survey said** (a new project has it as the main scene). Godot `--into` never edits your scenes:
+   instance `addons/onelobby/menu/menu.tscn` (C#: `addons/onelobby_menu/OneLobbyMenu.tscn`) in the menu entry's scene, set
+   `menu.client = Net.client` before its `_ready` (GDScript; `Net` is the autoload the scaffolder registered), connect
+   `game_started(lobby)` (start the match), `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword:
+   `docs/recipes/menu.md`. Never test with `-- --host` without `--local`: it opens a port and reaches public relays.
+3. **Web** `--into` writes `onelobby.json`, `multiplayer/session.js` and `test/multiplayer.mjs` only, and refuses `--ui drop-in`. With
+   no `package.json`: `npm init -y`, `npm pkg set type=module`, `npm install onelobby`. Put the game behind `step(tick, commands) ->
+   hash`, `snapshot()`, `restore(tick, bytes)`, `hash()`, swap it into the test's stand-in `Game`, and draw Host / Join / Start as
+   `docs/recipes/js-web.md` sections 3 and 4 say. The `<one-lobby>` element (`menu.md`, "Web") fits only games that sync through its
+   own `send` / `shared`, not through a Lobby.
+4. Hand work the template does not cover, after 1 to 3: the game's sim as lockstep frames (`docs/recipes/godot-gdscript.md` section 4b,
+   `js-web.md`), replication (`replication.md`), a pause-menu call when `session.pause` is not `off` (`pause.md`), the `by-hand`
+   advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check and plain-language errors already
+   live in the menu and the library.
+5. **By hand** (`template_planned`, planned engine, `runCommand: null`): ask the tool, do not assume; its `template_planned` refusal
+   names what it builds today. Follow the engine's recipe (`docs/recipes/unity.md`, `dotnet-generic.md`, `browser-game.md`), write
+   `onelobby.json` yourself against the schema, and say in the report that this path was by hand.
+6. Rules that stay: read `onelobby.json` at run time, never copy its values into code (`OneLobby.fromConfig`,
+   `OneLobbyClient.from_config`, `Blueprint.Load`); the game plays offline and every lobby call can fail (show `describeError`);
+   the lobby server URL is a player setting; bump `game.netVersion` when command bytes change. **Relay list**: the scaffolder writes
+   the library's default list unprobed and some are dead. In a scratch folder `npm install onelobby`, then run
+   `node -e "import('onelobby').then(async m => console.log(JSON.stringify((await m.checkNostrRelays(m.DEFAULT_NOSTR_RELAYS, 8000)).filter(r => r.ok).map(r => r.url))))"`
+   (anonymous, random keys) and write the result to `hosting.nostrRelays` with a `$comment` naming the date; offline, keep the default.
 
-## 5. Build
+## 5. Verify
 
-Follow the engine's recipe. Rules:
+`npx create-onelobby verify` in the game folder (Godot from `--godot <exe>`, else `$GODOT`, else `godot`; headless, loopback only).
+Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that step and run again until `VERIFY_OK`, or until you can
+name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
+runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it. `verify` proves the routes, not your
+wiring, so also boot the game (`godot --headless --audio-driver Dummy --path . --quit-after 90`, no flags; web: `node test/multiplayer.mjs`)
+and read it for errors, and check **offline**: with no lobby server the game still plays and the menu says multiplayer is unavailable.
+`verify` refuses engines the scaffolder does not build (no verdict line); then use the recipe's "Done when" and say which checks you could not run.
 
-- **Read the file at runtime, never copy its values into code.** JS: `OneLobby.fromConfig(blueprint, { displayName })`
-  (load the JSON with `fetch("./onelobby.json")` in the browser so a hand edit applies on reload; the full browser
-  version, with the lobby server setting, is `docs/recipes/js-web.md` section 3). C#:
-  `Blueprint.Load("onelobby.json")` then `LobbyClient.FromBlueprint(bp, transport, displayName)`; Unity: the
-  `OneLobbyRunner` Blueprint field. Show the voice button only when `blueprint.chat.voice`, the chat panel only when
-  `chat.text`, Browse only when `hosting.server && lobby.listed`.
-- Generate only what structural keys ask for: the menu entry (`ui.entry`), the Node host script when `hosting.direct`
-  on `node-browser`, `Snapshot` / `Restore` when `lockstep` with `lateJoin` or `migrate`.
-- The game stays fully playable offline: every lobby call can fail; show the error (`describeError`) and keep running.
-- The lobby server URL stays a player setting with the file's value as the default (AGENTS.md rule 5): pass the
-  player's value as `fromConfig(bp, { lobbyServer })`; with no address at all, `host()` / `join()` fail with
-  `no_server`, which `describeError` turns into words.
-
-## 6. Verify
-
-Run the recipe's "Done when" checks and the testing recipe (`docs/recipes/testing.md`; with no lobby server running,
-its in-memory section runs two players in Node with no network): two headless players, a
-message each way (lockstep: frames advance and hashes match), the join link if `lobby.joinLink`, and the offline check
-(no server: the game still plays and the menu says multiplayer is unavailable). Run direct hosting when
-`hosting.direct`. Fix and re-run until each passes or you can name why it cannot run here.
-
-## 7. Report
+## 6. Report
 
 ```
-OneLobby: <title> is multiplayer.
+OneLobby: <title> is multiplayer.   Shape: <shape id from --recommend>
 
 Settings (onelobby.json)          Why
   <key>  <value>  <reason, or "default">
-  ...
+Overrode the recommendation: <key: recommended -> chosen, because the survey found ...>   (or "none")
 
 Built
   <file>   <what it does>
 
 Verified
-  PASS <check>
-  FAIL <check>: <why, what to do>
+  PASS <check> / FAIL <check>: <why, what to do> / SKIPPED <check>: <why>
 
 Next
-  - <the one or two things only the user can do: a lobby server URL, a store setting, a netVersion bump rule>
+  - <what only the user can do: a lobby server URL, a store setting, the by-hand parts left, the `limits`>
 ```
 
-Every Settings line is a key the user can change by hand. Never write "works": name the checks that ran.
+Every Settings line is a key the user can change by hand.
