@@ -62,10 +62,10 @@ namespace OneLobby
     public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
     /// <summary><see cref="Kind"/>: "drop-in", "generated" or "none". <see cref="Theme"/>: "light", "dark" or "auto".</summary>
     public sealed record UiSection(string Kind, string? Entry, string Theme);
-    /// <summary>The diagnostics switches (spec/diagnostics.md); <see cref="LogSize"/> is 50..5000. <see cref="ShowConnectionCheck"/> is for a drop-in menu.</summary>
-    public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck)
+    /// <summary>The diagnostics switches (spec/diagnostics.md); <see cref="LogSize"/> is 50..5000. <see cref="ShowConnectionCheck"/> and <see cref="CheckOnOpen"/> are for a drop-in menu (<see cref="CheckOnOpen"/> false: the check runs only on the button).</summary>
+    public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck, bool CheckOnOpen = true)
     {
-        public static readonly DiagnosticsSection Defaults = new DiagnosticsSection(true, NetLog.DefaultCapacity, true, true);
+        public static readonly DiagnosticsSection Defaults = new DiagnosticsSection(true, NetLog.DefaultCapacity, true, true, true);
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ namespace OneLobby
                 w.WriteEndObject();
                 w.WriteStartObject("diagnostics");
                 w.WriteBoolean("reportToHost", Diagnostics.ReportToHost); w.WriteNumber("logSize", Diagnostics.LogSize);
-                w.WriteBoolean("relayProbe", Diagnostics.RelayProbe); w.WriteBoolean("showConnectionCheck", Diagnostics.ShowConnectionCheck);
+                w.WriteBoolean("relayProbe", Diagnostics.RelayProbe); w.WriteBoolean("showConnectionCheck", Diagnostics.ShowConnectionCheck); w.WriteBoolean("checkOnOpen", Diagnostics.CheckOnOpen);
                 w.WriteEndObject();
                 w.WriteEndObject();
             }
@@ -458,7 +458,7 @@ namespace OneLobby
                         });
                         break;
                     case "diagnostics":
-                        Object(v, "diagnostics", Array.Empty<string>(), new[] { "reportToHost", "logSize", "relayProbe", "showConnectionCheck" }, (dk, dv) =>
+                        Object(v, "diagnostics", Array.Empty<string>(), new[] { "reportToHost", "logSize", "relayProbe", "showConnectionCheck", "checkOnOpen" }, (dk, dv) =>
                         {
                             if (dk == "logSize") Int(dv, "diagnostics.logSize", 50, 5000);
                             else Bool(dv, "diagnostics." + dk);
@@ -607,7 +607,7 @@ namespace OneLobby
                 new UiSection(S(ui, "kind", web || engine == "godot-gdscript" || engine == "godot-csharp" ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
             {
                 Room = BuildRoom(roomJson, lobby),
-                Diagnostics = new DiagnosticsSection(B(diag, "reportToHost", true), I(diag, "logSize", NetLog.DefaultCapacity), B(diag, "relayProbe", true), B(diag, "showConnectionCheck", true)),
+                Diagnostics = new DiagnosticsSection(B(diag, "reportToHost", true), I(diag, "logSize", NetLog.DefaultCapacity), B(diag, "relayProbe", true), B(diag, "showConnectionCheck", true), B(diag, "checkOnOpen", true)),
             };
 
             // cross-key rules (spec/blueprint.schema.json x-rules), in order

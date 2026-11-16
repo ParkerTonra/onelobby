@@ -50,7 +50,8 @@
         "diagnostics.reportToHost": true,
         "diagnostics.logSize": 500,
         "diagnostics.relayProbe": true,
-        "diagnostics.showConnectionCheck": true
+        "diagnostics.showConnectionCheck": true,
+        "diagnostics.checkOnOpen": true
       }
     },
     {
@@ -85,13 +86,13 @@
     },
     {
       "name": "diagnostics_switches",
-      "input": { "game": { "id": "a" }, "diagnostics": { "reportToHost": false, "logSize": 50, "relayProbe": false, "showConnectionCheck": false } },
-      "expect": { "diagnostics.reportToHost": false, "diagnostics.logSize": 50, "diagnostics.relayProbe": false, "diagnostics.showConnectionCheck": false }
+      "input": { "game": { "id": "a" }, "diagnostics": { "reportToHost": false, "logSize": 50, "relayProbe": false, "showConnectionCheck": false, "checkOnOpen": false } },
+      "expect": { "diagnostics.reportToHost": false, "diagnostics.logSize": 50, "diagnostics.relayProbe": false, "diagnostics.showConnectionCheck": false, "diagnostics.checkOnOpen": false }
     },
     {
       "name": "diagnostics_partial",
       "input": { "game": { "id": "a" }, "diagnostics": { "logSize": 5000 } },
-      "expect": { "diagnostics.reportToHost": true, "diagnostics.logSize": 5000, "diagnostics.relayProbe": true, "diagnostics.showConnectionCheck": true }
+      "expect": { "diagnostics.reportToHost": true, "diagnostics.logSize": 5000, "diagnostics.relayProbe": true, "diagnostics.showConnectionCheck": true, "diagnostics.checkOnOpen": true }
     },
     {
       "name": "gdscript_ui_can_be_overridden",

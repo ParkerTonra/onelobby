@@ -248,7 +248,8 @@
         "reportToHost": { "description": "A joiner that cannot connect tells the host why (cause and step only, never an address). Off sends nothing.", "type": "boolean", "default": true },
         "logSize": { "description": "How many lines the net log keeps (the log a player can copy).", "type": "integer", "minimum": 50, "maximum": 5000, "default": 500 },
         "relayProbe": { "description": "After a failed connect with a relay set, ask the relay whether it refused the login or never answered.", "type": "boolean", "default": true },
-        "showConnectionCheck": { "description": "The drop-in menu shows the Connection check button (it contacts public STUN servers when pressed).", "type": "boolean", "default": true }
+        "showConnectionCheck": { "description": "The drop-in menu shows the Connection check button (it contacts public STUN servers when pressed). False also turns off the automatic run (checkOnOpen).", "type": "boolean", "default": true },
+        "checkOnOpen": { "description": "The drop-in menu runs the connection check once, when it opens (two small UDP questions to public STUN servers, plus the login of the player's own relay line when one is saved). False: only on the button.", "type": "boolean", "default": true }
       }
     }
   },

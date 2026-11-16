@@ -59,7 +59,8 @@ var session := {}
 var platforms := {}
 var ui := {}
 ## The diagnostics switches (spec/diagnostics.md): report_to_host, log_size (50 to 5000), relay_probe, show_connection_check
-## (the drop-in menu's Connection check button). `from_config` applies the first three to the client.
+## (the drop-in menu's Connection check button), check_on_open (the menu runs the check once when it opens; false: only
+## on the button). `from_config` applies the first three to the client.
 var diagnostics := {}
 
 static var _root: Dictionary = {}
@@ -277,7 +278,7 @@ static func _schema() -> Dictionary:
 		}),
 		"platforms": _obj({"steam": {"k": "steam"}, "epic": {"k": "epic"}, "discord": b}),
 		"ui": _obj({"kind": _enum(["drop-in", "generated", "none"]), "entry": _str(), "theme": _enum(["light", "dark", "auto"])}),
-		"diagnostics": _obj({"reportToHost": b, "logSize": _int(50, 5000), "relayProbe": b, "showConnectionCheck": b}),
+		"diagnostics": _obj({"reportToHost": b, "logSize": _int(50, 5000), "relayProbe": b, "showConnectionCheck": b, "checkOnOpen": b}),
 	}, ["game"])
 
 
@@ -523,6 +524,7 @@ static func _fill(input: Dictionary) -> Dictionary:
 		"logSize": diag_in.get("logSize", 500),
 		"relayProbe": diag_in.get("relayProbe", true),
 		"showConnectionCheck": diag_in.get("showConnectionCheck", true),
+		"checkOnOpen": diag_in.get("checkOnOpen", true),
 	}
 	return out
 

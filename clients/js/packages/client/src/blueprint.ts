@@ -68,7 +68,7 @@ export interface Blueprint {
     readonly discord: boolean;
   };
   readonly ui: { readonly kind: "drop-in" | "generated" | "none"; readonly entry?: string; readonly theme: "light" | "dark" | "auto" };
-  readonly diagnostics: { readonly reportToHost: boolean; readonly logSize: number; readonly relayProbe: boolean; readonly showConnectionCheck: boolean };
+  readonly diagnostics: { readonly reportToHost: boolean; readonly logSize: number; readonly relayProbe: boolean; readonly showConnectionCheck: boolean; readonly checkOnOpen: boolean };
 }
 
 /** What you may write: only `game.id` is required. */
@@ -133,7 +133,7 @@ export interface BlueprintInput {
     discord?: boolean;
   };
   ui?: { $comment?: string; kind?: "drop-in" | "generated" | "none"; entry?: string; theme?: "light" | "dark" | "auto" };
-  diagnostics?: { $comment?: string; reportToHost?: boolean; logSize?: number; relayProbe?: boolean; showConnectionCheck?: boolean };
+  diagnostics?: { $comment?: string; reportToHost?: boolean; logSize?: number; relayProbe?: boolean; showConnectionCheck?: boolean; checkOnOpen?: boolean };
 }
 
 /** Identity function for TypeScript completion in a `.ts` config (like Vite's `defineConfig`). */
@@ -224,7 +224,7 @@ const ROOT: Node = obj(
     }),
     platforms: obj({ steam: { k: "steam" }, epic: { k: "epic" }, discord: bool }),
     ui: obj({ kind: en("drop-in", "generated", "none"), entry: str(), theme: en("light", "dark", "auto") }),
-    diagnostics: obj({ reportToHost: bool, logSize: int(50, 5000), relayProbe: bool, showConnectionCheck: bool }),
+    diagnostics: obj({ reportToHost: bool, logSize: int(50, 5000), relayProbe: bool, showConnectionCheck: bool, checkOnOpen: bool }),
   },
   ["game"],
 );
@@ -435,6 +435,7 @@ function fill(input: Record<string, unknown>): Blueprint {
       logSize: diagnostics.logSize ?? 500,
       relayProbe: diagnostics.relayProbe ?? true,
       showConnectionCheck: diagnostics.showConnectionCheck ?? true,
+      checkOnOpen: diagnostics.checkOnOpen ?? true,
     },
   };
   return out as unknown as Blueprint;

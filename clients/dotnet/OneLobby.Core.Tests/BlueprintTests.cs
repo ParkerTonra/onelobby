@@ -174,13 +174,15 @@ namespace OneLobby.Tests
         public void DiagnosticsSwitchesReachTheConfig()
         {
             var d = Blueprint.Parse(@"{""game"":{""id"":""a""}}");
-            Assert.Equal(new DiagnosticsSection(true, 500, true, true), d.Diagnostics);
-            var o = Blueprint.Parse(@"{""game"":{""id"":""a""},""diagnostics"":{""reportToHost"":false,""logSize"":50,""relayProbe"":false,""showConnectionCheck"":false}}");
+            Assert.Equal(new DiagnosticsSection(true, 500, true, true, true), d.Diagnostics);
+            Assert.True(d.Diagnostics.CheckOnOpen);
+            var o = Blueprint.Parse(@"{""game"":{""id"":""a""},""diagnostics"":{""reportToHost"":false,""logSize"":50,""relayProbe"":false,""showConnectionCheck"":false,""checkOnOpen"":false}}");
             var cfg = o.ToConfig();
             Assert.False(cfg.Diagnostics.ReportToHost);
             Assert.Equal(50, cfg.Diagnostics.LogSize);
             Assert.False(cfg.Diagnostics.RelayProbe);
             Assert.False(o.Diagnostics.ShowConnectionCheck);
+            Assert.False(o.Diagnostics.CheckOnOpen);
             Assert.Equal("drop-in", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-gdscript""}").Ui.Kind);
             Assert.Equal("drop-in", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-csharp""}").Ui.Kind);
             Assert.Equal("generated", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""unity""}").Ui.Kind);
