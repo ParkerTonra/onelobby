@@ -97,6 +97,9 @@ public partial class NetPlayerSelfCheck : Node
             await Case("leave_and_spectator", LeaveAndSpectator);
             await Case("teleport_and_corrections", TeleportAndCorrections);
             await Case("body_and_missing_step", BodyAndMissingStep);
+            await Case("character_sets_its_own_step", CharacterSetsItsOwnStep);
+            await Case("spectator_becomes_player", SpectatorBecomesPlayer);
+            await Case("godot_api", GodotApi);
             await Case("spawner", SpawnerLifetime);
             await Case("allocation", Allocation);
             await Case("sample_trace", SampleTrace);
@@ -228,6 +231,20 @@ public partial class NetPlayerSelfCheck : Node
         ap.AddAnimationLibrary("", lib);
         root.AddChild(ap);
         ap.Owner = root;
+        var ps = new PackedScene();
+        var err = ps.Pack(root);
+        if (err != Error.Ok) throw new InvalidOperationException("Pack failed: " + err);
+        root.Free();
+        return ps;
+    }
+
+    /// <summary>Like <see cref="CharacterScene"/> (3D), but the root is an <see cref="OwnStepCharacter"/>: it sets the node's step function in its own <c>_Ready</c>.</summary>
+    private static PackedScene OwnStepScene()
+    {
+        var root = new OwnStepCharacter { Name = "Player" };
+        var np = new OneLobbyNetPlayer { Name = "NetPlayer" };
+        root.AddChild(np);
+        np.Owner = root;
         var ps = new PackedScene();
         var err = ps.Pack(root);
         if (err != Error.Ok) throw new InvalidOperationException("Pack failed: " + err);
@@ -574,6 +591,67 @@ public partial class NetPlayerSelfCheck : Node
         Check(Char(h, b.Peer) == null && bOnHost!.IsQueuedForDeletion(), "leave: B's character is freed on the host");
         Check(Char(a, b.Peer) == null, "leave: and on A");
         Cleanup(c);
+    }
+
+    /// <summary>Host authority, the spawner has no step function: a step the character set in its own <c>_Ready</c> survives the spawner (it used to be overwritten with null).</summary>
+    private async Task CharacterSetsItsOwnStep()
+    {
+        var c = new Cluster();
+        var opts = new NetPlayersOptions { Authority = PlayerAuthority.Host };
+        var scene = OwnStepScene();
+        var h = await NewMachine(c, "host", opts, scene, host: true);
+        var a = await NewMachine(c, "a", opts, scene);
+        Check(Np(Char(a, a.Peer)!).StepFunction != null, "own step: the node keeps the step its character set in _Ready (the spawner has none)");
+        Check(a.Layer!.Step != null, "own step: and the layer got it");
+        Check(Np(Char(h, h.Peer)!).StepFunction != null && h.Layer!.Step != null, "own step: the same on the host");
+        Cleanup(c);
+        // a spawner that has a step wins: it is the game's one step for every character
+        var c2 = new Cluster();
+        PlayerStepFunc mine = WalkStep;
+        var h2 = await NewMachine(c2, "host", new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = mine }, scene, host: true);
+        Check(h2.Layer!.Step == mine, "own step: a step given to the spawner is the layer's step");
+        Cleanup(c2);
+    }
+
+    /// <summary>A spectator has no character; when its role becomes player (<c>Room.SetRole</c>) the spawner makes its own, and the others get a copy of it.</summary>
+    private async Task SpectatorBecomesPlayer()
+    {
+        var c = new Cluster();
+        var opts = new NetPlayersOptions { Authority = PlayerAuthority.Owner };
+        var scene = CharacterScene("node3d");
+        var h = await NewMachine(c, "host", opts, scene, host: true, spectators: 1);
+        var a = await NewMachine(c, "a", opts, scene);
+        var s = await NewMachine(c, "c", opts, scene, spectator: true);
+        for (var i = 0; i < 120; i++) Frame(c);
+        Check(Char(s, s.Peer) == null && Char(h, s.Peer) == null, "spectator to player: no character while it is a spectator");
+        s.Lobby.Room.SetRole(RoomRole.Player);
+        for (var i = 0; i < 200; i++)
+        {
+            if (Char(s, s.Peer) is Node3D mine) mine.Position = new Vector3(4f, 0f, 2f);
+            Frame(c);
+        }
+        Check(Char(s, s.Peer) != null && s.Spawned.Exists(x => x.Peer == s.Peer && x.Local), "spectator to player: its own character is made, marked local");
+        Check(Char(h, s.Peer) != null && Char(a, s.Peer) != null, "spectator to player: the host and the other player get a copy");
+        Cleanup(c);
+    }
+
+    /// <summary>
+    /// The add-on and this demo are built against the oldest GodotSharp the packages support (4.5.1) and run on the engine at hand: a member that
+    /// build knows but the engine's GodotSharp lacks only fails at run time, with a MissingMethodException when that code path first runs
+    /// (<c>AnimationPlayer.CurrentAnimation</c> did on 4.7.2). This resolves every reference this build's assemblies make into GodotSharp, so such a
+    /// gap fails here by name, whether or not another case happens to run that line.
+    /// </summary>
+    private Task GodotApi()
+    {
+        var engine = typeof(GodotObject).Assembly;
+        foreach (var asm in new[] { typeof(NetPlayerSelfCheck).Assembly, typeof(OneLobby.Godot.GodotTransport).Assembly })
+        {
+            var (checkedRefs, missing) = GodotApiGaps.Scan(asm);
+            GD.Print($"NETPLAYER_SELF godot api: {asm.GetName().Name} makes {checkedRefs} references into GodotSharp {engine.GetName().Version}, {missing.Count} unresolved");
+            Check(checkedRefs > 20, $"godot api: {asm.GetName().Name}: the scan saw its references ({checkedRefs})");
+            foreach (var m in missing) Check(false, $"godot api: {asm.GetName().Name} uses {m}, which this engine's GodotSharp does not have");
+        }
+        return Task.CompletedTask;
     }
 
     /// <summary>The node's Teleport does not slide on the watcher; a cheat is put back and the node takes the host's state.</summary>

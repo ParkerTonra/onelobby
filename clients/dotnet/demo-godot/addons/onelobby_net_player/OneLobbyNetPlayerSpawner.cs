@@ -158,7 +158,7 @@ public partial class OneLobbyNetPlayerSpawner : Node
         else if (inst is Node2D n2 && SpawnPoint2D != null) n2.Position = SpawnPoint2D(peer);
         var holder = (SpawnParent.IsEmpty ? null : GetNodeOrNull(SpawnParent)) ?? GetParent();
         holder.AddChild(inst);
-        np.StepFunction = StepFunction;
+        if (StepFunction != null) np.StepFunction = StepFunction; // never overwrite a step the character set in its own _Ready
         np.Bind(Players!);
         _characters[peer] = inst;
         inst.SetMeta("onelobby_local", np.IsLocal);
