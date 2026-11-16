@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://examples/net_player_demo/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://addons/onelobby/menu/menu.tscn" id="2_menu"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_main")
+
+[node name="Menu" parent="." instance=ExtResource("2_menu")]
+layout_mode = 1
+config_path = "res://examples/net_player_demo/onelobby.json"

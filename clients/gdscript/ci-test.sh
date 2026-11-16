@@ -33,6 +33,11 @@ step lan "${G[@]}" -s res://tests/lan.gd
 step sync "${G[@]}" -s res://tests/sync.gd
 step replication_vectors "${G[@]}" -s res://tests/replication_vectors.gd
 step replication "${G[@]}" -s res://tests/replication.gd
+step net_player_vectors "${G[@]}" -s res://tests/net_player_vectors.gd
+step net_player "${G[@]}" -s res://tests/net_player.gd
+step net_player_node "${G[@]}" -s res://tests/net_player_node.gd
+step net_player_sample "${G[@]}" -s res://tests/net_player_sample.gd
+step net_player_two_process bash "$HERE/net-player-test.sh"
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
 step room "${G[@]}" -s res://tests/room.gd
 step menu "${G[@]}" -s res://tests/menu.gd
