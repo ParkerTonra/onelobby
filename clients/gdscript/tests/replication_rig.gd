@@ -36,8 +36,13 @@ class FakeLobby:
 	var net: Net
 	var name := ""
 	var ready_peers := {} # peer id -> true: links that are open
+	## What `lobby.room` offers the player layer: the roster with roles (`net.spectators` lists the spectators).
+	var room := RoomStub.new()
 	var all_peers := {}
 	var _log := OneLobbyNetLog.new(500, Callable())
+
+	func _init() -> void:
+		room.lobby = self
 
 	func now_ms() -> int:
 		return net.now
@@ -61,6 +66,18 @@ class FakeLobby:
 		return _log
 
 
+## The two things of `lobby.room` the player layer reads: the roster with a role for each peer.
+class RoomStub:
+	extends RefCounted
+	var lobby: RefCounted
+
+	func entries() -> Array:
+		var out: Array = []
+		for id: int in lobby.all_peers:
+			out.append({"id": id, "role": "spectator" if lobby.net.spectators.has(id) else "player"})
+		return out
+
+
 ## The in-memory network and its clock.
 class Net:
 	extends RefCounted
@@ -75,6 +92,7 @@ class Net:
 	var reorder_reliable := Callable()
 	var extra_delay_ms := Callable()
 	var block_open := false ## a joiner whose link never opens
+	var spectators := {} ## peer id -> true: seated as a spectator (what `lobby.room.entries()` says)
 	var queue: Array = [] # [at, to, from, channel, bytes]
 	var sent := {} # "owner:channel" -> bytes the owner handed to the network
 	var _last_reliable := {}
@@ -184,10 +202,12 @@ func start_host() -> RepPlayer:
 
 
 ## A joiner; with `net.block_open` its link never opens. Returns the player without a session when `attach` is false.
-func join(name: String, attach: bool = true) -> RepPlayer:
+func join(name: String, attach: bool = true, spectator: bool = false) -> RepPlayer:
 	var id := _next_peer
 	_next_peer += 1
 	var p := _make(name, id, false)
+	if spectator:
+		net.spectators[id] = true
 	p.lobby.all_peers[1] = true
 	host.lobby.all_peers[id] = true
 	host.lobby.peer_joined.emit({"peer_id": id, "name": name, "ping_ms": 0, "relayed": false})
@@ -200,24 +220,45 @@ func join(name: String, attach: bool = true) -> RepPlayer:
 	return p
 
 
+## A peer goes away: everyone else is told (`peer_left`) and its link closes. Its own session is not pumped again.
+func leave(p: RepPlayer) -> void:
+	players.erase(p)
+	net.lobbies.erase(p.lobby.local_peer_id)
+	for o in players:
+		o.lobby.all_peers.erase(p.lobby.local_peer_id)
+		o.lobby.ready_peers.erase(p.lobby.local_peer_id)
+		o.lobby.peer_left.emit({"peer_id": p.lobby.local_peer_id, "name": p.name, "ping_ms": 0, "relayed": false}, "left")
+
+
 ## One render frame on every peer: advance time, pump, run due ticks (host: sim + snapshot; client: inputs).
 func step() -> void:
 	net.advance(frame_ms)
 	for p in players.duplicate():
 		if p.session == null:
 			continue
-		p.session.pump()
-		if p.session.is_host:
-			while p.session.clock.try_advance():
-				if host_tick.is_valid():
-					host_tick.call(p.session.clock.tick)
-				p.session.send_snapshot()
-		else:
-			while p.session.clock.try_advance():
-				if p.make_input.is_valid():
-					var input: Variant = p.make_input.call(p.session.clock.tick)
-					if input != null:
-						p.submitted_seqs.append(p.session.submit_input(input))
+		_pump_player(p)
+
+
+## One peer's frame: the layer if the peer has one, else the bare session.
+func _pump_player(p: RepPlayer) -> void:
+	if frozen.has(p.name):
+		return
+	var layer: OneLobbyNetPlayers = layers.get(p.name)
+	if layer != null:
+		layer.pump()
+		return
+	p.session.pump()
+	if p.session.is_host:
+		while p.session.clock.try_advance():
+			if host_tick.is_valid():
+				host_tick.call(p.session.clock.tick)
+			p.session.send_snapshot()
+	else:
+		while p.session.clock.try_advance():
+			if p.make_input.is_valid():
+				var input: Variant = p.make_input.call(p.session.clock.tick)
+				if input != null:
+					p.submitted_seqs.append(p.session.submit_input(input))
 
 
 func run(seconds: float) -> void:
@@ -237,3 +278,50 @@ func until(cond: Callable, max_steps: int = 1200) -> bool:
 ## Bytes a player handed to the network on a channel (lobby frames included).
 func sent_bytes(p: RepPlayer, channel: int) -> int:
 	return net.sent_bytes(p.name, channel)
+
+
+# ---- the player layer on the rig (tests/net_player.gd): a OneLobbyNetPlayers on each peer, the GDScript twin of the JS `PlayerRig` ----
+
+## name -> OneLobbyNetPlayers.
+var layers := {}
+## Peers whose frames are skipped (a host that stopped sending, a client that went away): name -> true.
+var frozen := {}
+## `opts` of the layer for every peer, or a `Callable(name) -> Dictionary`.
+var layer_opts: Variant = {}
+
+
+## The scenario of spec/net-player.md section 11: `opts` has `latency_ms` (100), `jitter_ms` (20), `loss_rate` (0.03), `layer`
+## (options of the layer, or a Callable by peer name) and `session` (session config keys; `adaptive_delay` is on unless turned off).
+static func player_rig(opts: Dictionary = {}) -> RefCounted:
+	var sc := {"adaptive_delay": true}
+	sc.merge(opts.get("session", {}), true)
+	var rig = (load("res://tests/replication_rig.gd") as GDScript).new(sc, float(opts.get("latency_ms", 100.0)), float(opts.get("loss_rate", 0.03)), float(opts.get("jitter_ms", 20.0)))
+	rig.layer_opts = opts.get("layer", {})
+	return rig
+
+
+func _opts_for(name: String) -> Dictionary:
+	if layer_opts is Callable:
+		return (layer_opts as Callable).call(name)
+	return layer_opts
+
+
+## The host with a layer: `{p, layer}`.
+func host_players() -> Dictionary:
+	var p := start_host()
+	var l := OneLobbyNetPlayers.new(p.session, _opts_for("host"))
+	layers["host"] = l
+	return {"p": p, "layer": l}
+
+
+## A joiner with a layer: `{p, layer}`; `spectator` seats it as a spectator (it gets no player).
+func join_players(name: String, spectator: bool = false) -> Dictionary:
+	var p := join(name, true, spectator)
+	var l := OneLobbyNetPlayers.new(p.session, _opts_for(name))
+	layers[name] = l
+	return {"p": p, "layer": l}
+
+
+## Virtual time in ms.
+func now_ms() -> int:
+	return net.now
