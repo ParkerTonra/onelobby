@@ -27,7 +27,7 @@ Missing or half there:
 | GDScript | Voice (needs Opus) and replication (C# only) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
 | UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
-| Room layer | No ready toggle, per-player data (colour, team, seat), spectators, countdown, rematch, name dedupe. |
+| Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. No drop-in menu draws it yet. |
 | Ban | Per lobby, by IP, forgotten when the lobby ends. No game shows kick/ban in its UI. |
 | Settings | Nothing persists name, relay line or last code outside the browser. |
 | Errors | Plain-language `describeError` exists in JS only. Players never see *why* a connection failed. |

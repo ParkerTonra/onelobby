@@ -101,6 +101,11 @@ lobby.pause.can_resume; lobby.pause.policy = func(peer: int, want: bool) -> bool
 lobby.lockstep.submit(cmd); var f := lobby.lockstep.next_frame()   # f = {tick, commands: [{peer_id, bytes}]}, {} when none
 lobby.lockstep.report_hash(f["tick"], hash)                 # a u64 in an int
 lobby.lockstep.snapshot = func() -> PackedByteArray: return bytes; lobby.lockstep.restore = func(tick: int, bytes: PackedByteArray) -> void: pass
+lobby.room.entries(); lobby.room.set_data({"color": "#ff8800"}); lobby.room.set_ready(true)   # roster: id, name, role, seat, ready, status, data; calls return an error code ("" = ok)
+lobby.room.start(); lobby.room.cancel_countdown(); lobby.room.back_to_lobby(); lobby.room.rematch()   # host; countdown_changed / started / returned_to_lobby signals
+lobby.room.kick(id, {"reason": "..."}); lobby.room.ban(id, {"reason": "..."}); lobby.room.unban(player_id)   # the player sees lobby.removal; bans persist (lobby.room.bans)
+lobby.room.seat_dropped.connect(func(info: Dictionary) -> void: pass); lobby.room.changed.connect(func() -> void: pass); lobby.room.filter = func(text: String, kind: String) -> String: return text   # docs/recipes/room.md
+await client.host({"password": "x", "room": {"spectators": 2, "auto_start": "all_ready"}}); await client.join(code, {"password": "x", "role": "spectator"})
 ```
 
 ## Install
@@ -300,7 +305,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
 
 - Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
-- Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause): `docs/recipes/godot-gdscript.md`
+- Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause, room layer): `docs/recipes/godot-gdscript.md`
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`

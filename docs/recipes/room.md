@@ -6,8 +6,8 @@ Every lobby has a room: the roster a lobby screen shows. It gives you what three
 survive the lobby, and passwords on every route. The host owns the truth; everyone else holds a copy and asks the host.
 A game that never touches `lobby.room` behaves as before. Spec: `spec/room.md`.
 
-JS and C# ship it in 0.7.2 (`lobby.room` in JS, `lobby.Room` in C#, the same messages and rules); GDScript follows in the same release.
-The examples are JS first, then the same in C# under "C#".
+JS, C# and GDScript ship it in 0.7.2 (`lobby.room` in JS and GDScript, `lobby.Room` in C#, the same messages and rules, so
+players of all three share a room). The examples are JS first, then the same in C# under "C#" and in GDScript under "GDScript".
 
 ## The lobby screen
 
@@ -249,6 +249,125 @@ then lasts one process). Give a file with `OneLobbyConfig.PlayerIdFile` / `BanFi
 store with `PlayerIdStore` / `BanStore` (PlayerPrefs, a save file). Differences from JS names: the `countdown` event is
 `CountdownUpdated`, the `backToLobby` event is `BackedToLobby`, `supported` is `SupportConfirmed`, and `Room.Supported` is a
 `bool?` (null until the host answers).
+
+## GDScript
+
+`lobby.room` is an `OneLobbyRoom` (a `RefCounted`) with the same shape as JS `lobby.room`, in GDScript style: snake_case,
+signals instead of `on`, Dictionaries for entries. It works on server lobbies and Direct lobbies (IP and Nostr codes), raw and
+lockstep. Signals fire inside the client's per-frame pump (or when a host call changes the room). The API is documented in
+the `room.gd` comments; the wire is the one in `spec/room.md`, so GDScript, JS and C# players share a room.
+
+An entry is `{id, name, role, seat, ready, status, data, legacy?}` (`id` is the peer id). A call that can fail returns the
+stable error code (`""` when it worked) and also raises it on `client.error`, where JS and C# throw. `room.supported` is
+`null` until the host answers (a host is `true` at once; `false` after 3 s with an older host, then `entries()` is the hub
+roster). Signals: `changed`, `player_joined`, `player_left(entry, why)`, `player_changed(entry, keys)`, `state_changed`,
+`started`, `all_ready_changed`, `countdown_changed(countdown)`, `countdown_cancelled(reason)`, `returned_to_lobby`,
+`settings_changed`, `seat_dropped(info)`, `seat_restored(info)`, `requested(peer_id, what)`, `removed(info)`,
+`rejected(code, re, key)`, `bans_changed`, `became_supported`, `became_unsupported`.
+
+```gdscript compile file=room_screen.gd
+extends Node
+
+
+func wire_room(lobby: OneLobbyLobby, start_button: Button) -> void:
+	var room := lobby.room
+	room.changed.connect(func() -> void: _redraw(lobby, start_button))       # after every roster, ready, data and state change
+	room.countdown_changed.connect(func(c: Dictionary) -> void: print("starting in ", ceili(float(c["remaining"]) / 1000.0)))
+	room.countdown_cancelled.connect(func(why: String) -> void: print("start cancelled: ", why))
+	room.started.connect(func() -> void: print("go"))                          # the lobby phase is in_game now
+	room.removed.connect(func(info: Dictionary) -> void: print(info["reason"]))   # kicked, banned or refused: a plain sentence
+	room.became_unsupported.connect(func() -> void: print("this host is older and has no room layer"))
+	room.rejected.connect(func(code: String, what: String, key: String) -> void: print("refused %s: %s %s" % [what, code, key]))
+	_redraw(lobby, start_button)
+
+
+func _redraw(lobby: OneLobbyLobby, start_button: Button) -> void:
+	for p: Dictionary in lobby.room.entries():
+		var data: Dictionary = p["data"]
+		var tag := "watching" if p["role"] == "spectator" else ("reconnecting" if p["status"] == "reconnecting" else ("ready" if p["ready"] else "not ready"))
+		print("%s  seat %d  colour %s  %s" % [p["name"], p["seat"], data.get("color", "-"), tag])
+	start_button.disabled = not (lobby.is_host and lobby.room.state == "lobby" and lobby.room.all_ready)
+
+
+# A player's own calls (the host answers; a refusal arrives as `rejected`)
+func pick_my_look(lobby: OneLobbyLobby) -> void:
+	lobby.room.set_data({"color": "#ff8800", "avatar": "3", "team": "1"})
+	lobby.room.set_ready(true)
+```
+
+Host side, the same flow:
+
+```gdscript compile file=room_host.gd
+extends Node
+
+
+func host_controls(lobby: OneLobbyLobby) -> void:
+	var room := lobby.room
+	room.requested.connect(func(_peer: int, what: String) -> void:         # a joiner clicked "Start", "Back to lobby" or "Rematch"
+		if what == "start" and room.all_ready:
+			room.start()
+		if what == "rematch":
+			room.rematch())
+	room.seat_dropped.connect(func(info: Dictionary) -> void: print("bot into seat ", info["seat"]))     # the player is gone past the window
+	room.seat_restored.connect(func(info: Dictionary) -> void: print("bot out of seat ", info["seat"]))  # it came back (info["returning"])
+	room.filter = func(text: String, _kind: String) -> String: return text.replace("darn", "****")   # optional word filter; nothing by default
+
+
+func end_of_round(lobby: OneLobbyLobby) -> void:
+	lobby.room.back_to_lobby()    # ready flags reset, links and seats stay; or lobby.room.rematch() to go again
+
+
+func moderate(lobby: OneLobbyLobby, peer_id: int) -> void:
+	lobby.room.kick(peer_id, {"reason": "Please keep it friendly."})           # may rejoin
+	lobby.room.ban(peer_id, {"code": "spam", "reason": "Spam in chat."})       # refused from now on, in every lobby you host
+	var bans := lobby.room.bans.list()                                          # [{id, ip?, name, reason, code, at}]
+	if not bans.is_empty():
+		lobby.room.unban(str((bans[0] as Dictionary)["id"]))
+```
+
+Setup with a password, spectators and late join, then joining. `host()`, `host_direct()`, `join()` and `join_direct()` all
+take these options:
+
+```gdscript compile file=room_setup.gd
+extends Node
+
+
+func host_it(client: OneLobbyClient) -> OneLobbyLobby:
+	return await client.host_direct({
+		"name": "Sam's game", "max_players": 4, "password": "tulip",
+		"room": {"spectators": 4, "late_join": "spectate", "auto_start": "all_ready", "countdown_seconds": 3,
+			"data": {"team": {"type": "int", "min": 0, "max": 2}}},
+		"data": {"color": "#ff8800"},                                       # the host's own starting data
+	})
+
+
+func join_it(client: OneLobbyClient, code: String) -> OneLobbyLobby:
+	# null with client.last_error["code"] == "bad_password" when the password is wrong
+	return await client.join_direct(code, {"password": "tulip", "role": "spectator", "data": {"color": "#33aaff"}})
+```
+
+`room` options are the `onelobby.json` keys in snake_case (`auto_start`, `auto_start_players`, `min_players`,
+`countdown_seconds`, `spectators`, `late_join`, `seat_dropped`, `rejoin_window_seconds`, `password_required`, `max_name_length`,
+`data`); a blueprint's `room` section is the default (`OneLobbyConfig.room_options()`) and your options win, their `data`
+declarations merging with the file's. `host()` fails with `password_required` when `room.passwordRequired` is true and no
+password is given. A joiner's `data` and `role` go in its `join`; `rejoin()` brings none.
+
+The player id (32 hex characters, made once per install and game) and the ban list live in an `OneLobbyStore`
+(`get_item`, `set_item`, `remove_item`). `client.store` defaults to the file `user://onelobby.json`; set
+`OneLobbyStore.memory()` (nothing kept), `OneLobbyStore.file("user://mine.json")` or your own subclass before `host()` / `join()`.
+`client.player_id()` is the id and `client.bans()` the list (`lobby.room.bans`: `list()`, `add()`, `remove()`, `clear()`).
+
+GDScript specifics:
+
+- The Direct hub in `hub.gd` has no spectator slots and no ban list: a Direct host gets `max_players + spectators` as its
+  capacity and its room does the split, the ban check and a second password check itself (spec section 8, "new client, old hub"); a
+  banned or wrong-password joiner is told by a `deny` frame. A server lobby on a hub with the `room` feature uses the hub's checks too.
+- A ban stores the player id. The address fallback needs the link's remote address, which Godot's WebRTC does not expose, so the
+  stock link leaves `OLLink.remote_address` empty and an address-only ban is not enforced (a custom transport can fill it in; the
+  lobby polls it every 500 ms and re-checks the list when it appears).
+- Godot strings cannot hold U+0000: its JSON parser turns it into U+FFFD, so the name and text rules strip U+FFFD as well.
+- Tests: `tests/room_vectors.gd` (every case of `spec/vectors/room.json`), `tests/room.gd` (real peers on loopback plus stand-in
+  peers for the host rules) and `tools/engine-smoke/run.mjs --room` against JS and C# peers.
 
 ## Compatibility
 

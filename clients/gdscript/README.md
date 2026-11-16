@@ -2,7 +2,7 @@
 
 A pure GDScript client for Godot 4.4+, no .NET. Raw and lockstep modes, through a lobby server or Direct (no server, Nostr join codes): your own messages over the host's star (a joiner's
 send goes through the host, `from` is always the real sender), host migration, chunking of big payloads, join codes,
-lobby browse, kick/approve, rejoin, text chat, the shared pause, lockstep (below) and `onelobby.json` (`OneLobbyConfig`, below). Voice and replication are in the C# and JS clients. Written from `spec/`;
+lobby browse, kick/approve, rejoin, text chat, the shared pause, lockstep, the room layer (below) and `onelobby.json` (`OneLobbyConfig`, below). Voice and replication are in the C# and JS clients. Written from `spec/`;
 the API mirrors `OneLobby.Core`'s, with signals for events. Recipe: [docs/recipes/godot-gdscript.md](../../docs/recipes/godot-gdscript.md).
 
 ```gdscript
@@ -44,6 +44,9 @@ failures are the shared ones (`spec/vectors/blueprint.json`), with these GDScrip
   anonymous game fails `identity_anonymous`. All arrive as `client.last_error` and the `error` signal like any other failure.
 - The file must be in the export (export preset, "Filters to export non-resource files": `*.json`). JSON comments are not allowed (GDScript's parser has none).
 - `hosting.openPort` (UPnP) and `lobby.password` are read but not applied; pass `upnp_port` / `password` to `host_direct` yourself.
+- The `room` section is read: `cfg.room` (snake_case keys, `data` as in the file) and `cfg.room_options()`; `host()` / `host_direct()` take it as
+  the default for their `room` option. `room.lateJoin` defaults from `lobby.lateJoin` and the cross rules `late_join_conflict`,
+  `min_exceeds_max` and `autostart_exceeds_players` apply (`spec/vectors/blueprint.json` `roomValid` / `roomInvalid`).
 
 ### Plain-language errors and invite links
 
@@ -90,6 +93,23 @@ The host emits one frame per tick and never waits (`lobby.start()` begins it; a 
 host send a snapshot (your `restore` runs; signals `lobby.lockstep.desync` and `restored`); a third mismatch drops that peer.
 A late joiner is served from `snapshot` (deflated above 1 KiB, as in JS and C#). `lobby.lockstep.catching_up` is true when more
 than 2 frames are waiting. Tests: `tests/sync.gd` (real peers on loopback) and, against JS and C# peers, `tools/engine-smoke`.
+
+## Room layer (ready, countdown, spectators, kick and ban)
+
+`lobby.room` is the roster a lobby screen shows, on the same wire as the JS and C# ones (`spec/room.md`): per-player data
+(colour, avatar, team, your own keys), ready, a start countdown, auto start, back to lobby and rematch, spectators, seats that
+stay with a player, a "reconnecting" state, a `seat_dropped` hook, kick and ban with a reason the player sees, bans that survive
+the lobby (keyed by a per-install player id, kept in `client.store`), and a password on every route. Recipe and signals:
+[docs/recipes/room.md](../../docs/recipes/room.md) (section "GDScript"); tests: `tests/room_vectors.gd`, `tests/room.gd`.
+
+```gdscript
+lobby.room.set_data({"color": "#ff8800"}); lobby.room.set_ready(true)           # a joiner asks, the host decides: `rejected(code, re, key)` on refusal
+lobby.room.changed.connect(func() -> void: draw(lobby.room.entries()))            # {id, name, role, seat, ready, status, data}
+lobby.room.started.connect(func() -> void: print("go"))                           # after the host's countdown; lobby.phase is "in_game"
+lobby.room.start(); lobby.room.kick(peer_id, {"reason": "afk"}); lobby.room.ban(peer_id, {})   # host; the player gets lobby.removal {code, reason, ban}
+var lobby := await client.host({"password": "tulip", "room": {"spectators": 2, "auto_start": "all_ready"}})
+var lobby := await client.join(code, {"password": "tulip", "role": "spectator"})
+```
 
 ## Direct mode (no lobby server)
 
