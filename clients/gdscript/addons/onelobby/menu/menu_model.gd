@@ -34,7 +34,8 @@ var route := "auto"
 ## Options passed to client.host() / host_direct() and join() / join_direct() (a test gives loopback addresses here).
 var host_options := {}
 var join_options := {}
-## Base address of an invite link ("https://game.example/play"). The invite button needs it and a lobby-server lobby.
+## Base address of an invite link ("https://game.example/play"). Optional: with it (and a lobby-server code) the copied invite
+## sentence ends with the link.
 var invite_base := ""
 ## The query key of an invite link.
 var invite_param := "join"
@@ -129,9 +130,9 @@ func approve_joins_on() -> bool:
 	return c != null and bool(c.lobby.get("approve_joins", false))
 
 
-## An invite link needs a base address and a lobby-server code (a direct code does not travel in a link).
+## Copy invite is always offered while a lobby is open.
 func invite_available() -> bool:
-	return invite_base != "" and lobby != null and not lobby_is_direct()
+	return lobby != null
 
 
 func lobby_is_direct() -> bool:
@@ -178,11 +179,43 @@ static func clean_join_text(text: String) -> String:
 	return out.left(40)
 
 
-## What a join field holds: {kind: "lobby" | "direct" | "address" | "", value}. A link yields its lobby code.
+## What a join field holds: {kind: "lobby" | "direct" | "address" | "", value}. A link yields its lobby code. A pasted invite
+## sentence ("Join my game in Fortress: code 7HQ 4K2") yields its code: the words after its "code" marker first, then the whole
+## text as one code, then the words scanned from the END (a game title can look like a code, so the title is never tried first).
 static func parse_join(text: String) -> Dictionary:
 	var t := text.strip_edges()
 	if t.is_empty():
 		return {"kind": "", "value": ""}
+	var words: Array = []
+	for w in t.replace("\t", " ").replace("\n", " ").replace("\r", " ").split(" ", false):
+		var c := _trim_token(w)
+		if c != "":
+			words.append(c)
+	if words.size() > 1:
+		for i in words.size() - 1:
+			if str(words[i]).to_lower() == "code":
+				var got := _after_marker(words, i + 1)
+				if got["kind"] != "":
+					return got
+				break
+	var whole := _parse_one(t)
+	if whole["kind"] != "" or words.size() < 2:
+		return whole
+	var i := words.size() - 1
+	while i >= 0:
+		if i >= 1 and _is_group_pair(words[i - 1], words[i]):
+			var pair := _parse_one(str(words[i - 1]) + " " + str(words[i]))
+			if pair["kind"] == "lobby":
+				return pair
+		var one := _parse_one(str(words[i]))
+		if one["kind"] != "":
+			return one
+		i -= 1
+	return whole
+
+
+## One field's worth of text: a lobby code, a direct code, an address or a link.
+static func _parse_one(t: String) -> Dictionary:
 	if t.contains("?") or t.contains("://") or t.contains("#"):
 		var from_link := OneLobbyInvite.parse(t)
 		if from_link != "":
@@ -195,6 +228,35 @@ static func parse_join(text: String) -> Dictionary:
 	if not OneLobbyJoinCode.parse_address(t).has("error"):
 		return {"kind": "address", "value": t}
 	return {"kind": "", "value": t}
+
+
+## Strips quotes, brackets and trailing punctuation around a word of a pasted sentence (a link keeps its inner marks).
+static func _trim_token(w: String) -> String:
+	var a := 0
+	var b := w.length()
+	const EDGE := "\"'`()[]{}<>.,;:!“”‘’"
+	while a < b and EDGE.contains(w[a]):
+		a += 1
+	while b > a and EDGE.contains(w[b - 1]):
+		b -= 1
+	return w.substr(a, b - a)
+
+
+## Two words shaped like the lobby screen's grouping ("7HQ" "4K2"): three characters each, so ordinary words ("game in") are not taken.
+static func _is_group_pair(a: String, b: String) -> bool:
+	return a.length() == 3 and b.length() == 3
+
+
+## The code right after the "code" marker: one word, or two ("7HQ" "4K2", as the lobby screen groups it).
+static func _after_marker(words: Array, at: int) -> Dictionary:
+	var one := _parse_one(str(words[at]))
+	if one["kind"] != "":
+		return one
+	if at + 1 < words.size() and _is_group_pair(words[at], words[at + 1]):
+		var two := _parse_one(str(words[at]) + " " + str(words[at + 1]))
+		if two["kind"] == "lobby":
+			return two
+	return {"kind": "", "value": ""}
 
 
 ## The boot flags the menu acts on at once: --host, --join=<code> and --name=<name>, as {host, join, name}.
@@ -418,10 +480,18 @@ func code_text() -> String:
 	return OneLobbyJoinCode.display(c) if c.length() == OneLobbyJoinCode.LENGTH else c
 
 
+## The invite sentence: "Join my game in <title>: code 7HQ 4K2" (no title: "Join my game: code 7HQ 4K2"), then a space and the
+## invite link when `invite_base` is set and the code is a lobby-server code. The code is written as the lobby screen shows it.
 func invite_text() -> String:
-	if lobby == null or invite_base == "":
+	if lobby == null:
 		return ""
-	return OneLobbyInvite.make(lobby.code, invite_base, invite_param)
+	var title := client.config.title if client.config != null and client.config.ok else ""
+	var text := OneLobbyMenuText.t("invite_sentence", [title, code_text()]) if title != "" else OneLobbyMenuText.t("invite_sentence_untitled", [code_text()])
+	if invite_base != "" and not lobby_is_direct():
+		var link := OneLobbyInvite.make(lobby.code, invite_base, invite_param)
+		if link != "":
+			text += " " + link
+	return text
 
 
 func countdown_text() -> String:

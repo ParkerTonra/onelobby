@@ -8,6 +8,9 @@ extends RefCounted
 ## Sentences about errors, removals and the connection check are not here: they come from OneLobbyFriendly, OneLobbyDiagnose
 ## and the room layer's removal reasons, so a game that rewords one of those does it at the source. A value may hold `%s` / `%d`
 ## placeholders; `t()` fills them from `args` in order.
+##
+## A reworded invite sentence (`invite_sentence`, `invite_sentence_untitled`) must keep the code as its last word or right after
+## its "code" marker: the Join box finds the code there when a player pastes the sentence.
 
 const TABLE := {
 	# start
@@ -32,6 +35,8 @@ const TABLE := {
 	"code_caption": "Join code",
 	"copy_code": "Copy code",
 	"copy_invite": "Copy invite",
+	"invite_sentence": "Join my game in %s: code %s",
+	"invite_sentence_untitled": "Join my game: code %s",
 	"copied": "Copied!",
 	"copy_failed": "Couldn't copy, select it by hand",
 	"players_header": "Players %d/%d",

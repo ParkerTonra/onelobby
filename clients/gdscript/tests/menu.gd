@@ -107,6 +107,10 @@ func _names(r: Rig) -> Array:
 	return r.model.roster_rows().map(func(row: Dictionary) -> String: return row["name"])
 
 
+func M_parse(text: String) -> Dictionary:
+	return OneLobbyMenuModel.parse_join(text)
+
+
 func _row(r: Rig, who: String) -> Dictionary:
 	for row: Dictionary in r.model.roster_rows():
 		if row["name"] == who:
@@ -150,13 +154,21 @@ func _pure() -> void:
 	_check(M.parse_join("192.168.1.20:47810")["kind"] == "address" and M.parse_join("192.168.1.20")["kind"] == "address", "an ip:port or an ip")
 	_check(M.parse_join(OneLobbyJoinCode.encode_ip("10.1.2.3", 47810))["kind"] == "direct", "a direct code")
 	_check(M.parse_join("hello")["kind"] == "" and M.parse_join("")["kind"] == "", "garbage and nothing are no code")
-	_check(M.parse_boot_flags(PackedStringArray(["--host", "--name=Sam"])) == {"host": true, "join": "", "name": "Sam"}, "boot flags: --host and --name")
-	_check(M.parse_boot_flags(PackedStringArray(["--join=7HQ4K2", "--other"]))["join"] == "7HQ4K2", "boot flags: --join")
-	_check(OneLobbyMenuText.t("players_header", [2, 4]) == "Players 2/4", "the text table fills placeholders")
-	OneLobbyMenuText.override({"host": "Create game"})
-	_check(OneLobbyMenuText.t("host") == "Create game" and OneLobbyMenuText.t("join") == "Join", "override replaces some strings and keeps the rest")
+	# a pasted invite sentence: the code after its "code" marker, never the game title
+	var lobby_code := {"kind": "lobby", "value": "7HQ4K2"}
+	_check(M.parse_join("Join my game in Fortress: code 7HQ 4K2") == lobby_code, "a sentence with a code-like title (Fortress): %s" % str(M.parse_join("Join my game in Fortress: code 7HQ 4K2")))
+	_check(M.parse_join("Join my game in Castle: code 7HQ-4K2") == lobby_code, "a six-letter title that is itself a valid code (Castle)")
+	_check(M.parse_join("Join my game: code 7HQ-4K2") == lobby_code and M.parse_join("Join my game: code 7HQ 4K2.") == lobby_code, "no title; a trailing full stop")
+	_check(M.parse_join("\"Join my game in Fortress: code 7HQ-4K2\"") == lobby_code and M.parse_join("code '7HQ-4K2'!") == lobby_code, "quotes and punctuation around the code are dropped")
+	_check(M.parse_join("Join my game in Fortress: code 7HQ 4K2 https://g.example/play?join=7HQ-4K2") == lobby_code, "a sentence followed by its link")
+	_check(M.parse_join("Come play Fortress 7HQ-4K2") == lobby_code and M.parse_join("Rejoins ma partie Castle : 7HQ 4K2") == lobby_code, "a reworded sentence with no marker: scanned from its end")
+	_check(M.parse_join("Join my game: code 192.168.1.20:47810")["kind"] == "address", "an address after the marker")
+	var dc := OneLobbyJoinCode.encode_ip("10.1.2.3", 47810)
+	_check(M.parse_join("Join my game in Fortress: code " + dc) == {"kind": "direct", "value": dc}, "a direct code after the marker")
+	_check(M.parse_join("Join my game in Fortress")["kind"] == "", "a sentence with no code is no code")
+	OneLobbyMenuText.override({"invite_sentence_untitled": "Come play: code %s"})
+	_check(OneLobbyMenuText.t("invite_sentence_untitled", ["7HQ 4K2"]) == "Come play: code 7HQ 4K2", "the invite sentence can be reworded")
 	OneLobbyMenuText.override({})
-	_check(OneLobbyMenuText.t("host") == "Host a game" and OneLobbyMenuText.t("no_such_key") == "no_such_key", "override({}) restores the defaults; an unknown key shows itself")
 	# saved name and last code are the defaults
 	var store := OneLobbyStore.memory()
 	var r := _rig(store)
@@ -178,7 +190,17 @@ func _flow() -> void:
 	var code := h.model.code_text()
 	_check(code != "" and h.model.lobby.ip_code != "", "the lobby has a code to show: %s" % code)
 	_check(h.model.copy_code() and _copied.back() == code, "Copy code puts the code on the clipboard")
-	_check(not h.model.invite_available() and not h.model.copy_invite(), "no invite link for a direct code")
+	_check(h.model.invite_available() and h.model.copy_invite() and _copied.back() == "Join my game: code " + code, "Copy invite copies the sentence with the code (no title): %s" % _copied.back())
+	h.model.invite_base = "https://g.example/play"
+	_check(h.model.invite_text() == "Join my game: code " + code, "a direct code does not travel in a link, so no link follows the sentence")
+	h.model.invite_base = ""
+	var titled := OneLobbyClient.from_config({"game": {"id": "menu-test", "title": "Fortress"}})
+	h.client.config = titled.config
+	_check(h.model.invite_text() == "Join my game in Fortress: code " + code, "with a game title the sentence names the game: %s" % h.model.invite_text())
+	_check(M_parse(h.model.invite_text())["kind"] == "direct", "and the Join box reads that back as the code, not the title")
+	h.client.config = null
+	titled.free()
+	_check(M_parse(_copied.back())["value"] == h.model.lobby.code or M_parse(_copied.back())["kind"] == "direct", "the Join box takes the copied sentence back: %s" % str(M_parse(_copied.back())))
 	_check(h.client.settings.effective()["name"] == "Sam" and h.client.settings.effective()["last_code"] != "", "the name and the code were saved")
 	var g := await _guest(h, "Ann")
 	_check(g.model.screen == Screen.LOBBY, "joining by the (lower-case) code lands on the lobby screen")

@@ -202,7 +202,7 @@ func _layouts() -> void:
 		m.ban(m.roster_rows()[1]["id"], "just a test")
 		await _until(func() -> bool: return m.ban_rows().size() == 1)
 		await _audit(menu, tag + " lobby with a ban", Vector2(size))
-		_check(not menu.get_node("%CopyInviteButton").visible, "%s: no invite button without a base" % tag)
+		_check(menu.get_node("%CopyInviteButton").visible, "%s: Copy invite is always offered in a lobby" % tag)
 		_cancel()
 		await m.left
 		_check(m.screen == Screen.START, "%s: ui_cancel in the lobby leaves it" % tag)

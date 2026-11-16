@@ -30,10 +30,10 @@ func _on_left() -> void:
 
 ## What it shows
 
-- **Start.** Name (cleaned with the room's name rules and saved), Host, Join (cleaned as typed; offers the last code), Password,
+- **Start.** Name (cleaned with the room's name rules and saved), Host, Join (cleaned as typed; offers the last code; also takes a pasted invite sentence, a bare code, an `ip:port` or an invite link), Password,
   Browse (only when a lobby server is set), Settings.
 - **Connecting.** What is being tried, and Cancel.
-- **Lobby.** The code, large, with Copy code (and Copy invite when `invite_base` is set and the code is a lobby-server code); the roster
+- **Lobby.** The code, large, with Copy code and Copy invite (the sentence `Join my game in <Game>: code 7HQ 4K2`, the game's `game.title`, or `Join my game: code 7HQ 4K2` with no title; when `invite_base` is set and the code is a lobby-server code, a space and the invite link follow); the roster
   (host mark, ready, watching, reconnecting, ping); a Ready toggle; for the host Start (everyone sees the countdown, the host can
   cancel it), Kick and Ban on every row with an optional reason, the ban list with Unban, the lobby settings the room layer lets the host
   change (start by itself, players needed, countdown, late join), and Let in / Refuse when the lobby asks to approve joins; text chat when
@@ -97,6 +97,10 @@ extends Node
 func _ready() -> void:
 	OneLobbyMenuText.override({"host": "Create game", "join": "Enter game", "players_header": "In this game: %d of %d"})
 ```
+
+The invite sentence is two keys, `invite_sentence` and `invite_sentence_untitled`. The Join box finds the code in a pasted sentence by the word
+after its "code" marker, else by scanning from the end, so a reworded or translated sentence must keep the code as its last word or right
+after the word "code" (a game title that looks like a code is never taken for one). A clickable `mygame://` link is not part of the menu.
 
 Sentences about errors, removals and the connection check come from the library (`OneLobbyFriendly`, `OneLobbyDiagnose`, the room's
 removal reasons), so they are reworded at their source.
