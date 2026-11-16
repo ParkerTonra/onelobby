@@ -44,6 +44,11 @@ map the name with an import map placed before your module script:
 <script type="importmap">{ "imports": { "onelobby": "./node_modules/onelobby/dist/index.js" } }</script>
 ```
 
+When your own server serves the page and does not expose `node_modules/`, serve the single-file bundle instead (it has no bare imports of
+its own): `require.resolve("onelobby/bundle")` in Node is `dist/onelobby.bundle.mjs`; send that file at a URL of your server and map the name to it,
+`{ "imports": { "onelobby": "/onelobby.bundle.js" } }`. The scaffolder's glue (`multiplayer/session.js`, or `session.mjs` for a CommonJS game: a `.mjs` file is an ES module whatever
+`package.json` says) imports `onelobby` by that bare name, so a no-bundler page needs this line before it can load the glue.
+
 A `file:` install writes that machine's path into `package.json`; switch it to the npm version before sharing the game.
 Lobby URL: the server's WebSocket endpoint is `ws://HOST:8080/ws` (`wss://HOST/ws` behind Caddy).
 

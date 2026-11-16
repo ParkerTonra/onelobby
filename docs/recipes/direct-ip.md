@@ -171,6 +171,9 @@ const kit = new OneLobby({
   advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },
 });
 const lobby = await hostDirect(kit, { maxPlayers: 8, openPort: true });   // 47810, or the next free port up to 47819; else port_in_use
+// a kit made with OneLobby.fromConfig(onelobby.json) gives hostDirect (and hostNostr) their defaults from kit.blueprint: seats,
+// late join, port, openPort, nostr and its relays, LAN discovery and the rate limit; an option you pass still wins
+// on this PC only (tests, a dev run): hostDirect(kit, { local: true })   // loopback, no router, no Nostr, no STUN
 console.log(lobby.joinCodeKind, "code:", lobby.joinCode);   // "nostr" by default; lobby.directCode is the IP code (see s.3b)
 lobby.on("message", (from, bytes, channel) => { /* the host is truth: validate, then broadcast */ });
 // lobby.leave() closes the listener and removes the router mapping; joiners get sessionEnded("host_left")
@@ -324,6 +327,11 @@ itself runs on Node.
   IPAddress.Loopback` (the hub's TCP + UDP listener) plus `DataChannelTransport.BindAddress = "127.0.0.1"` (the WebRTC
   sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both. Never in
   a shipped build: other machines cannot connect.
+  **JS "test on this PC only"** (the equivalent of `--local` in the Godot and Unity menus; a Node host has no flag of its own):
+  `hostDirect(kit, { local: true })`, which is `bindHost: "127.0.0.1", openPort: false, nostr: false` in one switch. Without
+  `openPort: false` the host asks the router for a port, and without `nostr: false` it joins public Nostr relays, so spell
+  those two out whenever you pass `bindHost` alone. A local run hands out no STUN server either (no ICE servers at all), in
+  every client.
   A host bound to loopback puts `127.0.0.1` in its join code, `joinUrl` and address list (never the LAN address, which nothing
   listens on), so a joiner on the same PC joins by the code: JS `bindHost` 127.0.0.1, C# `BindAddress` loopback, GDScript
   `listen_address` 127.0.0.1 (an explicit `public_ip` / `PublicAddress` still wins).

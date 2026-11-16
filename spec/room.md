@@ -112,7 +112,9 @@ character cut), re-run on every `peerRenamed`. Steps, in order, on code points:
 1. **Strip** every character in U+0000-U+001F, U+007F-U+009F, U+200B-U+200F, U+2028-U+202E, U+2066-U+2069, U+FEFF.
 2. **Collapse** each run of whitespace (U+0020, U+00A0, U+1680, U+2000-U+200A, U+202F, U+205F, U+3000) to one U+0020, and
    trim both ends.
-3. **Clamp** to `maxNameLength` code points (default 24, at most 24).
+3. **Clamp** to `maxNameLength` code points (default 24, at most 24). The cut comes after the trim, so it can leave a trailing space
+   (`"123456789012345 67"` at 16 is `"123456789012345 "`); that is by design and the vectors pin it. A game that shows or compares
+   names trims once more itself (C# `SettingsRules.CleanName(...).TrimEnd()`, the JS and GDScript equivalents the same).
 4. **Filter**: apply the host's filter hook (4.9) with kind `"name"`, then repeat steps 1-3 on its result. A hook that
    throws counts as no hook.
 5. **Default**: an empty result, or exactly `Player` (the stand-in the hub puts for an empty name), becomes `Player N`

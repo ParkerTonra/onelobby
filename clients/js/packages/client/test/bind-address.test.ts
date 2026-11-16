@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { loopbackBindAddress } from "../src/direct-address.js";
 import { WebRtcLink } from "../src/webrtc.js";
+import { decodeJoinCode } from "../src/joincode.js";
+import { OneLobby } from "../src/onelobby.js";
+import { hostDirect } from "../src/direct/index.js";
 
 /** An RTCPeerConnection stand-in that only records its configuration: no socket, no native. */
 function recordingRtc(seen: Record<string, unknown>[]): typeof RTCPeerConnection {
@@ -37,5 +40,29 @@ describe("loopback ICE bind address", () => {
     new WebRtcLink({ remoteId: 2, iceServers: [{ urls: ["stun:stun.example:3478"] }], relayOnly: false }, recordingRtc(seen));
     expect(seen[0]!.iceServers).toEqual([]);
     expect(seen[1]!.iceServers).toEqual([{ urls: ["stun:stun.example:3478"] }]);
+  });
+});
+
+describe("hostDirect({ local: true }) is the JS --local", () => {
+  const kitFor = (name: string) => new OneLobby({ gameId: "com.onelobby.localtest", netVersion: "1", lobbyServer: "", mode: "raw", displayName: name, rememberSeat: false });
+
+  it("binds loopback with no router request and no Nostr: the join code is the IP code and names 127.0.0.1", async () => {
+    const host = await hostDirect(kitFor("Ann"), { local: true, port: 0, log: false });
+    try {
+      expect(host.joinCode).toBe(host.directCode);
+      expect(decodeJoinCode(host.joinCode)).toMatchObject({ ip: "127.0.0.1" });
+      expect(host.directAddresses.every((a: string) => a.startsWith("127.0.0.1"))).toBe(true);
+    } finally {
+      await host.leave();
+    }
+  });
+
+  it("negative control: without local, Nostr stays on (the join code is a Nostr code, apart from the IP code)", async () => {
+    const host = await hostDirect(kitFor("Bob"), { bindHost: "127.0.0.1", openPort: false, port: 0, log: false, nostr: { relays: [], stun: [] } });
+    try {
+      expect(host.joinCode).not.toBe(host.directCode);
+    } finally {
+      await host.leave();
+    }
   });
 });

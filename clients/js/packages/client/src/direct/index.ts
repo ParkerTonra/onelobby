@@ -40,8 +40,15 @@ export interface DirectHostOptions {
    * following `fallbackPorts` is used; the join code carries the port, so friends never type it.
    */
   port?: number;
-  /** Test seam: listen on this one local address (e.g. "127.0.0.1") instead of every interface. Default: every interface. */
+  /**
+   * Listen on this one local address instead of every interface (default: every interface). `bindHost: "127.0.0.1"` is the JS
+   * route for "test on this PC only" (the same as `--local` in the Godot and Unity menus): the hub and the ICE sockets bind
+   * loopback, and the join code, `joinUrl` and address list name 127.0.0.1. Add `openPort: false` and `nostr: false` so the
+   * router is not asked and no public relay is reached, or pass `local: true`, which sets all three.
+   */
   bindHost?: string;
+  /** This PC only (the JS `--local`): `bindHost` "127.0.0.1" (unless you set one), `openPort: false` and `nostr: false`. Never in a shipped build. */
+  local?: boolean;
   /** How many ports after `port` to try when it is busy; default 9 with `port` left out, else 0. */
   fallbackPorts?: number;
   /** Optional; joiners must send the same one or get `bad_password`. */
@@ -168,6 +175,11 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
         ...defined,
       }
     : defined;
+  if (o.local) {
+    o.bindHost ??= "127.0.0.1";
+    o.openPort = false;
+    o.nostr = false;
+  }
   const port = o.port ?? DEFAULT_DIRECT_PORT;
   // busy (another program holds it): try the next fallbackPorts; the join code carries the port
   const last = port + Math.max(0, o.fallbackPorts ?? (o.port === undefined ? DEFAULT_FALLBACK_PORTS : 0));

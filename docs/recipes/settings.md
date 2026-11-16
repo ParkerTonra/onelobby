@@ -43,7 +43,7 @@ Browsers have no environment, so nothing is overridden there. A value that does 
 ## 2. How the client applies them
 
 - **Name.** An empty name (C#: empty or the default `"Player"`) takes the saved one. A blueprint with
-  `players.identity: "anonymous"` gets none; `players.maxNameLength` clamps it.
+  `players.identity: "anonymous"` gets none; `players.maxNameLength` clamps it. The clean (`SettingsRules.CleanName`, and the JS and GDScript equivalents) trims, then clamps, so a cut at a space leaves a trailing space (spec/room.md 4.1, by design): trim again where it shows.
 - **Relay.** A valid saved line is appended to the ICE list for every route (lobby server, direct IP, Nostr, rejoin),
   after the host's entries and after any entry your own call passed; an identical entry is not added twice. A line that does
   not parse is skipped, with one warning that does not print it (JS `kit.on("warning")`, C# `client.Warning`, GDScript
