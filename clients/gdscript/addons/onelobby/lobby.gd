@@ -146,7 +146,7 @@ func _init(client: OneLobbyClient, msg: Dictionary, room_setup: Dictionary = {})
 			var id := OneLobbySignaling.i(p, "peerId")
 			_peers[id] = _rec(id, OneLobbySignaling.s(p, "name"))
 	if not _peers.has(local_peer_id):
-		_peers[local_peer_id] = _rec(local_peer_id, client.display_name)
+		_peers[local_peer_id] = _rec(local_peer_id, client.effective_name())
 	if not _peers.has(_host_id):
 		_peers[_host_id] = _rec(_host_id, "host")
 	if client.peer_timeout_ms > 0:
