@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "game": { "id": "com.example.menudemo", "netVersion": "1", "title": "Menu demo" },
+  "engine": "godot-gdscript",
+  "hosting": { "direct": true, "server": false },
+  "lobby": { "maxPlayers": 4 },
+  "room": { "countdownSeconds": 1 },
+  "chat": { "text": true }
+}

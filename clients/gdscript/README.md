@@ -15,6 +15,10 @@ lobby.message_received.connect(func(from: int, bytes: PackedByteArray, channel: 
 lobby.broadcast("hi".to_utf8_buffer())
 ```
 
+## The drop-in menu
+
+`addons/onelobby/menu/menu.tscn` (`OneLobbyMenu`) is a whole multiplayer menu: name, host, join by code / address / invite link, browse, lobby with ready / start / kick / ban, relay field, connection check and plain-words errors, driven by `onelobby.json`. Add the scene, connect `game_started(lobby)`, done. The logic is `OneLobbyMenuModel` (no nodes), every string is in `OneLobbyMenuText`. [docs/recipes/menu.md](../../docs/recipes/menu.md); demo: `examples/menu_demo/`; tests: `tests/menu.gd`, `tests/menu_scene.gd`.
+
 ## From onelobby.json
 
 One settings file for the game's multiplayer (`spec/blueprint.schema.json`, `docs/design/blueprint.md`; the same file JS and C#

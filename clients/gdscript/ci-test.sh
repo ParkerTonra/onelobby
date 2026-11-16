@@ -18,7 +18,7 @@ step() { # step <name> <cmd...>
   echo "::group::$name"
   timeout 240 "$@" > "$LOG/$name.out" 2>&1; local rc=$?
   if [ $rc -ne 0 ]; then # failed step: name the failed checks before the tail (the tail is often only warnings)
-    grep -n -A1 -E 'FAIL|SCRIPT ERROR|^ERROR:' "$LOG/$name.out" | head -n 60
+    grep -a -n -A1 -E 'FAIL|SCRIPT ERROR|^ERROR:' "$LOG/$name.out" | head -n 60
     echo "--- tail ---"
   fi
   tail -n 40 "$LOG/$name.out"
@@ -31,6 +31,8 @@ step blueprint "${G[@]}" -s res://tests/blueprint.gd
 step sync "${G[@]}" -s res://tests/sync.gd
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
 step room "${G[@]}" -s res://tests/room.gd
+step menu "${G[@]}" -s res://tests/menu.gd
+step menu_scene "${G[@]}" -s res://tests/menu_scene.gd
 step friendly "${G[@]}" -s res://tests/friendly.gd
 step settings "${G[@]}" -s res://tests/settings.gd
 step nostr_unit "${G[@]}" -s res://tests/nostr_unit.gd

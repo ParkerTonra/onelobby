@@ -1,0 +1,594 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/onelobby/menu/menu.gd" id="1_menu"]
+
+[node name="OneLobbyMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="Pages" type="MarginContainer" parent="Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StartPage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="StartRow" type="HBoxContainer" parent="Margin/Pages/StartPage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="StartSpacerL" type="Control" parent="Margin/Pages/StartPage/StartRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StartColumn" type="VBoxContainer" parent="Margin/Pages/StartPage/StartRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="StartSpacerR" type="Control" parent="Margin/Pages/StartPage/StartRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StartTitle" type="Label" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="StartNote" type="Label" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="NameLabel" type="Label" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NameEdit" type="LineEdit" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+max_length = 24
+
+[node name="HostButton" type="Button" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="JoinLabel" type="Label" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="JoinRow" type="HBoxContainer" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+layout_mode = 2
+
+[node name="JoinEdit" type="LineEdit" parent="Margin/Pages/StartPage/StartRow/StartColumn/JoinRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="JoinButton" type="Button" parent="Margin/Pages/StartPage/StartRow/StartColumn/JoinRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PasswordEdit" type="LineEdit" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+secret = true
+max_length = 64
+
+[node name="BrowseButton" type="Button" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SettingsButton" type="Button" parent="Margin/Pages/StartPage/StartRow/StartColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ConnectingPage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ConnectingRow" type="HBoxContainer" parent="Margin/Pages/ConnectingPage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ConnectingSpacerL" type="Control" parent="Margin/Pages/ConnectingPage/ConnectingRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ConnectingColumn" type="VBoxContainer" parent="Margin/Pages/ConnectingPage/ConnectingRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="ConnectingSpacerR" type="Control" parent="Margin/Pages/ConnectingPage/ConnectingRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ConnectingLabel" type="Label" parent="Margin/Pages/ConnectingPage/ConnectingRow/ConnectingColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="ConnectingCancel" type="Button" parent="Margin/Pages/ConnectingPage/ConnectingRow/ConnectingColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LobbyPage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="LobbyRow" type="HBoxContainer" parent="Margin/Pages/LobbyPage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LobbySpacerL" type="Control" parent="Margin/Pages/LobbyPage/LobbyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LobbyColumn" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="LobbySpacerR" type="Control" parent="Margin/Pages/LobbyPage/LobbyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CodeCaption" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="CodeLabel" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 40
+
+[node name="CodeButtons" type="HFlowContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="CopyCodeButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/CodeButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CopyInviteButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/CodeButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PlayersHeader" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RosterList" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RosterNote" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="CountdownLabel" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="ActionRow" type="HFlowContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="ReadyButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+
+[node name="StartButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CancelStartButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LeaveButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LobbyNote" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="RequestsHeader" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RequestsList" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ReasonEdit" type="LineEdit" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+max_length = 120
+
+[node name="BansHeader" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BansList" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LobbySettingsToggle" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+
+[node name="LobbySettingsBox" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AutoStartRow" type="HFlowContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox"]
+layout_mode = 2
+
+[node name="AutoStartLabel" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/AutoStartRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AutoStartOption" type="OptionButton" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/AutoStartRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MinPlayersRow" type="HFlowContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox"]
+layout_mode = 2
+
+[node name="MinPlayersLabel" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/MinPlayersRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MinPlayersSpin" type="SpinBox" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/MinPlayersRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 64.0
+value = 1.0
+
+[node name="CountdownRow" type="HFlowContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox"]
+layout_mode = 2
+
+[node name="CountdownSecondsLabel" type="Label" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/CountdownRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CountdownSpin" type="SpinBox" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox/CountdownRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.0
+max_value = 60.0
+value = 3.0
+
+[node name="LateJoinCheck" type="CheckBox" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/LobbySettingsBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ChatBox" type="VBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ChatLog" type="RichTextLabel" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ChatBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 72)
+scroll_following = true
+size_flags_vertical = 3
+focus_mode = 0
+
+[node name="ChatRow" type="HBoxContainer" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ChatBox"]
+layout_mode = 2
+
+[node name="ChatEdit" type="LineEdit" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ChatBox/ChatRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+max_length = 256
+
+[node name="ChatSendButton" type="Button" parent="Margin/Pages/LobbyPage/LobbyRow/LobbyColumn/ChatBox/ChatRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ErrorPage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ErrorRow" type="HBoxContainer" parent="Margin/Pages/ErrorPage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ErrorSpacerL" type="Control" parent="Margin/Pages/ErrorPage/ErrorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ErrorColumn" type="VBoxContainer" parent="Margin/Pages/ErrorPage/ErrorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="ErrorSpacerR" type="Control" parent="Margin/Pages/ErrorPage/ErrorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ErrorTitle" type="Label" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="ErrorMessage" type="Label" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="ErrorHint" type="Label" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="ErrorCode" type="Label" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 12
+
+[node name="ErrorLogButtons" type="HFlowContainer" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="CopyLogsButton" type="Button" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn/ErrorLogButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SaveLogsButton" type="Button" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn/ErrorLogButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LogNote" type="Label" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="ErrorBackButton" type="Button" parent="Margin/Pages/ErrorPage/ErrorRow/ErrorColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SettingsPage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SettingsRow" type="HBoxContainer" parent="Margin/Pages/SettingsPage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="SettingsSpacerL" type="Control" parent="Margin/Pages/SettingsPage/SettingsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SettingsColumn" type="VBoxContainer" parent="Margin/Pages/SettingsPage/SettingsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="SettingsSpacerR" type="Control" parent="Margin/Pages/SettingsPage/SettingsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SettingsTitle" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="RelayLabel" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="RelayStatus" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="RelayEdit" type="LineEdit" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+secret = true
+
+[node name="RelayButtons" type="HFlowContainer" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="RelaySaveButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn/RelayButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RelayClearButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn/RelayButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RelayNote" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="ServerLabel" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ServerEdit" type="LineEdit" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ServerSaveButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ServerNote" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="ConnectionCheckButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CheckVerdict" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="CheckFacts" type="Label" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="SettingsCopyLogsButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SettingsBackButton" type="Button" parent="Margin/Pages/SettingsPage/SettingsRow/SettingsColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BrowsePage" type="ScrollContainer" parent="Margin/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="BrowseRow" type="HBoxContainer" parent="Margin/Pages/BrowsePage"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="BrowseSpacerL" type="Control" parent="Margin/Pages/BrowsePage/BrowseRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BrowseColumn" type="VBoxContainer" parent="Margin/Pages/BrowsePage/BrowseRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 6.0
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="BrowseSpacerR" type="Control" parent="Margin/Pages/BrowsePage/BrowseRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BrowseTitle" type="Label" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="BrowseStatus" type="Label" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+size_flags_horizontal = 3
+horizontal_alignment = 1
+
+[node name="BrowseList" type="VBoxContainer" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BrowseButtons" type="HFlowContainer" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="BrowseRefreshButton" type="Button" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn/BrowseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BrowseBackButton" type="Button" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn/BrowseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
