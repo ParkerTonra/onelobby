@@ -10,6 +10,7 @@ import { ONELOBBY_VERSION } from "./blueprint.js";
 import { glueSession } from "./files.js";
 import { detectProject, notAProject, projectDir } from "./project.js";
 import { buildCommand, selectCsproj } from "./csharp.js";
+import { runUpdateUnity } from "./unity-update.js";
 import { moveReferences } from "./csproj.js";
 import { hasMark, nugetConfig, sourcePath, targetVersion } from "./packages.js";
 import {
@@ -328,6 +329,7 @@ export async function runUpdate({ dir, opts, io }) {
   const found = detectProject(target);
   if (found.kind === null) throw notAProject(found, "update");
   if (found.kind === "web") return updateWeb({ io, opts, found, target });
+  if (found.kind === "unity") return runUpdateUnity({ target, opts, io });
 
   const flavor = found.kind === "godot-csharp" ? CSHARP : GDSCRIPT;
   const plan = planUpdate({ target, opts, cwd: io.cwd, flavor });
