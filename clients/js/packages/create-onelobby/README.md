@@ -114,6 +114,184 @@ nothing it started outlives it (also on a failed check and on Ctrl+C), and it wr
 `skipped` and names the one command; `--fetch-helpers` installs it there (an anonymous npm download). Scaffolding never
 downloads it, so `npm create onelobby` stays zero-dependency and offline-capable.
 
+## --recommend: which multiplayer setup fits my game?
+
+`--recommend "<one-line description of the game>"` reads one sentence and proposes the setup: sync mode, tick rate, player count,
+pause and hosting, with a one-line reason per choice. It is a plain matcher over the words of the sentence: no network, no
+model, no dependency, the same answer every time. Its rules are data in `src/recommend-data.js` (the five shapes, the words that
+select them, the answers and reasons, the advice, what each engine can do today).
+
+Two uses, one engine behind both:
+
+1. **Alone** (no folder, no `--into`): writes nothing and prints the proposal. `--template <engine>` names the engine; otherwise
+   it is read from the sentence ("Unity", "Godot", "GDScript", "C#", "browser", "web"); otherwise it is unknown and the output
+   says what would differ per engine instead of guessing. `--json` prints one object (below), which is what an agent calls.
+2. **With a scaffold run** (`create-onelobby my-game --recommend "..."`, also with `--into`): the proposal supplies the answers
+   nothing else gave. Order of precedence: explicit flags and `--set`, then `--from <onelobby.json>`, then the recommendation,
+   then the built-in defaults. The output (text and `--json`) lists the keys that came from it with each one's reason, and the
+   ones it proposed that a flag or file kept; `--dry-run` shows the same and writes nothing. When no `--template`, `--from` or
+   Godot project says otherwise, an engine named in the sentence picks the template (a planned one stops as `template_planned`).
+   On a terminal without `--yes` or `--no-input` it asks one first question, "Describe your game in one line (Enter to skip)",
+   and then shows the recommended values as the defaults of the later prompts.
+
+An empty description is `bad_flag`. A sentence that matches no shape, or two equally, is an answer too: shape `null`, no
+proposal beyond the scaffolder's own defaults, the five shapes with one line each, and the questions to settle it (exit 0).
+
+### The five shapes
+
+| Id | Words that select it (weak ones alone never decide) | Proposes |
+|---|---|---|
+| `lockstep` | deterministic, lockstep, fixed tick, seeded, party, minigames, RTS | `sync.mode lockstep`, `sync.tickRate` (from the sentence, else 20), `sync.hashEveryTicks 60`, `session.pause off` (`anyone` for strategy); 8 players for a party game, else 4 |
+| `coop-snapshots` | co-op, survival, sandbox, open world, free roam, the host runs the world | `sync.mode replication`, `sync.tickRate 15`, `session.pause host` |
+| `replication` | shooter, FPS, hitscan, battle royale, racing, physics | `sync.mode replication`, `sync.tickRate 30`, `session.pause off` |
+| `turn-based` | turn-based, card game, chess, board game, poker, trivia | `sync.mode raw`, no tick, no pause |
+| `own-server` | own server loop, existing server, websocket | `sync.mode raw`; `asWebSocket` where the client has it |
+
+Every shape also proposes `lobby.maxPlayers` (read from "4 player", "2-4 players", "up to 8", "1v1", "duel", "for 4"; else 4),
+`room.spectators` only when the sentence mentions watching, and `hosting.direct` / `hosting.server` when the engine is known
+(direct with join codes wherever the engine can listen; a lobby server for a browser page, which cannot listen). Nothing else is
+proposed. A near miss is handled on purpose: "deterministic" outweighs "shooter"; "survival" inside a card game is a weak word;
+lockstep is never proposed for Unity physics (Unity physics is not deterministic), whatever the sentence says.
+
+Honest about this version: a proposal never promises what the engine's client lacks. Prediction (`Reconciler`) and hit rewind
+(`HistoryRing`, `RewindTick`) exist in the C# replication layer only (Godot C#, Unity, .NET); the JS and GDScript clients keep
+the data for them (`lastProcessedInput`, `trySampleAt`) and the advice row says "by-hand". The `web` template writes only the
+`lockstep` and `raw` sample game, so where the best mode for the game is `replication` it proposes `raw` and the output says so in
+a `limits` row. Input redundancy on the fast channel and an adaptive input delay are not in any lockstep helper yet (advice
+rows `lockstep-fast-inputs` and `adaptive-input-delay`, status `by-hand`). A proposal for a planned template (`godot-csharp`,
+`unity`, `dotnet`, `node-browser`) is printed, with no command to run, because the scaffolder would stop with `template_planned`.
+
+### Examples
+
+A clear match (the full output, text):
+
+```
+create-onelobby --recommend: "4 player party minigames in Godot"
+
+Game shape: lockstep (Deterministic fixed-tick game)
+  matched: "party", "minigames"
+Engine: godot-gdscript (Godot 4 GDScript), from the description ("Godot")
+
+Proposal (blueprint key, proposed value, why):
+  sync.mode            lockstep  every peer runs the same fixed-tick simulation and only the small inputs cross the network, so there is no state to sync
+  sync.tickRate        20        lockstep sends one frame per tick, so this is your simulation's fixed step: set it to the rate your sim runs at (20 until you know)
+  sync.hashEveryTicks  60        a state hash about every 60 ticks finds a drift between peers early (a mismatch raises Desync)
+  lobby.maxPlayers     4         your description says "4 player"
+  session.pause        off       a real-time round cannot wait for one player to find the pause key
+  hosting.direct       true      the engine can listen, so players share a join code and one of them hosts: the game outlives any server
+  hosting.server       false     a lobby server is optional here; switch it on if you also want a public list
+
+Advice that is not a blueprint key yet:
+  [by-hand] Send inputs on the fast channel with the last few ticks repeated
+      why: a reliable ordered input channel stalled one game about half its frames at 80 ms and 2% loss;
+      redundancy on the fast channel fixed it.
+      how: no lockstep helper does this yet (its commands travel on the reliable channel); send your own input
+      packets on the fast channel (Channel.Fast in C#, { channel: 'fast' } in JS) beside the lockstep frames
+      (docs/recipes/raw-mode.md)
+  [by-hand] Use an adaptive input delay (a few ticks, grown when the round trip grows)
+      why: a fixed delay is either too laggy on a good link or too stuttery on a bad one.
+      how: no client has it yet: measure the round trip yourself and schedule each command a few ticks ahead
+      (docs/recipes/raw-mode.md)
+  [built-in] Let bots take the seats of dropped players
+      why: a lockstep game cannot wait for a player who left; a bot keeps the simulation moving.
+      how: room.on("seatDropped", s => spawnBot(s.seat)) fires once the rejoin window has passed
+      (room.seatDropped / rejoinWindowSeconds) (docs/recipes/room.md)
+
+Open questions (add the words to the description and run again):
+  - GDScript or C#? Assumed GDScript, the Godot template that exists today.
+    add: "in Godot with GDScript, or in Godot with C#"
+  - What fixed tick rate does the simulation run at?
+    add: "at 30 ticks per second"
+  - Is the simulation deterministic? Lockstep needs the same commands in the same order to give the same state
+  on every peer: a fixed tick, in-state seeded random numbers, no wall clock, no unordered iteration, no
+  floats that differ by platform (AGENTS.md rule 3).
+    add: "deterministic with a fixed tick and seeded random numbers (or: not deterministic)"
+
+Run it:
+  npx create-onelobby my-game --template godot-gdscript --hosting direct --mode lockstep --tick-rate 20 --set sync.hashEveryTicks=60 --max-players 4 --pause off --yes
+```
+
+A sentence that matches nothing (text):
+
+```
+create-onelobby --recommend: "a puzzle game"
+
+Game shape: unknown. The description does not clearly match one shape, so nothing is proposed beyond the scaffolder's normal defaults.
+Engine: unknown (not given by --template or the description)
+
+The five shapes (add words from one to the description):
+  lockstep        Deterministic fixed-tick game: party minigames, an RTS on a seeded simulation: every peer runs the same sim and only small inputs cross the network
+  coop-snapshots  Free-roam co-op with rich state: survival, sandbox: the host runs the world and sends snapshots, each joiner predicts its own actions
+  replication     Shooter or physics game, host-authoritative: shooters, physics, AI: the host decides, joiners get interpolated snapshots and send inputs; anything that is not deterministic
+  turn-based      Turn-based, card or board game: nothing to sync between turns: the host is the truth and raw messages are enough, with no tick
+  own-server      An existing server-style game: the game keeps its own server loop and OneLobby only carries the bytes, shaped like a WebSocket
+
+Open questions (add the words to the description and run again):
+  - Which engine or platform is it for? It changes hosting, the modes the scaffolder writes today and which
+  helpers (prediction, hit rewind) exist.
+    add: "in Godot (GDScript or C#), in Unity, or in the browser"
+  - What kind of game is it? The description did not clearly match one shape.
+    add: "one of: deterministic fixed-tick party minigames; co-op survival sandbox; shooter or physics game; turn-based card game; a game with its own server loop"
+  - How many players?
+    add: "for 4 players, or up to 8 players, or a 1v1 duel"
+
+Run it:
+  npx create-onelobby my-game --yes
+```
+
+A scaffold run that mixes a flag with the recommendation. The flag wins and the output says what it kept (the file list and the
+`onelobby.json` that the dry run prints are cut out here):
+
+```
+create-onelobby my-game --template godot-gdscript --recommend "co-op survival sandbox for 4 with spectators" --max-players 6 --yes --dry-run --no-natives
+...
+From the recommendation (coop-snapshots):
+  sync.mode        replication  the host runs the world and sends binary delta snapshots; sending the whole state as text outgrew the link in a real game
+  sync.tickRate    15           snapshots at about 10-20 Hz carry a rich world without outgrowing the link (15 is the middle)
+  room.spectators  4            your description mentions watching; spectators do not count against lobby.maxPlayers
+  session.pause    host         the host's machine runs the world, so the host decides when it stops
+  hosting.direct   true         the engine can listen, so players share a join code and one of them hosts: the game outlives any server
+  hosting.server   false        a lobby server is optional here; switch it on if you also want a public list
+  kept lobby.maxPlayers = 6 from a flag (the recommendation said 4)
+
+```
+
+#### JSON fields
+
+`create-onelobby --recommend "<text>" --json` prints exactly one object. The field names are a contract: an agent can rely on them.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ok` | boolean | always `true`; an error is `{ ok: false, error: { code, message } }` as everywhere else |
+| `command` | string | always `"recommend"` |
+| `description` | string | the sentence, trimmed |
+| `shape` | string or `null` | `lockstep`, `coop-snapshots`, `replication`, `turn-based`, `own-server`, or `null` when unknown |
+| `shapeName` | string or `null` | the shape in words |
+| `matched` | string[] | the words of the sentence that decided the shape, as the sentence wrote them |
+| `engine` | object | the engine the proposal assumed |
+| `engine.id` | string or `null` | a blueprint `engine` value, or `null` when unknown |
+| `engine.from` | string | `"template"` (--template, a --from file or a Godot folder), `"text"` (read from the sentence), `"default"` (the scaffolder's default, scaffold runs only) or `"none"` |
+| `engine.words` | string[] | the words that named the engine (only when `from` is `"text"`) |
+| `engine.label` | string or `null` | the engine in words |
+| `engine.template` | string or `null` | `"built"` (create-onelobby writes a project for it) or `"planned"` |
+| `answers` | array | the proposal: `[key, value, why]` rows in schema order; `key` is a blueprint key, `value` a value the schema allows |
+| `advice` | object[] | advice that is not a blueprint key: `{ id, text, why, status, how, doc }`; `status` is `built-in` (the client has it), `by-hand` (the game writes it; `how` names the pieces) or `depends` (engine unknown; `how` says which engines) |
+| `limits` | object[] | where the best choice is something the template cannot write: `{ key, wanted, got, why }` |
+| `notes` | string[] | plain sentences: a ban that applied, a planned template, an unknown engine |
+| `questions` | object[] | what the sentence did not say and would change the answer: `{ id, question, add }`; `add` is the words to add to the description |
+| `flags` | string[] | the `create-onelobby` flags that apply `answers` (`--set key=value` for keys that have no flag of their own) |
+| `runCommand` | string or `null` | one ready-to-run command line; `null` when there is none yet (planned template, unknown engine) |
+| `shapes` | object[] | the five shapes: `{ id, name, summary }` |
+| `candidates` | object[] | only when `shape` is `null`: the shapes the words hinted at, `{ shape, score, matched }` |
+| `differences` | object[] | only when the engine is unknown and a shape matched: what would differ per engine, `{ topic, text }` |
+
+#### In a scaffold run
+
+With a folder or `--into`, `--json` is the usual scaffold result plus `recommendation`: `{ description, shape, matched, engine,
+applied, overridden, limits, questions, notes }`. `applied` is `[key, value, why]` rows for the keys the recommendation really
+supplied; `overridden` is `{ key, value, recommended, by }` for keys it proposed that a flag (`"a flag"`), a `--from` file or an
+answer typed at a prompt (`"your answer"`) kept instead.
+
 ## All templates
 
 `create-onelobby --help` lists every flag (one per setting, plus `--set key=value`). `--dry-run` writes nothing (and downloads

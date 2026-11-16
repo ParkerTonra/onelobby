@@ -4,7 +4,7 @@ OneLobby is an open-source, game-agnostic multiplayer kit: a lobby server (join 
 client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneLobby.Godot`, `OneLobby.DataChannel`
 (libdatachannel WebRTC for any .NET app) or the `com.onelobby.unity` package). Peers talk over WebRTC data channels;
 the server never sees game data.
-Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
+Pick a mode (or run `npx create-onelobby --recommend "<one line about the game>" --json` for a proposal with reasons): `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
 `OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# also has prediction and lag-compensation helpers).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.

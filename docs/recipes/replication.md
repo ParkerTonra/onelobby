@@ -7,6 +7,7 @@ redundant input stream, reliable events, local-player prediction and lag-compens
 DLL runs under Unity, Godot C# and plain .NET; your engine code only copies transforms in and out.
 Design: DESIGN s.18. Wire format: `spec/replication.md`. Snippets tagged `csharp compile`, `ts compile` and `gdscript compile` are
 checked by `docs/check-snippets.mjs`. The three clients speak the same wire: a host in one engine serves clients in the others.
+Not sure which mode fits? `npx create-onelobby --recommend "<one line about your game>"` proposes one with a reason per choice (`--json` for an agent).
 
 Connect first (`docs/recipes/dotnet-generic.md` or `godot-csharp.md`) with `SyncMode.Raw`, then add this.
 

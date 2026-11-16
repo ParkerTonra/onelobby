@@ -35,6 +35,7 @@ build dist/onelobby.global.min.js (window.OneLobby).
 - [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over OneLobby.DataChannel/libdatachannel, OneLobbyRunner, voice); desktop now, no WebGL
 - [Browser JS](docs/recipes/js-web.md): the same in a plain web page
 - [Generic .NET](docs/recipes/dotnet-generic.md): console or any engine; DataChannelTransport (libdatachannel WebRTC) for real play, the in-memory transport for tests
+- [Which setup fits](clients/js/packages/create-onelobby/README.md): `npx create-onelobby --recommend "<one line about the game>" [--json]` proposes sync mode, tick rate, players, pause and hosting with a reason per choice (deterministic, no network; five shapes)
 - [Raw mode](docs/recipes/raw-mode.md): bring your own netcode (host-authoritative, turn-based)
 - [Replicated state](docs/recipes/replication.md): OneLobby.Replication (C#), ReplicationSession (JS) and OneLobbyReplicationSession (GDScript) on raw mode: delta snapshots, interpolation, inputs, events, prediction, lag-compensated hitscan
 - [Voice and chat](docs/recipes/voice-and-chat.md): push-to-talk, mute, text chat

@@ -3,6 +3,7 @@
 Use `mode: "raw"` when your game is turn-based or host-authoritative (arcade, card, board games) and you do not want a
 deterministic lockstep sim. OneLobby gives you lobbies plus reliable/fast byte messages; you define the protocol.
 Connect first with `js-web.md` (or the C# recipes), then add this.
+Not sure which mode fits? `npx create-onelobby --recommend "<one line about your game>"` proposes one with a reason per choice (`--json` for an agent).
 
 ## Pattern: joiners send intents, the host decides, everyone gets the result
 

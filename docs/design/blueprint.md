@@ -414,6 +414,8 @@ create-onelobby [dir] [options]
   --template <web|node-browser|godot-csharp|godot-gdscript|unity|dotnet>
   --into <dir>                 add to an existing project instead of creating one
   --from <onelobby.json>       take every answer from this file (hand-edit path, CI)
+  --recommend "<one line>"     propose the setup for a game described in a sentence: alone it prints the proposal and writes nothing;
+                               with a folder or --into it fills the answers no flag, --set or --from gave (landed)
   --game-id <reverse.dns>  --title <text>
   --max-players <n>  --listed  --approve-joins  --password  --no-late-join  --no-rejoin  --no-join-link
   --mode <raw|lockstep|replication>  --tick-rate <n>
@@ -437,6 +439,9 @@ create-onelobby [dir] [options]
 create-onelobby update [dir | --into <dir>]   re-vendor the add-on (PIN-guarded): --addon-from, --webrtc-zip, --webrtc-dir, --no-natives, --force, --dry-run, --json
 create-onelobby verify [dir | --into <dir>]   prove multiplayer on 127.0.0.1, last line VERIFY_OK / VERIFY_FAIL: --godot <exe>, --server <url>, --fetch-helpers, --json
 ```
+
+Precedence of answers: explicit flags and `--set`, then `--from`, then `--recommend`, then the built-in defaults. On a TTY without
+`--yes` the first question is "Describe your game in one line (Enter to skip)" and the later prompts default to the recommended values.
 
 Rules: prompt only when stdin is a TTY and neither `--yes` nor `--no-input` is set (clig.dev: "Only use prompts or
 interactive elements if stdin is an interactive terminal"). `CI=true` in the environment implies `--no-input`

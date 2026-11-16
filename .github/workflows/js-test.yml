@@ -30,6 +30,9 @@ jobs:
       - name: Typecheck, build, test (prepublishOnly)
         working-directory: clients/js/packages/client
         run: npm run prepublishOnly
+      - name: Test create-onelobby (scaffolder, update, verify, recommend)
+        working-directory: clients/js/packages/create-onelobby
+        run: npm test
 
   dotnet:
     runs-on: ubuntu-latest

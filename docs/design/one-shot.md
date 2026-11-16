@@ -32,7 +32,7 @@ Missing or half there:
 | Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. The GDScript and Godot C# menus draw the fields (name, masked relay line, lobby server, last code); and so does the web element; Unity does not yet. |
 | Errors | Plain-language `describeError` exists in JS only. Players never see *why* a connection failed. |
 | Verify | No one-command two-peer test for a game; Unity is not in engine-smoke. |
-| Recommendation | The skill has sync-mode rules; the scaffolder asks instead of recommending. |
+| Recommendation | `create-onelobby --recommend "<one line>"` landed (alone, or filling a scaffold run's answers; `--json` for an agent; five shapes, section 5). The agent skill still has its own sync-mode rules and does not call it yet. |
 
 Full matrix with file references: kept with the desk notes (not in this repo).
 
@@ -108,6 +108,7 @@ Each is one lane unless noted; order matters for the first three.
    `template_planned`. `extension_list.cfg` is not written by the scaffolder: `godot --headless --import` creates it itself once the natives are there.
    CI: `clients/gdscript/scaffold-test.sh` in the `gdscript` job. Second half landed (`godot-gdscript` and `web`): `create-onelobby update` (PIN-guarded re-vendor: changed / added / removed files listed, `--force` for edited ones, natives only when their pinned version moved, `no_pin` names `--into`; `web` prints the `npm install onelobby@^x` line and whether the glue differs) and `create-onelobby verify` (checks `godot`, `addon-pin`, `natives`, `blueprint`, `direct`, `nostr`, `turn`, `server`, one verdict line `VERIFY_OK` / `VERIFY_FAIL <check>: <next step>`; a built-in loopback Nostr relay, a local TURN server from the `node-turn` helper loaded only when it runs, `--fetch-helpers` to get it). CI: `scaffold-test.sh` also plays the `.olc` entry as two headless processes and runs `verify` (OK, and FAIL on a broken `onelobby.json`). Not done: `godot-csharp` and `unity` templates; web `nostr`/`turn` checks (need node-datachannel); Unity batchmode.
 7. **Architecture recommender** (section 5) in the skill and `create-onelobby --recommend "<one-line game description>"`.
+   Landed (the `create-onelobby` half): a deterministic matcher over the sentence, rules as data in `src/recommend-data.js` (the shape ids are the first column of the section 5 table; a test keeps them in step), engine-aware (it never promises prediction or hit rewind outside the C# layer, or `replication` for the `web` template), text and `--json` (field names documented in the package README), and as defaults for a scaffold run (flags, then `--from`, then the recommendation, then the built-in defaults; one first question on a terminal). Not done: the skill half (it should call `--recommend --json`), and any key for who decides a player's movement (no such blueprint key exists).
 8. **GDScript sync helpers.** Text chat, shared pause, a lockstep helper with the fast-channel input pattern (section 5).
 9. **Skill rewrite.** Accept GDScript; one pass: survey, propose `onelobby.json` with reasons, build with the templates and
    drop-in menu, verify with `create-onelobby verify`, report. Fix stale lines (pause exists).
@@ -162,13 +163,13 @@ timeout, the host sees the same line, and Copy logs gives a log that names the c
 
 From what the games actually ended up with (several changed after setup; the recommender skips those detours).
 
-| Game shape | Recommend | Why |
-|---|---|---|
-| Fixed-tick, deterministic, small inputs (party minigames, RTS on a seeded sim) | Lockstep; inputs on the fast channel with the last N ticks repeated, adaptive input delay, state hash every ~60 ticks, bots take dropped seats | A reliable ordered input channel stalled one game about half its frames at 80 ms and 2% loss; redundancy on the fast channel fixed it |
-| Free-roam co-op with rich state (survival, sandbox) | Host-authoritative snapshots, ~10-20 Hz, joiner predicts its own actions, binary deltas against an acked baseline once state passes ~3 KB, reliable keyframe every few seconds | Whole-state JSON at 10 Hz outgrew the link in one game |
-| Shooters and physics in a non-deterministic engine (Unity) | Replication (host authority, interpolation, owner prediction, hit rewind capped ~350 ms), 30 Hz sim / 20 Hz snapshots | Unity physics isn't deterministic, so lockstep is out |
-| Turn-based, card, board | Raw messages, host is truth, no tick | Nothing to sync between turns |
-| An existing server-style game | OneLobby as a WebSocket transport (`asWebSocket`) | Keeps the game's own server loop |
+| Id | Game shape | Recommend | Why |
+|---|---|---|---|
+| `lockstep` | Fixed-tick, deterministic, small inputs (party minigames, RTS on a seeded sim) | Lockstep; inputs on the fast channel with the last N ticks repeated, adaptive input delay, state hash every ~60 ticks, bots take dropped seats | A reliable ordered input channel stalled one game about half its frames at 80 ms and 2% loss; redundancy on the fast channel fixed it |
+| `coop-snapshots` | Free-roam co-op with rich state (survival, sandbox) | Host-authoritative snapshots, ~10-20 Hz, joiner predicts its own actions, binary deltas against an acked baseline once state passes ~3 KB, reliable keyframe every few seconds | Whole-state JSON at 10 Hz outgrew the link in one game |
+| `replication` | Shooters and physics in a non-deterministic engine (Unity) | Replication (host authority, interpolation, owner prediction, hit rewind capped ~350 ms), 30 Hz sim / 20 Hz snapshots | Unity physics isn't deterministic, so lockstep is out |
+| `turn-based` | Turn-based, card, board | Raw messages, host is truth, no tick | Nothing to sync between turns |
+| `own-server` | An existing server-style game | OneLobby as a WebSocket transport (`asWebSocket`) | Keeps the game's own server loop |
 
 Player count from the design (2-4 default, 8 for party games, spectators separate). Hosting: direct with Nostr codes
 everywhere the engine can listen (games outlive any server), lobby server optional.
