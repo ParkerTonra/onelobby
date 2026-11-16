@@ -183,8 +183,8 @@ key: `docs/design/blueprint.md` section 4e. A game's own extra fields and events
 
 ## 9. What is not built yet
 
-- For the Godot C# node: the scaffolder's `godot-csharp` template does not copy the add-on folder or reference `OneLobby.Replication` yet (a game does both by hand),
-  and the two-process run of the C# sample has never run (it needs the WebRTC natives in the demo project).
+- For the Godot C# node: the two-process run of the C# sample has never run (it needs the WebRTC natives in the demo project). The scaffolder's two Godot templates write a
+  game with players in the world when the blueprint has `sync.mode` `replication` and a `sync.player` section (section 10b, "The scaffolder"); the Unity and web templates do not.
 - An adapter for any JS game engine; this layer talks plain numbers.
 - A dropped player is despawned at once (the rejoin window does not keep it frozen), and a rejoin starts a new player.
 - Your own extra state fields and events in `onelobby.json`: send your own entity or `sendEvent` for now.
@@ -317,6 +317,13 @@ godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join
 
 ## 10b. Godot (C#)
 
+**The scaffolder.** `npx create-onelobby my-game --template godot-gdscript --mode replication --set sync.player.authority=owner --yes` (also `godot-csharp`; `host` for the
+other authority, `--set sync.player.space=2d` for a side-on game; or a `--recommend` sentence of the co-op or shooter shape) writes a new game whose menu opens a game with a
+floor, a camera, the spawner and one character (a capsule or a square that walks and jumps) per player, and a two-peer test that also proves the joiner's player appears on the host,
+follows it, and that one jump arrives once. The C# template also vendors `addons/onelobby_net_player/` (pinned, `update` re-vendors it) and references `OneLobby.Replication`.
+`--into` adds the vendored parts and the reference and prints the lines that add a spawner; it writes no scene into your game. `--yes` alone does not turn it on. Details:
+`clients/js/packages/create-onelobby/README.md`, "Players in the world".
+
 The Godot C# side is the twin of section 10 on the C# layer of section 11: `OneLobbyNetPlayer` (a `Node` under the character) and
 `OneLobbyNetPlayerSpawner` (one character per seated player), names in PascalCase, `[GlobalClass]` so both appear in the editor's node
 list. A game written in C# and a game written in GDScript, JS or Unity can be in one lobby (same wire).
@@ -326,7 +333,7 @@ list. A game written in C# and a game written in GDScript, JS or Unity can be in
 because Godot cannot attach a node class that lives in a referenced assembly to a scene in the editor, and a character scene needs the node
 as a child (and `OneLobby.Godot` does not reference `OneLobby.Replication`). What a game references: `OneLobby.Replication` (NuGet package
 or project) next to `OneLobby.Core` and `OneLobby.Godot`. The demo project does it with a `ProjectReference`; the scaffolder's `godot-csharp`
-template does not offer the node or that reference yet (section 9). Reference example: `clients/dotnet/demo-godot` (`NetPlayerDemo.tscn`:
+template adds the folder (pinned by `addons/onelobby_net_player/PIN.json`) and the package reference when the blueprint has `sync.player` (the paragraph "The scaffolder" below). Reference example: `clients/dotnet/demo-godot` (`NetPlayerDemo.tscn`:
 the menu, a flat floor, capsules that walk and jump, a colour per team, a name per player).
 
 | the GDScript node (section 10) | the C# node | note |

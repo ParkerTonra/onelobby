@@ -21,6 +21,14 @@ godot --headless --import --path .                                        # once
 godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn   # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
 ```
 
+Players in the world are one command too: add `--mode replication --set sync.player.authority=owner` (or `host`; `--set sync.player.space=2d` for a side-on game), or a
+`--recommend "co-op survival sandbox for 4"`, and a new project also gets `Player.tscn` / `Player.cs` (a character with the `OneLobbyNetPlayer` node that walks and jumps),
+`Game.cs` (a floor, a camera and the `OneLobbyNetPlayerSpawner`), a main scene that opens the game when the menu starts it, the add-on folder `addons/onelobby_net_player/`
+(pinned by its own `PIN.json`, re-vendored by `update` with the same protection of edited files), a reference to `OneLobby.Replication` at the same version as the others
+(with `--packages-from` the folder needs that package too), and a player check in `tests/MultiplayerTest.cs` (the joiner's player appears on the host, follows it, one jump arrives
+once). The scene and the scripts are yours to edit; `update` never rewrites them. `--yes` alone does not turn it on. `--into` adds the folder, its pin and the reference, writes no
+scene into your game, and prints the lines that add the spawner. What the node and the spawner do: `net-player.md` section 10b.
+
 The packages of a version reach the public registry only with its release. Before that, pack them (`clients/dotnet/pack.sh <new version> <folder>`) and add
 `--packages-from <folder>`: the references get that version and a `nuget.config` takes `OneLobby.*` from the folder.
 
@@ -79,7 +87,8 @@ and acts on `--host`, `--join=<code>` and `--name=<name>` after `--`. Its proper
 is a runnable example (`godot --path clients/dotnet/demo-godot res://MenuDemo.tscn -- --host --name=Sam`).
 
 Players in the world: the add-on folder `addons/onelobby_net_player/` (`OneLobbyNetPlayer` under the character, `OneLobbyNetPlayerSpawner`)
-and a reference to `OneLobby.Replication`; see `net-player.md` section 10b and the sample `NetPlayerDemo.tscn`.
+and a reference to `OneLobby.Replication`; `create-onelobby` adds both (and the character, the game and a check in a new project) when the blueprint has `sync.player` (see "One command"
+above). By hand: `net-player.md` section 10b and the sample `NetPlayerDemo.tscn`.
 
 The scene is generated from the GDScript menu's (`node tools/make-menu-scene.mjs`), and a test fails when the two differ, so a
 layout fix lands in both at once.

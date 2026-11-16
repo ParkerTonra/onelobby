@@ -161,7 +161,12 @@ Each is one lane unless noted; order matters for the first three.
     a node class in a referenced assembly cannot be attached to a scene), with the same exports, properties, methods and signals as the GDScript node in PascalCase, and a sample
     that moves (`NetPlayerDemo.tscn`). Proven in one headless Godot process on an in-memory network (`--netplayer-selfcheck`, run by `scaffold-test.sh` in CI); the
     two-process script (`net-player-test.sh`) has never run (no CI step fetches the natives for the demo project). Nobody has seen it in a window, the smoothing numbers are the
-    plan's, no real link has carried it. Not built: the scaffolder's `godot-csharp` template does not offer the node yet.
+    plan's, no real link has carried it. Landed (the scaffolder): `create-onelobby` writes the player pieces in both Godot templates when the blueprint has `sync.mode` `replication` and a
+    `sync.player` section in its answers (a flag, `--set`, a `--from` file or the recommendation; `--yes` alone does not turn it on): a new project gets `player.tscn` / `player.gd` (`Player.tscn` / `Player.cs`), a
+    game with a spawner, floor and camera, a main scene that opens it on `game_started` and a player check in its two-peer test (the joiner's player appears on the host, follows it, one jump arrives once);
+    `godot-csharp` also vendors `addons/onelobby_net_player/` under a pin of its own (`update` re-vendors it, edited files stop it) and references `OneLobby.Replication`; `--into` adds the vendored parts and
+    prints the spawner lines; `verify` has a `player` file check for such a game. A game without `sync.player` is written byte for byte as before (a test pins it). Run by `clients/gdscript/scaffold-test.sh` and
+    `clients/dotnet/scaffold-test.sh` in CI. Not built: the Unity and web templates.
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.
