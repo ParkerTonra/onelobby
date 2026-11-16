@@ -208,6 +208,8 @@ export async function runGodot(ctx) {
     changed: wouldChange,
     next,
   };
+  if (ctx.recommendation) result.recommendation = ctx.recommendation.json;
+  const fromRec = ctx.recommendation ? `\n\n${ctx.recommendation.text}` : "";
   const text = (verb) => {
     const out = [];
     if (!wouldChange) out.push(`Nothing changed: ${target} already has everything (${unchanged.length} files unchanged).`);
@@ -223,13 +225,13 @@ export async function runGodot(ctx) {
   if (opts.dryRun) {
     result.dryRun = true;
     if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-    else io.stdout.write(`Dry run: nothing written, nothing downloaded.\n${text(into ? "Would add to" : "Would create")}\n\nonelobby.json:\n${JSON.stringify(blueprint, null, 2)}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
+    else io.stdout.write(`Dry run: nothing written, nothing downloaded.\n${text(into ? "Would add to" : "Would create")}\n\nonelobby.json:\n${JSON.stringify(blueprint, null, 2)}${fromRec}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
     return 0;
   }
 
   await applyGodot(plan, { target, opts, cwd: io.cwd, fetchImpl: io.fetch });
   if (!into && !opts.noGit && ctx.gitInit) ctx.gitInit(target);
   if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-  else io.stdout.write(`${text(into ? "Added to" : "Created")}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
+  else io.stdout.write(`${text(into ? "Added to" : "Created")}${fromRec}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
   return 0;
 }

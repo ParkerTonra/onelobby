@@ -16,6 +16,7 @@ import {
 import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
 import { isCSharpProject } from "./godot-project.js";
 import { runGodot } from "./godot.js";
+import { detectEngine, recommend, renderApplied, renderText } from "./recommend.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
 import { runUpdate } from "./update.js";
 import { runVerify } from "./verify/index.js";
@@ -77,6 +78,34 @@ function run_(cmd, args, cwd, io) {
   return spawnSync(file, fileArgs, { cwd, stdio: ["ignore", 2, 2] }).status === 0;
 }
 
+/** Every dotted key a --from file sets (the leaves of its sections). */
+function flatKeys(obj, prefix = "") {
+  return Object.entries(obj).flatMap(([k, v]) => (v && typeof v === "object" && !Array.isArray(v) ? flatKeys(v, `${prefix}${k}.`) : [`${prefix}${k}`]));
+}
+
+/** The default a prompt shows when the recommendation has a value for its key. */
+function recommendedDefault(q, rows) {
+  if (q.type === "hosting") {
+    const d = rows.get("hosting.direct")?.[1];
+    const s = rows.get("hosting.server")?.[1];
+    return d === undefined || s === undefined ? undefined : d && s ? "both" : d ? "direct" : "server";
+  }
+  return rows.get(q.key)?.[1];
+}
+
+/** `create-onelobby --recommend "<text>"` with no folder: print the proposal, write nothing. */
+function recommendAlone({ opts, io }) {
+  let engine;
+  if (opts.template !== undefined) {
+    if (!TEMPLATES.includes(opts.template)) throw new CliError("bad_flag", `--template: unknown template "${opts.template}". Choose one of: ${TEMPLATES.join(", ")}.`);
+    engine = { id: opts.template, from: "template" };
+  }
+  const rec = recommend({ description: opts.recommend, engine });
+  if (opts.json) io.stdout.write(JSON.stringify(rec) + "\n");
+  else io.stdout.write(renderText(rec));
+  return 0;
+}
+
 /** Commands that act on an existing game, named first: `create-onelobby update`, `create-onelobby verify`. (A folder called "update" needs ./update.) */
 const COMMANDS = { update: runUpdate, verify: runVerify };
 
@@ -92,23 +121,42 @@ export async function run(argv, io) {
     return 0;
   }
 
+  if (command && opts.recommend !== undefined) throw new CliError("bad_flag", "--recommend belongs to create-onelobby itself (alone, or with a folder or --into), not to update or verify");
   if (command) return await COMMANDS[command]({ dir, opts, io });
+  if (opts.recommend !== undefined && dir === undefined && opts.into === undefined) return recommendAlone({ opts, io });
 
   const fromFile = opts.from ? readFromFile(opts.from, io.cwd) : undefined;
   // --into a folder with a project.godot and no --template: a Godot project (C# when a .csproj / .sln sits beside it)
   const intoDir = opts.into !== undefined ? resolve(io.cwd, opts.into) : undefined;
   const godotInto = intoDir !== undefined && existsSync(join(intoDir, "project.godot"));
-  const template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(readdirSync(intoDir)) ? "godot-csharp" : "godot-gdscript") : "web");
-  if (!TEMPLATES.includes(template)) throw new CliError("bad_flag", `--template: unknown template "${template}". Choose one of: ${TEMPLATES.join(", ")}.`);
-  if (!IMPLEMENTED_TEMPLATES.includes(template))
-    throw new CliError(
-      "template_planned",
-      `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(" and ")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
-    );
+  let template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(readdirSync(intoDir)) ? "godot-csharp" : "godot-gdscript") : undefined);
+  let engineFrom = template === undefined ? undefined : "template";
+  const checkTemplate = () => {
+    if (!TEMPLATES.includes(template)) throw new CliError("bad_flag", `--template: unknown template "${template}". Choose one of: ${TEMPLATES.join(", ")}.`);
+    if (!IMPLEMENTED_TEMPLATES.includes(template))
+      throw new CliError(
+        "template_planned",
+        `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(" and ")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
+      );
+  };
+  if (template !== undefined) checkTemplate();
+  if (opts.recommend !== undefined) recommend({ description: opts.recommend }); // an empty description is bad_flag before anything is asked
 
   const interactive = io.stdinIsTTY && !opts.yes && !opts.noInput && !isCi(io.env);
   const prompter = interactive ? createPrompter(io.stdin, opts.json ? io.stderr : io.stdout) : null;
   try {
+    // ---- the game in one line (--recommend, or one first question on a terminal) ----
+    let description = opts.recommend;
+    if (description === undefined && interactive) description = await prompter.ask("Describe your game in one line (Enter to skip)");
+    if (template === undefined) {
+      const named = description ? detectEngine(description) : null;
+      template = named?.id ?? "web";
+      engineFrom = named ? "text" : "default";
+      checkTemplate();
+    }
+    const rec = description ? recommend({ description, engine: engineFrom === "text" ? undefined : { id: template, from: engineFrom } }) : null;
+    const recRows = new Map(rec ? rec.answers.map((r) => [r[0], r]) : []);
+
     // ---- where ----
     let target;
     if (opts.into !== undefined) {
@@ -131,12 +179,14 @@ export async function run(argv, io) {
     answers.engine = template;
     for (const [key, value] of given) setPath(answers, key, value);
 
+    const fromKeys = new Set(fromFile ? flatKeys(fromFile) : []);
+    const flagKeys = new Set(given.map(([k]) => k));
     if (interactive) {
       for (const q of questions(template)) {
         if (q.when && !q.when(answers)) continue;
         const already = q.type === "hosting" ? getPath(answers, "hosting.direct") !== undefined || getPath(answers, "hosting.server") !== undefined : getPath(answers, q.key) !== undefined;
         if (already) continue;
-        const def = q.key === "game.id" ? deriveGameId(dirName) : q.key === "game.title" ? dirName : q.def;
+        const def = q.key === "game.id" ? deriveGameId(dirName) : q.key === "game.title" ? dirName : (recommendedDefault(q, recRows) ?? q.def);
         const v = await askOne(prompter, { ...q, def }, opts.json ? io.stderr : io.stdout);
         const value = v === undefined ? (q.key === "game.id" || q.key === "game.title" ? def : undefined) : v;
         if (value === undefined) continue;
@@ -146,6 +196,24 @@ export async function run(argv, io) {
         } else setPath(answers, q.key, value);
       }
     }
+
+    // the recommendation fills what no flag, --set, --from or answer gave; the built-in defaults come after it
+    const applied = [];
+    const overridden = [];
+    for (const row of recRows.values()) {
+      const [key, value] = row;
+      const have = getPath(answers, key);
+      if (have === undefined) {
+        setPath(answers, key, value);
+        applied.push(row);
+      } else if (JSON.stringify(have) !== JSON.stringify(value)) overridden.push({ key, value: have, recommended: value, by: flagKeys.has(key) ? "a flag" : fromKeys.has(key) ? "--from" : "your answer" });
+    }
+    const recommendation = rec
+      ? {
+          json: { description: rec.description, shape: rec.shape, matched: rec.matched, engine: rec.engine, applied, overridden, limits: rec.limits, questions: rec.questions, notes: rec.notes },
+          text: renderApplied(applied, overridden, rec.shape),
+        }
+      : undefined;
 
     if (getPath(answers, "game.id") === undefined) {
       if (opts.yes) setPath(answers, "game.id", deriveGameId(dirName));
@@ -168,7 +236,7 @@ export async function run(argv, io) {
       const gitInit = (dir) => {
         if (!run_("git", ["init", "-q"], dir, io)) io.stderr.write("create-onelobby: git init failed; continuing without a repository\n");
       };
-      return await runGodot({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit });
+      return await runGodot({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation });
     }
 
     // ---- plan ----
@@ -201,12 +269,14 @@ export async function run(argv, io) {
     }
 
     const result = { ok: true, dir: target, template, blueprint, files: files.map((f) => f.path), next };
+    if (recommendation) result.recommendation = recommendation.json;
+    const fromRec = recommendation ? `\n\n${recommendation.text}` : "";
     if (opts.dryRun) result.dryRun = true;
 
     if (opts.dryRun) {
       if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
       else {
-        io.stdout.write(`Dry run: nothing written.\n${into ? "Would add to" : "Would create"} ${target}:\n${files.map((f) => `  ${f.path}`).join("\n")}\n\nonelobby.json:\n${JSON.stringify(blueprint, null, 2)}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
+        io.stdout.write(`Dry run: nothing written.\n${into ? "Would add to" : "Would create"} ${target}:\n${files.map((f) => `  ${f.path}`).join("\n")}\n\nonelobby.json:\n${JSON.stringify(blueprint, null, 2)}${fromRec}\n\nNext:\n${next.map((n) => `  ${n}`).join("\n")}\n`);
       }
       return 0;
     }
@@ -225,7 +295,7 @@ export async function run(argv, io) {
       }
     }
     if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-    else io.stdout.write(`${into ? "Added to" : "Created"} ${target}\n${files.map((f) => `  ${f.path}`).join("\n")}\n\nNext:\n${result.next.map((n) => `  ${n}`).join("\n")}\n`);
+    else io.stdout.write(`${into ? "Added to" : "Created"} ${target}\n${files.map((f) => `  ${f.path}`).join("\n")}${fromRec}\n\nNext:\n${result.next.map((n) => `  ${n}`).join("\n")}\n`);
     return 0;
   } finally {
     prompter?.close();

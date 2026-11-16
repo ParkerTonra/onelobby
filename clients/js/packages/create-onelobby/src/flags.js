@@ -50,6 +50,7 @@ const OPTION_FLAGS = {
   template: "value",
   into: "value",
   from: "value",
+  recommend: "value",
   hosting: "value",
   set: "value",
   "onelobby-version": "value",
@@ -115,6 +116,7 @@ export function parseArgs(argv) {
     template: undefined,
     into: undefined,
     from: undefined,
+    recommend: undefined,
     yes: false,
     noInput: false,
     dryRun: false,
@@ -169,6 +171,7 @@ export function parseArgs(argv) {
         if (name === "template") opts.template = v;
         else if (name === "into") opts.into = v;
         else if (name === "from") opts.from = v;
+        else if (name === "recommend") opts.recommend = v;
         else if (name === "onelobby-version") opts.onelobbyVersion = v;
         else if (name === "addon-from") opts.addonFrom = v;
         else if (name === "webrtc-zip") opts.webrtcZip = v;
@@ -253,6 +256,9 @@ Usage: create-onelobby [dir] [options]
   --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ only; a Godot GDScript
                                folder (project.godot, no .csproj) gets the add-on, the natives, the autoload and a test (the template is implied)
   --from <onelobby.json>       take every answer from this file (flags still override it)
+  --recommend "<one line>"     describe the game in a sentence: alone (no folder, nothing written) it prints the proposed multiplayer setup
+                               (sync mode, tick rate, players, pause, hosting) with a reason per choice and the questions that would change it;
+                               with a folder or --into the proposal fills the answers no flag, --set or --from gave. --json for the same facts.
   --game-id <reverse.dns>  --title <text>  --net-version <text>
   --max-players <n>  --listed  --approve-joins  --password  --no-late-join  --no-rejoin  --no-join-link
   --mode <raw|lockstep|replication>  --tick-rate <n>
@@ -266,7 +272,8 @@ Usage: create-onelobby [dir] [options]
   -y, --yes                    defaults for everything not given (game id: com.example.<folder-name>)
   --no-input                   never prompt; a missing required answer is an error (CI=true implies it)
   --dry-run                    print the plan and onelobby.json, write nothing
-  --json                       print one JSON object { ok, dir, template, blueprint, files, next } and nothing else
+  --json                       print one JSON object { ok, dir, template, blueprint, files, next } and nothing else (with --recommend: the
+                               proposal, or { ..., recommendation } in a scaffold run)
   --no-install  --no-git       skip "npm install" / "git init" in a new project
   --force                      overwrite existing files (--into) or write into a non-empty folder
   godot-gdscript only:

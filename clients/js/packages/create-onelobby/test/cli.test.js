@@ -124,7 +124,7 @@ describe("--yes and --no-input", () => {
 describe("prompts (TTY, no --yes)", () => {
   it("asks in schema order with the schema descriptions, empty answers keep defaults", async () => {
     // game.id, game.title, lobbyServer, maxPlayers, listed, (approveJoins skipped: listed), password ... then defaults
-    const answers = ["com.acme.asked", "", "wss://s.example/ws", "6", "y", "", "", "", "", "", "", "", "y", "", "", "", ""];
+    const answers = ["", "com.acme.asked", "", "wss://s.example/ws", "6", "y", "", "", "", "", "", "", "", "y", "", "", "", ""];
     const r = await cli(["g", "--dry-run", "--json"], { tty: true, input: answers.join("\n") + "\n" });
     expect(r.code).toBe(0);
     const prompts = r.err; // with --json the questions go to stderr, stdout stays one object

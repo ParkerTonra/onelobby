@@ -1,0 +1,144 @@
+{
+  "ok": true,
+  "command": "recommend",
+  "description": "4 player party minigames in Godot",
+  "shape": "lockstep",
+  "shapeName": "Deterministic fixed-tick game",
+  "matched": [
+    "party",
+    "minigames"
+  ],
+  "engine": {
+    "id": "godot-gdscript",
+    "from": "text",
+    "words": [
+      "Godot"
+    ],
+    "label": "Godot 4 GDScript",
+    "template": "built"
+  },
+  "answers": [
+    [
+      "sync.mode",
+      "lockstep",
+      "every peer runs the same fixed-tick simulation and only the small inputs cross the network, so there is no state to sync"
+    ],
+    [
+      "sync.tickRate",
+      20,
+      "lockstep sends one frame per tick, so this is your simulation's fixed step: set it to the rate your sim runs at (20 until you know)"
+    ],
+    [
+      "sync.hashEveryTicks",
+      60,
+      "a state hash about every 60 ticks finds a drift between peers early (a mismatch raises Desync)"
+    ],
+    [
+      "lobby.maxPlayers",
+      4,
+      "your description says \"4 player\""
+    ],
+    [
+      "session.pause",
+      "off",
+      "a real-time round cannot wait for one player to find the pause key"
+    ],
+    [
+      "hosting.direct",
+      true,
+      "the engine can listen, so players share a join code and one of them hosts: the game outlives any server"
+    ],
+    [
+      "hosting.server",
+      false,
+      "a lobby server is optional here; switch it on if you also want a public list"
+    ]
+  ],
+  "advice": [
+    {
+      "id": "lockstep-fast-inputs",
+      "text": "Send inputs on the fast channel with the last few ticks repeated",
+      "why": "a reliable ordered input channel stalled one game about half its frames at 80 ms and 2% loss; redundancy on the fast channel fixed it",
+      "status": "by-hand",
+      "how": "no lockstep helper does this yet (its commands travel on the reliable channel); send your own input packets on the fast channel (Channel.Fast in C#, { channel: 'fast' } in JS) beside the lockstep frames",
+      "doc": "docs/recipes/raw-mode.md"
+    },
+    {
+      "id": "adaptive-input-delay",
+      "text": "Use an adaptive input delay (a few ticks, grown when the round trip grows)",
+      "why": "a fixed delay is either too laggy on a good link or too stuttery on a bad one",
+      "status": "by-hand",
+      "how": "no client has it yet: measure the round trip yourself and schedule each command a few ticks ahead",
+      "doc": "docs/recipes/raw-mode.md"
+    },
+    {
+      "id": "bots-take-seats",
+      "text": "Let bots take the seats of dropped players",
+      "why": "a lockstep game cannot wait for a player who left; a bot keeps the simulation moving",
+      "status": "built-in",
+      "how": "room.on(\"seatDropped\", s => spawnBot(s.seat)) fires once the rejoin window has passed (room.seatDropped / rejoinWindowSeconds)",
+      "doc": "docs/recipes/room.md"
+    }
+  ],
+  "limits": [],
+  "notes": [],
+  "questions": [
+    {
+      "id": "godotLanguage",
+      "question": "GDScript or C#? Assumed GDScript, the Godot template that exists today.",
+      "add": "in Godot with GDScript, or in Godot with C#"
+    },
+    {
+      "id": "tickRate",
+      "question": "What fixed tick rate does the simulation run at?",
+      "add": "at 30 ticks per second"
+    },
+    {
+      "id": "determinism",
+      "question": "Is the simulation deterministic? Lockstep needs the same commands in the same order to give the same state on every peer: a fixed tick, in-state seeded random numbers, no wall clock, no unordered iteration, no floats that differ by platform (AGENTS.md rule 3).",
+      "add": "deterministic with a fixed tick and seeded random numbers (or: not deterministic)"
+    }
+  ],
+  "flags": [
+    "--hosting",
+    "direct",
+    "--mode",
+    "lockstep",
+    "--tick-rate",
+    "20",
+    "--set",
+    "sync.hashEveryTicks=60",
+    "--max-players",
+    "4",
+    "--pause",
+    "off"
+  ],
+  "runCommand": "npx create-onelobby my-game --template godot-gdscript --hosting direct --mode lockstep --tick-rate 20 --set sync.hashEveryTicks=60 --max-players 4 --pause off --yes",
+  "shapes": [
+    {
+      "id": "lockstep",
+      "name": "Deterministic fixed-tick game",
+      "summary": "party minigames, an RTS on a seeded simulation: every peer runs the same sim and only small inputs cross the network"
+    },
+    {
+      "id": "coop-snapshots",
+      "name": "Free-roam co-op with rich state",
+      "summary": "survival, sandbox: the host runs the world and sends snapshots, each joiner predicts its own actions"
+    },
+    {
+      "id": "replication",
+      "name": "Shooter or physics game, host-authoritative",
+      "summary": "shooters, physics, AI: the host decides, joiners get interpolated snapshots and send inputs; anything that is not deterministic"
+    },
+    {
+      "id": "turn-based",
+      "name": "Turn-based, card or board game",
+      "summary": "nothing to sync between turns: the host is the truth and raw messages are enough, with no tick"
+    },
+    {
+      "id": "own-server",
+      "name": "An existing server-style game",
+      "summary": "the game keeps its own server loop and OneLobby only carries the bytes, shaped like a WebSocket"
+    }
+  ]
+}
