@@ -37,7 +37,7 @@ var _closed := false
 ## ice_servers (Array of {urls, username?, credential?}: handed to joiners in welcome.ice).
 ## The IP path (join without Nostr) is on when `udp_port_range` ([begin, end]: the UDP ports the host port-forwards, one
 ## per joiner) or `tcp_port` is given, or `nostr` is false: then a TCP WebSocket listens on `tcp_port` (47810) at
-## `listen_address` ("*") and `ip_code` is a version 0 code of `public_ip` (default: this machine's first private IPv4)
+## `listen_address` ("*") and `ip_code` is a version 0 code of `public_ip` (default: 127.0.0.1 with a loopback `listen_address`, else this machine's first private IPv4)
 ## and that port. `nostr` false skips the relays (no internet needed; `code` is then the IP code).
 ## `lan` (false) turns LAN discovery on: one UDP socket (`lan_port`, 47840) answers the questions of players' games on the same network,
 ## only while this host exists (it needs the IP path, so it switches that on). With `listen_address` "127.0.0.1" it binds the loopback only.
@@ -81,6 +81,25 @@ static func start(options: Dictionary) -> OneLobbyDirectHost:
 	if port > 0:
 		d._start_upnp(port)
 	return d
+
+
+## True for a `listen_address` that names this PC only: 127.x.x.x, "localhost", "::1".
+static func is_loopback_address(listen_address: String) -> bool:
+	var h := listen_address.strip_edges().to_lower().trim_prefix("[").trim_suffix("]")
+	if h.begins_with("::ffff:"):
+		h = h.substr(7)
+	return h == "localhost" or h == "::1" or h.begins_with("127.")
+
+
+## The IPv4 address the IP join code carries: `public_ip` when given, else 127.0.0.1 when the host listens on loopback only
+## (a LAN address would be one nothing listens on), else this machine's LAN address.
+static func code_address(options: Dictionary) -> String:
+	var addr := str(options.get("public_ip", ""))
+	if addr != "":
+		return addr
+	if is_loopback_address(str(options.get("listen_address", "*"))):
+		return "127.0.0.1"
+	return lan_ipv4()
 
 
 ## This machine's first private IPv4 address (a LAN address), "127.0.0.1" when it has none. For a join code that is

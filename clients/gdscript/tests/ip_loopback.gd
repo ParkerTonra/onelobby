@@ -36,6 +36,13 @@ func _run() -> void:
 	_check(OneLobbyJoinCode.parse_address("10.0.0.5:5000") == {"ip": "10.0.0.5", "port": 5000}, "parse_address with port")
 	_check(OneLobbyJoinCode.parse_address("10.0.0.5").get("port", 0) == 47810, "parse_address default port")
 	_check(OneLobbyJoinCode.parse_address("nonsense").has("error"), "parse_address rejects")
+	# a loopback host's code names loopback; public_ip still wins; a non-loopback host keeps the LAN address (negative control)
+	_check(OneLobbyDirectHost.code_address({"listen_address": "127.0.0.1"}) == "127.0.0.1", "loopback listen_address -> code address 127.0.0.1")
+	_check(OneLobbyDirectHost.code_address({"listen_address": "localhost"}) == "127.0.0.1", "localhost listen_address -> 127.0.0.1")
+	_check(OneLobbyDirectHost.code_address({"listen_address": "127.0.0.1", "public_ip": "203.0.113.7"}) == "203.0.113.7", "public_ip wins over loopback")
+	_check(OneLobbyDirectHost.code_address({"listen_address": "0.0.0.0"}) == OneLobbyDirectHost.lan_ipv4(), "non-loopback listen_address keeps the LAN address")
+	_check(OneLobbyDirectHost.code_address({}) == OneLobbyDirectHost.lan_ipv4(), "no listen_address keeps the LAN address")
+	_check(not OneLobbyDirectHost.is_loopback_address("0.0.0.0") and not OneLobbyDirectHost.is_loopback_address("192.168.1.5") and OneLobbyDirectHost.is_loopback_address("::ffff:127.0.0.1"), "is_loopback_address")
 	_check(OneLobbyLobby.ice_failed_message(false, true).contains("port-forward its UDP port range"), "by-ip message names the next step")
 	_check(OneLobbyLobby.port_range_full_message([47900, 47901]).contains("47900-47901"), "range message")
 
