@@ -60,8 +60,8 @@ export type { Cause, Stage, Reached, RelayState, CandidateType, NatFact, Diagnos
 export { NetLog } from "./netlog.js";
 export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
 export { checkConnection } from "./connection-check.js";
-export { LanFinder, LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets } from "./lan.js";
-export type { LanGame, LanFinderOptions, LanFinderStatus, LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";
+export { LanFinder } from "./lan.js";
+export type { LanGame, LanFinderOptions, LanFinderStatus } from "./lan.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
 export { ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication, DEFAULT_REPLICATION_CONFIG, } from "./replication/index.js";
 export type { EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates, ReplicationEvents, ReplicationErrorCode, } from "./replication/index.js";
