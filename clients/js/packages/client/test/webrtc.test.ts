@@ -89,6 +89,18 @@ describe("WebRtcLink", () => {
     expect(() => link.send("reliable", Uint8Array.of(1))).not.toThrow();
   });
 
+  it("a send that fails on a channel that is still open is thrown, not dropped", async () => {
+    // only the closed case is swallowed: a message the channel cannot carry must not vanish without a word
+    const link = make();
+    await link.handleSignal({ sdp: { type: "offer", sdp: "v=0" } });
+    const [reliable, fast, voice] = FakePc.last.channels;
+    for (const c of [reliable, fast, voice]) c.open();
+    reliable.send = () => {
+      throw new TypeError("Message too large");
+    };
+    expect(() => link.send("reliable", Uint8Array.of(1))).toThrow("Message too large");
+  });
+
   it("data that arrives before every channel is open waits for onOpen, then comes in order", async () => {
     const link = make();
     await link.handleSignal({ sdp: { type: "offer", sdp: "v=0" } });
