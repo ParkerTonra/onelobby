@@ -383,6 +383,22 @@ export function buildSuite(opts) {
     j.send({ t: 'set_name', name: 'x'.repeat(30) });
     assert.equal((await h.next('lobby')).peers.find((p) => p.peerId === 2).name, 'x'.repeat(24));
   });
+  const DIAG = { cause: 'nat_blocked', stage: 'ice', elapsedMs: 15000, relaySet: false, candidateTypes: { local: ['host', 'srflx'], remote: ['host'] }, clientVersion: '0.7.2' };
+  T('host', 'diag (when listed in welcome.features): a joiner report reaches the host only, rebuilt, from stamped; bad reports are bad_request', async (t) => {
+    const h = await t.host();
+    if (!h.welcome.features?.includes('diag')) return; // optional feature: an older hub ignores the message
+    const j = await t.join(h.lobby.code, {}, h);
+    const k = await t.join(h.lobby.code, {}, h);
+    await j.next('peer_joined');
+    j.send({ t: 'diag', from: 3, report: { ...DIAG, address: '203.0.113.9', name: 'Sam' } });
+    const got = await h.next('diag');
+    assert.equal(got.from, 2);
+    assert.deepEqual(got.report, DIAG);
+    await j.expectSilence(200); await k.expectSilence(200);
+    await j.callError({ t: 'diag', report: { ...DIAG, elapsedMs: -1 } }, 'bad_request');
+    await j.callError({ t: 'diag' }, 'bad_request');
+    await h.callError({ t: 'diag', report: DIAG }, 'bad_request');
+  });
   T('host', 'set_name outside a lobby -> bad_request', async (t) => {
     const c = await t.hello();
     await c.callError({ t: 'set_name', name: 'Solo' }, 'bad_request');
@@ -682,6 +698,15 @@ export function buildSuite(opts) {
     assert.deepEqual(h.drain().filter((m) => m.t === 'error'), [], 'no errors');
     for (const j of js) assert.equal(j.drain().filter((m) => m.t === 'signal').length, n, 'every joiner got all its signals');
   }, { rateLimitOnly: true });
+  T('ratelimit', 'diag: the fourth report within a minute -> rate_limited, three were forwarded', async (t) => {
+    const h = await t.host();
+    if (!h.welcome.features?.includes('diag')) return;
+    const j = await t.join(h.lobby.code, {}, h);
+    for (let i = 0; i < 3; i++) { j.send({ t: 'diag', report: DIAG }); await h.next('diag'); }
+    const e = await j.callError({ t: 'diag', report: DIAG }, 'rate_limited');
+    assert.ok(e.data?.retryAfterMs > 0);
+    await h.expectSilence(200);
+  });
   T('ratelimit', 'set_name: a second rename within a second -> rate_limited with retryAfterMs, the first applied', async (t) => {
     const h = await t.host(); const j = await t.join(h.lobby.code, {}, h);
     j.send({ t: 'set_name', name: 'One' });

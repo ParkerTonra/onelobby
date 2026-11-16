@@ -15,7 +15,7 @@ line says **(decision)** it goes beyond DESIGN.md and stream E reports it to the
 - The first message must be `hello`. Anything else before it: `error{bad_request}`. A second `hello`: `error{bad_request}`.
 - `hello.proto` other than `"lk1"`: `error{bad_request, data:{supported:["lk1"]}}`, then close.
 - `hello` reply: `welcome` (always). With a valid `resumeToken` see Resume. `welcome.features` (optional array of
-  strings) names optional messages the hub handles: `"set_name"` and `"room"` (see "Room additions"). A missing array means none.
+  strings) names optional messages the hub handles: `"set_name"`, `"room"` (see "Room additions") and `"diag"` (see "Diagnostics additions"). A missing array means none.
 - `ping{n}` is answered with `pong{n}` at any time after `hello`. A socket silent for 30 s is closed by the server;
   clients ping every 10 s.
 - A socket is in at most one lobby. `create`/`join` while already in one: `error{bad_request}`.
@@ -182,6 +182,21 @@ All additive; an old hub ignores the fields and does not list `"room"` in `welco
 - `lobbies.items[].hasPassword` (true only when the lobby has a password).
 - `lobby.spectators` (integer, additive).
 - `errorCode` gains `bad_password` (already used by direct hubs) and `banned`.
+
+## Diagnostics additions (spec/diagnostics.md s.7)
+
+All additive; an old hub ignores `diag` and does not list `"diag"` in `welcome.features`, and a client sends nothing to a
+hub without it.
+
+- `diag{report}` (client -> hub): a joiner tells the host why its link to the host failed. `report` is
+  `{cause, stage, elapsedMs, relaySet, natType?, candidateTypes:{local,remote}, clientVersion}`, typed and size-capped
+  (`diagReport` in the schema); it has no address, name, free text or credential.
+- The hub rebuilds the report from the known fields (anything else is dropped) and forwards `diag{from, report}` to
+  **the lobby's host only**, with `from` the sender's peerId stamped by the hub. No reply on success.
+- Errors: the sender is not in a lobby (pending approval counts as not in) or is the host: `bad_request` (field
+  `report`); the frame over 1024 bytes of JSON, or a missing or invalid report: `bad_request` (field `report`); more than 3
+  reports per 60 s from one peer: `rate_limited{retryAfterMs}` and nothing forwarded.
+- A host that does not know `diag` ignores the forwarded message (unknown `t`).
 
 ## Error `data` summary
 

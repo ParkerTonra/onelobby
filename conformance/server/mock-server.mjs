@@ -90,13 +90,13 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
       const slot = l?.peers.get(tk.peerId);
       const ice = [{ urls: ['stun:localhost:3478'] }];
       if (l && slot && !slot.conn && slot.reservedUntil && l.gameId === m.gameId) {
-        sendTo(conn, { t: 'welcome', peerId: tk.peerId, ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name'] });
+        sendTo(conn, { t: 'welcome', peerId: tk.peerId, ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name', 'diag'] });
         tokens.delete(m.resumeToken); l.peers.delete(slot.peerId);
         const p = addPeer(l, conn, conn.hello.name, slot.peerId, slot.joinedAt);
         sendTo(conn, lobbyMsg(l, p)); everyone(l, { t: 'peer_joined', peer: { peerId: p.peerId, name: p.name } }, p.peerId);
         return;
       }
-      return sendTo(conn, { t: 'welcome', ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name'] });
+      return sendTo(conn, { t: 'welcome', ice, serverTime: Date.now(), limits: { maxMsg: MAX_MSG, maxPlayers: 64 }, features: ['set_name', 'diag'] });
     }
     if (!conn.hello) return bad('hello first');
     const l = conn.lobby ? lobbies.get(conn.lobby) : null;
@@ -187,6 +187,24 @@ export function startMock({ port = 0, scale = 1, allowedGameIds = null, maxLobbi
         const wait = hit(`set_name:${conn.id}`, lim.rename, 1000);
         if (wait) return err(conn, 'rate_limited', 'too many renames', { retryAfterMs: wait });
         me.name = name; return broadcastLobby(l);
+      }
+      case 'diag': {
+        // spec/diagnostics.md s.7: rebuilt from the known fields, host only, 3 per minute per peer
+        if (!l || me.peerId === l.hostId) return bad('report', 'report');
+        const r = m.report;
+        const name = (v) => typeof v === 'string' && /^[a-z][a-z0-9_]{0,31}$/.test(v);
+        const types = (v) => Array.isArray(v) && v.length <= 3 && new Set(v).size === v.length && v.every((x) => ['host', 'srflx', 'relay'].includes(x));
+        const ok = r && typeof r === 'object' && name(r.cause) && name(r.stage) && Number.isInteger(r.elapsedMs) && r.elapsedMs >= 0 && r.elapsedMs <= 3600000
+          && typeof r.relaySet === 'boolean' && (r.natType === undefined || ['open', 'cone', 'symmetric', 'blocked'].includes(r.natType))
+          && r.candidateTypes && types(r.candidateTypes.local) && types(r.candidateTypes.remote)
+          && typeof r.clientVersion === 'string' && /^[A-Za-z0-9._+-]{1,32}$/.test(r.clientVersion) && JSON.stringify(m).length <= 1024;
+        if (!ok) return bad('report', 'report');
+        const wait = hit(`diag:${conn.id}`, 3, 60000);
+        if (wait) return err(conn, 'rate_limited', 'too many reports', { retryAfterMs: wait });
+        const out = { cause: r.cause, stage: r.stage, elapsedMs: r.elapsedMs, relaySet: r.relaySet, ...(r.natType ? { natType: r.natType } : {}), candidateTypes: { local: [...r.candidateTypes.local], remote: [...r.candidateTypes.remote] }, clientVersion: r.clientVersion };
+        const host = l.peers.get(l.hostId);
+        if (host?.conn) sendTo(host.conn, { t: 'diag', from: me.peerId, report: out });
+        return;
       }
       case 'phase': {
         if (!l) return bad('not in a lobby'); if (!needHost()) return;

@@ -88,7 +88,7 @@
       "oneOf": [
         { "$ref": "#/$defs/c_hello" }, { "$ref": "#/$defs/c_create" }, { "$ref": "#/$defs/c_join" }, { "$ref": "#/$defs/c_list" },
         { "$ref": "#/$defs/c_leave" }, { "$ref": "#/$defs/c_signal" }, { "$ref": "#/$defs/c_meta" }, { "$ref": "#/$defs/c_phase" },
-        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }, { "$ref": "#/$defs/c_path" }, { "$ref": "#/$defs/c_set_name" }, { "$ref": "#/$defs/c_bans" }
+        { "$ref": "#/$defs/c_kick" }, { "$ref": "#/$defs/c_approve" }, { "$ref": "#/$defs/c_ping" }, { "$ref": "#/$defs/c_host_changed" }, { "$ref": "#/$defs/c_path" }, { "$ref": "#/$defs/c_set_name" }, { "$ref": "#/$defs/c_bans" }, { "$ref": "#/$defs/c_diag" }
       ]
     },
     "c_hello": {
@@ -169,6 +169,38 @@
       "required": ["t", "ids"],
       "properties": { "t": { "const": "bans" }, "ids": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/playerId" } } }
     },
+    "c_diag": {
+      "description": "Additive (spec/diagnostics.md s.7): a joiner tells the host why its link failed. The hub rebuilds the report from the known fields, forwards it to the host only as s_diag, at most 3 per minute per peer. Only sent to a hub whose welcome.features has \"diag\".",
+      "type": "object",
+      "required": ["t", "report"],
+      "properties": { "t": { "const": "diag" }, "report": { "$ref": "#/$defs/diagReport" } }
+    },
+    "diagReport": {
+      "type": "object",
+      "required": ["cause", "stage", "elapsedMs", "relaySet", "candidateTypes", "clientVersion"],
+      "properties": {
+        "cause": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+        "stage": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+        "elapsedMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "relaySet": { "type": "boolean" },
+        "natType": { "enum": ["open", "cone", "symmetric", "blocked"] },
+        "candidateTypes": {
+          "type": "object",
+          "required": ["local", "remote"],
+          "properties": {
+            "local": { "type": "array", "maxItems": 3, "uniqueItems": true, "items": { "enum": ["host", "srflx", "relay"] } },
+            "remote": { "type": "array", "maxItems": 3, "uniqueItems": true, "items": { "enum": ["host", "srflx", "relay"] } }
+          }
+        },
+        "clientVersion": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,32}$" }
+      }
+    },
+    "s_diag": {
+      "description": "Additive: a joiner's diagnosis, forwarded to the host only; from is stamped by the hub.",
+      "type": "object",
+      "required": ["t", "from", "report"],
+      "properties": { "t": { "const": "diag" }, "from": { "$ref": "#/$defs/peerId" }, "report": { "$ref": "#/$defs/diagReport" } }
+    },
     "c_approve": {
       "type": "object",
       "required": ["t", "peerId", "ok"],
@@ -193,7 +225,7 @@
       "oneOf": [
         { "$ref": "#/$defs/s_welcome" }, { "$ref": "#/$defs/s_lobby" }, { "$ref": "#/$defs/s_peer_joined" }, { "$ref": "#/$defs/s_peer_left" },
         { "$ref": "#/$defs/s_host_changed" }, { "$ref": "#/$defs/s_join_request" }, { "$ref": "#/$defs/s_lobbies" },
-        { "$ref": "#/$defs/s_signal" }, { "$ref": "#/$defs/s_error" }, { "$ref": "#/$defs/s_pong" }
+        { "$ref": "#/$defs/s_signal" }, { "$ref": "#/$defs/s_error" }, { "$ref": "#/$defs/s_pong" }, { "$ref": "#/$defs/s_diag" }
       ]
     },
     "s_welcome": {
@@ -204,7 +236,7 @@
         "peerId": { "$ref": "#/$defs/peerId", "description": "Present only when a resumeToken was accepted." },
         "ice": { "type": "array", "items": { "$ref": "#/$defs/iceServer" } },
         "serverTime": { "type": "integer", "description": "unix ms" },
-        "features": { "type": "array", "items": { "type": "string" }, "description": "optional messages this hub handles: \"set_name\"; \"room\" (spec/room.md s.7: passwords, spectator slots, player-id bans, kick codes). Missing = none." },
+        "features": { "type": "array", "items": { "type": "string" }, "description": "optional messages this hub handles: \"set_name\"; \"room\" (spec/room.md s.7: passwords, spectator slots, player-id bans, kick codes); \"diag\" (spec/diagnostics.md s.7: the joiner's diagnosis relay). Missing = none." },
         "limits": {
           "type": "object",
           "required": ["maxMsg", "maxPlayers"],
