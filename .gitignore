@@ -8,3 +8,4 @@ dist/
 .vs/
 coverage/
 .tmp-scaffold/
+.tmp-unity/

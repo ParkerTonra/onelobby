@@ -1,0 +1,65 @@
+/* The stock look of the OneLobby menu: the engine's default runtime theme plus layout only (spacing, one dark backdrop,
+   two larger sizes). A game restyles it by adding a StyleSheet after this one (OneLobbyMenu.StyleSheets); every control
+   has a name from OneLobbyMenu.ControlNames and the classes below. */
+.onelobby-menu {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    align-items: center;
+    background-color: rgb(32, 32, 32);
+}
+
+.onelobby-menu--playing {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.onelobby-scroll {
+    flex-grow: 1;
+    width: 100%;
+    max-width: 640px;
+}
+
+.onelobby-pages {
+    padding: 16px;
+}
+
+.onelobby-menu Label {
+    white-space: normal;
+    margin: 2px 0 4px 0;
+}
+
+.onelobby-menu Button {
+    margin: 2px 6px 2px 0;
+}
+
+.onelobby-title {
+    font-size: 20px;
+    -unity-font-style: bold;
+    margin-bottom: 8px;
+}
+
+.onelobby-code {
+    font-size: 30px;
+    -unity-font-style: bold;
+}
+
+.onelobby-error-code {
+    font-size: 10px;
+}
+
+.onelobby-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.onelobby-row > Label {
+    margin-right: 12px;
+}
+
+.onelobby-chat-scroll {
+    max-height: 120px;
+    min-height: 40px;
+}
