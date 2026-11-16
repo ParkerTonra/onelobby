@@ -1,0 +1,13 @@
+; Engine configuration file. Made by create-onelobby; Godot may rewrite it when you open the project in the editor.
+
+config_version=5
+
+[application]
+
+config/name="{{title}}"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.5", "C#")
+{{audio}}
+[dotnet]
+
+project/assembly_name="{{assembly}}"

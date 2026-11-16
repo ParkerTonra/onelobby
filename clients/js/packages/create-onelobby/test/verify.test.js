@@ -116,10 +116,11 @@ describe("verify on a folder", () => {
     expect((await cli(["verify", "p", "--json"], () => [])).out).toContain("no onelobby.json");
   });
 
-  it("a Godot C# project is template_planned", async () => {
+  it("a Godot C# project runs the checks handed in for its kind", async () => {
     godotGame();
     writeFileSync(join(cwd, "g/g.csproj"), "<Project/>");
-    expect(JSON.parse((await cli(["verify", "g", "--json"], () => [])).out).error.code).toBe("template_planned");
+    const r = JSON.parse((await cli(["verify", "g", "--json"], (kind) => [fake("kind", ok(kind))])).out);
+    expect(r).toMatchObject({ ok: true, kind: "godot-csharp", verdict: "VERIFY_OK" });
   });
 });
 

@@ -298,11 +298,11 @@ describe("update: other folders", () => {
     expect(r.json.glue).toEqual({ path: "multiplayer/session.js", state: "identical" });
   });
 
-  it("a Godot C# project is template_planned", async () => {
+  it("a Godot C# project with no pin is no_pin (its template is built; adopt it with --into)", async () => {
     mkdirSync(at("cs"));
     writeFileSync(at("cs/project.godot"), "config_version=5\n");
     writeFileSync(at("cs/cs.csproj"), "<Project/>");
-    expect((await j(["update", "cs"])).json.error.code).toBe("template_planned");
+    expect((await j(["update", "cs"])).json.error.code).toBe("no_pin");
   });
 
   it("a folder that is no game is not_a_project; a missing folder is no_such_dir", async () => {

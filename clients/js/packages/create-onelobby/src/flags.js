@@ -57,6 +57,7 @@ const OPTION_FLAGS = {
   "addon-from": "value",
   "webrtc-zip": "value",
   "webrtc-dir": "value",
+  "packages-from": "value",
   "no-natives": "bool",
   godot: "value",
   server: "value",
@@ -130,6 +131,7 @@ export function parseArgs(argv) {
     addonFrom: undefined,
     webrtcZip: undefined,
     webrtcDir: undefined,
+    packagesFrom: undefined,
     noNatives: false,
     godot: undefined,
     server: undefined,
@@ -176,6 +178,7 @@ export function parseArgs(argv) {
         else if (name === "addon-from") opts.addonFrom = v;
         else if (name === "webrtc-zip") opts.webrtcZip = v;
         else if (name === "webrtc-dir") opts.webrtcDir = v;
+        else if (name === "packages-from") opts.packagesFrom = v;
         else if (name === "godot") opts.godot = v;
         else if (name === "server") opts.server = v;
         else if (name === "hosting") {

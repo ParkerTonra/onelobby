@@ -282,15 +282,15 @@ describe("godot-gdscript: --into", () => {
     expect(tree(at("mine"))).toEqual(["project.godot", "scene.tscn"]);
   });
 
-  it("a Godot C# project (a .csproj or .sln next to project.godot) is template_planned and names the recipe", async () => {
+  it("a Godot C# project (a .csproj or .sln next to project.godot) is not a GDScript project: wrong_template, nothing written", async () => {
     for (const marker of ["Game.csproj", "Game.sln"]) {
       godotProject("cs");
       writeFileSync(at("cs", marker), "<Project/>");
-      for (const args of [["--into", "cs", "--yes"], ["--into", "cs", "--template", "godot-gdscript", "--yes"]]) {
+      for (const args of [["--into", "cs", "--template", "godot-gdscript", "--yes"]]) {
         const r = await j([...args, "--no-natives", "--addon-from", "checkout"]);
         expect(r.code).toBe(1);
-        expect(r.json.error.code).toBe("template_planned");
-        expect(r.json.error.message).toContain("docs/recipes/godot-csharp.md");
+        expect(r.json.error.code).toBe("wrong_template");
+        expect(r.json.error.message).toContain("--template godot-csharp");
       }
       expect(tree(at("cs"))).toEqual([marker, "project.godot", "scene.tscn"]);
       rmSync(at("cs"), { recursive: true });
@@ -322,13 +322,13 @@ describe("godot-gdscript: --into", () => {
 });
 
 describe("templates still planned", () => {
-  for (const t of ["godot-csharp", "unity"]) {
+  for (const t of ["unity"]) {
     it(`${t} is template_planned and the message no longer claims only web exists`, async () => {
       const r = await j(["g", "--template", t, "--yes", "--no-git"]);
       expect(r.code).toBe(1);
       expect(r.json.error.code).toBe("template_planned");
       expect(r.json.error.message).toContain("planned for v2");
-      expect(r.json.error.message).toContain('"web" and "godot-gdscript"');
+      expect(r.json.error.message).toContain('"web", "godot-gdscript" and "godot-csharp"');
       expect(r.json.error.message).not.toContain("only");
     });
   }

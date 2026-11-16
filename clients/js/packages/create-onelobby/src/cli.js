@@ -15,6 +15,7 @@ import {
 } from "./blueprint.js";
 import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
 import { isCSharpProject } from "./godot-project.js";
+import { runCSharp } from "./csharp.js";
 import { runGodot } from "./godot.js";
 import { detectEngine, recommend, renderApplied, renderText } from "./recommend.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
@@ -23,7 +24,7 @@ import { runVerify } from "./verify/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The hand recipe for each template that is not built yet. */
-const PLANNED_RECIPES = { "godot-csharp": "godot-csharp.md", unity: "unity.md", dotnet: "dotnet-generic.md", "node-browser": "js-web.md" };
+const PLANNED_RECIPES = { unity: "unity.md", dotnet: "dotnet-generic.md", "node-browser": "js-web.md" };
 
 function defaultIo() {
   return {
@@ -136,7 +137,7 @@ export async function run(argv, io) {
     if (!IMPLEMENTED_TEMPLATES.includes(template))
       throw new CliError(
         "template_planned",
-        `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(" and ")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
+        `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(", ").replace(/, ([^,]*)$/, " and $1")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
       );
   };
   if (template !== undefined) checkTemplate();
@@ -230,7 +231,7 @@ export async function run(argv, io) {
     }
     answers = withDefaults(answers, templateDefaults(template, { title: dirName.slice(0, 64) }));
 
-    const wantUi = template === "godot-gdscript" ? "drop-in" : "generated";
+    const wantUi = template === "godot-gdscript" || template === "godot-csharp" ? "drop-in" : "generated";
     if (getPath(answers, "ui.kind") !== wantUi)
       throw new CliError("unsupported", `template ${template} writes the ${wantUi} UI (ui.kind "${wantUi}"); ui.kind "${getPath(answers, "ui.kind")}" is not supported by the scaffolder yet`, "ui.kind");
 
@@ -241,11 +242,12 @@ export async function run(argv, io) {
     // ---- validate with the real loader ----
     const blueprint = await buildBlueprint(answers);
 
-    if (template === "godot-gdscript") {
+    if (template === "godot-gdscript" || template === "godot-csharp") {
       const gitInit = (dir) => {
         if (!run_("git", ["init", "-q"], dir, io)) io.stderr.write("create-onelobby: git init failed; continuing without a repository\n");
       };
-      return await runGodot({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation });
+      const runTemplate = template === "godot-csharp" ? runCSharp : runGodot;
+      return await runTemplate({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation });
     }
 
     // ---- plan ----

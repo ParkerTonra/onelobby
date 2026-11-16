@@ -38,9 +38,6 @@ export function detectProject(dir, { requireBlueprint = false } = {}) {
 export const notAProject = (found, command) =>
   new CliError(
     "not_a_project",
-    `${found.dir} is not a OneLobby game this version of create-onelobby can ${command} (${found.why}). Run it in a folder made by create-onelobby (a Godot GDScript project with project.godot and onelobby.json, or a web project with onelobby.json and src/session.js), or point it there with --into <dir>.`,
+    `${found.dir} is not a OneLobby game this version of create-onelobby can ${command} (${found.why}). Run it in a folder made by create-onelobby (a Godot project (GDScript or C#) with project.godot and onelobby.json, or a web project with onelobby.json and src/session.js), or point it there with --into <dir>.`,
   );
 
-/** A Godot C# project is detected but its template is not built yet. */
-export const csharpPlanned = (dir) =>
-  new CliError("template_planned", `${dir} is a Godot C# project (a .csproj or .sln sits next to project.godot): the godot-csharp template is planned for v2. Follow docs/recipes/godot-csharp.md for now.`);

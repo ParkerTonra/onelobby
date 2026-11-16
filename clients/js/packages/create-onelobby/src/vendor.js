@@ -79,7 +79,10 @@ export function addonSource({ addonFrom, cwd } = {}) {
 
 // ---- the pin file ------------------------------------------------------------------------------------------------------
 
-export const PIN_PATH = "addons/onelobby/PIN.json";
+export const ADDON_DIR = "addons/onelobby";
+export const PIN_PATH = `${ADDON_DIR}/PIN.json`;
+/** The C# menu's folder (godot-csharp): the only OneLobby source a C# game copies in (the rest comes from NuGet). */
+export const MENU_DIR = "addons/onelobby_menu";
 
 const sortKeys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortKeys(o[k])])) : o);
 
@@ -101,7 +104,8 @@ export function buildPin({ files, commit, version = packageVersion(), webrtcNati
  * clean relative path (the same rule the zip reader applies to entry names: forward slashes, no empty, `.` or `..` segment,
  * no drive letter, no leading `/`, no NUL). Throws CliError("bad_pin") naming the first bad key; touches nothing.
  */
-export function checkPinFiles(pin) {
+export function checkPinFiles(pin, folder = ADDON_DIR) {
+  const PIN_PATH = `${folder}/PIN.json`;
   const files = pin?.files;
   if (typeof files !== "object" || files === null || Array.isArray(files)) throw new CliError("bad_pin", `${PIN_PATH} has no "files" list; adopt the add-on again with: npx create-onelobby --into . --force`);
   for (const [key, hash] of Object.entries(files)) {
@@ -112,7 +116,7 @@ export function checkPinFiles(pin) {
       } catch {
         ok = false;
       }
-    if (!ok) throw new CliError("bad_pin", `${PIN_PATH} lists ${JSON.stringify(key)}, which is not a plain relative path inside addons/onelobby/ (no "..", no absolute path, no backslash); nothing was read, written or deleted. Restore the pin from git, or adopt the add-on again with: npx create-onelobby --into . --force`);
+    if (!ok) throw new CliError("bad_pin", `${PIN_PATH} lists ${JSON.stringify(key)}, which is not a plain relative path inside ${folder}/ (no "..", no absolute path, no backslash); nothing was read, written or deleted. Restore the pin from git, or adopt the add-on again with: npx create-onelobby --into . --force`);
     if (typeof hash !== "string") throw new CliError("bad_pin", `${PIN_PATH}: the hash of ${JSON.stringify(key)} is not a string; restore the pin from git`);
   }
   return files;
@@ -122,12 +126,12 @@ export function checkPinFiles(pin) {
  * Compare a project's add-on with its PIN.json: { ok, pin, edited, missing, added }. `edited`: a pinned file whose bytes
  * (CRLF read as LF) no longer match; `missing`: pinned but gone; `added`: a file in the add-on folder the pin does not list.
  */
-export function verifyPin(projectDir) {
-  const pinFile = join(projectDir, ...PIN_PATH.split("/"));
+export function verifyPin(projectDir, folder = ADDON_DIR) {
+  const pinFile = join(projectDir, ...folder.split("/"), "PIN.json");
   if (!existsSync(pinFile)) return { ok: false, pin: null, edited: [], missing: [], added: [], error: "no_pin" };
   const pin = JSON.parse(readFileSync(pinFile, "utf8"));
-  checkPinFiles(pin); // before any key is joined to a path
-  const root = join(projectDir, "addons", "onelobby");
+  checkPinFiles(pin, folder); // before any key is joined to a path
+  const root = join(projectDir, ...folder.split("/"));
   const edited = [];
   const missing = [];
   for (const [path, hash] of Object.entries(pin.files)) {
@@ -227,3 +231,34 @@ export function applyBlock(existing, lines) {
 /** The managed lines for each engine-neutral file. `.gitignore`: what a fresh clone regenerates; `.gitattributes`: keep the add-on LF. */
 export const GITIGNORE_LINES = ["addons/godot_webrtc/", ".godot/", ".onelobby/"]; // .onelobby/: scratch and helper cache of `create-onelobby verify`
 export const GITATTRIBUTES_LINES = ["addons/onelobby/** text eol=lf"];
+
+// ---- godot-csharp: the menu folder and its managed blocks ---------------------------------------------------------------
+
+/** The managed lines for a Godot C# game: the same as GDScript plus what `dotnet build` regenerates. */
+export const CSHARP_GITIGNORE_LINES = [...GITIGNORE_LINES, "bin/", "obj/"];
+export const CSHARP_GITATTRIBUTES_LINES = [`${MENU_DIR}/** text eol=lf`];
+
+/** The menu bundled in this package by scripts/build.mjs, or absent when the package was built without it. */
+const packagedMenu = () => join(PKG_ROOT, "vendor", "csharp-menu");
+
+/** The folder holding OneLobbyMenu.cs for `--addon-from <folder>`: a repo checkout, the demo project, the project that has it, or the folder itself. */
+export function resolveMenuFolder(from, cwd = process.cwd()) {
+  const base = resolve(cwd, from);
+  for (const c of [join(base, "clients/dotnet/demo-godot/addons/onelobby_menu"), join(base, "demo-godot/addons/onelobby_menu"), join(base, "addons/onelobby_menu"), base]) {
+    if (existsSync(join(c, "OneLobbyMenu.cs"))) return { dir: c, root: base };
+  }
+  throw new CliError("bad_addon_from", `--addon-from: no OneLobbyMenu.cs in ${base} (looked for clients/dotnet/demo-godot/addons/onelobby_menu, addons/onelobby_menu and the folder itself)`);
+}
+
+/** The C# menu to vendor: { files: [{ path, content }] (relative to addons/onelobby_menu/), commit, from }. */
+export function menuSource({ addonFrom, cwd } = {}) {
+  if (addonFrom !== undefined) {
+    const { dir, root } = resolveMenuFolder(addonFrom, cwd);
+    return { files: readTree(dir).filter((f) => f.path !== "PIN.json"), commit: gitHead(root), from: "local" };
+  }
+  const dir = join(packagedMenu(), "onelobby_menu");
+  if (!existsSync(join(dir, "OneLobbyMenu.cs")))
+    throw new CliError("addon_missing", 'this create-onelobby has no C# menu bundled (run "npm run build" in the package, or pass --addon-from <repo checkout>)');
+  const meta = JSON.parse(readFileSync(join(packagedMenu(), "source.json"), "utf8"));
+  return { files: readTree(dir).filter((f) => f.path !== "PIN.json"), commit: meta.commit, from: "package" };
+}

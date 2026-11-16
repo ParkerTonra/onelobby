@@ -36,10 +36,12 @@ const quoteGd = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 const bytes = (c) => (Buffer.isBuffer(c) ? c : Buffer.from(c, "utf8"));
 
 /** .olc/<slug>.json: two tasks that open the game as a host window plus a small joiner window on this PC (Godot from $GODOT). */
-export function olcEntry({ slug, title }) {
+export function olcEntry({ slug, title, build = false }) {
   const joiner = `--join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Joiner`;
-  const ps = `$g = if ($env:GODOT) { $env:GODOT } else { 'godot' }; Start-Process -FilePath $g -ArgumentList '--path','.','--','--host','--local','--name=Host'; Start-Sleep -Seconds 4; & $g --path . --resolution 640x360 -- ${joiner}`;
-  const sh = `G="\${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- ${joiner}`;
+  const psBuild = build ? "dotnet build -nologo -v q; if ($LASTEXITCODE -ne 0) { exit 1 }; " : "";
+  const shBuild = build ? "dotnet build -nologo -v q || exit 1; " : "";
+  const ps = `${psBuild}$g = if ($env:GODOT) { $env:GODOT } else { 'godot' }; Start-Process -FilePath $g -ArgumentList '--path','.','--','--host','--local','--name=Host'; Start-Sleep -Seconds 4; & $g --path . --resolution 640x360 -- ${joiner}`;
+  const sh = `${shBuild}G="\${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- ${joiner}`;
   const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + joiner${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
@@ -180,7 +182,7 @@ export async function runGodot(ctx) {
   if (into) {
     if (!existsSync(join(target, "project.godot"))) throw new CliError("not_godot_project", `--into: ${target} has no project.godot; run this inside a Godot 4 project folder, or drop --into to make a new one`);
     if (isCSharpProject(readdirSync(target)))
-      throw new CliError("template_planned", `${target} is a Godot C# project (a .csproj or .sln sits next to project.godot): the godot-csharp template is planned for v2. Follow docs/recipes/godot-csharp.md for now.`);
+      throw new CliError("wrong_template", `${target} is a Godot C# project (a .csproj or .sln sits next to project.godot), not a GDScript one: drop --template godot-gdscript (or use --template godot-csharp).`);
   } else {
     const state = targetState(target);
     if (state === "file") throw new CliError("exists", `${target} is a file`);

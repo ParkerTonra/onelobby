@@ -36,3 +36,11 @@ cpSync(addon, join(outDir, "onelobby"), { recursive: true });
 const head = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 const commit = head.status === 0 && /^[0-9a-f]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : "unknown";
 writeFileSync(join(outDir, "source.json"), JSON.stringify({ commit }, null, 2) + "\n");
+
+// The Godot C# menu (OneLobbyMenu.cs and .tscn), bundled for the godot-csharp template (the rest of a C# game comes from NuGet).
+const menu = join(repo, "clients/dotnet/demo-godot/addons/onelobby_menu");
+if (!existsSync(join(menu, "OneLobbyMenu.cs"))) throw new Error(`the Godot C# menu is missing at ${menu}`);
+const menuOut = join(pkg, "vendor/csharp-menu");
+rmSync(menuOut, { recursive: true, force: true });
+cpSync(menu, join(menuOut, "onelobby_menu"), { recursive: true });
+writeFileSync(join(menuOut, "source.json"), JSON.stringify({ commit }, null, 2) + "\n");

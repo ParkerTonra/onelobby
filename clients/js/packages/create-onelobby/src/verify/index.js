@@ -1,13 +1,15 @@
 // `create-onelobby verify`: prove a game's multiplayer on this machine, 127.0.0.1 only, and say so in one verdict line.
 //   godot-gdscript: godot, addon-pin, natives, blueprint, direct, nostr, turn, server   (godot.js)
+//   godot-csharp:   godot, dotnet, menu-pin, natives, blueprint, direct, nostr, turn, server   (csharp.js)
 //   web:            blueprint, project-test, nostr, turn                                 (web.js)
 // Helpers (a local Nostr relay: built in, relay.js; a local TURN server: npm node-turn, turn.js) are used only while this runs.
 // Everything it starts is stopped again, also on a failed check and on Ctrl+C. It writes only inside the game folder
 // (.onelobby/, covered by the managed .gitignore block).
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { csharpPlanned, detectProject, notAProject, projectDir } from "../project.js";
+import { detectProject, notAProject, projectDir } from "../project.js";
 import { runChecks } from "./core.js";
+import { csharpChecks } from "./csharp.js";
 import { godotChecks, writeProbe } from "./godot.js";
 import { killAll } from "./procs.js";
 import { webChecks } from "./web.js";
@@ -16,17 +18,16 @@ import { webChecks } from "./web.js";
 export async function runVerify({ dir, opts, io }) {
   const target = projectDir({ dir, opts, cwd: io.cwd });
   const found = detectProject(target, { requireBlueprint: true });
-  if (found.kind === "godot-csharp") throw csharpPlanned(target);
   if (found.kind === null) throw notAProject(found, "verify");
 
   const injected = typeof io.verifyChecks === "function"; // a test seam: fake checks, no Godot, no files written
-  const checks = injected ? io.verifyChecks(found.kind) : found.kind === "web" ? webChecks() : godotChecks();
+  const checks = injected ? io.verifyChecks(found.kind) : found.kind === "web" ? webChecks() : found.kind === "godot-csharp" ? csharpChecks() : godotChecks();
   const ctx = { dir: target, opts, env: io.env, services: {}, kind: found.kind };
   const notes = [];
-  if (found.kind === "godot-gdscript" && !injected) {
+  if ((found.kind === "godot-gdscript" || found.kind === "godot-csharp") && !injected) {
     const ignore = existsSync(join(target, ".gitignore")) ? readFileSync(join(target, ".gitignore"), "utf8") : "";
     if (!/^\.onelobby\/?\s*$/m.test(ignore)) notes.push("the .gitignore does not ignore .onelobby/ (verify's scratch folder); run: npx create-onelobby update (it refreshes the managed block)");
-    writeProbe(target);
+    if (found.kind === "godot-gdscript") writeProbe(target); // a C# game has no probe file: its own tests/MultiplayerTest.cs takes the routes
   }
 
   const progress = opts.json ? io.stderr : io.stdout;

@@ -8,10 +8,17 @@ import { dirname, join, relative } from "node:path";
 import { CliError } from "./flags.js";
 import { ONELOBBY_VERSION } from "./blueprint.js";
 import { glueSession } from "./files.js";
-import { csharpPlanned, detectProject, notAProject, projectDir } from "./project.js";
+import { detectProject, notAProject, projectDir } from "./project.js";
+import { selectCsproj } from "./csharp.js";
+import { moveReferences } from "./csproj.js";
+import { hasMark, nugetConfig, sourcePath, targetVersion } from "./packages.js";
 import {
+  CSHARP_GITATTRIBUTES_LINES,
+  CSHARP_GITIGNORE_LINES,
   GITATTRIBUTES_LINES,
   GITIGNORE_LINES,
+  MENU_DIR,
+  menuSource,
   NATIVES_DIR,
   NATIVES_MARKER,
   PIN_PATH,
@@ -28,13 +35,17 @@ import {
 
 export const IMPORT_COMMAND = "godot --headless --import --path .";
 const ADDON_DIR = "addons/onelobby";
+
+/** What differs between the two vendored folders: where it lives, where it comes from, which blocks it brings. */
+const GDSCRIPT = { template: "godot-gdscript", dir: ADDON_DIR, pinPath: PIN_PATH, ignore: GITIGNORE_LINES, attributes: GITATTRIBUTES_LINES, source: (o) => addonSource(o), what: "add-on" };
+const CSHARP = { template: "godot-csharp", dir: MENU_DIR, pinPath: `${MENU_DIR}/PIN.json`, ignore: CSHARP_GITIGNORE_LINES, attributes: CSHARP_GITATTRIBUTES_LINES, source: (o) => menuSource(o), what: "menu", csharp: true };
 const short = (sha) => (typeof sha === "string" && sha.length >= 7 ? sha.slice(0, 7) : String(sha ?? "unknown"));
 
 /** The managed blocks of .gitignore and .gitattributes, as { path, content, action }. */
-export function blockPlan(target) {
+export function blockPlan(target, flavor = GDSCRIPT) {
   return [
-    [".gitignore", GITIGNORE_LINES],
-    [".gitattributes", GITATTRIBUTES_LINES],
+    [".gitignore", flavor.ignore],
+    [".gitattributes", flavor.attributes],
   ].map(([path, lines]) => {
     const p = join(target, path);
     const before = existsSync(p) ? readFileSync(p, "utf8") : undefined;
@@ -43,12 +54,38 @@ export function blockPlan(target) {
   });
 }
 
-/** What a godot-gdscript update would do, writing nothing. Throws no_pin / bad_pin / local_changes when it must not go on. */
-export function planUpdate({ target, opts, cwd }) {
+/** The C# game's own files: its OneLobby.* package versions, and nuget.config when --packages-from names a local folder. */
+function csharpExtras({ target, opts, cwd }) {
+  const wanted = targetVersion(opts, cwd);
+  const gd = existsSync(join(target, "project.godot")) ? readFileSync(join(target, "project.godot"), "utf8") : "";
+  const file = selectCsproj(target, gd);
+  const text = readFileSync(join(target, file), "utf8");
+  const moved = moveReferences(text, wanted.version, file);
+  let nuget = { action: "none" };
+  if (wanted.from === "feed") {
+    const content = Buffer.from(nugetConfig(sourcePath(target, wanted.dir)), "utf8");
+    const p = join(target, "nuget.config");
+    const before = existsSync(p) ? readFileSync(p, "utf8") : undefined;
+    if (before === undefined) nuget = { action: "create", content };
+    else if (before.replace(/\r\n/g, "\n") === content.toString("utf8")) nuget = { action: "unchanged", content };
+    else if (hasMark(before) || opts.force) nuget = { action: "update", content };
+    else nuget = { action: "skip", content, note: "nuget.config exists and was not written by create-onelobby; left alone (add the folder as a source for OneLobby.* yourself, or rerun with --force)" };
+  }
+  return {
+    csproj: { file, content: Buffer.from(moved.text, "utf8"), changed: moved.changed, moved: moved.moved, skipped: moved.skipped, refs: moved.refs },
+    nuget,
+    packages: { version: wanted.version, from: wanted.from, ...(wanted.dir ? { folder: wanted.dir.replace(/\\/g, "/") } : {}) },
+    changed: moved.changed || nuget.action === "create" || nuget.action === "update",
+  };
+}
+
+/** What an update would do, writing nothing. Throws no_pin / bad_pin / local_changes when it must not go on. */
+export function planUpdate({ target, opts, cwd, flavor = GDSCRIPT }) {
+  const { pinPath: PIN_PATH, dir: ADDON_DIR } = flavor;
   const rel = relative(cwd, target) || ".";
   let pinState;
   try {
-    pinState = verifyPin(target);
+    pinState = verifyPin(target, ADDON_DIR);
   } catch (e) {
     if (e instanceof CliError) throw e; // a pin key that escapes the add-on folder
     throw new CliError("bad_pin", `${PIN_PATH} is not valid JSON (${e.message}); restore it from git, or adopt the add-on again with: npx create-onelobby --into ${rel} --force`);
@@ -61,7 +98,7 @@ export function planUpdate({ target, opts, cwd }) {
   const pin = pinState.pin;
   if (typeof pin?.files !== "object" || pin.files === null) throw new CliError("bad_pin", `${PIN_PATH} has no "files" list; adopt the add-on again with: npx create-onelobby --into ${rel} --force`);
 
-  const source = addonSource({ addonFrom: opts.addonFrom, cwd });
+  const source = flavor.source({ addonFrom: opts.addonFrom, cwd });
   const wanted = new Map(source.files.map((f) => [f.path, f]));
 
   const changed = [];
@@ -100,7 +137,7 @@ export function planUpdate({ target, opts, cwd }) {
   removed.sort();
 
   const files = [...changed.map((path) => ({ path, content: wanted.get(path).content, action: "change" })), ...added.map((path) => ({ path, content: wanted.get(path).content, action: "add" }))];
-  const blocks = blockPlan(target);
+  const blocks = blockPlan(target, flavor);
 
   // natives: the pinned version moved, or the folder is gone
   const present = existsSync(join(target, NATIVES_MARKER));
@@ -131,6 +168,7 @@ export function planUpdate({ target, opts, cwd }) {
           webrtcNative: nativesInstall || oldNatives === undefined ? { version: WEBRTC_NATIVE_VERSION, zipSha256: WEBRTC_NATIVE_ZIP_SHA256 } : pin.webrtcNative,
         })
       : null;
+  const extra = flavor.csharp ? csharpExtras({ target, opts, cwd }) : null;
   return {
     files,
     removed,
@@ -140,12 +178,14 @@ export function planUpdate({ target, opts, cwd }) {
     blocks,
     natives,
     pinText,
-    current: !addonChanged && !blocksChanged && !nativesInstall,
+    ...(extra ? { csproj: extra.csproj, nuget: extra.nuget, packages: extra.packages } : {}),
+    current: !addonChanged && !blocksChanged && !nativesInstall && !(extra && extra.changed),
     addon: { from: source.from, commit: source.commit, previousCommit: pin.source?.commit ?? "unknown", createOnelobby: packageVersion(), previousCreateOnelobby: pin.createOnelobby ?? "unknown" },
   };
 }
 
-async function applyUpdate(plan, { target, opts, cwd, fetchImpl }) {
+async function applyUpdate(plan, { target, opts, cwd, fetchImpl, flavor = GDSCRIPT }) {
+  const { pinPath: PIN_PATH, dir: ADDON_DIR } = flavor;
   // natives first: a failed download leaves the folder as it was
   const nativeFiles = plan.natives.status === "install" ? await loadNatives({ webrtcZip: opts.webrtcZip, webrtcDir: opts.webrtcDir, cwd, fetchImpl }) : [];
   const put = (path, content) => {
@@ -170,14 +210,16 @@ async function applyUpdate(plan, { target, opts, cwd, fetchImpl }) {
   if (plan.pinText) put(PIN_PATH, plan.pinText);
   for (const b of plan.blocks) if (b.action !== "unchanged") put(b.path, b.content);
   for (const f of nativeFiles) put(f.path, f.content);
+  if (plan.csproj?.changed) put(plan.csproj.file, plan.csproj.content);
+  if (plan.nuget?.action === "create" || plan.nuget?.action === "update") put("nuget.config", plan.nuget.content);
 }
 
-function godotResult({ target, plan, dryRun }) {
+function godotResult({ target, plan, dryRun, flavor = GDSCRIPT }) {
   return {
     ok: true,
     command: "update",
     dir: target,
-    template: "godot-gdscript",
+    template: flavor.template,
     current: plan.current,
     changed: !plan.current,
     addon: plan.addon,
@@ -200,22 +242,38 @@ function godotResult({ target, plan, dryRun }) {
       ...(plan.natives.reason ? { reason: plan.natives.reason } : {}),
     },
     ...(dryRun ? { dryRun: true } : {}),
-    next: plan.current ? [] : [`${IMPORT_COMMAND}   # new class_names (and a new natives version) need the import`],
+    ...(flavor.csharp
+      ? {
+          packages: plan.packages,
+          csproj: { file: plan.csproj.file, moved: plan.csproj.moved, skipped: plan.csproj.skipped },
+          nugetConfig: plan.nuget.action,
+        }
+      : {}),
+    next: plan.current ? [] : flavor.csharp ? ["dotnet build   # restores the OneLobby packages at the new version and builds the game", `${IMPORT_COMMAND}   # a new natives version needs the import`] : [`${IMPORT_COMMAND}   # new class_names (and a new natives version) need the import`],
   };
 }
 
-function godotText(r, plan, verb) {
+function godotText(r, plan, verb, flavor = GDSCRIPT) {
+  const { pinPath: PIN_PATH, dir: ADDON_DIR } = flavor;
   if (r.current)
-    return `Already current: ${r.dir} has this version's add-on (add-on commit ${short(plan.addon.commit)}) and the managed .gitignore/.gitattributes blocks; ${r.natives.status === "skipped" ? `the WebRTC natives were not checked (${r.natives.reason})` : `the WebRTC natives are at ${r.natives.version}`}. Nothing was written.`;
+    return `Already current: ${r.dir} has this version's ${flavor.what} (${flavor.what} commit ${short(plan.addon.commit)})${flavor.csharp ? `, the OneLobby package references at ${plan.packages.version}` : ""} and the managed .gitignore/.gitattributes blocks; ${r.natives.status === "skipped" ? `the WebRTC natives were not checked (${r.natives.reason})` : `the WebRTC natives are at ${r.natives.version}`}. Nothing was written.`;
   const f = r.files;
   const out = [`${verb} ${r.dir}`];
   out.push(
-    `  ${ADDON_DIR}/: ${f.changed.length} changed, ${f.added.length} added, ${f.removed.length} removed (add-on commit ${short(plan.addon.previousCommit)} -> ${short(plan.addon.commit)}, ${plan.addon.from === "package" ? `bundled in create-onelobby ${plan.addon.createOnelobby}` : "from --addon-from"})`,
+    `  ${ADDON_DIR}/: ${f.changed.length} changed, ${f.added.length} added, ${f.removed.length} removed (${flavor.what} commit ${short(plan.addon.previousCommit)} -> ${short(plan.addon.commit)}, ${plan.addon.from === "package" ? `bundled in create-onelobby ${plan.addon.createOnelobby}` : "from --addon-from"})`,
   );
   for (const [label, list] of [["changed", f.changed], ["added", f.added], ["removed", f.removed]]) for (const p of list) out.push(`    ${label.padEnd(8)} ${p}`);
   if (r.overwritten.length) out.push(`  --force overwrote your edits to ${r.overwritten.length} file(s):`, ...r.overwritten.map((p) => `    ${p}`));
   if (r.kept.length) out.push(`  kept ${r.kept.length} file(s) you added (not in this add-on):`, ...r.kept.map((p) => `    ${p}`));
   if (r.pin === "rewritten") out.push(`  ${PIN_PATH} rewritten`);
+  if (flavor.csharp) {
+    const c = plan.csproj;
+    for (const m of c.moved) out.push(`  ${c.file}: ${m.id} ${m.from} -> ${m.to}`);
+    for (const k of c.skipped) out.push(`  ${c.file}: ${k.id} left as it is (${k.why})`);
+    if (!c.moved.length && !c.skipped.length) out.push(`  ${c.file}: package references already at ${plan.packages.version}`);
+    if (plan.nuget.action === "create" || plan.nuget.action === "update") out.push(`  nuget.config (${plan.nuget.action === "create" ? "written" : "refreshed"}: OneLobby.* from ${plan.packages.folder})`);
+    if (plan.nuget.action === "skip") out.push(`  nuget.config: ${plan.nuget.note}`);
+  }
   for (const b of r.blocks) out.push(`  ${b} (managed block)`);
   const n = r.natives;
   if (n.status === "install") out.push(`  ${n.folder} (webrtc-native ${n.version}, from ${n.source === "download" ? "a checked download" : n.source === "zip" ? "--webrtc-zip" : "--webrtc-dir"}; ${n.why})`);
@@ -268,20 +326,20 @@ function updateWeb({ io, opts, found, target }) {
 export async function runUpdate({ dir, opts, io }) {
   const target = projectDir({ dir, opts, cwd: io.cwd });
   const found = detectProject(target);
-  if (found.kind === "godot-csharp") throw csharpPlanned(target);
   if (found.kind === null) throw notAProject(found, "update");
   if (found.kind === "web") return updateWeb({ io, opts, found, target });
 
-  const plan = planUpdate({ target, opts, cwd: io.cwd });
-  const result = godotResult({ target, plan, dryRun: opts.dryRun });
+  const flavor = found.kind === "godot-csharp" ? CSHARP : GDSCRIPT;
+  const plan = planUpdate({ target, opts, cwd: io.cwd, flavor });
+  const result = godotResult({ target, plan, dryRun: opts.dryRun, flavor });
   const next = result.next.length ? `\nNext:\n  ${result.next.join("\n  ")}\n` : "";
   if (opts.dryRun || plan.current) {
     if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-    else io.stdout.write(`${opts.dryRun && !plan.current ? "Dry run: nothing written, nothing downloaded.\n" : ""}${godotText(result, plan, "Would update")}\n${next}`);
+    else io.stdout.write(`${opts.dryRun && !plan.current ? "Dry run: nothing written, nothing downloaded.\n" : ""}${godotText(result, plan, "Would update", flavor)}\n${next}`);
     return 0;
   }
-  await applyUpdate(plan, { target, opts, cwd: io.cwd, fetchImpl: io.fetch });
+  await applyUpdate(plan, { target, opts, cwd: io.cwd, fetchImpl: io.fetch, flavor });
   if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-  else io.stdout.write(`${godotText(result, plan, "Updated")}\n${next}`);
+  else io.stdout.write(`${godotText(result, plan, "Updated", flavor)}\n${next}`);
   return 0;
 }
