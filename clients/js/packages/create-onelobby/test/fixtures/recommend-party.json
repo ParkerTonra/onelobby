@@ -85,7 +85,7 @@
   "questions": [
     {
       "id": "godotLanguage",
-      "question": "GDScript or C#? Assumed GDScript, the Godot template that exists today.",
+      "question": "GDScript or C#? Assumed GDScript, the default Godot template (the C# one is --template godot-csharp).",
       "add": "in Godot with GDScript, or in Godot with C#"
     },
     {

@@ -213,7 +213,7 @@ export const ENGINES = {
   },
   "godot-csharp": {
     label: "Godot 4 C#",
-    template: "planned",
+    template: "built",
     recipe: "docs/recipes/godot-csharp.md",
     canListen: true,
     modes: ["lockstep", "raw", "replication"],
@@ -243,7 +243,7 @@ export const FEATURE_PROOF = {
   hitRewind: "docs/recipes/replication.md section 2 (C# HistoryRing, RewindTick); JS and GDScript have trySampleAt / try_sample_at to rewind by hand (sections 5 and 6)",
   asWebSocket: "docs/recipes/browser-game.md (JS lobby.asWebSocket); AGENTS.md; no GDScript or C# equivalent",
   lockstepFastInputs: "docs/recipes/godot-gdscript.md section 4: input redundancy on the fast channel is not in the wire yet (commands travel on the reliable channel); no JS or C# lockstep helper repeats inputs either",
-  templates: "docs/design/one-shot.md section 1 (Scaffolder row): web and godot-gdscript are built, godot-csharp and unity are template_planned; src/cli.js refuses sync.mode replication for the web template",
+  templates: "docs/design/one-shot.md section 1 (Scaffolder row): web, godot-gdscript and godot-csharp are built, unity is template_planned; src/cli.js refuses sync.mode replication for the web template",
 };
 
 /**
@@ -363,7 +363,7 @@ export const QUESTIONS = {
   },
   tickRate: { question: "What fixed tick rate does the simulation run at?", add: "at 30 ticks per second" },
   engine: { question: "Which engine or platform is it for? It changes hosting, the modes the scaffolder writes today and which helpers (prediction, hit rewind) exist.", add: "in Godot (GDScript or C#), in Unity, or in the browser" },
-  godotLanguage: { question: "GDScript or C#? Assumed GDScript, the Godot template that exists today.", add: "in Godot with GDScript, or in Godot with C#" },
+  godotLanguage: { question: "GDScript or C#? Assumed GDScript, the default Godot template (the C# one is --template godot-csharp).", add: "in Godot with GDScript, or in Godot with C#" },
   players: { question: "How many players?", add: "for 4 players, or up to 8 players, or a 1v1 duel" },
   stateSize: { question: "Roughly how large is the world state? Binary deltas matter once it passes about 3 KB.", add: "with a world state of about 10 KB" },
   shape: {

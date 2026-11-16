@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { main } from "../src/cli.js";
 import { setPath } from "../src/flags.js";
+import { IMPLEMENTED_TEMPLATES } from "../src/blueprint.js";
 import { validate } from "../src/blueprint.js";
 import { ADVICE, ENGINES, FEATURE_PROOF, SHAPES } from "../src/recommend-data.js";
 import { detectEngine, readPlayers, readTickRate, recommend, renderText } from "../src/recommend.js";
@@ -292,6 +293,32 @@ describe("engine limits: every shape on every engine loads, and no feature is cl
   });
 });
 
+describe("godot-csharp is a built template", () => {
+  it("the ENGINES table says built exactly for the templates the scaffolder writes", () => {
+    expect(Object.entries(ENGINES).filter(([, e]) => e.template === "built").map(([k]) => k).sort()).toEqual([...IMPLEMENTED_TEMPLATES].sort());
+    expect(ENGINES["godot-csharp"].template).toBe("built");
+  });
+
+  it("a proposal for a C# game carries a real run command that names the template, and no 'planned' note", async () => {
+    const r = await json(["--recommend", "4 player shooter in Godot with C#"]);
+    expect(r.json.engine).toMatchObject({ id: "godot-csharp", template: "built" });
+    expect(r.json.runCommand).toMatch(/^npx create-onelobby my-game --template godot-csharp .*--yes$/);
+    expect(r.json.notes.join(" ")).not.toMatch(/template is planned/);
+    expect(r.out ?? "").not.toMatch(/planned, not built/);
+  });
+
+  it("fills a scaffold run on the template, and keeps the dropped list when a flag replaced sync.mode", async () => {
+    const r = await json(["g", "--template", "godot-csharp", "--recommend", "4 player party minigames", "--mode", "raw", "--yes", "--dry-run", "--no-natives"]);
+    expect(r.code).toBe(0);
+    expect(r.json.template).toBe("godot-csharp");
+    expect(r.json.blueprint).toMatchObject({ engine: "godot-csharp", sync: { mode: "raw" }, lobby: { maxPlayers: 4 } });
+    expect(r.json.recommendation.dropped.map((d) => d.key).sort()).toEqual(["sync.hashEveryTicks", "sync.tickRate"]);
+    expect(r.json.recommendation.engine).toMatchObject({ id: "godot-csharp", from: "template" });
+    const byText = await json(["g", "--recommend", "co-op survival sandbox in Godot with C#", "--yes", "--dry-run", "--no-natives"]);
+    expect(byText.json.template).toBe("godot-csharp");
+  });
+});
+
 describe("alone: writes nothing, needs no folder", () => {
   it("prints the shape, matched words, table, advice, questions and a command, and leaves the folder empty", async () => {
     const r = await cli(["--recommend", "4 player party minigames in Godot"]);
@@ -407,9 +434,9 @@ describe("with a scaffold run", () => {
     expect((await json(["g", "--template", "web", "--mode", "replication", "--yes", "--dry-run"])).json.error.code).toBe("unsupported");
   });
 
-  it("every shape scaffolds in a dry run on the templates built today", async () => {
+  it("every shape scaffolds in a dry run on the templates built today (the same list as ENGINES)", async () => {
     for (const [shape, text] of [["lockstep", "deterministic party minigames"], ["coop-snapshots", "co-op survival sandbox"], ["replication", "first-person shooter"], ["turn-based", "chess"], ["own-server", "its own server loop"]]) {
-      for (const tpl of ["web", "godot-gdscript"]) {
+      for (const tpl of ["web", "godot-gdscript", "godot-csharp"]) {
         const r = await json(["g", "--template", tpl, "--recommend", text, "--yes", "--dry-run", "--no-natives"]);
         expect(r.code, `${shape} on ${tpl}: ${r.out}`).toBe(0);
         expect(r.json.recommendation.shape).toBe(shape);
