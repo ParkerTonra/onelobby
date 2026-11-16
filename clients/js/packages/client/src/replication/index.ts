@@ -17,3 +17,15 @@ export {
   toHex, fromHex,
 } from "./protocol.js";
 export type { Ent, World, ReplicationErrorCode, SnapshotHeader, DecodedInput, InputEntry, Json } from "./protocol.js";
+export { Reconciler, PredictionSmoother, HistoryRing } from "./helpers.js";
+export { NetPlayers, NET_PLAYER } from "./player.js";
+export type {
+  PlayerAuthority, PlayerLimits, PlayerBlueprint, NetPlayersOptions, ActionEvent, PlayerStats, NetPlayersEvents,
+} from "./player.js";
+export {
+  PlayerCodec, PLAYER_TYPE_ID, KIND_PLAYER_EVENTS, TELEPORT_MODULO, DEFAULT_PLAYER_WIRE, MOVEMENT_MODES, BUTTONS, ACTION_EVENTS, OMITTABLE,
+  OMITTABLE_FIELDS, defaultPlayerState, defaultPlayerInput, positionBits, encodePlayerEvents, decodePlayerEvents, actionByName, actionById,
+} from "./player-wire.js";
+export type {
+  PlayerState, PlayerInput, PlayerSpace, PlayerWireConfig, ActionName, ActionArgs, ActionEventDef, ButtonName, WireEvent,
+} from "./player-wire.js";

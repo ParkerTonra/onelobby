@@ -1,0 +1,335 @@
+# Networked player, version 1 (on top of replication)
+
+Status: **JS only.** The reference implementation is `clients/js/packages/client/src/replication/` (`player-wire.ts`: the
+tables as code, `player.ts`: the layer, `helpers.ts`: `Reconciler`, `PredictionSmoother`, `HistoryRing`). The GDScript
+client and the C# client do not have it yet; the Godot `NetPlayer` node and the Unity `NetPlayer` component come after, built
+from this document and `spec/vectors/net-player.json`.
+
+**Proven only on an in-memory network with a virtual clock** (`RepRig`: latency, jitter and loss on a fake link). No two
+processes, no real link and no real game engine have run it, and nobody has seen a networked player move on a screen. The
+smoothing numbers below are the plan's numbers (`docs/design/one-shot.md` section 7.2), not tuned by eye.
+
+This layer is a game-side convention over `spec/replication.md`; it adds one message kind (5) and changes nothing about
+kinds 1 to 4. A game that does not use it sees no new entity, no new message and the same bytes as before.
+
+Names in the tables are the names every client's API uses (camelCase in JS and C#, snake_case in GDScript).
+
+## 1. What a player is
+
+One replicated entity per **seated** peer (players, not spectators), of the reserved **type id 65535**, owned by that peer
+(`owner` = its peer id). Its state bytes are the player preset of section 2 written with `NetWriter`. Type ids 65520 to
+65535 are reserved for OneLobby; a game must not use them for its own entities (65535 is the largest id the snapshot
+record allows, so it cannot collide with a game that counts up from 1). Layouts of kinds 1 and 2 do not change: in
+`"owner"` mode the input message carries the state bytes, in `"host"` mode the input preset bytes (section 3).
+
+The host's layer creates the entity: in `"host"` mode when the peer's link is up (it starts at the game's spawn point, the
+origin by default); in `"owner"` mode when the peer's first state arrives (so nobody sees a player flash at the origin). The
+host's own player is written straight into its entity. A peer that leaves loses its entity; a peer that becomes a spectator
+loses it too; a spectator never gets one. A late joiner gets everyone through the keyframe.
+
+During the rejoin window a dropped player is **gone**: the lobby reports `peerLeft` at once, the entity is despawned, and a
+rejoin (same peer id) creates a new entity with its first state. Nothing remembers its place. Keeping the character
+frozen with a "reconnecting" tag (`one-shot.md` section 8, item 3) is not built.
+
+## 2. The state (the player preset)
+
+Fields in wire order, written LSB first like every `NetWriter` state (spec/replication.md "State bits"). `quant(a, b, n)` is
+`Quantize.float` over `[a, b]` in `n` bits; `angle(n)` is `Quantize.angle`. `R` is `sync.player.range`, `V` is
+`sync.player.velocityRange`. `PB` (position bits) is the smallest `b` in 8..24 with `2^b - 1 >= ceil(2 R / 0.01)`: about 1 cm
+a step (R = 300: 16 bits, 0.92 cm; R = 1000: 18 bits; R = 100000: 24 bits, the most).
+
+| # | field | type | bits (3D) | bits (2D) | range | default | left out with |
+|---|---|---|---|---|---|---|---|
+| 1 | `x` | quant(-R, R, PB) | PB | PB | -R..R | 0 | never |
+| 2 | `y` | quant(-R, R, PB) | PB | PB | -R..R | 0 | never (3D: up; 2D: the second axis) |
+| 3 | `z` | quant(-R, R, PB) | PB | | -R..R | 0 | never (3D only) |
+| 4 | `vx` | quant(-V, V, 10) | 10 | 10 | -V..V per second | 0 | `velocity` |
+| 5 | `vy` | quant(-V, V, 10) | 10 | 10 | | 0 | `velocity` |
+| 6 | `vz` | quant(-V, V, 10) | 10 | | | 0 | `velocity` (3D only) |
+| 7 | `yaw` | angle(12) | 12 | 12 | degrees [0, 360) | 0 | `yaw` (2D: the facing) |
+| 8 | `pitch` | quant(-90, 90, 10) | 10 | | degrees | 0 | `pitch` (3D only) |
+| 9 | `onGround` | bool | 1 | 1 | | true | `onGround` |
+| 10 | `mode` | bits | 4 | 4 | 0 idle, 1 walk, 2 run, 3 crouch, 4 jump, 5 fall, 6 swim, 7 climb, 8 fly; 9 to 15 are the game's | 0 | `mode` |
+| 11 | `item` | bits | 4 | 4 | held item or slot 0..15 | 0 | `item` |
+| 12 | `aiming` | bool | 1 | 1 | aiming down sights | false | `aiming` |
+| 13 | `blocking` | bool | 1 | 1 | | false | `blocking` |
+| 14 | `health` | bits | 8 | 8 | 0..255 | 100 | `health` |
+| 15 | `alive` | bool | 1 | 1 | | true | `alive` |
+| 16 | `team` | bits | 4 | 4 | team or colour 0..15 | 0 | `team` |
+| 17 | `teleport` | bits | 3 | 3 | counter, wraps at 8 | 0 | never |
+
+Totals with nothing left out: **127 bits = 16 bytes (3D)**, **91 bits = 12 bytes (2D)**, at the default range. A field
+that is left out is not on the wire (the later fields move up), and a reader sees its default. Quantisation clamps: a value
+outside the range travels as the nearest end; 0 is not exactly representable for `pitch` (10 bits over 180 degrees), it
+travels as 0.088. Two ends that use different `sync.player` settings cannot read each other: the file is part of the game's
+`netVersion`.
+
+Defaults and the layout are in `spec/vectors/net-player.json` (`states`, with `configs`).
+
+### The teleport counter
+
+A small counter in the state (3 bits, wraps). When it differs between two samples the player **snaps** to the newer sample
+instead of sliding (the snap happens when render time reaches the newer sample's tick; until then the older sample is
+held). It is raised by:
+
+- a respawn and the game's own teleport call (the owner raises it by **1**);
+- the host when it puts a player somewhere (a limit refused an owner's move, or the game calls the host's teleport): it
+  raises it by **4**, so the two can never be mistaken for each other when an owner teleports in the same moment.
+
+An owner that sees the host's raise takes the host's state (section 5.1, step 6).
+
+## 3. The input preset (`"host"` authority)
+
+The input message of a client carries, per input, these bytes (`spec/replication.md` kind 2 wraps and repeats them):
+
+| # | field | type | bits (3D) | bits (2D) | range |
+|---|---|---|---|---|---|
+| 1 | `moveX` | quant(-1, 1, 7) | 7 | 7 | strafe right = +1 |
+| 2 | `moveY` | quant(-1, 1, 7) | 7 | 7 | forward = +1 (2D: down = +1) |
+| 3 | `yaw` | angle(12) | 12 | 12 | degrees |
+| 4 | `pitch` | quant(-90, 90, 10) | 10 | | degrees (3D only) |
+| 5 | `buttons` | 8 bools in this order: `jump`, `crouch`, `sprint`, `aim`, `block`, `fire`, `use`, `reload` | 8 | 8 | |
+
+3D: 44 bits = 6 bytes. 2D: 34 bits = 5 bytes. The game adds its own buttons or axes by writing its own input next to
+this one; that is not in `onelobby.json` yet (section 9).
+
+## 4. Action events
+
+Each event has an id and arguments (written with `NetWriter`, bit-packed, padded to whole bytes; the length is exact, a
+different length is rejected). `origin`: who may start it. `owner` events are started by the player's own peer, or by the host
+for any player; `host` events only by the host (a client that sends one is refused and counted).
+
+| id | name | origin | arguments (3D), bits | 2D differs | bytes (3D) |
+|---|---|---|---|---|---|
+| 1 | `jump` | owner | none | | 0 |
+| 2 | `land` | owner | `impact` quant(0, 64, 6), the speed it landed at | | 1 |
+| 3 | `shoot` | owner | `yaw` angle(12), `pitch` quant(-90, 90, 10): the aim direction; `view` u32: the render tick the shooter was seeing, times 256 | no `pitch` | 7 |
+| 4 | `melee` | owner | `swing` 8: the swing id | | 1 |
+| 5 | `reload` | owner | none | | 0 |
+| 6 | `use` | owner | `target` 16: the game's id of what was used, 0 for none | | 2 |
+| 7 | `itemSwitch` | owner | `slot` 4 | | 1 |
+| 8 | `throw` | owner | `yaw` angle(12), `pitch` quant(-90, 90, 10), `power` quant(0, 1, 6) | no `pitch` | 4 |
+| 9 | `hit` | host | `by` 16: the attacker's peer id, 0 for the world; `damage` 8 | | 3 |
+| 10 | `death` | host | `by` 16 | | 2 |
+| 11 | `respawn` | owner | none (the position is the state, with a raised teleport counter) | | 0 |
+| 12 | `emote` | owner | `emote` 6 | | 1 |
+
+`hit` is "hit taken": the host raises it for the victim after it judged a shot. Ids 13 to 255 are reserved. A game leaves an
+event out with `sync.player.omit` (the name, e.g. `"emote"`); sending or receiving it is then an error.
+
+### 4.1 The message: kind 5, `playerEvents`
+
+Additive to replication version 1 (spec/replication.md "Versioning": an old decoder ignores kind 5). Prefix `52 01 05`.
+
+```
+count:u8                1..255 records
+count x record
+  player:varuint        peer id of the player the event belongs to (> 0)
+  seq:varuint           1, 2, 3 ... per player (> 0); see "Exactly once" for whose numbering
+  id:u8                 the event id (> 0)
+  tick:varuint          host tick it happened (32 bits)
+  len:u8                bytes of arguments
+  args[len]
+```
+
+Decoders reject a message (count it as malformed, never throw) with the replication error names: `too_short`, `trailing`,
+`varint`, `range` (a 32-bit field above 2^32 - 1), and the new ones `count_0`, `player_0`, `seq_0`, `event_id` (id 0). An unknown
+id above 12 decodes; the layer drops it as unknown. Vectors: `spec/vectors/net-player.json` (`events`, `invalid`).
+
+### 4.2 Exactly once, on time
+
+Routing is the replication rule: a client sends to the host only; the host sends to each other client.
+
+Sender (client to host, host to each other client), for each event:
+
+1. One copy on `reliable` at once (a single record).
+2. The same record in the **next 4 ticks'** `fast` messages (`eventRepeats` = 4, one message per tick per peer holding every
+   record that still has copies left, at most 1000 bytes).
+
+So one lost datagram costs nothing (the next copy carries it) and a bad run of 4 is covered by the reliable copy, which
+cannot be lost. The receiver drops a record it has seen by `(player, seq)` whichever copy came second (a floor plus a set of
+seen numbers above it).
+
+`seq` is the **sender's** numbering on the way to the host (per player, from 1: a client numbers its own events), and the
+**host's** numbering on the way out (it gives each accepted event the next number of that player and sends it with its own
+tick). So a refused event leaves no hole in what the receivers see.
+
+Timing. A client sends `tick` = `floor(serverTick)` (its estimate of the host's current tick). The host **restamps** every
+event it accepts with its own tick of arrival, so the event and the state the host wrote on arrival of the same input
+carry the same clock. A receiving client holds an event until its `renderTick` reaches the event's `tick`, then plays it, so a
+jump lines up with the body that jumps. An event that arrives after its tick was already rendered is played at once and
+counted as **late**. The owner plays its own events at once, and the host plays an accepted event on arrival.
+
+## 5. The two authorities
+
+`sync.player.authority`: **`"owner"`** (the default, and what a game that does not say gets) is the player's own PC placing
+the player: co-op. **`"host"`** is the host placing the player: competitive. The decision is made by the game type
+(`docs/design/one-shot.md` section 5) and can be overruled in `onelobby.json`. Everyone who is not the owner sees the player
+the same way in both modes (section 6).
+
+### 5.1 `"owner"` step by step
+
+1. Each client tick the game gives the layer its player's state (`setLocalState`; a partial patch is merged, and the
+   teleport counter is the layer's to keep).
+2. The layer writes it (section 2) and sends it as the bytes of that tick's input (`submitInput`): it is repeated 4 times and
+   acked like any input.
+3. The host takes one input per client per tick (`tryGetInput`; a repeated input is ignored) and decodes it. A state of the
+   wrong length is dropped and counted (`statesRejected`).
+4. The host checks it (section 7). If it passes, it becomes the entity's state; the snapshot carries it to everyone else.
+5. The owner never applies snapshot state to its own player.
+6. Except one case: the snapshot's `lastInput` names the last input the host applied. The owner remembers the teleport counter
+   it sent in each input. If the counter in its own entity differs from the one it sent in input `lastInput`, the host put it
+   back: the owner takes the host's whole state as its own (event `corrected`) and ignores the inputs still on the way
+   (those up to the last it had sent when it noticed).
+7. After a refusal the host keeps its last accepted state, raises the counter by 4 and ignores states until the owner shows
+   the new counter; then it accepts again.
+
+The host's own player is written straight into its entity each tick. The host can place any player (`teleportPlayer`,
+`respawnPlayer`): in this mode that is a correction as in steps 6 and 7.
+
+### 5.2 `"host"` step by step
+
+1. The game supplies a **step function** `step(state, input, dt) -> state` (`dt` = 1 / `tickRate` seconds) and the same
+   function runs on the host and in every owner's prediction. It must be deterministic given its arguments.
+2. Each client tick the owner makes an input (`setLocalInput`), sends it (section 3), and applies `step` to its own state at
+   once (prediction; `Reconciler.predict` with the sequence number `submitInput` returned).
+3. The host takes one input per client per tick and steps that player once (`state = quantise(step(state, input, dt))`). A
+   repeated input (nothing new arrived) does **not** step: the owner has predicted exactly the inputs it sent, so the state
+   after input N is the same on both sides.
+4. The snapshot carries the state and `lastInput`. The owner calls `Reconciler.reconcile(state, lastInput)`: it starts from the
+   host's state and replays the inputs the host has not seen.
+5. The difference between the state before and after is a correction: `PredictionSmoother.correct(dx, dy, dz, teleport)`. The
+   drawn position is the predicted position plus the smoother's `offset`, which decays to zero in **100 ms**. A correction
+   longer than **2.0** on the ground plane, longer than **0.5** vertically, or with a changed teleport counter **snaps** (offset
+   cleared). For 2D the plane is x, y and there is no vertical part.
+6. The host quantises after every step so both sides replay from the same bytes.
+
+Host mode needs the game's movement to be a function of (state, input, dt) only. A game whose movement uses the engine's
+physics (a `CharacterBody`, a `CharacterController`) must wrap one step of it: that is what the Godot node and the Unity
+component will do in the next lanes.
+
+## 6. Smooth remote players
+
+A client draws every other player from the snapshots it holds (`trySampleAt`), never from a raw packet.
+
+- **Render delay.** The session option `adaptiveDelay` (default **off**; the layer turns it on) replaces the fixed 100 ms.
+  `delay = clamp(2 I + 4 J, 2 I, 250 ms)` where `I` = snapshot interval (`1000 / tickRate x snapshotEveryTicks`, 33.3 ms at
+  the default) and `J` = smoothed arrival jitter. **Lower bound 2 I (66.7 ms at the default), upper bound 250 ms.** `J` is the
+  mean deviation of `(arrival gap) - (tick gap x tickMs)` over snapshots that advance the newest tick: it rises by a quarter of
+  the difference at once and falls by 1/32. The delay moves towards its target by a fraction `elapsed / 100 ms` when it must
+  grow and by at most 20 ms per second when it may shrink. It starts at `interpolationDelayMs` (100). Render time never runs
+  backwards. See spec/replication.md "Clock and render time".
+- **Interpolation.** Numbers (`x y z vx vy vz`) blend linearly; `yaw` turns on the **shortest arc**; `pitch` is linear. Fields
+  that are not numbers or are discrete (`mode`, `item`, `health`, `team`, the flags) are taken from the **older** sample, never
+  blended. If the two samples' `teleport` differ, the older one is held until render time reaches the newer one's tick.
+- **Carry-on.** Past the newest snapshot the session holds and never extrapolates. The layer carries a player on by its
+  velocity: `position + velocity x min(overshoot, 250 ms)`, then holds. The overshoot is `(renderTick - latestTick) x tickMs`. A
+  game with `velocity` left out is not carried on.
+
+## 7. The host's limits
+
+Basic protection from glitches and cheats. **Not an anti-cheat**: a cheater who stays under the limits is not stopped, and
+nothing here hides one player's data from another. A limit that is not set in `sync.player.limits` is not checked.
+
+Owner authority, for each state the host accepts (`d` = distance from the last accepted state, `dt` = seconds of host ticks
+since it, at least one tick):
+
+| limit | refused when |
+|---|---|
+| `maxSpeed` | `d > maxSpeed x dt x 1.25 + 2 x positionStep` (25% tolerance for packets bunching up) |
+| `maxStep` | `d > maxStep` |
+| a teleport | the owner raised the counter (it is an honest respawn or portal) but another owner teleport was accepted less than **1000 ms** ago |
+
+An **honest teleport** passes when limits are set: the owner raises its counter (by 1) in the state, and the host skips the
+speed and step checks for that one update, at most once per second. (A cheater can do the same once a second; this is the
+price of letting a portal through without a game-side hook.) When a state is refused the host keeps its last accepted
+state, raises the counter by 4, answers with it in the next snapshots and ignores the owner until it shows the new counter
+(section 5.1).
+
+Events (both authorities), on the first copy the host sees of each event:
+
+| limit | |
+|---|---|
+| `minShotIntervalMs` | `shoot`: refused when the gap to the player's previous accepted `shoot` is under `0.9 x min - one tick`, measured in the sender's claimed ticks (clamped to between 15 ticks before and one tick after the host's tick) |
+| `minMeleeIntervalMs` | the same for `melee` |
+
+An event over its limit is **dropped and counted** (`actionsRateLimited`): the host's game never sees it and it is never
+relayed. Also refused and counted (`actionsRejected`): a `host` event from a client, an event of another player, an event
+the blueprint leaves out, and arguments of the wrong length.
+
+Host authority needs no speed or step limit: the host steps the player itself.
+
+A limit `maxJump`, the distance of "how far a player may jump in one step", is `maxStep`.
+
+## 8. Hit rewind
+
+The host's layer records every player's state each host tick (a `HistoryRing`, 64 ticks). `shoot` carries `view`, the render
+tick (x 256) the shooter was seeing. `rewound(peer, view)` answers where that player was then, clamped by the session's
+existing `rewindTick` (`maxRewindMs`, default **250 ms**). The game decides what a hit is and raises `hit` and `death`
+itself (`hostAction`).
+
+The shooter's view is older than its own tick by the render delay plus the one-way trip from the host, and the shot takes
+another one-way trip to reach the host, so the rewind needed is about `one-way x 2 + render delay`. The default 250 ms covers
+links up to about 60 ms one way; with 100 ms one way the clamp cuts in, and `maxRewindMs` has to be raised for such a game.
+
+## 9. `sync.player` in `onelobby.json`
+
+See `docs/design/blueprint.md` section 4e. Keys: `authority`, `space`, `range`, `velocityRange`, `limits`
+(`maxSpeed`, `maxStep`, `minShotIntervalMs`, `minMeleeIntervalMs`), `omit`. Needs `sync.mode: "replication"` (rule
+`player_needs_replication`). A game's **own extra fields and events** are not in the file: only leaving the preset's out
+is. A game that needs its own state next to the player sends it as its own entity, or its own events with `sendEvent`.
+
+## 10. Numbers in one place
+
+| what | value |
+|---|---|
+| reserved type id | 65535 |
+| state size, default range | 16 bytes (3D), 12 bytes (2D) |
+| input preset size | 6 bytes (3D), 5 bytes (2D) |
+| position step | about 1 cm (`PB` bits) |
+| event repeats | 4 `fast` ticks + 1 `reliable` |
+| render delay | `clamp(2 I + 4 J, 2 I, 250 ms)`; fixed 100 ms when the option is off |
+| carry-on cap | 250 ms |
+| correction blend | 100 ms; snap past 2.0 horizontal, 0.5 vertical, or a changed teleport counter |
+| owner / host teleport step | +1 / +4 (mod 8) |
+| speed tolerance | 25% + 2 position steps |
+| teleport rate with limits | one per 1000 ms |
+| rate tolerance | 0.9 x the interval - one tick |
+| rewind | the session's `maxRewindMs` (250) |
+| per-player bytes per second | at most 3500 up and 1500 down per client link (measured section 11) |
+
+## 11. Tests and measured numbers
+
+`clients/js/packages/client/test/net-player*.test.ts` on `RepRig`: a host and two clients (A moves, B watches) at **100 ms
+one-way latency, 20 ms jitter, 3% loss on `fast`** (the fake network's `dropFast`), a fixed seed, 16 ms frames, once for each
+authority. Bounds the tests hold the layer to: D1 worst path error 0.5 m and mean 0.15 m (the two paths are compared at the one
+constant lag, 0 to 600 ms in 8 ms steps, where they are closest on average; that lag is the sum of the two links and the
+render delay); D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
+the watcher, on-time ones played within 2 ticks after their tick, also at 30% loss; D4 the budget above. The measured numbers
+of the last run are in the PR description of the change that added this file.
+
+## 12. Vectors
+
+`spec/vectors/net-player.json`: `configs` (the settings that shape the wire), `states` (encode `state` for `config` to `hex`,
+decode `hex` to `decoded`, `bits`), `inputs`, `args` (one event's arguments), `events` (kind 5 messages) and `invalid` (decoding
+must fail with `error`; `length` for a state, input or arguments of the wrong length). Compare decoded floats with a tolerance
+of 1e-5.
+
+They are generated from the JS client. Regenerate (from `clients/js/packages/client`, after `npm ci` in `clients/js`):
+
+```
+ONELOBBY_WRITE_VECTORS=1 ../../node_modules/.bin/vitest run test/net-player-vectors.test.ts
+```
+
+then run the same command without the variable: the plain run only reads the file and checks it.
+
+## 13. What a second implementer will trip on
+
+- `Quantize.float` rounds half away from zero in double precision and clamps; `pitch` and `moveX` have even step counts, so 0
+  does not round-trip exactly.
+- Left-out fields shorten the state and move the later ones up: the layout depends on the settings, and both ends must agree.
+- The host numbers relayed events itself (section 4.2); the sender's numbers are only for the first hop.
+- In `"host"` mode a repeated input must not step, and the host must quantise after each step.
+- The teleport counter of the owner is the owner's to keep: a game that overwrites it each tick with its own value breaks the
+  correction (the layer's `setLocalState` keeps it).
+- Time stamps: `tick` in the message is host ticks; `view` is the render tick x 256 as an unsigned 32-bit number.

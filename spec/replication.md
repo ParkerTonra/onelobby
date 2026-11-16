@@ -49,7 +49,7 @@ replication.
 |---|---|---|
 | 0 | `magic:u8` | `0x52` (`'R'`). A raw payload with any other first byte is not replication: pass it to the game untouched |
 | 1 | `version:u8` | `1` |
-| 2 | `kind:u8` | `1` snapshot, `2` input, `3` event, `4` stream event |
+| 2 | `kind:u8` | `1` snapshot, `2` input, `3` event, `4` stream event; `5` player events (`spec/net-player.md`, only where the player layer is used) |
 
 ## kind 1: `snapshot` (host -> one client, `fast`; keyframes on `reliable`)
 
@@ -135,6 +135,16 @@ lossy start or a client that lost its state should not wait for luck. So:
 - `RenderTick`: the target is `ServerTick - InterpolationDelayMs / tickMs` (default 100 ms). It is set to the target
   at once on the first estimate or when more than 10 ticks away; otherwise each pump advances it by
   `elapsedMs / tickMs`, then closes 10% of the remaining error, and it never runs backwards.
+
+**Adaptive render delay (optional, default off).** The session option `adaptiveDelay` (config `AdaptiveDelay`, default
+`false`; `maxInterpolationDelayMs`, default 250) replaces the fixed `InterpolationDelayMs` with a delay that grows when the
+link is jittery and shrinks when it is calm: `delay = clamp(2 I + 4 J, 2 I, maxInterpolationDelayMs)`, `I` = the snapshot
+interval in ms (`1000 / tickRate x SnapshotEveryTicks`), `J` = smoothed arrival jitter (for every snapshot that advances
+the newest tick: `d = |gap between arrivals - (tick gap x tickMs)|`; `J += (d - J) / 4` when `d > J`, else `J += (d - J) / 32`).
+The delay starts at the fixed value, moves towards its target by `elapsed / 100 ms` of the distance when it must grow and by
+at most 20 ms per second when it may shrink, and render time still never runs backwards. With the option off nothing here
+applies and every number above is unchanged. Only the JS client has it (the networked player layer turns it on,
+`spec/net-player.md`); the jitter estimate is measured either way.
 
 ### Sampling and visibility (client)
 
@@ -284,7 +294,8 @@ header), counted when a message is sent or when a replication message of version
 ## Versioning
 
 `version` changes only for an incompatible layout. Additive changes (new `kind` values) keep version 1: decoders ignore
-unknown kinds. The game's own schema is versioned by the lobby's `netVersion` (bump it when a state layout changes).
+unknown kinds. Kind 5 is the networked player's action events (`spec/net-player.md` section 4.1); a decoder that does not
+know it ignores it, and the layers of kinds 1 to 4 are unchanged by it. The game's own schema is versioned by the lobby's `netVersion` (bump it when a state layout changes).
 
 ## Vectors
 

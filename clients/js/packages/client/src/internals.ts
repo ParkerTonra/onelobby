@@ -57,8 +57,7 @@ export { probeRelay } from "./connection-check.js";
 export {
   ReplicationStats, STREAM_GAP_TIMEOUT_MS, MAX_STREAM_BUFFERED, MAX_STREAM_BUFFERED_BYTES, MAX_STREAM_AHEAD, encodeSnapshot, decodeSnapshot,
   peekSnapshot, encodeInput, decodeInput, encodeEvent, decodeEvent, encodeStreamEvent, decodeStreamEvent, isReplication, indexOfEntity,
-  ByteWriter, MAX_STATE_BYTES, toHex, fromHex,
+  ByteWriter, MAX_STATE_BYTES, toHex, fromHex, KIND_PLAYER_EVENTS, TELEPORT_MODULO, DEFAULT_PLAYER_WIRE, MOVEMENT_MODES, BUTTONS,
+  ACTION_EVENTS, OMITTABLE, OMITTABLE_FIELDS, positionBits, encodePlayerEvents, decodePlayerEvents, actionByName, actionById,
 } from "./replication/index.js";
-export type { Ent, World, SnapshotHeader, DecodedInput, InputEntry, Json } from "./replication/index.js";
-export { LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets, nodeLanUdp } from "./lan.js";
-export type { LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";
+export type { Ent, World, SnapshotHeader, DecodedInput, InputEntry, Json, ActionEventDef, WireEvent } from "./replication/index.js";

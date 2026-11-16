@@ -74,9 +74,11 @@ export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-c
 // The codec functions (encodeSnapshot, decodeInput, ...) are in onelobby/internals.
 export {
   ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication,
-  DEFAULT_REPLICATION_CONFIG,
+  DEFAULT_REPLICATION_CONFIG, Reconciler, PredictionSmoother, HistoryRing, NetPlayers, NET_PLAYER, PLAYER_TYPE_ID, PlayerCodec,
+  defaultPlayerState, defaultPlayerInput,
 } from "./replication/index.js";
 export type {
   EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates,
-  ReplicationEvents, ReplicationErrorCode,
+  ReplicationEvents, ReplicationErrorCode, PlayerAuthority, PlayerLimits, PlayerBlueprint, NetPlayersOptions, ActionEvent, PlayerStats,
+  NetPlayersEvents, PlayerState, PlayerInput, PlayerSpace, PlayerWireConfig, ActionName, ActionArgs, ButtonName,
 } from "./replication/index.js";
