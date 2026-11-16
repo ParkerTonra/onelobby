@@ -1130,7 +1130,10 @@ export declare class Lockstep extends Emitter<LockstepEvents> {
      * begins at tick 1 again. The host keeps its role and the peers that said hi; the game builds a fresh sim on `started`.
      */
     reset(): void;
-    /** A joiner just learned the session is in game (first frame, snapshot, or phase from the server). */
+    /**
+     * A joiner just learned the session is in game (first frame, snapshot, or phase from the server). The 3 s silent-host
+     * clock starts now: it must not count the time spent waiting in the lobby, where no frames flow.
+     */
     markStarted(): void;
     /** The shared pause is on: the host emits no frames and a joiner expects none (no silent-host check). */
     get isHeld(): boolean;
