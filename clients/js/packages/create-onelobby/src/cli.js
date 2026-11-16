@@ -160,7 +160,7 @@ export async function run(argv, io) {
   // node-browser is a Node process that already serves the game: there is no new project to write, only the blueprint and the glue
   const needInto = () => {
     if (template === "node-browser" && opts.into === undefined)
-      throw new CliError("unsupported", 'template node-browser works with --into <your game folder> only (the game already has the Node server that hosts): run create-onelobby --into <folder> --template node-browser ...; it writes onelobby.json (engine "node-browser", hosting.direct true) and the glue, and test/multiplayer.mjs only for sync.mode lockstep', "template");
+      throw new CliError("unsupported", 'template node-browser works with --into <your game folder> only (the game already has the Node server that hosts): run create-onelobby --into <folder> --template node-browser ...; it writes onelobby.json (engine "node-browser", hosting.direct true), and the glue and test/multiplayer.mjs only for sync.mode lockstep', "template");
   };
   if (template !== undefined) {
     checkTemplate();
@@ -309,7 +309,9 @@ export async function run(argv, io) {
     // the glue is an ES module: an existing package.json without "type": "module" (a CommonJS game) gets the .mjs name, which Node reads as ESM whatever the package says
     const glueName = existingPkg !== null && existingPkg.type !== "module" ? "session.mjs" : "session.js";
     const standIn = template !== "node-browser" || blueprint.sync.mode === "lockstep"; // a raw or replication game has its own sync: no lockstep stand-in test for it
-    const files = into ? intoFiles({ blueprint, packageJson: existingPkg !== null ? undefined : { dirName, onelobbyVersion: opts.onelobbyVersion }, glueName, standIn }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
+    // a Node host's pages only join (asWebSocket): the glue is for a page that hosts, so there only the lockstep stand-in test (which imports it) gets it
+    const glue = template !== "node-browser" || standIn;
+    const files = into ? intoFiles({ blueprint, packageJson: existingPkg !== null ? undefined : { dirName, onelobbyVersion: opts.onelobbyVersion }, glueName, standIn, glue }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
     if (!into) {
       const state = targetState(target);
       if (state === "file") throw new CliError("exists", `${target} is a file`);
@@ -337,7 +339,7 @@ export async function run(argv, io) {
       if (blueprint.hosting.server && !blueprint.hosting.lobbyServer) next.push("set hosting.lobbyServer in onelobby.json (or open the page with ?lobby=ws://HOST:8080/ws)");
     } else {
       const deps = { ...existingPkg?.dependencies, ...existingPkg?.devDependencies };
-      next.push(...intoNext({ rel, glueName, standIn, titleFromFolder: blueprint.game.title === dirName, nodeHost: template === "node-browser", mode: blueprint.sync.mode, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
+      next.push(...intoNext({ rel, glueName, glue, standIn, titleFromFolder: blueprint.game.title === dirName, nodeHost: template === "node-browser", mode: blueprint.sync.mode, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, range: deps.onelobby, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
     }
 
     const result = { ok: true, dir: target, template, blueprint, files: files.map((f) => f.path), next };

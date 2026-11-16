@@ -126,6 +126,9 @@ export const SHAPES = [
     terms: [
       ["own server loop", 6],
       ["own server", 4],
+      ["own sync", 4],
+      ["own netcode", 4],
+      ["own rooms", 3],
       ["server loop", 4],
       ["existing server", 4],
       ["own backend", 3],
@@ -134,7 +137,8 @@ export const SHAPES = [
     ],
     modes: [{ mode: "raw", why: "the game keeps its own server loop, so OneLobby only moves its messages (the host runs that loop)" }],
     tickRate: null,
-    pause: null,
+    pause: { value: "off", why: "the game keeps its own server loop, so it keeps its own pause (OneLobby's shared pause is for a game that has none)" },
+    pauseModifiers: false, // a pause word in the sentence ("strategy") describes the game, not a pause OneLobby should add
     players: { value: 4, why: "2-4 players is the default" },
   },
 ];

@@ -268,7 +268,7 @@ Usage: create-onelobby [dir] [options]
 
   --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   ${builtList()} exist; the rest are planned for v2
                                (node-browser, a Node process that hosts and serves the page, works with --into only: it writes onelobby.json
-                               with engine "node-browser" and the glue, and the lockstep test only for sync.mode lockstep)
+                               with engine "node-browser", and the glue and the lockstep test only for sync.mode lockstep)
   --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ (and a minimal package.json when
                                there is none; the glue is multiplayer/session.mjs when an existing package.json has no "type": "module"); a Godot folder (project.godot) gets the add-on, the natives, the autoload and a test. With no
                                --template the folder is read (Godot, Unity, .NET, web files); a folder that tells nothing needs --template

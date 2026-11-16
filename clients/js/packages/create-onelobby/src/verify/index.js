@@ -18,6 +18,15 @@ import { unityChecks } from "./unity.js";
 import { webChecks } from "./web.js";
 import { hasNetPlayer, playerCheck } from "./wiring.js";
 
+/** The `engine` in the folder's onelobby.json, or null. */
+function engineOfBlueprint(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.engine ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** `create-onelobby verify [dir] [--into dir] [options]`. Returns the exit code (0 only for VERIFY_OK). */
 export async function runVerify({ dir, opts, io }) {
   const target = projectDir({ dir, opts, cwd: io.cwd });
@@ -38,7 +47,9 @@ export async function runVerify({ dir, opts, io }) {
 
   const progress = opts.json ? io.stderr : io.stdout;
   const t0 = Date.now();
-  progress.write(`create-onelobby verify: ${target} (${found.kind})\n`);
+  // a web-kind folder is a plain browser game or a Node process that hosts the pages (the engine in onelobby.json): say which
+  const engine = found.kind === "web" ? (engineOfBlueprint(target) ?? "web") : found.kind;
+  progress.write(`create-onelobby verify: ${target} (${engine})\n`);
   const pad = Math.max(...checks.map((c) => c.name.length)) + 2;
 
   const stop = async () => {
@@ -76,6 +87,7 @@ export async function runVerify({ dir, opts, io }) {
         command: "verify",
         verdict: outcome.verdict,
         kind: found.kind,
+        engine,
         dir: target,
         ...(ctx.unity ? { unity: { exe: ctx.unity.exe, version: ctx.unity.version, from: ctx.unity.from } } : {}),
         ...(ctx.godot ? { godot: { exe: ctx.godot.exe, version: ctx.godot.version, from: ctx.godot.from } } : {}),

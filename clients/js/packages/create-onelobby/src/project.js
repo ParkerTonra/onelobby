@@ -1,11 +1,20 @@
 // What kind of OneLobby game lives in a folder? Shared by `update` and `verify`.
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CliError } from "./flags.js";
 import { isCSharpProject } from "./godot-project.js";
 
 /** Where the web glue lives: a scaffolded project (src/session.js) or an `--into` project (multiplayer/session.js). */
 export const WEB_GLUE_PATHS = ["src/session.js", "multiplayer/session.js", "multiplayer/session.mjs"];
+
+/** The `engine` in the folder's onelobby.json, or null (unreadable, unset). */
+function blueprintEngine(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.engine ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** The folder a command works on: the positional directory, else --into, else the current folder. Must exist. */
 export function projectDir({ dir, opts, cwd }) {
@@ -33,6 +42,8 @@ export function detectProject(dir, { requireBlueprint = false } = {}) {
   if (has("onelobby.json")) {
     const glue = WEB_GLUE_PATHS.find(has);
     if (glue) return { kind: "web", dir, glue };
+    // a Node process that hosts the pages (engine node-browser) joins from its own page code: `--into` writes no glue for it
+    if (blueprintEngine(dir) === "node-browser") return { kind: "web", dir, glue: null };
     return { kind: null, dir, why: "onelobby.json but no web glue (src/session.js, multiplayer/session.js or multiplayer/session.mjs)" };
   }
   return { kind: null, dir, why: "no project.godot and no onelobby.json" };

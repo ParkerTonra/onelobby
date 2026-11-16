@@ -17,6 +17,7 @@ import { tgzNames } from "../tar.js";
 import { validate } from "../blueprint.js";
 import { MIN_EDITOR, TEST_ASSEMBLY, TEST_FILES, editorIsNewEnough, resolveUnity } from "../unity.js";
 import { PACKAGE_NAME, readDependency } from "../manifest.js";
+import { ownNetcodeNote } from "./core.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
@@ -210,7 +211,7 @@ export function unityChecks() {
         const missing = needTest(ctx);
         if (missing) return missing;
         const res = routeResult(await runRoute(ctx, "direct", []), `Run the test by hand (${routeByHand("direct")}) and read its log; check that nothing blocks Unity on 127.0.0.1.`);
-        return res.status === "ok" ? { status: "ok", detail: "two peers on 127.0.0.1, host and join by address, one message each way: the game's MultiplayerTests", ...warn(res) } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
+        return res.status === "ok" ? { status: "ok", detail: `two peers on 127.0.0.1, host and join by address, one message each way: the game's MultiplayerTests${ownNetcodeNote(f.mode)}`, ...warn(res) } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
       },
     },
     {

@@ -11,6 +11,16 @@ export function lineText(r) {
   return `skipped ${r.detail ?? ""}`.trimEnd();
 }
 
+/**
+ * What a passing `direct` check does NOT prove, for a game that keeps its own sync (sync.mode raw or replication): the scaffolder's
+ * two-peer test links two peers and sends one message each way, it never runs the game's own sessions. "" for lockstep (the
+ * game plugs into that test) and for an unknown mode. Appended to the check's ok detail so VERIFY_OK cannot read as "the netcode works".
+ */
+export function ownNetcodeNote(mode) {
+  if (mode !== "raw" && mode !== "replication") return "";
+  return `; this proves OneLobby's lobby and messages only, NOT this game's own netcode (sync.mode ${mode}): run the game's own two-player test and name it in the report`;
+}
+
 /** The one last line: VERIFY_OK, or VERIFY_FAIL <first failing check>: <why and the next step>. */
 export function verdictLine(results) {
   const first = results.find((r) => r.status === "fail");

@@ -386,8 +386,14 @@ function differences(shape, advice) {
   return out;
 }
 
+/** For an existing game whose Node process hosts the pages: the answers below are defaults, the game's own constants win. */
+export const NODE_HOST_NOTE =
+  "engine node-browser is an existing game whose Node process hosts the pages: lobby.maxPlayers is the WHOLE lobby (every browser at once plus the host's own seat), so take it from the game's own seat or room constant (--max-players), not from the match size in the sentence; the game's own pause means --pause off; and the constants the game passes in code go in the file (--set session.rateLimit.messages=N, session.rateLimit.perMs=N, session.peerTimeoutMs=N, --net-version, --game-id), never a copy in code.";
+const NODE_HOST_OWN_SYNC = " A game that keeps its own sync and rooms passes --mode raw; add 'own server loop' to the sentence to get the own-server shape.";
+
 function finish(rec, eng) {
   rec.flags = flagsForRows(rec.answers);
+  if (eng.id === "node-browser") rec.notes.push(NODE_HOST_NOTE + (rec.shape === "own-server" ? "" : NODE_HOST_OWN_SYNC));
   const built = eng.id && ENGINES[eng.id].template === "built";
   if (eng.id && !built) {
     rec.runCommand = null;

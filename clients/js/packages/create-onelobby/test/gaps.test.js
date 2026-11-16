@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { buildLine, main } from "../src/cli.js";
+import { ONELOBBY_VERSION } from "../src/blueprint.js";
 import { fixtureNativesZip } from "./helpers/zip.js";
 import { WIRING_LIST_MAX, blueprintNext, wiringCheck, wiringDetail, withoutComments } from "../src/verify/wiring.js";
 import { runChecks } from "../src/verify/core.js";
@@ -104,11 +105,27 @@ describe("web --into", () => {
     expect(next).toContain('"type": "module"');
   });
 
-  it("an existing package.json that lists onelobby gets a plain npm install", async () => {
-    put("w/package.json", '{ "type": "module", "dependencies": { "onelobby": "^0.7.0" } }');
+  it("an existing package.json that lists the targeted onelobby version gets a plain npm install", async () => {
+    put("w/package.json", `{ "type": "module", "dependencies": { "onelobby": "^${ONELOBBY_VERSION}" } }`);
     const r = await cli(["--into", "w", "--yes", "--json"]);
     expect(r.json.next).toContain("npm install");
     expect(r.json.next.join("\n")).not.toContain('"type": "module"');
+  });
+
+  it("an older onelobby pin gets the exact install line that moves it, naming the old range (negative control: the targeted pin does not)", async () => {
+    put("old/package.json", '{ "type": "module", "dependencies": { "onelobby": "^0.6.0" } }');
+    const r = await cli(["--into", "old", "--yes", "--json"]);
+    const line = r.json.next.find((l) => l.startsWith(`npm install onelobby@^${ONELOBBY_VERSION}`));
+    expect(line).toContain("lists onelobby ^0.6.0");
+    expect(line).toContain("lock file");
+    expect(r.json.next).not.toContain("npm install");
+    expect(readFileSync(at("old/package.json"), "utf8")).toContain("^0.6.0"); // never edited
+    put("cur/package.json", `{ "type": "module", "dependencies": { "onelobby": "^${ONELOBBY_VERSION}" } }`);
+    const same = await cli(["--into", "cur", "--yes", "--json"]);
+    expect(same.json.next.some((l) => l.includes("lists onelobby"))).toBe(false);
+    put("dev/package.json", '{ "type": "module", "devDependencies": { "onelobby": "~0.5.1" } }'); // a devDependencies pin counts the same
+    const dev = await cli(["--into", "dev", "--yes", "--json"]);
+    expect(dev.json.next.join("\n")).toContain("lists onelobby ~0.5.1");
   });
 
   it("the Next lines come in the order the work happens and use the glue's real names", async () => {

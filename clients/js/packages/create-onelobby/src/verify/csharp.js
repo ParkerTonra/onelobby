@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { validate } from "../blueprint.js";
 import { buildCommand, selectCsproj } from "../csharp.js";
 import { MENU_DIR, NATIVES_MARKER, verifyPin } from "../vendor.js";
+import { ownNetcodeNote } from "./core.js";
 import { resolveGodot } from "./godot.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
@@ -188,7 +189,7 @@ export function csharpChecks() {
         const missing = needTest(ctx);
         if (missing) return missing;
         const res = routeResult(await runRoute(ctx, "direct", [], 120000), `Run: dotnet build, then godot --headless --audio-driver Dummy --path . ${TEST_SCENE} and read its output; check that nothing blocks Godot on 127.0.0.1.`);
-        return res.status === "ok" ? { status: "ok", detail: "two peers on 127.0.0.1, host and join by address, one message each way: the game's tests/MultiplayerTest.cs" } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
+        return res.status === "ok" ? { status: "ok", detail: `two peers on 127.0.0.1, host and join by address, one message each way: the game's tests/MultiplayerTest.cs${ownNetcodeNote(f.mode)}` } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
       },
     },
     {

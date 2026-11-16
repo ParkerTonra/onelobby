@@ -298,8 +298,8 @@ function godotText(r, plan, verb, flavor = GDSCRIPT) {
 }
 
 function updateWeb({ io, opts, found, target }) {
-  const mine = readFileSync(join(target, ...found.glue.split("/")), "utf8").replace(/\r\n/g, "\n");
-  const same = mine === glueSession().replace(/\r\n/g, "\n");
+  // a node-browser game written by `--into` has no glue (found.glue is null): nothing to compare
+  const same = found.glue === null || readFileSync(join(target, ...found.glue.split("/")), "utf8").replace(/\r\n/g, "\n") === glueSession().replace(/\r\n/g, "\n");
   let declared = null;
   try {
     declared = JSON.parse(readFileSync(join(target, "package.json"), "utf8")).dependencies?.onelobby ?? null;
@@ -317,7 +317,7 @@ function updateWeb({ io, opts, found, target }) {
     current: declared === wanted && same,
     dependency: { package: "onelobby", wanted, declared },
     install,
-    glue: { path: found.glue, state: same ? "identical" : "differs" },
+    glue: found.glue === null ? { path: null, state: "none" } : { path: found.glue, state: same ? "identical" : "differs" },
     next: [install],
     ...(opts.dryRun ? { dryRun: true } : {}),
   };
@@ -327,7 +327,7 @@ function updateWeb({ io, opts, found, target }) {
       [
         'A web game takes OneLobby from the npm package "onelobby", so there is no add-on to re-vendor. Nothing was written and npm was not run.',
         `  package.json declares onelobby ${declared ?? "(nothing)"}; this create-onelobby targets ${wanted}.`,
-        `  ${found.glue}: ${same ? "identical to this version's glue" : "differs from this version's glue (it is yours to edit, so update never rewrites it; compare it with templates/glue/session.js in the create-onelobby package)"}.`,
+        found.glue === null ? "  no glue file (a Node process that hosts the pages needs none)." : `  ${found.glue}: ${same ? "identical to this version's glue" : "differs from this version's glue (it is yours to edit, so update never rewrites it; compare it with templates/glue/session.js in the create-onelobby package)"}.`,
         "",
         "Next:",
         `  ${install}`,

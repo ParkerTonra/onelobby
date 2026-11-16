@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate } from "../blueprint.js";
 import { LEGACY_PIN, NATIVES_MARKER, WEBRTC_NATIVE_VERSION, existingNativesVersion, verifyPin } from "../vendor.js";
+import { ownNetcodeNote } from "./core.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
@@ -150,7 +151,7 @@ export function godotChecks() {
           const t0 = Date.now();
           const r = await g(ctx, ["-s", "res://tests/multiplayer.gd"], { timeoutMs: 120000 });
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
-          if (/^MULTIPLAYER_OK/m.test(r.out) && !r.timedOut) return { status: "ok", detail: "two peers on 127.0.0.1, host and join by code, one message each way: the game's tests/multiplayer.gd" };
+          if (/^MULTIPLAYER_OK/m.test(r.out) && !r.timedOut) return { status: "ok", detail: `two peers on 127.0.0.1, host and join by code, one message each way: the game's tests/multiplayer.gd${ownNetcodeNote(f.mode)}` };
           const fail = /^MULTIPLAYER_FAIL (.*)$/m.exec(r.out)?.[1];
           return {
             status: "fail",
@@ -159,7 +160,7 @@ export function godotChecks() {
           };
         }
         const res = probeResult(await probe(ctx, ["--route=direct"]), "direct", probeByHand("direct"));
-        return res.status === "ok" ? { status: "ok", detail: "two peers on 127.0.0.1, host and join by code, one message each way: the bundled probe" } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
+        return res.status === "ok" ? { status: "ok", detail: `two peers on 127.0.0.1, host and join by code, one message each way: the bundled probe${ownNetcodeNote(f.mode)}` } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
       },
     },
     {

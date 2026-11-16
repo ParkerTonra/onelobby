@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { main } from "../src/cli.js";
 import { detectEngine, recommend } from "../src/recommend.js";
+import { detectProject } from "../src/project.js";
 import { webChecks } from "../src/verify/web.js";
 
 let cwd;
@@ -49,12 +50,38 @@ describe("the recommender can say \"a Node process hosts\"", () => {
   });
 });
 
+describe("an existing game whose Node process hosts the pages: what the recommender says", () => {
+  const rows = (rec) => Object.fromEntries(rec.answers.map((r) => [r[0], r[1]]));
+  const RTS = "browser RTS in a Node server that runs its own sync and its own rooms, 15 ticks a second";
+  it("'own sync' / 'own rooms' read as the own-server shape: raw, pause off, and a note that the game's own constants win", () => {
+    const rec = recommend({ description: RTS });
+    expect(rec.engine.id).toBe("node-browser");
+    expect(rec.shape).toBe("own-server");
+    expect(rows(rec)).toMatchObject({ "sync.mode": "raw", "session.pause": "off", "hosting.direct": true });
+    const note = rec.notes.join(" ");
+    expect(note).toContain("lobby.maxPlayers is the WHOLE lobby");
+    expect(note).toContain("--set session.rateLimit.messages=N, session.rateLimit.perMs=N, session.peerTimeoutMs=N");
+    expect(note).toContain("--pause off");
+    expect(rec.runCommand).toContain("--pause off");
+  });
+  it("the note is there even when no shape matched (shape null), and absent for a plain browser game and for Godot", () => {
+    expect(recommend({ description: "a Node server hosts the match" }).notes.join(" ")).toContain("WHOLE lobby");
+    expect(recommend({ description: "browser ant game for 4 players, the host runs the match" }).notes.join(" ")).not.toContain("WHOLE lobby");
+    expect(recommend({ description: "a Godot co-op game for 4 players" }).notes.join(" ")).not.toContain("WHOLE lobby");
+  });
+  it("negative control: the other shapes keep their pause (a co-op game is still host-pausable)", () => {
+    expect(rows(recommend({ description: "co-op survival sandbox in Godot, the host runs the world" }))["session.pause"]).toBe("host");
+  });
+});
+
 describe("--into --template node-browser", () => {
-  it("a raw game gets the blueprint and the glue, no lockstep stand-in, and a CommonJS package keeps working (.mjs glue)", async () => {
+  it("a raw game gets the blueprint only: no glue (its pages only join), no lockstep stand-in, and a CommonJS package is left alone", async () => {
     put("g/package.json", '{ "name": "g", "main": "server.js" }');
     const r = await cli(["--into", "g", "--template", "node-browser", "--mode", "raw", "--yes", "--json"]);
     expect(r.code).toBe(0);
-    expect(r.json.files).toEqual(["onelobby.json", "multiplayer/session.mjs"]);
+    expect(r.json.files).toEqual(["onelobby.json"]);
+    expect(existsSync(at("g/multiplayer"))).toBe(false);
+    expect(r.json.next.join("\n")).toContain("no glue file was written");
     expect(r.json.blueprint).toMatchObject({ engine: "node-browser", hosting: { direct: true, server: false }, sync: { mode: "raw" } });
     expect(existsSync(at("g/test/multiplayer.mjs"))).toBe(false);
     const next = r.json.next.join("\n");
@@ -75,6 +102,18 @@ describe("--into --template node-browser", () => {
     put("g/package.json", '{ "type": "module" }');
     const r = await cli(["--into", "g", "--template", "node-browser", "--mode", "lockstep", "--yes", "--json"]);
     expect(r.json.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]);
+    expect(r.json.next.join("\n")).toContain("is used only by test/multiplayer.mjs, never by the game");
+  });
+  it("a glue-less node-browser folder is still a game for verify and update (negative control: a web folder with no glue is not)", async () => {
+    put("g/package.json", "{}");
+    const w = await cli(["--into", "g", "--template", "node-browser", "--mode", "raw", "--yes", "--json"]);
+    expect(w.code).toBe(0);
+    expect(detectProject(at("g"), { requireBlueprint: true })).toMatchObject({ kind: "web", glue: null });
+    const up = await cli(["update", "g", "--json"]);
+    expect(up.code).toBe(0);
+    expect(up.json.glue).toEqual({ path: null, state: "none" });
+    put("plain/onelobby.json", JSON.stringify({ engine: "web", game: { id: "com.x.y" } }));
+    expect(detectProject(at("plain"), { requireBlueprint: true }).kind).toBe(null);
   });
   it("the recommendation's blueprint loads: --recommend with --into writes direct true", async () => {
     put("g/package.json", "{}");
