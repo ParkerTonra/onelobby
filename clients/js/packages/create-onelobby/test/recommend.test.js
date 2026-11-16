@@ -618,3 +618,14 @@ describe("the doc and the data cannot diverge", () => {
     for (const [text, shape] of SENTENCES.filter((s) => s[1])) expect(renderText(recommend({ description: text }))).toContain(`Game shape: ${shape}`);
   });
 });
+
+describe("a sentence with no engine", () => {
+  it("has runCommand null and the note tells the agent to name the engine in the sentence", () => {
+    const rec = recommend({ description: "co-op game for 4 players where the host runs the world" });
+    expect(rec.runCommand).toBeNull();
+    expect(rec.notes.join(" ")).toContain("name the engine in the sentence itself");
+  });
+  it("negative control: the same sentence naming Godot has a command", () => {
+    expect(recommend({ description: "co-op game in Godot for 4 players where the host runs the world" }).runCommand).toContain("create-onelobby");
+  });
+});
