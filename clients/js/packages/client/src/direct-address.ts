@@ -69,3 +69,14 @@ export function parseDirectAddress(input: string, defaultPort = DEFAULT_DIRECT_P
   const display = (v6 ? `[${host}]` : host) + `:${port}`;
   return { host, port, isIPv6: v6, display, url: `ws://${display}/`, candidate: `candidate:1 1 UDP 2122317823 ${host} ${port} typ host` };
 }
+
+/**
+ * The local address a WebRTC link should bind its ICE sockets to when the other end is this PC: "127.0.0.1" for a
+ * 127.x.x.x host (or an IPv4-mapped one), else undefined (every interface, libdatachannel's default). A loopback run
+ * then opens no socket on a real interface, so the OS firewall has nothing to ask about.
+ */
+export function loopbackBindAddress(host: string | undefined): string | undefined {
+  if (!host) return undefined;
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/^::ffff:/, "");
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ? "127.0.0.1" : undefined;
+}

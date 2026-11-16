@@ -18,7 +18,7 @@ import { joinCodeKindName, type IpCodeKind, type JoinCodeKind } from "../join-co
 import { NostrHostBridge } from "../nostr/host.js";
 import { HOST_FIRST_RELAY_MS } from "../nostr/limits.js";
 import { DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "../nostr/relays.js";
-import { DEFAULT_DIRECT_PORT } from "../direct-address.js";
+import { DEFAULT_DIRECT_PORT, loopbackBindAddress } from "../direct-address.js";
 import { DirectHubHost, PortInUseError, portFailureHint, type HttpHandler } from "./hub-host.js";
 import { directHubOptions } from "./hub.js";
 import { isPublicIPv4, lanIPv4, localAddresses, type PortMapper, type PortMapResult, type PortMapperOptions } from "./portmap.js";
@@ -206,11 +206,13 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       : hub.openPort({ description: `OneLobby ${kit.options.gameId}`, ...o.portMapping }).catch((e: Error) => ({
           mapped: false, method: "none" as const, externalIPv4: null, localIPv4: null, detail: e.message,
         }));
+  // a hub listening on loopback only (bindHost "127.0.0.1"): its WebRTC links stay on loopback too
+  const bindAddress = loopbackBindAddress(o.bindHost);
   const wrapLinks = (inner: LinkFactory): LinkFactory => ({
     // the hub's welcome.ice is the host's list (STUN only with Nostr on, plus its ice_servers); the UDP port pin stays, except for a
     // relay-only link: it never uses a host candidate, and libjuice cannot do TURN on a shared (UDP mux) port, so a pinned
     // relay-only host got no relay candidate and sent from its own address instead of through the relay
-    create: (lo) => inner.create(lo.relayOnly ? lo : { ...lo, portRange: { begin: hub.port, end: hub.port } }),
+    create: (lo) => inner.create({ ...(lo.relayOnly ? lo : { ...lo, portRange: { begin: hub.port, end: hub.port } }), ...(bindAddress ? { bindAddress } : {}) }),
   });
   let lobby: Lobby;
   try {

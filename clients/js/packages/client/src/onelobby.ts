@@ -26,7 +26,7 @@ import { webRtcLinkFactory } from "./webrtc.js";
 import { decodeJoinCode, encodeJoinCode, encodeRoomCodeFor, looksLikeJoinCode } from "./joincode.js";
 import { NostrSocket } from "./nostr/socket.js";
 import { DEFAULT_NOSTR_STUN, type RelayConnect } from "./nostr/relays.js";
-import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
+import { DEFAULT_DIRECT_PORT, loopbackBindAddress, parseDirectAddress } from "./direct-address.js";
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 import { diagnose, type DiagnoseFacts, type Reached } from "./diagnose.js";
@@ -866,7 +866,9 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     if (!addr) throw new OneLobbyError("bad_address", `"${codeOrAddress}" is not a join code or an address (try 6B01-RGFE-P2B or 192.168.1.20:47810)`);
     const inner = this.linkFactory;
     // an address needs no STUN: keep the TURN entries (host's and own) and drop the STUN-only ones
-    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: o.iceServers.filter(hasTurn), extraRemoteCandidates: [addr.candidate] }) };
+    // a host on this PC (127.x.x.x): bind the ICE sockets to loopback too
+    const bindAddress = loopbackBindAddress(addr.host);
+    const links: LinkFactory = { create: (o) => inner.create({ ...o, iceServers: o.iceServers.filter(hasTurn), extraRemoteCandidates: [addr.candidate], ...(bindAddress ? { bindAddress } : {}) }) };
     return { nostr: null, url: addr.url, joinedWith: joinedWith(addr), links };
   }
 

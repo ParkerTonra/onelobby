@@ -2422,6 +2422,11 @@ export interface LinkOptions {
         end: number;
     };
     /**
+     * Bind the ICE sockets to this one local address (libdatachannel `bindAddress`; "127.0.0.1" when the peer is this PC).
+     * Honoured by node-datachannel; browsers ignore it. Left out = every interface.
+     */
+    bindAddress?: string;
+    /**
      * Direct-IP joiner: remote ICE candidate lines (`candidate:1 1 UDP ... typ host`) added after the remote
      * description, for the address the player typed or pasted as a code.
      */

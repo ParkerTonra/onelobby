@@ -69,6 +69,7 @@ export class WebRtcLink implements PeerLink {
       config.portRangeEnd = opts.portRange.end;
       if (opts.portRange.begin === opts.portRange.end) config.enableIceUdpMux = true;
     }
+    if (opts.bindAddress) config.bindAddress = opts.bindAddress; // libdatachannel name; node-datachannel passes it through
     this.pc = new rtc(config);
     this.pc.onicecandidate = (e) => {
       if (e.candidate && isRelayCandidate(e.candidate.candidate)) this.relaySeen = true;

@@ -3,6 +3,8 @@
 // Needs a build (npm run build) and node-datachannel (a devDependency of onelobby).
 //   node e2e/direct-smoke.mjs host [port] [password|-] [--no-upnp]   prints "join code ...", echoes, exits after "bye"
 //   node e2e/direct-smoke.mjs join <code|address> [password]          sends "hello direct" + "fast direct", waits for echoes
+//   --loopback (host): every socket on 127.0.0.1 (TCP hub, UDP, ICE), no Nostr, no router request; the join address is 127.0.0.1:<port>.
+//     The joiner needs no flag: an address on 127.x.x.x binds its ICE sockets to loopback by itself. Run both through tools/loopback-check.
 import { readFileSync } from "node:fs";
 import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby, webRtcLinkFactoryFor } from "../packages/client/dist/index.js";
@@ -41,8 +43,10 @@ if (args[0] === "host") {
   const waitS = Number(flags.find((f) => f.startsWith("--wait="))?.slice(7) ?? 120);
   // --page: serve a browser join page on the same port; whoever opens joinUrl runs the same echo test as `join`.
   const http = flags.includes("--page") ? joinPage() : undefined;
+  const loopback = flags.includes("--loopback");
   const lobby = await hostDirect(kit, {
-    port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp"), http, portMapping: { log: say },
+    port, password, maxPlayers: 8, openPort: !flags.includes("--no-upnp") && !loopback, http, portMapping: { log: say },
+    ...(loopback ? { bindHost: "127.0.0.1", publicAddress: "127.0.0.1", nostr: false, fallbackPorts: 0 } : {}),
   }).catch((e) => {
     say(`FAIL host: ${e.code ?? ""} ${e.message}`);
     process.exit(1);
