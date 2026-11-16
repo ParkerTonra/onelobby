@@ -33,7 +33,9 @@ extends RefCounted
 ## entities, is_mine (isMine), submit_input (submitInput), try_sample (trySample), try_sample_at, try_get_latest
 ## (tryGetLatest), find, rtt_ms (rttMs), peer_rtt_ms (peerRttMs), traffic_rates (trafficRates), describe, is_replication_payload,
 ## packet_log, stats, dispose. Signals: entity_spawned, entity_despawned, event_received, event_delivered, event_gap,
-## other_message (otherMessage), host_lost (hostLost), client_ready (clientReady).
+## other_message (otherMessage), host_lost (hostLost), client_ready (clientReady). For add-on layers (the networked player): register_kind
+## (registerKind), send_extension (sendExtension), count_malformed (countMalformed), traffic_with (trafficWith), lobby_handle
+## (lobbyHandle), interpolation_delay_ms and jitter_ms; the config keys adaptive_delay (default false) and max_interpolation_delay_ms.
 
 ## Client: an entity became visible at `render_tick` (create the game object here). `{id, type_id, owner}`.
 signal entity_spawned(info: Dictionary)
@@ -67,6 +69,11 @@ const DEFAULT_CONFIG := {
 	## Host, 0 = off: a reliable full snapshot on join and every this many seconds.
 	"keyframe_seconds": 5,
 	"packet_log_per_second": 20,
+	## Client, false = off: the render delay follows the arrival jitter, `clamp(2 I + 4 J, 2 I, max_interpolation_delay_ms)`
+	## (I = snapshot interval, J = smoothed jitter); off keeps the fixed `interpolation_delay_ms`. The player layer turns it on.
+	"adaptive_delay": false,
+	## Upper bound of the adaptive delay in ms.
+	"max_interpolation_delay_ms": 250,
 }
 
 const P := preload("res://addons/onelobby/replication_protocol.gd")
@@ -122,6 +129,18 @@ var snapshot_age_ms: int:
 var last_processed_input: int:
 	get:
 		return _last_processed
+## Client: the render delay in ms right now (`interpolation_delay_ms` of the config, or the adaptive value when `adaptive_delay` is on).
+var interpolation_delay_ms: float:
+	get:
+		return _delay_ms if bool(config["adaptive_delay"]) else float(config["interpolation_delay_ms"])
+## Client: smoothed snapshot arrival jitter in ms (always measured; only `adaptive_delay` acts on it).
+var jitter_ms: float:
+	get:
+		return _jitter
+## The lobby this session runs on (for add-on layers).
+var lobby_handle: Variant:
+	get:
+		return _lobby
 
 var _lobby: Variant
 var _nw := OneLobbyNetWriter.new()
@@ -136,6 +155,8 @@ var _send_seq := {} # "peer:stream" -> last seq sent
 var _event_bytes := {} # peer -> reliable event bytes sent
 var _streams: OneLobbyReplicationStreams
 var _held: Array = [] # [{ev, at}]
+var _traffic := {} # peer -> [sent, received] replication payload bytes
+var _extensions := {} # message kind (5 and up) -> Callable(from, payload, channel)
 
 # host
 var _host_ents := {} # id -> {type, owner, source, last}
@@ -162,6 +183,10 @@ var _have_render := false
 var _last_pump_ms := 0
 var _last_input_send_ms := -1000000000000
 var _newest_at_ms := -1
+var _delay_ms := 100.0
+var _jitter := 0.0
+var _last_arrive_ms := -1
+var _last_arrive_tick := 0
 
 
 ## Per-client host bookkeeping.
@@ -251,6 +276,7 @@ func _init(lobby: Variant, cfg: Dictionary = {}) -> void:
 			else:
 				_joining[id] = true
 	_last_pump_ms = _now()
+	_delay_ms = float(config["interpolation_delay_ms"])
 
 
 func _connect(sig: Signal, handler: Callable) -> void:
@@ -465,6 +491,7 @@ func send_snapshot() -> void:
 		_rates.add(now, _SNAPSHOT, bytes.size())
 		_log_packet("out", c.peer, channel, bytes, baseline)
 		c.bytes_sent += bytes.size()
+		_count(c.peer, true, bytes.size())
 		stats.snapshots_sent += 1
 		if baseline == null:
 			stats.full_snapshots_sent += 1
@@ -513,6 +540,7 @@ func _send_event_to(peer: int, tick: int, stream: int, body: PackedByteArray, pl
 		bytes = P.encode_stream_event(tick, stream, next, body)
 	_lobby.send(peer, bytes, channel)
 	_rates.add(_now(), _EVENT, bytes.size())
+	_count(peer, true, bytes.size())
 	_log_packet("out", peer, channel, bytes, null)
 	if channel == OneLobbyWire.RELIABLE:
 		_event_bytes[peer] = int(_event_bytes.get(peer, 0)) + bytes.size()
@@ -521,6 +549,47 @@ func _send_event_to(peer: int, tick: int, stream: int, body: PackedByteArray, pl
 ## Reliable event bytes sent to one peer (payloads, no lobby header). Client: to the host.
 func reliable_event_bytes_sent_to(peer_id: int) -> int:
 	return int(_event_bytes.get(peer_id, 0))
+
+
+## Replication payload bytes sent to and received from one peer since it was first seen (all kinds, no lobby header):
+## `{sent, received}`.
+func traffic_with(peer_id: int) -> Dictionary:
+	var t: Array = _traffic.get(peer_id, [0, 0])
+	return {"sent": t[0], "received": t[1]}
+
+
+func _count(peer: int, sent: bool, bytes: int) -> void:
+	var t: Array
+	if _traffic.has(peer):
+		t = _traffic[peer]
+	else:
+		t = [0, 0]
+		_traffic[peer] = t
+	t[0 if sent else 1] += bytes
+
+
+## Add-on layers (the player layer): handle every message of replication `kind` (5 and up, additive per spec/replication.md
+## "Versioning"). The handler is `Callable(from: int, payload: PackedByteArray, channel: int)`; one that finds the message
+## malformed calls `count_malformed()`.
+func register_kind(kind: int, handler: Callable) -> void:
+	if kind < 5 or kind > 255:
+		push_error("OneLobbyReplicationSession.register_kind: kind must be 5..255")
+		return
+	_extensions[kind] = handler
+
+
+## Send a payload of an add-on kind to one peer on a channel, counted as event bytes in `traffic_rates`.
+func send_extension(peer: int, bytes: PackedByteArray, channel: int) -> void:
+	_lobby.send(peer, bytes, channel)
+	_rates.add(_now(), _EVENT, bytes.size())
+	_count(peer, true, bytes.size())
+	_log_packet("out", peer, channel, bytes, null)
+	stats.events_sent += 1
+
+
+## Count one add-on message as malformed.
+func count_malformed() -> void:
+	stats.malformed += 1
 
 
 func _forget_peer(peer: int) -> void:
@@ -606,6 +675,7 @@ func _send_input_message(count: int) -> void:
 	_lobby.send(host_peer_id, bytes, OneLobbyWire.FAST)
 	var now := _now()
 	_rates.add(now, _INPUT, bytes.size())
+	_count(host_peer_id, true, bytes.size())
 	_log_packet("out", host_peer_id, OneLobbyWire.FAST, bytes, null)
 	_last_input_send_ms = now
 	if n > 0:
@@ -709,6 +779,7 @@ func _client_receive_snapshot(payload: PackedByteArray) -> void:
 	stats.snapshots_received += 1
 	var now := _now()
 	if tick > _newest_tick:
+		_measure_jitter(tick, now)
 		_newest_tick = tick
 		_newest_at_ms = now
 		_ack_tick = tick
@@ -725,11 +796,34 @@ func _client_receive_snapshot(payload: PackedByteArray) -> void:
 	_last_sample_ms = now
 
 
+# Jitter: how far a snapshot's spacing in time is from its spacing in ticks (RFC 3550 style, grows fast, shrinks slowly).
+func _measure_jitter(tick: int, now: int) -> void:
+	if _last_arrive_ms >= 0:
+		var d := absf(float(now - _last_arrive_ms) - float(tick - _last_arrive_tick) * clock.tick_ms())
+		_jitter += (d - _jitter) * (0.25 if d > _jitter else 1.0 / 32.0)
+	_last_arrive_ms = now
+	_last_arrive_tick = tick
+
+
+func _adapt_delay(elapsed_ms: int) -> void:
+	var interval := clock.tick_ms() * float(maxi(1, int(config["snapshot_every_ticks"])))
+	var lo := 2.0 * interval
+	var hi := maxf(lo, float(config["max_interpolation_delay_ms"]))
+	var target := minf(hi, maxf(lo, 2.0 * interval + 4.0 * _jitter))
+	if target > _delay_ms:
+		_delay_ms += (target - _delay_ms) * minf(1.0, float(elapsed_ms) / 100.0) # grows within ~100 ms
+	else:
+		_delay_ms = maxf(target, _delay_ms - float(elapsed_ms) * 0.02) # shrinks at most 20 ms per second
+	_delay_ms = minf(hi, maxf(lo, _delay_ms))
+
+
 func _update_render_tick(elapsed_ms: int) -> void:
 	if not _have_offset:
 		return
 	var tick_ms := clock.tick_ms()
-	var target := server_tick - float(config["interpolation_delay_ms"]) / tick_ms
+	if bool(config["adaptive_delay"]):
+		_adapt_delay(elapsed_ms)
+	var target := server_tick - interpolation_delay_ms / tick_ms
 	if not _have_render or absf(target - _render_tick) > 10.0:
 		_render_tick = target
 		_have_render = true
@@ -779,6 +873,14 @@ func _on_message(from: int, payload: PackedByteArray, channel: int) -> void:
 		stats.malformed += 1
 		return
 	var kind: int = payload[2]
+	if kind >= 1:
+		_count(from, false, payload.size())
+	if kind >= 5 and _extensions.has(kind):
+		_rates.add(_now(), _RECEIVED + _EVENT, payload.size())
+		if packet_log or packet_log_sink.is_valid():
+			_log_packet("in", from, channel, payload, null)
+		(_extensions[kind] as Callable).call(from, payload, channel)
+		return
 	if kind >= 1 and kind <= 4:
 		var bucket := _SNAPSHOT if kind == P.KIND_SNAPSHOT else (_INPUT if kind == P.KIND_INPUT else _EVENT)
 		_rates.add(_now(), _RECEIVED + bucket, payload.size())
