@@ -381,10 +381,17 @@ kind of the parent must follow `sync.player.space`; a parent of the other kind i
 Where C# had to differ from the GDScript node: `SetInput` takes the whole `NetPlayerInput` (a struct has no patch); `Velocity` is two typed
 properties; the spawn point is two properties; signals are named in PascalCase because Godot C# names a signal after its delegate; the
 node never reads `AnimationPlayer.CurrentAnimation` (the C# accessor is not in every Godot 4.x build: a game compiled against GodotSharp
-4.5.1 hit `MissingMethodException` on Godot 4.7.2), so it plays the mode's animation when the mode changes or the player stopped. (Both
+4.5.1 hit `MissingMethodException` on Godot 4.7.2), so it plays the mode's animation when the mode changes or the player stopped. The
+packages and the sample stay built against GodotSharp 4.5.1, the oldest Godot they support (a 4.5 game keeps restoring and building; a
+newer GodotSharp reference would fail a 4.5 game's restore), and the sample's self-check (`NetPlayerDemo.tscn -- --netplayer-selfcheck`,
+case `godot_api`) resolves every reference the sample and `OneLobby.Godot` make into GodotSharp on the running engine, so a member that a
+newer Godot lacks fails there by name. (Both
 spawners take a spectator's local character back when the roster says spectator, and make it again when it says player: a joiner's
 roster says "player" until the host's room snapshot arrives, so the character made at once for this machine would otherwise stay.
-The C# spawner looks on every layer tick and takes it back only; the GDScript one looks on every `tick` of the layer and does both.)
+The C# spawner looks on every layer tick and takes it back; it is the layer's own `PlayerJoined` that makes it again when the host seats the
+player (the self-check case `spectator_becomes_player`); the GDScript one looks on every `tick` of the layer and does both, and the Unity
+spawner looks every 8th frame and does both. A spawner gives its step function to a character only when it has one: a step the character
+set in its own `_Ready` / `Awake` is kept.)
 
 An owner-authority character, you move it as you always did:
 

@@ -13,7 +13,7 @@
 | `OneLobby.Core.Tests` | xunit: spec vectors, goldens, lobby, lockstep, migration, desync, chat, voice, Opus |
 | `OneLobby.Replication.Tests` | xunit: wire vectors, spawn/despawn, delta after loss, late join, interpolation, input redundancy, prediction, lag compensation, 4 x 54-entity bandwidth, the net-player vectors and D1 to D9 |
 | `OneLobby.Conformance` | stdio adapter for `conformance/peer` |
-| `demo-godot` | Godot 4.5.1 .NET gridpaint demo (Host / Join / Browse, code field, chat line, hold V to talk), the drop-in menu add-on `addons/onelobby_menu/` (`OneLobbyMenu.cs` + `OneLobbyMenu.tscn`, copied into a game) and `MenuDemo.tscn` (`-- --menu-selfcheck` is the local headless layout check) |
+| `demo-godot` | Godot 4.5.1 .NET gridpaint demo (built against GodotSharp 4.5.1, the oldest supported Godot, and run on newer ones too; `NetPlayerDemo.tscn -- --netplayer-selfcheck` checks that every GodotSharp member it and `OneLobby.Godot` use exists on the running engine) (Host / Join / Browse, code field, chat line, hold V to talk), the drop-in menu add-on `addons/onelobby_menu/` (`OneLobbyMenu.cs` + `OneLobbyMenu.tscn`, copied into a game) and `MenuDemo.tscn` (`-- --menu-selfcheck` is the local headless layout check) |
 
 ## Game loop
 

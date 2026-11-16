@@ -373,6 +373,8 @@ then run the same command without the variable: the plain run only reads the fil
 - A spectator must not keep a character: a joiner's roster says "player" for its own peer until the host's room snapshot arrives,
   and the layer never announces a local spectator, so a spawner that made the local character at once looks at the roster on
   every tick, takes the character back when it says spectator and makes it again when it says player.
+- A spawner that has no step function must leave the node's alone: a character that set its own step in `_ready` / `_Ready` / `Awake`
+  loses it if the spawner assigns "none" after adding the character (the GDScript and Godot C# spawners did).
 - A host in `"host"` mode with no step function reports it **once** (JS and C#: one exception from the first `pump()` / `Pump()`
   that needed the step, thrown after everything else in that pump has run; GDScript: one `push_error`), keeps pumping what does
   not need the step (roster, snapshots, events), does not move the players that need it, and works as soon as the step is set,

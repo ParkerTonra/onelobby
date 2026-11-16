@@ -3,7 +3,7 @@
 # with --local (the direct route, loopback only, no Nostr, nothing leaves this PC) and --netplayer-test. The joiner walks a scripted
 # path and jumps once; the host compares where its copy of the joiner's character was with the joiner's own trace and prints
 # NETPLAYER_OK or NETPLAYER_FAIL <why>. The twin of clients/gdscript/net-player-test.sh. Needs `dotnet build` of this project, the WebRTC
-# natives (fetch-webrtc.sh) and the .NET build of Godot. NO CI STEP RUNS THIS: none fetches the natives for this project, and it has never run.
+# natives (fetch-webrtc.sh) and the .NET build of Godot. NO CI STEP RUNS THIS: none fetches the natives for this project. It has run by hand on Windows with Godot 4.7.2 (NETPLAYER_OK, twice). Its WebRTC UDP sockets are bound to every address (0.0.0.0 and [::]), not only to 127.0.0.1: only the signalling TCP link is loopback-only.
 #   usage: GODOT=/path/to/godot_mono clients/dotnet/demo-godot/net-player-test.sh
 set -uo pipefail
 GODOT="${GODOT:?set GODOT to the .NET (mono) build of Godot 4.5+}"
