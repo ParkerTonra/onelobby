@@ -50,6 +50,7 @@ export function planUpdate({ target, opts, cwd }) {
   try {
     pinState = verifyPin(target);
   } catch (e) {
+    if (e instanceof CliError) throw e; // a pin key that escapes the add-on folder
     throw new CliError("bad_pin", `${PIN_PATH} is not valid JSON (${e.message}); restore it from git, or adopt the add-on again with: npx create-onelobby --into ${rel} --force`);
   }
   if (pinState.error === "no_pin")

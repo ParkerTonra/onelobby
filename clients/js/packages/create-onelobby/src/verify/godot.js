@@ -72,6 +72,7 @@ export function godotChecks() {
         try {
           pin = verifyPin(ctx.dir);
         } catch (e) {
+          if (e?.code === "bad_pin") return { status: "fail", detail: e.message, next: "Restore it from git, or run: npx create-onelobby --into . --force." };
           return { status: "fail", detail: `addons/onelobby/PIN.json is not valid JSON (${e.message}).`, next: "Restore it from git, or run: npx create-onelobby --into . --force." };
         }
         const bits = [pin.edited.length && `edited: ${pin.edited.join(", ")}`, pin.missing.length && `missing: ${pin.missing.join(", ")}`, pin.added.length && `added: ${pin.added.join(", ")}`].filter(Boolean);

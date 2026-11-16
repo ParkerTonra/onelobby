@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
-import { readZip } from "./zip.js";
+import { readZip, safeEntryName } from "./zip.js";
 
 export const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const packageVersion = () => JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8")).version;
@@ -97,6 +97,28 @@ export function buildPin({ files, commit, version = packageVersion(), webrtcNati
 }
 
 /**
+ * The pin's `files` object, checked: every key is joined under addons/onelobby/ and read, hashed or deleted, so a key must be a
+ * clean relative path (the same rule the zip reader applies to entry names: forward slashes, no empty, `.` or `..` segment,
+ * no drive letter, no leading `/`, no NUL). Throws CliError("bad_pin") naming the first bad key; touches nothing.
+ */
+export function checkPinFiles(pin) {
+  const files = pin?.files;
+  if (typeof files !== "object" || files === null || Array.isArray(files)) throw new CliError("bad_pin", `${PIN_PATH} has no "files" list; adopt the add-on again with: npx create-onelobby --into . --force`);
+  for (const [key, hash] of Object.entries(files)) {
+    let ok = !key.endsWith("/");
+    if (ok)
+      try {
+        safeEntryName(key);
+      } catch {
+        ok = false;
+      }
+    if (!ok) throw new CliError("bad_pin", `${PIN_PATH} lists ${JSON.stringify(key)}, which is not a plain relative path inside addons/onelobby/ (no "..", no absolute path, no backslash); nothing was read, written or deleted. Restore the pin from git, or adopt the add-on again with: npx create-onelobby --into . --force`);
+    if (typeof hash !== "string") throw new CliError("bad_pin", `${PIN_PATH}: the hash of ${JSON.stringify(key)} is not a string; restore the pin from git`);
+  }
+  return files;
+}
+
+/**
  * Compare a project's add-on with its PIN.json: { ok, pin, edited, missing, added }. `edited`: a pinned file whose bytes
  * (CRLF read as LF) no longer match; `missing`: pinned but gone; `added`: a file in the add-on folder the pin does not list.
  */
@@ -104,6 +126,7 @@ export function verifyPin(projectDir) {
   const pinFile = join(projectDir, ...PIN_PATH.split("/"));
   if (!existsSync(pinFile)) return { ok: false, pin: null, edited: [], missing: [], added: [], error: "no_pin" };
   const pin = JSON.parse(readFileSync(pinFile, "utf8"));
+  checkPinFiles(pin); // before any key is joined to a path
   const root = join(projectDir, "addons", "onelobby");
   const edited = [];
   const missing = [];
