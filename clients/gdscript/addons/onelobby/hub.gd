@@ -20,7 +20,7 @@ const IDLE_TIMEOUT_MS := 30000
 const RESUME_WINDOW_MS := 60000
 const MAX_MESSAGE_BYTES := 16 * 1024
 const CROCKFORD := "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-const KNOWN_TYPES := ["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name"]
+const KNOWN_TYPES := ["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "diag"]
 
 
 ## Sliding-window counter: at most `limit` events per `window_ms`.
@@ -64,6 +64,7 @@ class OLMember:
 	var token := ""
 	var ip := ""
 	var renames: OLRateWindow = null
+	var diag_rate: OLRateWindow = null
 
 
 class OLSession:
@@ -255,6 +256,7 @@ func receive(s: OLSession, text: String) -> void:
 		"host_changed": pass # a direct lobby has no migration: the host leaving ends the session
 		"path": _path_report(s, msg)
 		"set_name": _set_name(s, msg)
+		"diag": _diag(s, msg)
 
 
 # ---------------------------------------------------------------- hello / welcome
@@ -314,7 +316,7 @@ func _hello(s: OLSession, m: Dictionary) -> void:
 		"ice": ice,
 		"serverTime": int(Time.get_unix_time_from_system() * 1000.0),
 		"limits": {"maxMsg": MAX_MESSAGE_BYTES, "maxPlayers": max_players_hard},
-		"features": ["set_name"],
+		"features": ["set_name", "diag"],
 	}
 	if resumed != null:
 		w["peerId"] = resumed.peer_id
@@ -586,6 +588,32 @@ func _set_name(s: OLSession, m: Dictionary) -> void:
 	s.member.name = new_name
 	s.name = new_name
 	_broadcast_lobby(s.lobby)
+
+
+## A joiner tells the host why its link failed (spec/diagnostics.md s.7.2). The report is rebuilt from the known fields
+## (nothing else crosses), counted at most 3 per minute per peer, and forwarded to the host only, with `from` stamped here.
+func _diag(s: OLSession, m: Dictionary) -> void:
+	var lobby := s.lobby
+	var me := s.member
+	if lobby == null or me == null:
+		_error(s, "bad_request", "not in a lobby", {"field": "report"})
+		return
+	if me.peer_id == lobby.host_id:
+		_error(s, "bad_request", "the host has nobody to report to", {"field": "report"})
+		return
+	var report := OneLobbyDiagnose.clean_report(m.get("report"))
+	if report.is_empty() or JSON.stringify(m).length() > OneLobbyDiagnose.REPORT_MAX_BYTES:
+		_error(s, "bad_request", "report must be a small diagnosis report", {"field": "report"})
+		return
+	var now := _now()
+	if me.diag_rate == null:
+		me.diag_rate = OLRateWindow.new(OneLobbyDiagnose.REPORTS_PER_WINDOW, OneLobbyDiagnose.REPORT_WINDOW_MS)
+	if not me.diag_rate.try_hit(now):
+		_rate_limited(s, "diag", me.diag_rate.retry_after_ms(now))
+		return
+	var host: OLMember = lobby.find(lobby.host_id)
+	if host != null and host.session != null:
+		_send(host.session, {"t": "diag", "from": me.peer_id, "report": report})
 
 
 func _host_meta(s: OLSession, m: Dictionary) -> void:

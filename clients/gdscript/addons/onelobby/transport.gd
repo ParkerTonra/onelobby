@@ -60,9 +60,13 @@ class OLLink:
 	var is_failed := false
 	## True when the link runs through a TURN relay.
 	var relayed := false
-	## The remote end's IP address once the transport knows it, else "" (the room layer's ban check polls it; Godot's
-	## WebRTC does not expose the selected candidate pair, so the stock link leaves it empty).
-	var remote_address := ""
+	## Net log steps (spec/diagnostics.md): called with (kind, text), kind "ice", "chan" or "route"; the text holds no address.
+	var on_trace := Callable()
+
+	## What a diagnosis needs: {iceConnected: bool, relay: "none"|"pending"|"ok"|"refused"|"unreachable"|"failed"}; {} for a
+	## link that cannot tell (the lobby then diagnoses from the signaling traffic alone).
+	func facts() -> Dictionary:
+		return {}
 
 	## The initiator creates its offer (the answerer waits for apply_signal).
 	func start_offer() -> void:

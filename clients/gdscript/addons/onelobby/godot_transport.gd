@@ -104,6 +104,9 @@ class OLRtcLink:
 	## The host's address from a v0 IP code: its host candidates are also tried at this address (same UDP port).
 	var _remote_ip := ""
 	var _seen_remote := {}
+	var _turn_set := false
+	var _relay_seen := false
+	var _last_state := -1
 
 	func _init(opts: Dictionary, range_in_use := 0) -> void:
 		_initiator = bool(opts.get("initiator", false))
@@ -111,6 +114,7 @@ class OLRtcLink:
 		# relay-only (the server's path telemetry then counts it as relayed).
 		relayed = bool(opts.get("relay_only", false))
 		var ice: Array = opts.get("ice_servers", [])
+		_turn_set = OneLobbyLobby.has_relay(ice)
 		if ice.is_empty():
 			ice = [{"urls": [DEFAULT_STUN]}]
 		var config := {"iceServers": ice}
@@ -148,7 +152,22 @@ class OLRtcLink:
 		_pc.set_local_description(type, sdp)
 		_out.append({"type": type, "sdp": _relay_sdp(sdp) if relayed else sdp})
 
+	## For a diagnosis (spec/diagnostics.md s.10): whether ICE connected and what the TURN allocation did. libdatachannel
+	## reports no relay error, so a gathering that completed without a relay candidate is "failed" (refused or unreachable,
+	## not known) and the lobby asks the TURN server itself with a raw probe.
+	func facts() -> Dictionary:
+		var relay := "none"
+		if _turn_set:
+			relay = "ok" if _relay_seen else ("failed" if _pc.get_gathering_state() == WebRTCPeerConnection.GATHERING_STATE_COMPLETE else "pending")
+		return {"iceConnected": _was_connected, "relay": relay}
+
+	func _trace(kind: String, text: String) -> void:
+		if on_trace.is_valid():
+			on_trace.call(kind, text)
+
 	func _on_candidate(media: String, index: int, name: String) -> void:
+		if _is_relay(name):
+			_relay_seen = true
 		if relayed and not _is_relay(name):
 			return
 		_out.append({"candidate": name, "sdpMid": media, "sdpMLineIndex": index})
@@ -231,6 +250,9 @@ class OLRtcLink:
 			return
 		_pc.poll()
 		var st := _pc.get_connection_state()
+		if st != _last_state:
+			_last_state = st
+			_trace("ice", "connection state %d" % st)
 		if st == WebRTCPeerConnection.STATE_CONNECTED:
 			_was_connected = true
 		if st == WebRTCPeerConnection.STATE_FAILED or st == WebRTCPeerConnection.STATE_CLOSED \

@@ -28,6 +28,9 @@ step sync "${G[@]}" -s res://tests/sync.gd
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
 step room "${G[@]}" -s res://tests/room.gd
 step friendly "${G[@]}" -s res://tests/friendly.gd
+step diagnostics "${G[@]}" -s res://tests/diagnostics.gd
+step diag_hub "${G[@]}" -s res://tests/diag_hub.gd
+step diag_loopback "${G[@]}" -s res://tests/diag_loopback.gd
 step nostr_unit "${G[@]}" -s res://tests/nostr_unit.gd
 step relay_retry "${G[@]}" -s res://tests/relay_retry.gd
 step port_range "${G[@]}" -s res://tests/port_range.gd

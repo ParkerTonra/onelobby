@@ -15,6 +15,10 @@ signal peer_joined(peer: Dictionary)
 signal peer_ready(peer: Dictionary)
 ## reason: left, timeout, kicked, disconnected, ...
 signal peer_left(peer: Dictionary, reason: String)
+## Host only: a joiner that could not connect told you why (spec/diagnostics.md s.7.3). `info`: {peer, name, cause, stage,
+## elapsedMs, relaySet, natType?, candidateTypes, clientVersion, message (the sentence the joiner saw), hint (what you can
+## do), line (one line for a host screen: "Sam: strict NAT, no relay set, stopped at the connection check after 15 s.")}.
+signal peer_diagnosis(info: Dictionary)
 ## Host only: a joiner never got its link open ("timeout" after ready_timeout_ms, or the reason it left with).
 signal peer_failed(peer: Dictionary, reason: String)
 ## Host only: an approval lobby asks whether this peer may join; answer with approve().
@@ -389,6 +393,7 @@ func _require_host(what: String) -> bool:
 # ---- start and links -----------------------------------------------------------------------------------------------
 
 func _start() -> void:
+	_diag_start()
 	if is_host:
 		is_ready = true
 		if mode == "lockstep":
@@ -468,6 +473,7 @@ func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void
 		"remote_id": rec.id, "initiator": initiator, "ice_servers": _c.ice, "relay_only": relay_only or _c.relay_only,
 		"port_range": _c.port_range, "remote_ip": _c.remote_ip,
 	})
+	_diag_link(rec)
 	if rec.link is OneLobbyGodotTransport.OLRtcLink and rec.link.fail_reason == "port_range_full":
 		_c.raise_error("ice_failed", port_range_full_message(_c.port_range))
 	rec.last_rx_ms = now_ms()
@@ -543,6 +549,7 @@ func _pump() -> void:
 		if rec.link == null or _closed:
 			continue
 		for sig in rec.link.take_signals():
+			_diag_note_signal("out", rec.id, sig)
 			_c.send_signaling(OneLobbySignaling.signal_to(rec.id, sig))
 		if rec.link.is_open and not rec.open_handled:
 			rec.open_handled = true
@@ -609,15 +616,11 @@ func _check_ready_timer(now: int) -> void:
 		# the direct attempt stalled: dial the host ourselves through the TURN relay (a host answers an offer)
 		_ready_deadline_ms = now + _ready_retry_budget_ms
 		_ready_retry_budget_ms = 0
+		_diag_retry()
 		_connect_peer(_peers[_host_id], true, true)
 		return
 	_ready_deadline_ms = 0
-	var msg := ice_failed_message(has_relay(_c.ice), _c.remote_ip != "")
-	_c.raise_error("ice_failed", msg)
-	if _closed:
-		return
-	_c.send_signaling(OneLobbySignaling.simple("leave"))
-	_end("ice_failed")
+	_give_up_connecting()
 
 
 func _check_peer_watches(now: int) -> void:
@@ -671,6 +674,8 @@ func _allow_raw(from: int) -> bool:
 
 func _on_link_open(rec: OLPeerRec) -> void:
 	# telemetry (the server counts relayed vs direct): one report per connection
+	_diag_log("chan", "link to peer %d open" % rec.id)
+	_diag_log("route", "relay" if rec.link.relayed else "direct")
 	_c.send_signaling(OneLobbySignaling.path(rec.link.relayed))
 	if is_host:
 		if _epoch > 0:
@@ -850,6 +855,8 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 			var p: Variant = e.get("peer")
 			if p is Dictionary:
 				join_requested.emit({"peer_id": OneLobbySignaling.i(p, "peerId"), "name": OneLobbySignaling.s(p, "name"), "ping_ms": 0, "relayed": false})
+		"diag":
+			_diag_on_report(e)
 		"signal":
 			var from := OneLobbySignaling.i(e, "from")
 			var sig := OneLobbySignaling.signal_of(e)
@@ -900,6 +907,7 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 
 
 func _deliver_signal(rec: OLPeerRec, sig: Dictionary) -> void:
+	_diag_note_signal("in", rec.id, sig)
 	var is_offer := str(sig.get("type", "")) == "offer"
 	if rec.link == null:
 		if not is_offer or is_host:
@@ -1292,3 +1300,219 @@ func _close() -> void:
 		(l[0] as OneLobbyTransport.OLLink).close()
 	_lingering.clear()
 	_c._lobby_closed(self)
+
+
+# ---- diagnostics (spec/diagnostics.md): facts from the signaling traffic and the link, the report, the host's event -----
+
+var _diag_started_ms := 0
+var _diag_seen := {"local": [], "remote": []}
+var _diag_negotiated := false
+var _diag_gave_up := false
+var _diag_retried := false
+var _diag_probe := "" ## "", "running", or the probe's answer ("ok", "refused", "unreachable", "unknown")
+var _diag_at := {} # host: peer id -> when its last report was accepted
+var _diag_cand_re: RegEx = null
+
+
+func _diag_log(kind: String, text: String, addr := "", code := "") -> void:
+	_c.get_net_log().add(kind, text, addr, code)
+
+
+func _diag_start() -> void:
+	_diag_started_ms = now_ms()
+	_diag_log("lobby", "%s as peer %d, host is peer %d, %d in the roster" % ["hosting" if is_host else "joined", local_peer_id, _host_id, _peers.size()])
+
+
+func _diag_link(rec: OLPeerRec) -> void:
+	if rec.link != null:
+		rec.link.on_trace = _diag_log
+
+
+func _diag_retry() -> void:
+	_diag_start_probe()
+	_diag_retried = true
+	_diag_log("retry", "direct attempt stalled: dialing the host again through the relay only")
+
+
+## Counts the candidate types in a signal that crosses the host link (the facts `diagnose` takes) and logs the step.
+func _diag_note_signal(dir: String, peer_id: int, sig: Dictionary) -> void:
+	var lines: PackedStringArray = []
+	if sig.has("sdp"):
+		_diag_negotiated = true
+		_diag_log("sdp", "%s %s" % [dir, str(sig.get("type", ""))])
+		for l in str(sig["sdp"]).split("\n"):
+			var t := l.strip_edges()
+			if t.begins_with("a=candidate:"):
+				lines.append(t.substr(2))
+	elif sig.has("candidate"):
+		lines.append(str(sig["candidate"]))
+	if _diag_cand_re == null:
+		_diag_cand_re = RegEx.create_from_string("^(?:a=)?candidate:\\S+ [0-9]+ \\S+ [0-9]+ (\\S+) ([0-9]+) typ (host|srflx|prflx|relay)\\b")
+	for line in lines:
+		var m := _diag_cand_re.search(line)
+		if m == null:
+			continue
+		var type := "srflx" if m.get_string(3) == "prflx" else m.get_string(3)
+		if peer_id == _host_id and not is_host:
+			var list: Array = _diag_seen["local" if dir == "out" else "remote"]
+			if not list.has(type):
+				list.append(type)
+		_diag_log("cand", "%s %s" % [dir, type], "%s:%s" % [m.get_string(1), m.get_string(2)])
+
+
+func _diag_host_facts() -> Dictionary:
+	if _peers.has(_host_id) and _peers[_host_id].link != null:
+		return _peers[_host_id].link.facts()
+	return {}
+
+
+func _diag_reached() -> String:
+	if _peers.has(_host_id) and _peers[_host_id].link != null:
+		var l: OneLobbyTransport.OLLink = _peers[_host_id].link
+		if l.is_open:
+			return "channels"
+		if bool(l.facts().get("iceConnected", false)):
+			return "ice"
+	return "offer" if _diag_negotiated else "joined"
+
+
+func _diag_relay() -> String:
+	if not has_relay(_c.ice):
+		return "none"
+	var seen: Array = _diag_seen["local"]
+	if seen.has("relay"):
+		return "ok"
+	if _diag_probe == "refused" or _diag_probe == "unreachable":
+		return _diag_probe
+	return str(_diag_host_facts().get("relay", "pending"))
+
+
+static func _diag_sorted(types: Array) -> Array:
+	var out: Array = []
+	for t: String in ["host", "srflx", "relay"]:
+		if types.has(t):
+			out.append(t)
+	return out
+
+
+func _diag_joiner_facts(error: String) -> Dictionary:
+	var stun := false
+	for s: Variant in _c.ice:
+		if s is Dictionary:
+			var urls: Variant = (s as Dictionary).get("urls", [])
+			for u: Variant in (urls if urls is Array else [urls]):
+				if str(u).to_lower().begins_with("stun:") or str(u).to_lower().begins_with("stuns:"):
+					stun = true
+	return {
+		"side": "joiner", "route": _c.diag_route(), "error": error, "reached": _diag_reached(),
+		"elapsedMs": maxi(0, now_ms() - _diag_started_ms), "versions": null, "relaysUp": null, "stun": stun,
+		"relay": _diag_relay(), "local": _diag_sorted(_diag_seen["local"]), "remote": _diag_sorted(_diag_seen["remote"]),
+		"retried": _diag_retried, "nat": OneLobbyDiagnose.nat_fact(_c.last_check), "heard": null,
+	}
+
+
+## The stall with a relay set and no relay candidate: ask the TURN server itself why (a refused login or silence), where
+## the link cannot tell. A coroutine; `_diag_probe` holds "running" and then the answer.
+func _diag_start_probe() -> void:
+	if _diag_probe != "" or is_host or not _c.relay_probe:
+		return
+	var f := _diag_host_facts()
+	var relay := str(f.get("relay", ""))
+	if relay != "failed" and relay != "pending":
+		return # links without facts (or with a relay candidate) are not probed
+	var turn: Dictionary = {}
+	for s: Variant in _c.ice:
+		if s is Dictionary and OneLobbyLobby.has_relay([s]):
+			turn = s
+			break
+	if turn.is_empty() or _c.get_tree() == null:
+		return
+	_diag_probe = "running"
+	_diag_run_probe(turn)
+
+
+func _diag_run_probe(turn: Dictionary) -> void:
+	var r: String = await OneLobbyConnectionCheck.probe_relay(_c.get_tree(), turn)
+	_diag_probe = r
+	_diag_log("diag", "relay probe " + r)
+
+
+## The ready timer ran out: wait for the relay probe (at most a moment) so a refused login is told from a silent relay,
+## then report why.
+func _give_up_connecting() -> void:
+	_diag_start_probe()
+	if _diag_probe == "running" and not _closed:
+		var t0 := Time.get_ticks_msec()
+		while _diag_probe == "running" and Time.get_ticks_msec() - t0 < 2500 and not _closed and _c.is_inside_tree():
+			await _c.get_tree().process_frame
+	_finish_giving_up()
+
+
+func _finish_giving_up() -> void:
+	if _diag_gave_up or _closed or is_ready:
+		return
+	_diag_gave_up = true
+	var msg := ice_failed_message(has_relay(_c.ice), _c.remote_ip != "")
+	var facts := _diag_joiner_facts("ice_failed")
+	var d := OneLobbyDiagnose.diagnose(facts)
+	_diag_log("diag", "cause %s stage %s after %d ms" % [d["cause"], d["stage"], int(facts["elapsedMs"])])
+	_diag_log("error", "ice_failed", "", "ice_failed")
+	if _diag_send_report(d, facts) and _c.is_inside_tree():
+		# the report must be on the wire, and read by the host's hub, before the leave closes the socket
+		await _c.flush_signaling(500)
+		for _i in 10:
+			await _c.get_tree().process_frame
+	if _closed:
+		return
+	_c.raise_error("ice_failed", msg, {"diagnosis": d})
+	if _closed:
+		return
+	_c.send_signaling(OneLobbySignaling.simple("leave"))
+	_end("ice_failed")
+
+
+## Joiner: tell the host the cause over the signaling path (hubs that list the `diag` feature only), once.
+func _diag_send_report(d: Dictionary, facts: Dictionary) -> bool:
+	if not _c.report_to_host or is_host or not _c.features.has("diag"):
+		return false
+	var nat: Dictionary = _c.last_check
+	var report := {"cause": d["cause"], "stage": d["stage"], "elapsedMs": int(facts["elapsedMs"]), "relaySet": str(facts["relay"]) != "none"}
+	if not nat.is_empty():
+		if str(nat.get("udp", "")) == "blocked":
+			report["natType"] = "blocked"
+		elif str(nat.get("natType", "unknown")) != "unknown":
+			report["natType"] = nat["natType"]
+	report["candidateTypes"] = {"local": facts["local"], "remote": facts["remote"]}
+	report["clientVersion"] = OneLobbyClient.LIB_VERSION
+	var clean := OneLobbyDiagnose.clean_report(report)
+	if clean.is_empty():
+		return false
+	_c.send_signaling(JSON.stringify({"t": "diag", "report": clean}))
+	_diag_log("diag", "report sent " + str(d["cause"]))
+	return true
+
+
+## Host: a joiner diagnosis came through the hub (`diag{from, report}`).
+func _diag_on_report(e: Dictionary) -> void:
+	if not is_host:
+		return
+	var from := OneLobbySignaling.i(e, "from")
+	if from == local_peer_id or not _peers.has(from):
+		return
+	var report := OneLobbyDiagnose.clean_report(e.get("report"))
+	if report.is_empty():
+		return
+	var now := now_ms()
+	if _diag_at.has(from) and now - int(_diag_at[from]) < OneLobbyDiagnose.REPORT_HOST_GAP_MS:
+		return
+	_diag_at[from] = now
+	var x := OneLobbyDiagnose.explain_cause(report["cause"], {"stage": report["stage"], "elapsedMs": report["elapsedMs"]})
+	var peer_name: String = (_peers[from] as OLPeerRec).name
+	_diag_log("diag", "report from peer %d: %s at %s" % [from, x["cause"], report["stage"]])
+	var info := report.duplicate(true)
+	info["peer"] = _to_peer(_peers[from])
+	info["name"] = peer_name
+	info["message"] = x["message"]
+	info["hint"] = x["hostHint"]
+	info["line"] = OneLobbyDiagnose.host_line(peer_name, report["cause"], report["stage"], report["elapsedMs"])
+	peer_diagnosis.emit(info)

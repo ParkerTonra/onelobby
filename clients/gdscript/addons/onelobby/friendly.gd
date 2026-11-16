@@ -78,6 +78,17 @@ static func describe_error(err: Variant) -> Dictionary:
 	_init_regex()
 	var code := ""
 	var data := {}
+	# a connect failure that knows why (`last_error.diagnosis`) says why instead of the generic line for its code
+	if err is Dictionary and (err as Dictionary).get("diagnosis") is Dictionary:
+		var dx: Dictionary = (err as Dictionary)["diagnosis"]
+		var dc: Variant = (err as Dictionary).get("code")
+		if typeof(dc) == TYPE_STRING and not str(dc).is_empty() and dx.has("cause") and dx.has("message"):
+			var out := {"code": str(dc), "message": str(dx["message"]), "cause": str(dx["cause"])}
+			if not str(dx.get("hint", "")).is_empty():
+				out["hint"] = str(dx["hint"])
+			if dx.has("stage"):
+				out["stage"] = str(dx["stage"])
+			return out
 	if typeof(err) == TYPE_STRING or typeof(err) == TYPE_STRING_NAME:
 		var m := _bare_re.search(str(err).strip_edges())
 		if m != null:
