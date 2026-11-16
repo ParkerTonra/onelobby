@@ -397,8 +397,8 @@ sends and steps no input before that. A `Shoot` with `View` 0 gets your render t
 
 Things that differ from JS, on purpose: states are structs (no allocation per frame, copied by value), `Local` and `Get` are
 `PlayerState?` instead of `undefined`, `OnAction` is one event for every action, `SetLocalState` takes the whole state (JS merges a
-patch), and the carry-on, the render delay and the hit rewind use the same numbers. A handler of `OnAction` that throws propagates
-out of `Pump()` (JS rethrows it later and goes on).
+patch), and the carry-on, the render delay and the hit rewind use the same numbers. A handler of any layer event that throws does not stop `Pump()`: the other handlers run, the pump finishes, and the first
+exception is rethrown at the end of `Pump()` (later ones in the same pump are dropped), as in JS.
 
 **What is proven, in these words.** The C# layer is proven on an in-memory rig with a virtual clock (`NetPlayerTests`,
 `NetPlayerHostTests`, `NetPlayerVectorTests` in `clients/dotnet/OneLobby.Replication.Tests`: D1 to D9 and every case of

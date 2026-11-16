@@ -431,10 +431,24 @@ namespace OneLobby.Replication
             return secs > 0 ? ((b.Sent - a.Sent) / secs, (b.Received - a.Received) / secs) : (0, 0);
         }
 
-        /// <summary>Advance everything: call every frame instead of <see cref="ReplicationSession.Pump"/>. Runs the due ticks, snapshots, events and corrections.</summary>
+        /// <summary>
+        /// Advance everything: call every frame instead of <see cref="ReplicationSession.Pump"/>. Runs the due ticks, snapshots, events and corrections.
+        /// <para>A handler of any event of this class that throws does not stop the pump: every other handler still runs, the whole pump finishes
+        /// (no event is lost, no state is half applied), and then the FIRST exception is rethrown at the end of <c>Pump()</c>. Exceptions after
+        /// the first in the same pump are dropped. Events raised outside <c>Pump()</c> (by <see cref="Action"/>, <see cref="TeleportPlayer"/> ...)
+        /// rethrow the first exception when the call returns.</para>
+        /// </summary>
         public void Pump()
         {
             if (_disposed) return;
+            _inPump = true;
+            try { PumpCore(); }
+            finally { _inPump = false; }
+            Rethrow();
+        }
+
+        private void PumpCore()
+        {
             var now = _lobby.NowMs;
             var elapsed = now - _lastPumpMs;
             _lastPumpMs = now;
@@ -443,7 +457,7 @@ namespace OneLobby.Replication
             while (Session.Clock.TryAdvance())
             {
                 var tick = Session.Clock.Tick;
-                Tick?.Invoke(tick);
+                Fire(Tick, tick);
                 if (IsHost) HostTick(tick); else ClientTick();
                 FlushOutboxes();
             }
@@ -465,6 +479,40 @@ namespace OneLobby.Replication
         }
 
         // ================================================================== internals ==================================
+
+        private bool _inPump;
+        private System.Runtime.ExceptionServices.ExceptionDispatchInfo? _pending;
+
+        // Every handler runs even when an earlier one throws; the first exception is kept and rethrown by Rethrow (end of Pump, or at once
+        // for an event raised outside Pump). Note: GetInvocationList allocates a small array per raise.
+        private void Fire<T>(Action<T>? h, T a)
+        {
+            if (h == null) return;
+            foreach (var d in h.GetInvocationList())
+            {
+                try { ((Action<T>)d)(a); }
+                catch (Exception e) { _pending ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e); }
+            }
+            if (!_inPump) Rethrow();
+        }
+
+        private void Fire(Action<int, LimitKind>? h, int a, LimitKind b)
+        {
+            if (h == null) return;
+            foreach (var d in h.GetInvocationList())
+            {
+                try { ((Action<int, LimitKind>)d)(a, b); }
+                catch (Exception e) { _pending ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e); }
+            }
+            if (!_inPump) Rethrow();
+        }
+
+        private void Rethrow()
+        {
+            var p = _pending;
+            _pending = null;
+            p?.Throw();
+        }
 
         private void RequireHost()
         {
@@ -513,7 +561,7 @@ namespace OneLobby.Replication
                 _history.Forget(new NetId((uint)peer));
                 _hostPlayers.Remove(peer);
                 _relayDedupe.Remove(peer);
-                if (_known.Remove(peer)) PlayerLeft?.Invoke(peer);
+                if (_known.Remove(peer)) Fire(PlayerLeft, peer);
             }
         }
 
@@ -534,7 +582,7 @@ namespace OneLobby.Replication
             p.EntityId = Session.Spawn(PlayerWire.PlayerTypeId, p.Peer, p);
             p.Spawned = true;
             _known[p.Peer] = p.EntityId;
-            PlayerJoined?.Invoke(p.Peer);
+            Fire(PlayerJoined, p.Peer);
         }
 
         private void ClientRoster()
@@ -546,7 +594,7 @@ namespace OneLobby.Replication
                 if (_known.TryGetValue(kv.Key, out var cur) && cur == kv.Value) continue;
                 var fresh = !_known.ContainsKey(kv.Key);
                 _known[kv.Key] = kv.Value;
-                if (fresh) PlayerJoined?.Invoke(kv.Key);
+                if (fresh) Fire(PlayerJoined, kv.Key);
             }
             _scratchPeers.Clear();
             foreach (var peer in _known.Keys) if (!_present.ContainsKey(peer)) _scratchPeers.Add(peer);
@@ -555,7 +603,7 @@ namespace OneLobby.Replication
                 _known.Remove(peer);
                 _relayDedupe.Remove(peer);
                 if (peer == LocalPeerId) _predictor = null;
-                PlayerLeft?.Invoke(peer);
+                Fire(PlayerLeft, peer);
             }
         }
 
@@ -650,7 +698,7 @@ namespace OneLobby.Replication
                 p.State.Teleport = (prev.Teleport + NetPlayer.HostTeleportStep) % PlayerWire.TeleportModulo;
                 p.Awaiting = true;
                 p.LastAcceptTick = tick;
-                LimitViolation?.Invoke(p.Peer, kind);
+                Fire(LimitViolation, p.Peer, kind);
                 return;
             }
             p.State = s;
@@ -710,7 +758,7 @@ namespace OneLobby.Replication
                     _localState = auth;
                     _haveLocal = true;
                     Stats.Corrections++;
-                    Corrected?.Invoke(auth);
+                    Fire(Corrected, auth);
                 }
                 return;
             }
@@ -885,7 +933,7 @@ namespace OneLobby.Replication
         private void Play(in ActionEvent e)
         {
             Stats.ActionsPlayed++;
-            OnAction?.Invoke(e);
+            Fire(OnAction, e);
         }
     }
 }

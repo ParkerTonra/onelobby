@@ -22,10 +22,11 @@ namespace OneLobby.Replication.Tests
         }
 
         public static Scene Make(PlayerAuthority mode, double latencyMs = 100, double jitterMs = 20, double loss = 0.03, PlayerLimits? limits = null,
-            ReplicationConfig? session = null, string[]? omit = null, int spectators = 0, bool joinPeers = true, Func<int, PlayerState>? spawn = null, int seed = 1234)
+            ReplicationConfig? session = null, string[]? omit = null, int spectators = 0, bool joinPeers = true, Func<int, PlayerState>? spawn = null, int seed = 1234, bool precise = false)
         {
             var cfg = (session ?? new ReplicationConfig()) with { AdaptiveDelay = true };
             var s = new Scene { Mode = mode, Rig = new Rig(cfg, latencyMs, loss, jitterMs, seed) };
+            s.Rig.PreciseArrival = precise;
             var o = new NetPlayersOptions { Authority = mode, Step = WalkStep, Limits = limits ?? new PlayerLimits(null, null, null, null), Omit = omit ?? Array.Empty<string>(), Spawn = spawn };
             s.Host = s.Rig.StartHostLayer(o, spectators);
             s.Hl = s.Host.Layer!;

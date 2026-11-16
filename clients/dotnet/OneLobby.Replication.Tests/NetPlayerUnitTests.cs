@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using OneLobby.Replication;
 using Xunit;
@@ -76,6 +77,49 @@ namespace OneLobby.Replication.Tests
             Assert.Equal(4, s.Hl.Stats.ActionsRejected);
             Assert.Throws<InvalidOperationException>(() => s.Al.Action(PlayerAction.Emote, new ActionArgs { Emote = 1 }));
             Assert.Throws<InvalidOperationException>(() => s.Al.Action(PlayerAction.Hit));
+        }
+
+        private static (List<ActionEvent> Seen, PlayerState HostA, long Played, int Throws) ThrowingRun(bool withThrower)
+        {
+            var s = Scene.Make(PlayerAuthority.Owner, loss: 0, jitterMs: 0);
+            s.Rig.CatchPumpErrors = true;
+            s.Drive();
+            s.Rig.Run(2);
+            var seen = new List<ActionEvent>();
+            var first = true;
+            if (withThrower) s.Bl.OnAction += _ => { if (first) { first = false; throw new InvalidOperationException("handler"); } };
+            s.Bl.OnAction += e => seen.Add(e);
+            // three events in one tick of A: they reach B in the same pump
+            s.Al.Tick += _ => { };
+            s.Al.Action(PlayerAction.Jump); s.Al.Action(PlayerAction.Reload); s.Al.Action(PlayerAction.Emote, new ActionArgs { Emote = 3 });
+            s.Rig.Run(1);
+            return (seen, s.Hl.Latest(s.A.PeerId)!.Value, s.Bl.Stats.ActionsPlayed, s.Rig.PumpErrors.Count);
+        }
+
+        [Fact]
+        public void AThrowingHandlerDoesNotBreakThePumpAndTheFirstExceptionIsRethrownOnce()
+        {
+            var plain = ThrowingRun(false);
+            var thrown = ThrowingRun(true);
+            Assert.Equal(0, plain.Throws);
+            Assert.Equal(1, thrown.Throws);
+            Assert.Equal(3, plain.Seen.Count);
+            Assert.Equal(plain.Seen.Select(e => e.Name), thrown.Seen.Select(e => e.Name)); // all three reached the second handler, in order
+            Assert.Equal(plain.HostA, thrown.HostA);                                         // the layer ended in the same state
+            Assert.Equal(plain.Played, thrown.Played);
+        }
+
+        [Fact]
+        public void AnEventRaisedOutsidePumpRethrowsWhenTheCallReturns()
+        {
+            var s = Scene.Make(PlayerAuthority.Owner);
+            s.Drive();
+            s.Rig.Run(2);
+            var n = 0;
+            s.Al.OnAction += _ => throw new InvalidOperationException("outside");
+            s.Al.OnAction += _ => n++;
+            Assert.Throws<InvalidOperationException>(() => s.Al.Action(PlayerAction.Jump));
+            Assert.Equal(1, n);
         }
 
         [Fact]

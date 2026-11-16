@@ -104,7 +104,7 @@ namespace OneLobby.Replication.Tests
         private (List<double> Errors, List<double> Inside, List<double> Plain, int Past, double LimitMs) ShootAtStrafer(PlayerAuthority mode, double? maxRewindMs)
         {
             var cfg = maxRewindMs is double m ? new ReplicationConfig(MaxRewindMs: m) : null;
-            var s = Scene.Make(mode, latencyMs: 60, session: cfg);
+            var s = Scene.Make(mode, latencyMs: 60, session: cfg, precise: true);
             s.Drive(); // A is the target, strafing
             s.Rig.Run(4);
             var limitMs = s.Hl.Session.Config.MaxRewindMs;
@@ -286,7 +286,7 @@ namespace OneLobby.Replication.Tests
         }
 
         [Fact]
-        public void APlayerWithASingleRecordIsHeldWhereItIsAndAPlayerNotInTheWorldIsAbsent()
+        public void APlayerThatDoesNotMoveIsHeldAtItsSpawnPointAndAPlayerNotInTheWorldIsAbsent()
         {
             var cfg = new ReplicationConfig(AdaptiveDelay: true);
             var rig = new Rig(cfg, 100, 0, 0);
@@ -294,7 +294,7 @@ namespace OneLobby.Replication.Tests
             var host = rig.StartHostLayer(new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = Scene.WalkStep, Spawn = peer => new PlayerState { X = 50 + peer } });
             var a = rig.JoinLayer("a", o);
             var hl = host.Layer!;
-            // the layer has made A's player by now; A sends no input, so every record is the spawn point and the sampled state is held there
+            // A sends no input, so every record is the spawn point: the sampled state is the spawn point (this is not a one-record case: Join steps past the first record)
             Assert.True(hl.TryGet(a.PeerId, out var v));
             Assert.Equal(50 + a.PeerId, v.X, 1);
             Assert.True(Math.Abs(v.Vx) < 0.1);

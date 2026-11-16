@@ -85,6 +85,11 @@ namespace OneLobby.Replication.Tests
         /// <summary>Host sim step, run once per host tick before the snapshot.</summary>
         public Action<uint>? HostTick;
         public int FrameMs = 16;
+        /// <summary>False (default): a message is read at the end of the frame it became due in. True: at its due millisecond, as the JS rig does.</summary>
+        public bool PreciseArrival;
+        /// <summary>False (default): an exception out of a layer's Pump fails the test. True: it is collected in <see cref="PumpErrors"/> and the frame goes on.</summary>
+        public bool CatchPumpErrors;
+        public readonly List<Exception> PumpErrors = new();
         /// <summary>Peers whose frames are skipped (a host that stopped sending, a client that went away).</summary>
         public readonly HashSet<Player> Frozen = new();
         /// <summary>Virtual time in ms.</summary>
@@ -168,12 +173,23 @@ namespace OneLobby.Replication.Tests
         /// <summary>One render frame on every peer: pump, run due ticks (host: sim + snapshot; client: inputs).</summary>
         public void Step()
         {
-            Net.Advance(FrameMs);
+            if (PreciseArrival)
+            {
+                // the JS rig fires each message at its due millisecond; do the same: pump every peer's lobby after each ms of the frame
+                for (var ms = 1; ms < FrameMs; ms++) { Net.Advance(1); foreach (var q in Players.ToList()) if (!Frozen.Contains(q)) q.Client.Pump(); }
+                Net.Advance(1);
+            }
+            else Net.Advance(FrameMs);
             foreach (var p in Players.ToList())
             {
                 if (p.Session == null) { p.Client.Pump(); continue; }
                 if (Frozen.Contains(p)) continue;
-                if (p.Layer != null) { p.Layer.Pump(); continue; }
+                if (p.Layer != null)
+                {
+                    try { p.Layer.Pump(); }
+                    catch (Exception e) when (CatchPumpErrors) { PumpErrors.Add(e); }
+                    continue;
+                }
                 p.Session.Pump();
                 if (p.Session.IsHost)
                 {

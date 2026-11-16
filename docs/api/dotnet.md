@@ -1977,7 +1977,7 @@ public sealed class NetPlayers : IDisposable
     public double RewindTick(uint view);
     /// Replication bytes per second to and from one peer over about the last second. Host: any client. Client: the host.
     public (double Sent, double Received) BytesPerSecond(int peerId);
-    /// Advance everything: call every frame instead of ReplicationSession.Pump. Runs the due ticks, snapshots, events and corrections.
+    /// Advance everything: call every frame instead of ReplicationSession.Pump. Runs the due ticks, snapshots, events and corrections. A handler of any event of this class that throws does not stop the pump: every other handler still runs, the whole pump finishes (no event is lost, no state is half applied), and then the FIRST exception is rethrown at the end of Pump(). Exceptions after the first in the same pump are dropped. Events raised outside Pump() (by Action, TeleportPlayer ...) rethrow the first exception when the call returns.
     public void Pump();
     /// Stop listening. The session stays yours.
     public void Dispose();
