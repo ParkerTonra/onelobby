@@ -140,6 +140,8 @@ lobbyServer: "" })` does not.
 
 `fromConfig(json, overrides?)` takes the **parsed object**, never a path, a URL or a JSON string: the page passes `await (await fetch("/onelobby.json")).json()`; the Node host and the game's Node tests pass `JSON.parse(readFileSync(path.join(__dirname, "onelobby.json"), "utf8"))` (ES module: `new URL("./onelobby.json", import.meta.url)`). A game's own page or Node helper that used to take a hand-built option object (or the kit class, so a test can hand in its own) takes that parsed `config` instead and calls `fromConfig(config, { displayName })` itself; a test that needs another value copies the object first (`{ ...cfg, game: { ...cfg.game, netVersion: "99" } }`).
 
+**A default in your own wrapper beats the file.** `startOneLobby({ port = 47810, openPort = true, nostr = true })` hands those literals to `hostDirect`, so the file's `hosting.directPort`, `openPort` and `nostr` are never read: default them to `undefined` and pass an option only when the caller or an env var set it (`DIRECT_PORT=0` then still works per run). A helper that stops retrying by error code (`joinStopNotice(code)`) takes the error instead (`joinStopNotice(err)`, `describeError(err).message`); the page gets `describeError` from `/onelobby.bundle.js`, Node code from `onelobby`, and a page module that Node tests import is handed the function (a parameter or a setter) instead of importing a URL. With `port: 0` the host line prints the port and no busy range.
+
 The `<meta name="onelobby">` marker lets one `index.html` work both from the host's port (join through OneLobby) and
 from any other web server you already run. If the game already shares one page function between its own web server and
 OneLobby, pass that same function as `page`.
