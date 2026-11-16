@@ -28,6 +28,7 @@ func _check_player(hl: OneLobbyLobby, gl: OneLobbyLobby) -> bool:
 		spawners.append(sp)
 	var guest_peer := gl.local_peer_id
 	var mine: Variant = spawners[1].character_of(guest_peer) # the joiner's own player, on the joiner
+	mine.set_physics_process(false) # the test places this player itself: the character's own script (keys, gravity, no floor here) stays out of it
 	var appeared := func() -> bool:
 		var c: Variant = spawners[0].character_of(guest_peer) # the same player as the host sees it
 		return c != null and c.visible # hidden until its first state has arrived

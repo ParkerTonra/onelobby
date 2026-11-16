@@ -32,6 +32,7 @@
         }
         var guestPeer = _guest!.LocalPeerId;
         var me = (Player)spawners[1].CharacterOf(guestPeer)!; // the joiner's own player, on the joiner
+        me.SetPhysicsProcess(false); // the test places this player itself: the character's own script (keys, gravity, no floor here) stays out of it
         if (!await Until(() => spawners[0].CharacterOf(guestPeer) is Player { Visible: true })) return PlayerFail("the joiner's player never appeared on the host");
         var copy = (Player)spawners[0].CharacterOf(guestPeer)!; // the same player as the host sees it
         var jumps = 0;
