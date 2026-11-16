@@ -125,6 +125,24 @@ describe("lockstep end to end (memory transport, gridpaint)", () => {
     return { r, kitC, la, lb, A: new Player("alice", la), B: new Player("bob", lb) };
   }
 
+  it("a lobby that idles past the 3 s silent-host window, then starts, keeps its host and its frames", async () => {
+    const { r, la, lb, A, B } = await trio();
+    const events: string[] = [];
+    lb.on("sessionEnded", (why) => events.push("sessionEnded " + why));
+    lb.on("peerLeft", (p, why) => events.push(`peerLeft ${p.peerId} ${why}`));
+    lb.on("hostChanged", (id) => events.push("hostChanged " + id));
+    await play(r.clock, [A, B], 5000); // lobby phase: no frames flow, longer than the joiner's silent-host window
+    // line the start up so the joiner's 250 ms watchdog runs before the host's first frame (50 ms later) can arrive
+    await play(r.clock, [A, B], 250 - (r.clock.now() % 250) + 200);
+    await la.start();
+    await play(r.clock, [A, B], 1000);
+    expect(events).toEqual([]); // the joiner never ran the host-loss rule
+    expect(lb.isHost).toBe(false);
+    expect(lb.phase).toBe("in_game");
+    expect(B.g.tick).toBeGreaterThanOrEqual(15);
+    expect(B.g.tick).toBeGreaterThanOrEqual(A.g.tick - 2);
+  });
+
   it("two peers play 10 s of gridpaint and every hash matches", async () => {
     const { r, la, A, B } = await trio();
     await la.start();
