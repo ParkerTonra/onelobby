@@ -1,12 +1,14 @@
 # Networked player, version 1 (on top of replication)
 
-Status: **JS and GDScript.** The reference implementation is `clients/js/packages/client/src/replication/` (`player-wire.ts`: the
+Status: **JS, GDScript and C#.** The reference implementation is `clients/js/packages/client/src/replication/` (`player-wire.ts`: the
 tables as code, `player.ts`: the layer, `helpers.ts`: `Reconciler`, `PredictionSmoother`, `HistoryRing`). The GDScript client has it
 too (`clients/gdscript/addons/onelobby/`: `net_player_wire.gd`, `net_player_codec.gd`, `net_players.gd`, `reconciler.gd`,
 `prediction_smoother.gd`, `history_ring.gd`, and the Godot node `net_player.gd` with its spawner `net_player_spawner.gd`), built from
-this document and `spec/vectors/net-player.json`, which it passes in full. The C# client and the Unity `NetPlayer` component come after.
+this document and `spec/vectors/net-player.json`, which it passes in full. The C# client has it too (`clients/dotnet/OneLobby.Replication/`: `PlayerWire.cs`,
+`PlayerCodec.cs`, `NetPlayers.cs`, with `Helpers.cs` for `Reconciler`, `PredictionSmoother` and `HistoryRing`), also built from this document and the vectors,
+which it passes in full (`NetPlayerVectorTests`). The Unity `NetPlayer` component and a Godot C# node come after.
 
-**Proven only on an in-memory network with a virtual clock** (`RepRig` in JS, `tests/replication_rig.gd` in GDScript: latency, jitter and
+**Proven only on an in-memory network with a virtual clock** (`RepRig` in JS, `tests/replication_rig.gd` in GDScript, `Rig` in C#: latency, jitter and
 loss on a fake link) and, for the GDScript sample, by two headless processes on one PC (CI). No real link and no real game engine window
 have run it, and nobody has seen a networked player move on a screen. The smoothing numbers below are the plan's numbers
 (`docs/design/one-shot.md` section 7.2), not tuned by eye.

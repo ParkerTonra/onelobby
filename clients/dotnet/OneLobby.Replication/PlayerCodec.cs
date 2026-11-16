@@ -199,7 +199,7 @@ namespace OneLobby.Replication
 
         // ---- input preset (host-decides mode) ------------------------------------------------------------------------
 
-        public void WriteInput(NetWriter w, in PlayerInput i)
+        public void WriteInput(NetWriter w, in NetPlayerInput i)
         {
             w.WriteQuantized((float)i.MoveX, -1, 1, MoveBits);
             w.WriteQuantized((float)i.MoveY, -1, 1, MoveBits);
@@ -209,9 +209,9 @@ namespace OneLobby.Replication
             for (var k = 0; k < 8; k++) w.WriteBool((b >> k & 1) != 0);
         }
 
-        public PlayerInput ReadInput(NetReader r)
+        public NetPlayerInput ReadInput(NetReader r)
         {
-            var i = new PlayerInput();
+            var i = new NetPlayerInput();
             i.MoveX = r.ReadQuantized(-1, 1, MoveBits);
             i.MoveY = r.ReadQuantized(-1, 1, MoveBits);
             i.Yaw = r.ReadAngle(YawBits);
@@ -222,7 +222,7 @@ namespace OneLobby.Replication
             return i;
         }
 
-        public byte[] EncodeInput(in PlayerInput i)
+        public byte[] EncodeInput(in NetPlayerInput i)
         {
             _w.Reset();
             WriteInput(_w, i);
@@ -230,14 +230,14 @@ namespace OneLobby.Replication
         }
 
         /// <summary>The input as bytes without an allocation: valid until the next encode call on this codec.</summary>
-        public ReadOnlySpan<byte> EncodeInputSpan(in PlayerInput i)
+        public ReadOnlySpan<byte> EncodeInputSpan(in NetPlayerInput i)
         {
             _w.Reset();
             WriteInput(_w, i);
             return _w.Span;
         }
 
-        public bool DecodeInput(ReadOnlySpan<byte> b, out PlayerInput input)
+        public bool DecodeInput(ReadOnlySpan<byte> b, out NetPlayerInput input)
         {
             input = default;
             if (b.Length != InputBytes) return false;
@@ -248,7 +248,7 @@ namespace OneLobby.Replication
         }
 
         /// <summary>What an input becomes after one trip over the wire.</summary>
-        public PlayerInput QuantizeInput(in PlayerInput i)
+        public NetPlayerInput QuantizeInput(in NetPlayerInput i)
         {
             _q.Reset();
             WriteInput(_q, i);

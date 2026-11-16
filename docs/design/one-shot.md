@@ -152,6 +152,11 @@ Each is one lane unless noted; order matters for the first three.
     scene tree on the rig (`tests/net_player_node.gd`), and, in CI only (it needs the WebRTC natives), by two headless processes of the sample on
     127.0.0.1 (`net-player-test.sh`: the joiner's path and one jump reach the host). Nobody has seen it on a screen, the smoothing numbers are the plan's,
     and no real link has carried it. Not built: the JS-to-Godot player scenario in `tools/engine-smoke` (needs a `--players` scenario in both peers).
+    Landed (the C# lane, part 3a: the player layer only): `NetPlayers`, `PlayerCodec`, `PlayerWire` in `OneLobby.Replication` (same wire and numbers; states, inputs and event
+    arguments are structs; no engine type), the session additions (`AdaptiveDelay`, `InterpolationDelayMs`, `JitterMs`, `RegisterKind` / `SendExtension`, per-peer
+    `TrafficWith`, state schemas for `TrySampleAt` / `TryGetLatest`), every case of `spec/vectors/net-player.json` in both directions, and D1 to D9 on the C# `Rig`
+    (`NetPlayerTests`, `NetPlayerHostTests`). In-memory only: no two processes and no real link have carried it, no game engine has run it, nobody has seen it
+    on a screen. Not built (part 3b): the Unity `NetPlayer` component, a spawner, a sample, a Godot C# node, and the JS-to-C# trace test.
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.

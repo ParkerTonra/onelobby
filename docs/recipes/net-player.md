@@ -1,11 +1,11 @@
-# Networked players (JS and GDScript)
+# Networked players (JS, GDScript and C#)
 
 Players in the world with no player sync of your own: position, facing, movement state, jump, shoot, melee and the rest,
 smooth on every other screen. Built on `ReplicationSession` (`docs/recipes/replication.md`); the wire and every number are in
 `spec/net-player.md`.
 
-**Status: JS and GDScript** (the GDScript side is section 10: the `OneLobbyNetPlayer` node, the spawner and the layer, the same wire). The
-Unity `NetPlayer` component and the C# code are the next lane; they will be built from the spec and its vectors. The JS side is
+**Status: JS, GDScript and C#** (the GDScript side is section 10: the `OneLobbyNetPlayer` node, the spawner and the layer; the C# side is section 11:
+the layer in `OneLobby.Replication`, the same wire). The Unity `NetPlayer` component and a Godot C# node are the next lane. The JS and C# sides are
 proven on an in-memory network with a virtual clock and nothing else; the GDScript side on the same kind of rig and, in CI, by two
 headless processes of a sample on one PC. No real link and no real game engine window has run it, and nobody has looked at a
 networked player on a screen. The smoothing numbers are the plan's numbers, not tuned by eye.
@@ -181,8 +181,7 @@ key: `docs/design/blueprint.md` section 4e. A game's own extra fields and events
 
 ## 9. What is not built yet
 
-- The Unity component and the C# client code of the player layer (the Godot node and the GDScript code are section 10; the
-  Godot C# side has no node yet).
+- The Unity component and a Godot C# node (the C# layer itself is section 11; the Godot node and the GDScript code are section 10).
 - An adapter for any JS game engine; this layer talks plain numbers.
 - A dropped player is despawned at once (the rejoin window does not keep it frozen), and a rejoin starts a new player.
 - Your own extra state fields and events in `onelobby.json`: send your own entity or `sendEvent` for now.
@@ -312,6 +311,100 @@ keeps every socket on 127.0.0.1):
 godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --host --local --name=Sam
 godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join=127.0.0.1:47810 --local --name=Alex
 ```
+
+## 11. C# (plain .NET, Godot C#, Unity)
+
+`OneLobby.Replication` has the same layer on the same wire, so a C# peer, a JS peer and a GDScript peer can be in one game:
+`NetPlayers` (the layer; no engine type anywhere in it), with `PlayerCodec` / `PlayerWire` (the bytes) under it. **The Unity
+`NetPlayer` component and a Godot C# node do not exist yet** (the next lane). Until then a game calls the layer from its own
+`MonoBehaviour` or `Node`: pump it every frame, hand it your player each tick, draw the other players from `Get(peer)`, and
+make the characters yourself from `PlayerJoined` / `PlayerLeft`. Names are the JS ones in PascalCase; a state is a `PlayerState`
+struct (`X Y Z Vx Vy Vz Yaw Pitch OnGround Mode Item Aiming Blocking Health Alive Team Teleport`, doubles for the numbers), an
+input is a `NetPlayerInput` struct (`MoveX MoveY Yaw Pitch` and a `PlayerButtons` flags value), event arguments are one `ActionArgs`
+struct (the event decides which fields travel), and events are the `PlayerAction` enum. `new PlayerState()` is the default
+player (alive, health 100, on the ground); `default(PlayerState)` is all zero, so always use `new`. (The input struct is `NetPlayerInput`: a game often has its own `PlayerInput`, Unity's input system has one.)
+
+Make it from a raw-mode `Lobby` (`NetPlayers.FromConfig(lobby, blueprint)` reads `sync.player` and `sync.tickRate`; `new
+NetPlayers(lobby, options)` takes the settings in code) or from a `ReplicationSession` you made (give that one
+`new ReplicationConfig(AdaptiveDelay: true)` for smooth remote players; a session the layer makes has it on). Call
+`players.Pump()` every frame instead of `session.Pump()`.
+
+| what | C# |
+|---|---|
+| players in the world | `Players`, events `PlayerJoined(peer)` / `PlayerLeft(peer)` |
+| give your player (owner) | `SetLocalState(state)` (the teleport counter in it is ignored: it is the layer's) |
+| give your input (host) | `SetLocalInput(input)`; `Step` is `(state, input, dt) => state` and must be deterministic |
+| draw a player | `Get(peer)` / `TryGet(peer, out state)`; yours is `Local` (host authority: draw at `Local` + `Smoother.Offset`) |
+| newest authoritative state | `Latest(peer)` / `TryGetLatest` (on the host: its own record) |
+| events | `Action(PlayerAction.Jump)`, `Action(PlayerAction.Shoot, new ActionArgs { Yaw = 10 })`; the event `OnAction` (every event, filter on `Name`) |
+| host only | `HostAction(peer, ...)`, `TeleportPlayer`, `RespawnPlayer`, `TryRewound(peer, view, out state)`, `RewindTick`, `TryStateAt` |
+| the local player | `Teleport(state)` / `Teleport(x, y, z)`, `Respawn()`, events `Corrected(state)`, `LimitViolation(peer, kind)` |
+| numbers | `Stats`, `BytesPerSecond(peer)`, `Session.InterpolationDelayMs`, `Session.JitterMs` |
+
+Owner authority, a game's own movement (twelve lines):
+
+```csharp compile file=NetPlayerOwner.cs
+using OneLobby;
+using OneLobby.Replication;
+
+public sealed class CoopGame
+{
+    private readonly NetPlayers _players;
+    public CoopGame(Lobby lobby, Blueprint blueprint)
+    {
+        _players = NetPlayers.FromConfig(lobby, blueprint);
+        _players.OnAction += e => { if (e.Name == PlayerAction.Jump) System.Console.WriteLine("player " + e.Player + " jumped"); };
+    }
+    public void Frame(PlayerState mine, bool jumped)
+    {
+        _players.SetLocalState(mine);                       // your own character, as you always moved it
+        if (jumped) _players.Action(PlayerAction.Jump);
+        _players.Pump();                                    // instead of session.Pump()
+    }
+    public PlayerState? Draw(int peer) => _players.Get(peer); // null while that player is not in the world
+}
+```
+
+Host authority, one step function that runs on the host and in your prediction (twelve lines):
+
+```csharp compile file=NetPlayerHost.cs
+using OneLobby;
+using OneLobby.Replication;
+
+public sealed class ArenaGame
+{
+    private readonly NetPlayers _players;
+    public ArenaGame(Lobby lobby)
+    {
+        _players = new NetPlayers(lobby, new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = Step });
+    }
+    private static PlayerState Step(PlayerState s, NetPlayerInput i, double dt) { s.X += i.MoveX * 6 * dt; s.Z += i.MoveY * 6 * dt; s.Yaw = i.Yaw; return s; }
+    public void Frame(double moveX, double moveY, double yaw)
+    {
+        _players.SetLocalInput(new NetPlayerInput { MoveX = moveX, MoveY = moveY, Yaw = yaw }); // sent and stepped once per tick
+        _players.Pump();
+        var drawn = _players.Local;                         // null until the host's first state of your player has arrived
+        if (drawn is PlayerState p) System.Console.WriteLine(p.X + _players.Smoother.Offset.X);
+    }
+}
+```
+
+Behaviour is the other two clients' (spec section 13 lists what an implementer trips on): left-out fields shorten the state, the host
+renumbers events it relays, a repeated input does not step and the host quantises after each step, the owner's teleport counter
+moves by 1 and the host's by 4, and on the host `Get(peer)` for another player is the host's own record one tick behind,
+interpolated through the hit-rewind history. A host-authority owner has no `Local` until the host's first state of it arrives and
+sends and steps no input before that. A `Shoot` with `View` 0 gets your render tick x 256.
+
+Things that differ from JS, on purpose: states are structs (no allocation per frame, copied by value), `Local` and `Get` are
+`PlayerState?` instead of `undefined`, `OnAction` is one event for every action, `SetLocalState` takes the whole state (JS merges a
+patch), and the carry-on, the render delay and the hit rewind use the same numbers. A handler of `OnAction` that throws propagates
+out of `Pump()` (JS rethrows it later and goes on).
+
+**What is proven, in these words.** The C# layer is proven on an in-memory rig with a virtual clock (`NetPlayerTests`,
+`NetPlayerHostTests`, `NetPlayerVectorTests` in `clients/dotnet/OneLobby.Replication.Tests`: D1 to D9 and every case of
+`spec/vectors/net-player.json`). No two processes and no real link have carried the C# layer, no game engine has run it, nobody
+has seen it on a screen, and the smoothing numbers are the plan's and not tuned by eye. The measured numbers are written by the
+tests (`dotnet test clients/dotnet/OneLobby.Replication.Tests --logger "console;verbosity=detailed"`).
 
 ## Done when
 

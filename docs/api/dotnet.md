@@ -1827,13 +1827,338 @@ public static class NetMath
     public static (float X, float Y, float Z, float W) Nlerp((float X, float Y, float Z, float W) a, (float X, float Y, float Z, float W) b, float t);
 ```
 
+## OneLobby.Replication/NetPlayers.cs
+
+```csharp
+/// Who places a player: its own peer (Owner, the default) or the host (Host).
+public enum PlayerAuthority { Owner, Host }
+/// Which host limit an owner's update broke.
+public enum LimitKind { Speed, Step, TeleportRate }
+/// Host mode: one movement step for one player. Runs on the host for everyone and on the owner for prediction; it must be deterministic.
+public delegate PlayerState PlayerStepFunc(PlayerState state, NetPlayerInput input, double dt);
+/// The settings of NetPlayers; the first six are blueprint.sync.player.
+public sealed class NetPlayersOptions
+    public PlayerAuthority Authority { get; init; }
+    /// "3d" or "2d".
+    public string Space { get; init; }
+    public double Range { get; init; }
+    public double VelocityRange { get; init; }
+    /// The host's limits; a limit that is null is not checked.
+    public PlayerLimits Limits { get; init; }
+    /// Preset fields and events left out (see PlayerWire.Omittable).
+    public IReadOnlyList<string> Omit { get; init; }
+    /// Host mode: the movement step (also settable on NetPlayers.Step).
+    public PlayerStepFunc? Step { get; init; }
+    /// Host mode, host side: where a player starts (a full state; default: the default player at the origin).
+    public Func<int, PlayerState>? Spawn { get; init; }
+    /// Settings of the session the layer makes (ignored when you pass your own session).
+    public ReplicationConfig? Session { get; init; }
+    /// Whether a session the layer makes uses the adaptive render delay (default true).
+    public bool AdaptiveDelay { get; init; }
+/// Numbers of spec/net-player.md; constants of the wire contract.
+public static class NetPlayer
+    /// An action event is sent on the fast channel in this many consecutive ticks (and once on the reliable one).
+    public const int EventRepeats;
+    /// A player is carried on by its velocity for at most this long past the newest snapshot, then held.
+    public const double CarryOnMaxMs;
+    /// Owner mode: a claimed move may be this much faster than maxSpeed before it counts.
+    public const double SpeedTolerance;
+    /// Owner mode with limits: an owner-raised teleport is accepted at most this often.
+    public const long TeleportMinIntervalMs;
+    /// A rate limit allows this fraction of its interval, less one tick.
+    public const double RateTolerance;
+    /// Host mode: a correction is blended over this long.
+    public const float CorrectionBlendMs;
+    public const float SnapHorizontal;
+    public const float SnapVertical;
+    /// The claimed tick of an event may be at most this many ticks older than the host's tick when it arrives.
+    public const int ClaimMaxAgeTicks;
+    /// The host raises the teleport counter by this much (an owner raises it by 1).
+    public const int HostTeleportStep;
+/// One action event, as the game sees it.
+public readonly struct ActionEvent
+    public ActionEvent(int player, PlayerAction name, ActionArgs args, uint tick, uint seq, bool late, bool local);
+    /// Peer id of the player it belongs to.
+    public int Player { get; }
+    public PlayerAction Name { get; }
+    public ActionArgs Args { get; }
+    /// Host tick it happened.
+    public uint Tick { get; }
+    /// Per-player number (the host's numbering for events that travelled through the host).
+    public uint Seq { get; }
+    /// True when it arrived after the render time had passed its tick and was played at once.
+    public bool Late { get; }
+    /// True for this peer's own events (played at once, never relayed back).
+    public bool Local { get; }
+public sealed class PlayerStats
+    public long ActionsSent { get; internal set; }
+    public long ActionsPlayed { get; internal set; }
+    /// Played at once because they arrived after their tick had been rendered.
+    public long ActionsLate { get; internal set; }
+    /// Second copies dropped by sequence number.
+    public long ActionsDuplicate { get; internal set; }
+    /// Dropped by the host's rate limit and not relayed.
+    public long ActionsRateLimited { get; internal set; }
+    /// Dropped as not allowed (wrong sender, host-only event, left out, bad arguments).
+    public long ActionsRejected { get; internal set; }
+    /// Owner states that did not decode.
+    public long StatesRejected { get; internal set; }
+    /// Owner updates the host refused (a limit), each answered with a raised teleport counter.
+    public long LimitViolations { get; internal set; }
+    /// The host raised the teleport counter and this owner took the host's state (host mode: a correction that snapped).
+    public long Corrections { get; internal set; }
+/// The networked player layer over one ReplicationSession (spec/net-player.md): players in the world with no player sync of your own. One replicated entity of type PlayerWire.PlayerTypeId per seated peer, action events that arrive exactly once and play at the right moment, the host's limits, prediction and hit rewind. No engine type is used: the Unity component and the Godot node (a later lane) wrap this class. Call Pump every frame instead of ReplicationSession.Pump.
+public sealed class NetPlayers : IDisposable
+    /// The layer over a session you made (give it AdaptiveDelay: true for smooth remote players).
+    public NetPlayers(ReplicationSession session, NetPlayersOptions? options = null);
+    /// The layer over a raw-mode lobby: it makes the session (with the adaptive render delay on unless NetPlayersOptions.AdaptiveDelay is false).
+    public NetPlayers(Lobby lobby, NetPlayersOptions? options = null) : this(new ReplicationSession(lobby, (options?.Session ?? new ReplicationConfig()) with { AdaptiveDelay = options?.AdaptiveDelay ?? true }), options);
+    /// The layer from a lobby and the loaded blueprint: sync.player and sync.tickRate. extra adds NetPlayersOptions.Step and NetPlayersOptions.Spawn.
+    public static NetPlayers FromConfig(Lobby lobby, Blueprint blueprint, NetPlayersOptions? extra = null);
+    public ReplicationSession Session { get; }
+    public PlayerAuthority Authority { get; }
+    public PlayerCodec Codec { get; }
+    public PlayerLimits Limits { get; }
+    public PlayerStats Stats { get; }
+    /// Host mode: the movement step (also settable here after construction).
+    public PlayerStepFunc? Step { get; set; }
+    /// Smooths host-mode corrections of the local player (draw at Local + Smoother.Offset).
+    public PredictionSmoother Smoother { get; }
+    public bool IsHost;
+    public int LocalPeerId;
+    /// A player appeared (every peer sees every player, the local one included).
+    public event Action<int>? PlayerJoined;
+    /// A player is gone (its peer left, or it became a spectator).
+    public event Action<int>? PlayerLeft;
+    /// Every action event, for every player (the local one included). Filter on ActionEvent.Name.
+    public event Action<ActionEvent>? OnAction;
+    /// Host: one local tick is about to run (step your own world here, before the snapshot). Client: one input tick.
+    public event Action<uint>? Tick;
+    /// Owner mode: the host put this player back (a limit, or a teleport by the host); take the state as yours.
+    public event Action<PlayerState>? Corrected;
+    /// Host: an owner's update broke a limit (peer id, which limit).
+    public event Action<int, LimitKind>? LimitViolation;
+    /// Peers whose player is in the world right now (as this peer sees it, the local one included). A live view.
+    public IReadOnlyCollection<int> Players;
+    /// Owner mode: give the layer your player's state. Sent every tick; call as often as you like. The teleport counter in state is ignored: it is the layer's to keep (use Teleport(PlayerState)).
+    public void SetLocalState(in PlayerState state);
+    /// Host mode: the input of the current tick; sent and stepped once per tick.
+    public void SetLocalInput(in NetPlayerInput input);
+    /// The local player's state: yours in owner mode, the predicted one in host mode (draw it at Local + Smoother.Offset). Authority Host on a client: null until the host's first state of this player has arrived (the player starts where the host spawned it, never at the origin); inputs before that are neither sent nor stepped.
+    public PlayerState? Local { get; }
+    /// One player's state to draw now. The local player: Local. A remote player: its state at render time (about 100 ms behind, more on a jittery link), turning on the shortest arc, carried on by its velocity for at most 250 ms past the newest snapshot, then held. On the host a remote player is the host's own record one tick behind, interpolated through the hit-rewind history; one record alone, or a teleport between two records, is held, never blended. False while the player is not in the world.
+    public bool TryGet(int peerId, out PlayerState state);
+    /// TryGet as a nullable.
+    public PlayerState? Get(int peerId);
+    /// The authoritative state of a player in the newest snapshot (not smoothed). Host: its own record.
+    public bool TryGetLatest(int peerId, out PlayerState state);
+    public PlayerState? Latest(int peerId);
+    /// Send an action event for the local player. It plays here at once. A shoot with View 0 gets the render tick x 256.
+    public void Action(PlayerAction name, ActionArgs args = default);
+    /// Host: raise an action event for any player (Hit and Death come from here).
+    public void HostAction(int peerId, PlayerAction name, ActionArgs args = default);
+    /// Owner mode: put the local player somewhere else without sliding (the counter is raised by 1). On the host: the same for the host's own player. For another player use TeleportPlayer. to is the whole new state.
+    public void Teleport(PlayerState to);
+    /// Teleport to a position, keeping the rest of the local state.
+    public void Teleport(double x, double y, double z = 0);
+    /// Host: place any player (respawn point, portal) without sliding. In owner mode the owner is told to take the host's state.
+    public void TeleportPlayer(int peerId, PlayerState to);
+    /// Owner mode (and the host's own player): a teleport that also makes the player alive with full health, then the Respawn event.
+    public void Respawn(PlayerState at);
+    /// Respawn where the local player is.
+    public void Respawn();
+    /// Host: respawn any player (a teleport, alive, full health, and the Respawn event).
+    public void RespawnPlayer(int peerId, PlayerState at);
+    /// Where a player was at a host tick (hit rewind). Host only; false when not recorded (too old, or never there).
+    public bool TryStateAt(int peerId, double tick, out PlayerState state);
+    /// Host: where a player was when a shooter saw the world at view (a shoot's View, in 1/256 ticks), clamped by the session's rewind limit.
+    public bool TryRewound(int peerId, uint view, out PlayerState state);
+    /// The host tick a shooter was seeing, clamped to the session's MaxRewindMs.
+    public double RewindTick(uint view);
+    /// Replication bytes per second to and from one peer over about the last second. Host: any client. Client: the host.
+    public (double Sent, double Received) BytesPerSecond(int peerId);
+    /// Advance everything: call every frame instead of ReplicationSession.Pump. Runs the due ticks, snapshots, events and corrections.
+    public void Pump();
+    /// Stop listening. The session stays yours.
+    public void Dispose();
+```
+
+## OneLobby.Replication/PlayerCodec.cs
+
+```csharp
+/// Encodes and decodes the player preset for one configuration (spec/net-player.md sections 2 to 4): the state, the input preset and the arguments of the action events. No lobby, no session. Positions stay double; a value goes through float32 at the edge (NetWriter.WriteQuantized takes a float), then rounds half away from zero. Not thread safe (it reuses its scratch buffers).
+public sealed class PlayerCodec : IStateSchema<PlayerState>
+    public PlayerCodec(PlayerWireConfig? config = null);
+    public PlayerWireConfig Config { get; }
+    /// Bits of one position axis.
+    public int PosBits { get; }
+    public bool Is3D { get; }
+    /// Bits of one state.
+    public int StateBits { get; }
+    public int StateBytes { get; }
+    /// Bytes of one input preset.
+    public int InputBytes { get; }
+    /// True unless name (a field group or an event name) is left out.
+    public bool Has(string name);
+    /// Whether the game uses this event (not left out).
+    public bool HasEvent(PlayerAction a);
+    public void WriteState(NetWriter w, in PlayerState s);
+    public PlayerState ReadState(NetReader r);
+    /// The state as bytes (what goes into an entity's state, or into an input in owner mode).
+    public byte[] EncodeState(in PlayerState s);
+    /// The state as bytes without an allocation: valid until the next encode call on this codec.
+    public ReadOnlySpan<byte> EncodeStateSpan(in PlayerState s);
+    /// The state from bytes; false when the length is not exactly the layout's (a malformed state).
+    public bool DecodeState(ReadOnlySpan<byte> b, out PlayerState state);
+    /// What s becomes after one trip over the wire (quantised, omitted fields at their defaults).
+    public PlayerState QuantizeState(in PlayerState s);
+    /// Blend two states for rendering: numbers by t, yaw on the shortest arc, everything else from a; a teleport snaps (returns a).
+    public PlayerState Lerp(in PlayerState a, in PlayerState b, double t);
+    /// Lerp between two angles in degrees along the shorter arc; result in [0, 360). Double precision (NetMath.LerpAngle is float).
+    public static double LerpAngle(double a, double b, double t);
+    public void WriteInput(NetWriter w, in NetPlayerInput i);
+    public NetPlayerInput ReadInput(NetReader r);
+    public byte[] EncodeInput(in NetPlayerInput i);
+    /// The input as bytes without an allocation: valid until the next encode call on this codec.
+    public ReadOnlySpan<byte> EncodeInputSpan(in NetPlayerInput i);
+    public bool DecodeInput(ReadOnlySpan<byte> b, out NetPlayerInput input);
+    /// What an input becomes after one trip over the wire.
+    public NetPlayerInput QuantizeInput(in NetPlayerInput i);
+    public void WriteArgs(NetWriter w, PlayerAction name, in ActionArgs a);
+    public ActionArgs ReadArgs(NetReader r, PlayerAction name);
+    public byte[] EncodeArgs(PlayerAction name, in ActionArgs a);
+    /// Bytes of this event's arguments.
+    public int ArgsBytes(PlayerAction name);
+    /// Decode arguments; false when the length is not exactly the layout's.
+    public bool DecodeArgs(PlayerAction name, ReadOnlySpan<byte> b, out ActionArgs args);
+    /// What the arguments become after one trip over the wire (the others see this).
+    public ActionArgs QuantizeArgs(PlayerAction name, in ActionArgs a);
+```
+
+## OneLobby.Replication/PlayerWire.cs
+
+```csharp
+/// The action events of spec/net-player.md section 4; the value is the event id on the wire.
+public enum PlayerAction : byte { Jump = 1, Land = 2, Shoot = 3, Melee = 4, Reload = 5, Use = 6, ItemSwitch = 7, Throw = 8, /// <summary>Host only: "hit taken", raised for the victim.</summary> Hit = 9, /// <summary>Host only.</summary> Death = 10, Respawn = 11, Emote = 12, }
+/// The eight buttons of the input preset; the bit order is the wire order (jump first).
+public enum PlayerButtons : byte { None = 0, Jump = 1, Crouch = 2, Sprint = 4, Aim = 8, Block = 16, Fire = 32, Use = 64, Reload = 128, }
+/// One player's state (the player preset of spec/net-player.md section 2). A struct, so a state is copied by value and a frame allocates nothing; positions and velocities are double (the codec quantises through float32 at the edge, as the spec says). 2D uses X, Y and Vx, Vy (Z, Vz and Pitch stay 0). A field the game leaves out holds its default. new PlayerState() is the default player (on the ground, alive, health 100); default(PlayerState) is all zero (not alive): use new.
+public record struct PlayerState
+    public double X, Y, Z, Vx, Vy, Vz;
+    /// Facing in degrees [0, 360).
+    public double Yaw;
+    /// Aim in degrees [-90, 90] (3D).
+    public double Pitch;
+    public bool OnGround;
+    /// 0..15: 0 idle, 1 walk, 2 run, 3 crouch, 4 jump, 5 fall, 6 swim, 7 climb, 8 fly; 9 to 15 are the game's.
+    public int Mode;
+    /// Held item or slot, 0..15.
+    public int Item;
+    public bool Aiming, Blocking;
+    /// 0..255.
+    public int Health;
+    public bool Alive;
+    /// Team or colour, 0..15.
+    public int Team;
+    /// 0..7, wraps. A difference between two samples means "snap, do not slide".
+    public int Teleport;
+    public PlayerState();
+/// One input of host-decides mode (the input preset). MoveX is strafe right, MoveY is forward (2D: down is +1).
+public record struct NetPlayerInput
+    public double MoveX, MoveY;
+    public double Yaw;
+    /// 3D only.
+    public double Pitch;
+    public PlayerButtons Buttons;
+/// The arguments of one action event. One struct for all twelve events; the event decides which fields are on the wire: land: Impact; shoot: Yaw, Pitch (3D), View; melee: Swing; use: Target; itemSwitch: Slot; throw: Yaw, Pitch (3D), Power; hit: By, Damage; death: By; emote: Emote. Fields an event does not carry stay 0.
+public record struct ActionArgs
+    /// land: the speed it landed at, 0..64.
+    public double Impact;
+    public double Yaw, Pitch;
+    /// shoot: the render tick the shooter was seeing, times 256. 0 on a local shoot means "fill in my render tick".
+    public uint View;
+    public int Swing;
+    public int Target;
+    public int Slot;
+    /// throw: 0..1.
+    public double Power;
+    /// hit, death: the attacker's peer id, 0 for the world.
+    public int By;
+    public int Damage;
+    public int Emote;
+/// One action event as it travels (message kind 5).
+public readonly struct WireEvent
+    public WireEvent(uint player, uint seq, byte id, uint tick, byte[] args);
+    /// Peer id of the player it belongs to.
+    public uint Player { get; }
+    /// 1, 2, 3 ... per player.
+    public uint Seq { get; }
+    /// Event id (1..12 today).
+    public byte Id { get; }
+    /// Host tick it happened (a client's claim to the host; the host's own stamp when relayed).
+    public uint Tick { get; }
+    public byte[] Args { get; }
+/// What configures the preset on the wire. Everything else about the layer is local behaviour.
+public sealed record PlayerWireConfig(string Space = "3d", double Range = 300, double VelocityRange = 32, IReadOnlyList<string>? Omit = null)
+    public static readonly PlayerWireConfig Default;
+    /// The wire settings of a loaded sync.player section.
+    public static PlayerWireConfig From(PlayerSection p);
+/// The tables of spec/net-player.md as code: ids, names, origins, the reserved type id, the kind 5 message.
+public static class PlayerWire
+    /// The reserved entity type id of a networked player.
+    public const ushort PlayerTypeId;
+    /// Message kind of the action events (additive to replication version 1).
+    public const byte KindPlayerEvents;
+    /// The teleport counter wraps at this value (3 bits).
+    public const int TeleportModulo;
+    /// Records one message may carry (a u8 count).
+    public const int MaxEventsPerMessage;
+    /// The size past which older copies are left out of one message.
+    public const int MaxEventMessageBytes;
+    /// Movement modes of the preset (index = value); 9 to 15 are the game's own.
+    public static readonly IReadOnlyList<string> MovementModes;
+    /// The action events, in id order.
+    public static readonly IReadOnlyList<PlayerAction> Actions;
+    /// State fields that may go into sync.player.omit (position and teleport never).
+    public static readonly IReadOnlyList<string> OmittableFields;
+    /// Every name omit accepts: the fields and the events.
+    public static readonly IReadOnlyList<string> Omittable;
+    /// The wire name of an event, as omit and the spec write it ("itemSwitch").
+    public static string Name(PlayerAction a);
+    public static bool TryParseAction(string name, out PlayerAction action);
+    /// True when the event id is one of the twelve.
+    public static bool IsKnown(byte id);
+    /// True for the events only the host may start (hit, death).
+    public static bool IsHostOrigin(PlayerAction a);
+    /// Bits of a position axis: the smallest b in 8..24 with 2^b - 1 &gt;= ceil(2 x range / 0.01) (about 1 cm a step).
+    public static int PositionBits(double range);
+    /// Encode a kind 5 message of the first count events (1..255).
+    public static byte[] EncodePlayerEvents(IReadOnlyList<WireEvent> events, int count = -1);
+    /// Decode a kind 5 message into into (cleared first). Returns null on success, else the replication error name: too_short, trailing, varint, range, count_0, player_0, seq_0 or event_id. Never throws on bad bytes.
+    public static string? TryDecodePlayerEvents(ReadOnlySpan<byte> p, List<WireEvent> into);
+```
+
 ## OneLobby.Replication/ReplicationSession.cs
 
 ```csharp
-/// Host-authoritative state replication over a raw-mode Lobby (DESIGN s.18, spec/replication.md). Host: Spawn entities, run one sim step per NetworkClock.TryAdvance, read each client's input with TryGetInput, then SendSnapshot. Each client gets a delta against the last snapshot it acknowledged, on the fast channel. Client: SubmitInput once per Clock tick, render remote entities with TrySample{T} at RenderTick (100 ms behind the host), and reconcile the local player with TryGetLatest{T} + LastProcessedInput. Call Pump once per frame instead of lobby.Pump(); events fire inside it.
+/// Host-authoritative state replication over a raw-mode Lobby (DESIGN s.18, spec/replication.md). Host: Spawn entities, run one sim step per NetworkClock.TryAdvance, read each client's input with TryGetInput, then SendSnapshot. Each client gets a delta against the last snapshot it acknowledged, on the fast channel. Client: SubmitInput once per Clock tick, render remote entities with TrySample{T}(NetId, out T) at RenderTick (100 ms behind the host), and reconcile the local player with TryGetLatest{T}(NetId, out T, out uint) + LastProcessedInput. Call Pump once per frame instead of lobby.Pump(); events fire inside it.
 public sealed class ReplicationSession : IDisposable
+    /// Handler of an add-on message kind (RegisterKind): sender, the whole payload, the channel.
+    public delegate void ExtensionHandler(int from, ReadOnlyMemory<byte> payload, Channel channel);
     public ReplicationSession(Lobby lobby, ReplicationConfig? config = null);
     public ReplicationConfig Config { get; }
+    /// Client: the render delay in ms right now: ReplicationConfig.InterpolationDelayMs, or the adaptive value when ReplicationConfig.AdaptiveDelay is on.
+    public double InterpolationDelayMs;
+    /// Client: smoothed snapshot arrival jitter in ms (always measured; only ReplicationConfig.AdaptiveDelay acts on it).
+    public double JitterMs;
+    /// Replication payload bytes sent to and received from one peer since it was first seen (all kinds, no lobby header).
+    public (long Sent, long Received) TrafficWith(int peerId);
+    /// Add-on layers (the player layer): handle every message of replication kind kind (5 and up, additive per spec/replication.md "Versioning"). A handler that finds bad bytes calls CountMalformed.
+    public void RegisterKind(byte kind, ExtensionHandler handler);
+    /// Send a payload of an add-on kind to one peer on a channel, counted as event bytes in Rates.
+    public void SendExtension(int peerId, ReadOnlySpan<byte> payload, Channel channel);
+    /// Count one add-on message as malformed.
+    public void CountMalformed();
     public bool IsHost { get; }
     public Lobby Lobby;
     /// OneLobby.Lobby.FlushAsync: before leaving, wait until reliable events and snapshots sent so far have left this machine (true), or the timeout passes (false). Keep calling Pump meanwhile.
@@ -1922,6 +2247,12 @@ public sealed class ReplicationSession : IDisposable
     public bool TrySample<T>(NetId id, out T state) where T : IReplicatedState<T>, new();
     /// Client: an entity's state interpolated at any tick still in the snapshot buffer.
     public bool TrySampleAt<T>(NetId id, double tick, out T state) where T : IReplicatedState<T>, new();
+    /// Client: TrySample{T}(NetId, out T) for a state whose layout comes from a IStateSchema{T} instance.
+    public bool TrySample<T>(NetId id, IStateSchema<T> schema, out T state);
+    /// Client: TrySampleAt{T}(NetId, double, out T) for a state read and blended by a IStateSchema{T}.
+    public bool TrySampleAt<T>(NetId id, double tick, IStateSchema<T> schema, out T state);
+    /// Client: TryGetLatest{T}(NetId, out T, out uint) for a state read by a IStateSchema{T}.
+    public bool TryGetLatest<T>(NetId id, IStateSchema<T> schema, out T state, out uint tick);
     /// Client: the entity's state in the newest snapshot (not interpolated), e.g. the local player's authoritative state.
     public bool TryGetLatest<T>(NetId id, out T state, out uint tick) where T : IReplicatedState<T>, new();
     /// Client: info for an entity in the newest snapshot (owner, type), even before it is visible.
@@ -1966,8 +2297,14 @@ public readonly struct InputFrame
     /// True when no new input had arrived for this tick and the previous one is handed out again.
     public bool Repeated { get; }
 /// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
-public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0, double KeyframeSeconds = 5, int PacketLogPerSecond = 20)
+public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0, double KeyframeSeconds = 5, int PacketLogPerSecond = 20, bool AdaptiveDelay = false, double MaxInterpolationDelayMs = 250)
     public double TickMs;
+/// How a session reads and blends one entity's state when the state type cannot know its own configuration (the player preset: its layout depends on the game's settings). The generic IReplicatedState{T} path is for state types with a fixed layout.
+public interface IStateSchema<T>
+    /// Read one state; mirrors what the host wrote.
+    T Read(NetReader reader);
+    /// The state between a (older) and b (newer), t in [0, 1].
+    T Lerp(in T a, in T b, double t);
 /// A hole in a numbered stream that was given up on: events FirstMissing up to (not including) NextDelivered from From on Stream never arrived; delivery goes on at NextDelivered.
 public readonly record struct StreamGap(int From, byte Stream, uint FirstMissing, uint NextDelivered)
     /// How many sequence numbers were skipped.

@@ -169,7 +169,7 @@ namespace OneLobby.Replication.Tests
         public void D5_HostModePredictionEndsEqualAndSmoothsOrSnaps()
         {
             double glitch = 0;
-            PlayerState HostStep(PlayerState st, PlayerInput i, double dt)
+            PlayerState HostStep(PlayerState st, NetPlayerInput i, double dt)
             {
                 var r = Scene.WalkStep(st, i, dt);
                 if (glitch != 0 && i.Yaw > 89 && i.Yaw < 91) { r.X += glitch; glitch = 0; }
@@ -185,7 +185,7 @@ namespace OneLobby.Replication.Tests
             al.Tick += _ =>
             {
                 var t = rig.NowMs / 1000.0;
-                al.SetLocalInput(moving ? new PlayerInput { MoveX = Math.Sin(0.8 * t), MoveY = Math.Cos(0.8 * t), Yaw = 90 } : new PlayerInput { Yaw = 90 });
+                al.SetLocalInput(moving ? new NetPlayerInput { MoveX = Math.Sin(0.8 * t), MoveY = Math.Cos(0.8 * t), Yaw = 90 } : new NetPlayerInput { Yaw = 90 });
             };
             rig.Run(3);
             for (var i = 0; i < 400; i++)
@@ -291,7 +291,7 @@ namespace OneLobby.Replication.Tests
             var corrected = 0;
             al.Corrected += _ => corrected++;
             // the owner holds "walk right" from its very first tick, including the ticks before the host's first state arrives
-            al.Tick += _ => al.SetLocalInput(new PlayerInput { MoveX = 1, Yaw = 90 });
+            al.Tick += _ => al.SetLocalInput(new NetPlayerInput { MoveX = 1, Yaw = 90 });
             double? firstX = null; var minX = double.PositiveInfinity; var frames = 0; var without = 0; long inputsBefore = -1;
             for (var i = 0; i < 300; i++)
             {

@@ -217,7 +217,7 @@ namespace OneLobby.Replication.Tests
         public void AHostWithNoClientsStepsItsOwnPlayerInHostMode()
         {
             var s = Scene.Make(PlayerAuthority.Host, joinPeers: false);
-            s.Hl.Tick += _ => s.Hl.SetLocalInput(new PlayerInput { MoveX = 1 });
+            s.Hl.Tick += _ => s.Hl.SetLocalInput(new NetPlayerInput { MoveX = 1 });
             s.Rig.Run(1);
             Assert.True(s.Hl.Get(s.Hl.LocalPeerId)!.Value.X > 3);
         }
@@ -238,7 +238,7 @@ namespace OneLobby.Replication.Tests
             else s.Bl.Tick += _ =>
             {
                 var t = s.Rig.NowMs / 1000.0;
-                s.Bl.SetLocalInput(new PlayerInput { MoveX = Math.Sin(0.8 * t + 2), MoveY = Math.Cos(0.8 * t + 2), Yaw = 90 });
+                s.Bl.SetLocalInput(new NetPlayerInput { MoveX = Math.Sin(0.8 * t + 2), MoveY = Math.Cos(0.8 * t + 2), Yaw = 90 });
             };
             s.Rig.Run(3);
             var last = new Dictionary<int, Pt>();

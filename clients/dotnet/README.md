@@ -3,7 +3,7 @@
 | Project | What |
 |---|---|
 | `OneLobby.Core` | Engine-agnostic client (netstandard2.1 + net8.0): `LobbyClient`, `Lobby`, `LockstepSession`, `VoiceChannel`, `TextChat`, `ITransport`/`IPeerLink`/`ISignalingSocket`, `IVoiceCodec`, `IVoiceAudio`, and `InMemoryNetwork` (a fake lobby server + loopback links + manual clock, for offline tests) |
-| `OneLobby.Replication` | Host-authoritative state replication on a raw lobby (netstandard2.1 + net8.0, no engine types, no third-party deps): `ReplicationSession`, `NetworkClock`, `NetWriter`/`NetReader`/`Quantize`, `Reconciler`, `HistoryRing` (DESIGN s.18, `spec/replication.md`) |
+| `OneLobby.Replication` | Host-authoritative state replication on a raw lobby (netstandard2.1 + net8.0, no engine types, no third-party deps): `ReplicationSession`, `NetworkClock`, `NetWriter`/`NetReader`/`Quantize`, `Reconciler`, `HistoryRing` (DESIGN s.18, `spec/replication.md`), and the networked player layer `NetPlayers` / `PlayerCodec` / `PlayerWire` (`spec/net-player.md`, `docs/recipes/net-player.md` section 11; no Unity or Godot component yet) |
 | `OneLobby.Opus` | `OpusVoiceCodec` (Concentus, BSD-3-Clause; see `THIRD_PARTY.md`) |
 | `OneLobby.Core` menu | `MenuModel` and `MenuText` (in `OneLobby.Core`): the engine-free brain and text table of the drop-in multiplayer menu (screens, host, join, roster, ready, kick, ban, errors, settings, browse); a Godot or Unity controller only draws it. See `docs/recipes/menu.md`. |
 | `OneLobby.Godot` | `GodotTransport` (WebSocketPeer + WebRtcPeerConnection), `GodotVoiceAudio` (mic capture, per-speaker playback) |
@@ -11,7 +11,7 @@
 | `../unity/com.onelobby.unity` | Unity 6 UPM package: `UnityTransport` (wraps `DataChannelTransport`), `UnityVoiceAudio`, `OneLobbyRunner`; ships Core/DataChannel/Opus DLLs and the natives via `clients/unity/build-unity-package.ps1` (`docs/recipes/unity.md`) |
 | `OneLobby.Gridpaint` | The shared demo game (`spec/demo-game.md`) |
 | `OneLobby.Core.Tests` | xunit: spec vectors, goldens, lobby, lockstep, migration, desync, chat, voice, Opus |
-| `OneLobby.Replication.Tests` | xunit: wire vectors, spawn/despawn, delta after loss, late join, interpolation, input redundancy, prediction, lag compensation, 4 x 54-entity bandwidth |
+| `OneLobby.Replication.Tests` | xunit: wire vectors, spawn/despawn, delta after loss, late join, interpolation, input redundancy, prediction, lag compensation, 4 x 54-entity bandwidth, the net-player vectors and D1 to D9 |
 | `OneLobby.Conformance` | stdio adapter for `conformance/peer` |
 | `demo-godot` | Godot 4.5.1 .NET gridpaint demo (Host / Join / Browse, code field, chat line, hold V to talk), the drop-in menu add-on `addons/onelobby_menu/` (`OneLobbyMenu.cs` + `OneLobbyMenu.tscn`, copied into a game) and `MenuDemo.tscn` (`-- --menu-selfcheck` is the local headless layout check) |
 

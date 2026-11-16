@@ -15,7 +15,7 @@ namespace OneLobby.Replication.Tests
         public PlayerAuthority Mode;
 
         /// <summary>Host mode movement: 6 m/s on X and Z, facing the input's yaw. The same function runs on the host and in the owner's prediction.</summary>
-        public static PlayerState WalkStep(PlayerState s, PlayerInput i, double dt)
+        public static PlayerState WalkStep(PlayerState s, NetPlayerInput i, double dt)
         {
             s.X += i.MoveX * 6 * dt; s.Z += i.MoveY * 6 * dt; s.Vx = i.MoveX * 6; s.Vz = i.MoveY * 6; s.Yaw = i.Yaw;
             return s;
@@ -59,7 +59,7 @@ namespace OneLobby.Replication.Tests
             else l.Tick += _ =>
             {
                 var t = Rig.NowMs / 1000.0;
-                l.SetLocalInput(new PlayerInput { MoveX = Math.Sin(0.8 * t + phase), MoveY = Math.Cos(0.8 * t + phase), Yaw = 90 });
+                l.SetLocalInput(new NetPlayerInput { MoveX = Math.Sin(0.8 * t + phase), MoveY = Math.Cos(0.8 * t + phase), Yaw = 90 });
             };
         }
 

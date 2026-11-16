@@ -10,7 +10,7 @@ namespace OneLobby.Replication
     public enum LimitKind { Speed, Step, TeleportRate }
 
     /// <summary>Host mode: one movement step for one player. Runs on the host for everyone and on the owner for prediction; it must be deterministic.</summary>
-    public delegate PlayerState PlayerStepFunc(PlayerState state, PlayerInput input, double dt);
+    public delegate PlayerState PlayerStepFunc(PlayerState state, NetPlayerInput input, double dt);
 
     /// <summary>The settings of <see cref="NetPlayers"/>; the first six are <c>blueprint.sync.player</c>.</summary>
     public sealed class NetPlayersOptions
@@ -151,8 +151,8 @@ namespace OneLobby.Replication
         // local player
         private PlayerState _localState = new();
         private bool _haveLocal;
-        private PlayerInput _localInput;
-        private Reconciler<PlayerInput, PlayerState>? _predictor;
+        private NetPlayerInput _localInput;
+        private Reconciler<NetPlayerInput, PlayerState>? _predictor;
         private uint _lastCorrectTick;
         private uint _lastSentSeq;
         private uint _ignoreUntilSeq;
@@ -242,7 +242,7 @@ namespace OneLobby.Replication
         }
 
         /// <summary>Host mode: the input of the current tick; sent and stepped once per tick.</summary>
-        public void SetLocalInput(in PlayerInput input)
+        public void SetLocalInput(in NetPlayerInput input)
         {
             if (Authority != PlayerAuthority.Host) throw new InvalidOperationException("SetLocalInput is for authority Host; give your state with SetLocalState");
             _localInput = input;
@@ -596,7 +596,7 @@ namespace OneLobby.Replication
             if (!p.Spawned) SpawnEntity(p);
         }
 
-        private PlayerState RunStep(PlayerState s, PlayerInput input)
+        private PlayerState RunStep(PlayerState s, NetPlayerInput input)
         {
             if (Step == null) throw new InvalidOperationException("authority Host needs a step function: new NetPlayers(lobby, new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = ... })");
             return Codec.QuantizeState(Step(s, input, Dt));
@@ -684,7 +684,7 @@ namespace OneLobby.Replication
             if (_predictor == null)
             {
                 if (!_known.TryGetValue(LocalPeerId, out var id) || !Session.TryGetLatest(id, Codec, out var first, out var firstTick)) return; // no state yet: this input is neither sent nor stepped
-                var r = new Reconciler<PlayerInput, PlayerState>(first, (s, i) => RunStep(s, i));
+                var r = new Reconciler<NetPlayerInput, PlayerState>(first, (s, i) => RunStep(s, i));
                 r.Equal = (a, b) => Distance(a, b) <= 0.05;
                 _predictor = r;
                 _lastCorrectTick = firstTick;                     // the predictor already is this state: no correction, no snap

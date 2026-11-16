@@ -54,12 +54,12 @@ namespace OneLobby.Replication.Tests
                 && want.Health == got.Health && want.Alive == got.Alive && want.Team == got.Team && want.Teleport == got.Teleport, what + " flags");
         }
 
-        private static PlayerInput InputOf(JsonElement e)
+        private static NetPlayerInput InputOf(JsonElement e)
         {
             var b = PlayerButtons.None;
             var names = new[] { "jump", "crouch", "sprint", "aim", "block", "fire", "use", "reload" };
             for (var i = 0; i < 8; i++) if (B(e.GetProperty("buttons"), names[i])) b |= (PlayerButtons)(1 << i);
-            return new PlayerInput { MoveX = N(e, "moveX"), MoveY = N(e, "moveY"), Yaw = N(e, "yaw"), Pitch = N(e, "pitch"), Buttons = b };
+            return new NetPlayerInput { MoveX = N(e, "moveX"), MoveY = N(e, "moveY"), Yaw = N(e, "yaw"), Pitch = N(e, "pitch"), Buttons = b };
         }
 
         private static ActionArgs ArgsOf(JsonElement e) => new ActionArgs

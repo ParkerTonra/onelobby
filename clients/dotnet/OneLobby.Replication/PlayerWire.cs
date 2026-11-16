@@ -58,7 +58,7 @@ namespace OneLobby.Replication
     }
 
     /// <summary>One input of host-decides mode (the input preset). <see cref="MoveX"/> is strafe right, <see cref="MoveY"/> is forward (2D: down is +1).</summary>
-    public record struct PlayerInput
+    public record struct NetPlayerInput
     {
         public double MoveX, MoveY;
         public double Yaw;
