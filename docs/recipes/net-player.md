@@ -4,11 +4,12 @@ Players in the world with no player sync of your own: position, facing, movement
 smooth on every other screen. Built on `ReplicationSession` (`docs/recipes/replication.md`); the wire and every number are in
 `spec/net-player.md`.
 
-**Status: JS, GDScript, C# and Unity** (the Unity side is section 12: the `OneLobbyNetPlayer` component, the spawner and a sample; the GDScript side is section 10: the `OneLobbyNetPlayer` node, the spawner and the layer; the C# side is section 11:
-the layer in `OneLobby.Replication`, the same wire). A Godot C# node is the next lane. The JS and C# sides are
-proven on an in-memory network with a virtual clock and nothing else; the GDScript side on the same kind of rig and, in CI, by two
-headless processes of a sample on one PC. No real link and no real game engine window has run it, and nobody has looked at a
-networked player on a screen. The smoothing numbers are the plan's numbers, not tuned by eye.
+**Status: JS, GDScript, C# and Unity** (the GDScript side is section 10: the `OneLobbyNetPlayer` node, the spawner and the layer; the Godot C# node and
+spawner are section 10b; the C# side is section 11: the layer in `OneLobby.Replication`, the same wire; the Unity side is section 12: the component, the spawner and a sample).
+The JS and C# layers are proven on an in-memory network with a virtual clock and nothing else; the GDScript side on the same kind of rig and, in CI, by two
+headless processes of a sample on one PC; the Godot C# node, spawner and sample in one headless Godot process on an in-memory network; the Unity side in one editor process
+on an in-memory network and by two built players on one PC (local runs only: Unity is not in CI). No real link and no
+real game engine window has run it, and nobody has looked at a networked player on a screen. The smoothing numbers are the plan's numbers, not tuned by eye.
 
 A game that does not use the layer sees no change: no new entity, no new message, the same bytes.
 
@@ -119,7 +120,8 @@ export function start(lobby: Lobby): NetPlayers {
 `new NetPlayers(lobbyOrSession, options)`; `NetPlayers.fromBlueprint(lobby, blueprint, extra?)` reads `sync.player` and
 `sync.tickRate`. A lobby gets its own `ReplicationSession` (`players.session`) with the adaptive render delay on; pass a
 session you made (with `adaptiveDelay: true`) to configure it yourself. Options are the `sync.player` keys (`authority`,
-`space`, `range`, `velocityRange`, `limits`, `omit`) plus `step`, `spawn` and `session`.
+`space`, `range`, `velocityRange`, `limits`, `omit`) plus `step`, `spawn` and `session`. In `"host"` authority a host with no `step` throws one `Error` from the first `pump()` that needs it (after
+the rest of that pump has run); later pumps do not throw, the players that need the step do not move, and setting `players.step` later works.
 
 | name | what |
 |---|---|
@@ -181,7 +183,8 @@ key: `docs/design/blueprint.md` section 4e. A game's own extra fields and events
 
 ## 9. What is not built yet
 
-- A Godot C# node (the C# layer itself is section 11, the Unity component section 12; the Godot node and the GDScript code are section 10).
+- For the Godot C# node: the scaffolder's `godot-csharp` template does not copy the add-on folder or reference `OneLobby.Replication` yet (a game does both by hand),
+  and the two-process run of the C# sample has never run (it needs the WebRTC natives in the demo project).
 - An adapter for any JS game engine; this layer talks plain numbers.
 - A dropped player is despawned at once (the rejoin window does not keep it frozen), and a rejoin starts a new player.
 - Your own extra state fields and events in `onelobby.json`: send your own entity or `sendEvent` for now.
@@ -297,7 +300,7 @@ A game that wants to do all this itself uses the layer directly (`OneLobbyNetPla
 `set_local_state` / `set_local_input`, `get_state(peer)`, `send_action`, `on_action`, ...: the table of section 5 with snake_case names;
 `get` is `get_state`, `latest` is `latest_state`, `local` is `local_state()`, `players` is `player_ids()`, `action` is `send_action` and
 the signal for every action is `action_played`). Where the host draws the other players itself, `get_state(peer)` gives their host
-record one tick behind, interpolated (the JS `get` does the same). Authority `"host"` on a client: `local_state()` is an empty
+record one tick behind, interpolated (the JS `get` does the same). A spectator's local character is taken back (`player_removed`) when the roster says spectator and made again when it says player: the spawner looks at the roster on every `tick` of the layer. A `"host"` authority host with no `step` gets one `push_error` (once), keeps pumping, and its players that need the step do not move until `players.step` is set. Authority `"host"` on a client: `local_state()` is an empty
 Dictionary (and `get_state` of the local player is null) until the host's first state of your player has arrived; JS `local` is
 `undefined` then.
 
@@ -312,12 +315,134 @@ godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --host
 godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join=127.0.0.1:47810 --local --name=Alex
 ```
 
+## 10b. Godot (C#)
+
+The Godot C# side is the twin of section 10 on the C# layer of section 11: `OneLobbyNetPlayer` (a `Node` under the character) and
+`OneLobbyNetPlayerSpawner` (one character per seated player), names in PascalCase, `[GlobalClass]` so both appear in the editor's node
+list. A game written in C# and a game written in GDScript, JS or Unity can be in one lobby (same wire).
+
+**Where the node lives.** The two scripts are an add-on folder of the game project, `addons/onelobby_net_player/` (`OneLobbyNetPlayer.cs`,
+`OneLobbyNetPlayerSpawner.cs`), copied the way the menu's `addons/onelobby_menu/` is. They are not classes of the `OneLobby.Godot` library
+because Godot cannot attach a node class that lives in a referenced assembly to a scene in the editor, and a character scene needs the node
+as a child (and `OneLobby.Godot` does not reference `OneLobby.Replication`). What a game references: `OneLobby.Replication` (NuGet package
+or project) next to `OneLobby.Core` and `OneLobby.Godot`. The demo project does it with a `ProjectReference`; the scaffolder's `godot-csharp`
+template does not offer the node or that reference yet (section 9). Reference example: `clients/dotnet/demo-godot` (`NetPlayerDemo.tscn`:
+the menu, a flat floor, capsules that walk and jump, a colour per team, a name per player).
+
+| the GDScript node (section 10) | the C# node | note |
+|---|---|---|
+| `peer_id` | `PeerId` | export |
+| `animation_player`, `animation_tree` | `AnimationPlayerPath`, `AnimationTreePath` | exports (a `NodePath`) |
+| `mode_animations`, `animation_params` | `ModeAnimations` (`Dictionary<int, string>`), `AnimationParams` (`Dictionary<string, string>`) | exports; same defaults and the same value names; `RefreshAnimationParams()` after changing a value in place |
+| `auto_mode`, `hide_until_first_state` | `AutoMode`, `HideUntilFirstState` | exports |
+| `step_function` (a `Callable`) | `StepFunction` (a `PlayerStepFunc`) | |
+| `is_local`, `is_bound()`, `players()` | `IsLocal`, `IsBound`, `Players` | |
+| `bind(layer)`, `unbind()` | `Bind(NetPlayers)`, `Unbind()` | |
+| `pitch mode on_ground item aiming blocking health alive team` | `Pitch Mode OnGround Item Aiming Blocking Health Alive Team` | properties |
+| `velocity` (a Variant) | `Velocity` (`Vector3`) and `Velocity2D` (`Vector2`) | C# is typed |
+| `set_input({...})` (merges a patch) | `SetInput(in NetPlayerInput)` (the whole struct each call) | |
+| `teleport(to)`, `respawn(to)` | `Teleport(Vector3 / Vector2)`, `Respawn()`, `Respawn(Vector3 / Vector2)` | |
+| `jump() land(i) shoot(y, p) melee_attack(s) reload() use(t) switch_item(s) throw_item(y, p, w) emote(id)` | `Jump() Land(i) Shoot(y, p) MeleeAttack(s) Reload() Use(t) SwitchItem(s) ThrowItem(y, p, w) Emote(id)` | `float` arguments |
+| `hurt(by, damage)`, `kill(by)` (host) | `Hurt(by, damage)`, `Kill(by)` | |
+| signals `jumped landed shot melee reloaded used item_switched thrown hit died respawned emoted` | signals `Jumped Landed Shot Melee Reloaded Used ItemSwitched Thrown Hit Died Respawned Emoted` | same arguments (`Shot` has `long view`); also C# events (`net.Jumped += ...`); GDScript connects by the PascalCase name (`net.connect("Jumped", f)`) |
+
+| the GDScript spawner | the C# spawner | note |
+|---|---|---|
+| `scene`, `spawn_parent`, `pump_layer` | `Scene`, `SpawnParent`, `PumpLayer` | exports |
+| `spawn_point` (a Callable giving a `Vector3` or `Vector2`) | `SpawnPoint` (`Func<int, Vector3>`) and `SpawnPoint2D` (`Func<int, Vector2>`) | two properties instead of one Variant |
+| `step_function` | `StepFunction` | |
+| `start(lobby, cfg, opts)` | `Start(Lobby, Blueprint?, NetPlayersOptions?)` | |
+| `use_players(layer)`, `stop()`, `character_of(peer)`, `players`, `characters` | `UsePlayers(NetPlayers)`, `Stop()`, `CharacterOf(peer)`, `Players`, `Characters` | `Stop()` and leaving the tree dispose the layer (the spawner owns the layer it is given; the lobby and the session stay yours) |
+| signals `player_spawned(peer_id, character, is_local)`, `player_removed(peer_id, character)` | signals `PlayerSpawned(peer, character, isLocal)`, `PlayerRemoved(peer, character)` | |
+
+The node does what section 10 says: the machine that owns the player in `"owner"` authority reads the parent each physics frame
+(`GlobalPosition`, `GlobalRotationDegrees`, `Velocity` and `IsOnFloor()` of a `CharacterBody3D` / `CharacterBody2D`) and calls
+`SetLocalState`; in `"host"` authority the game gives `SetInput`, the layer predicts with the game's deterministic step and the node writes
+`Local` plus `Smoother.Offset` (nothing is written before the host's first state of the player has arrived: `Local` is null, the character
+stays where the game put it, never at the origin); every other machine writes `Get(PeerId)` into the parent each rendered frame and
+keeps the character hidden until the first state is in. Positions enter the layer as doubles widened from Godot's float `GlobalPosition`
+components (exact) and leave it as floats narrowed from the layer's doubles (the wire quantises through float32 anyway). The 2D or 3D
+kind of the parent must follow `sync.player.space`; a parent of the other kind is one `GD.PushError` and the node stays unbound.
+
+Where C# had to differ from the GDScript node: `SetInput` takes the whole `NetPlayerInput` (a struct has no patch); `Velocity` is two typed
+properties; the spawn point is two properties; signals are named in PascalCase because Godot C# names a signal after its delegate; the
+node never reads `AnimationPlayer.CurrentAnimation` (the C# accessor is not in every Godot 4.x build: a game compiled against GodotSharp
+4.5.1 hit `MissingMethodException` on Godot 4.7.2), so it plays the mode's animation when the mode changes or the player stopped. (Both
+spawners take a spectator's local character back when the roster says spectator, and make it again when it says player: a joiner's
+roster says "player" until the host's room snapshot arrives, so the character made at once for this machine would otherwise stay.
+The C# spawner looks on every layer tick and takes it back only; the GDScript one looks on every `tick` of the layer and does both.)
+
+An owner-authority character, you move it as you always did:
+
+```csharp
+public partial class Hero : CharacterBody3D
+{
+    private OneLobbyNetPlayer _net = null!;
+    public override void _Ready()
+    {
+        _net = GetNode<OneLobbyNetPlayer>("NetPlayer");
+        _net.Shot += (yaw, pitch, view) => GD.Print("bang from " + _net.PeerId);
+        _net.Health = 100; _net.Team = 1;
+    }
+    public override void _PhysicsProcess(double delta)
+    {
+        if (!_net.IsLocal) return;                       // on the other machines the node moves this character
+        Velocity = new Vector3(Input.GetAxis("ui_left", "ui_right") * 5f, IsOnFloor() ? 0f : Velocity.Y - 18f * (float)delta, Input.GetAxis("ui_up", "ui_down") * 5f);
+        if (IsOnFloor() && Input.IsActionJustPressed("ui_accept")) { Velocity = Velocity with { Y = 6f }; _net.Jump(); }
+        MoveAndSlide();
+    }
+}
+```
+
+A host-authority character: the node moves it, you give it input and one step function (the same function the host runs):
+
+```csharp
+public partial class Fighter : CharacterBody3D
+{
+    private OneLobbyNetPlayer _net = null!;
+    public override void _Ready()
+    {
+        _net = GetNode<OneLobbyNetPlayer>("NetPlayer");
+        _net.StepFunction = Step;                         // must be deterministic: it also runs on the host
+    }
+    private static PlayerState Step(PlayerState s, NetPlayerInput i, double dt) { s.X += i.MoveX * 6 * dt; s.Z += i.MoveY * 6 * dt; s.Yaw = i.Yaw; return s; }
+    public override void _PhysicsProcess(double delta)
+    {
+        if (_net.IsLocal) _net.SetInput(new NetPlayerInput { MoveX = Input.GetAxis("ui_left", "ui_right"), MoveY = Input.GetAxis("ui_up", "ui_down"), Yaw = RotationDegrees.Y });
+    }
+}
+```
+
+The spawner takes the lobby (the menu's `GameStarted` lobby) and the blueprint, makes the layer, pumps it every frame, makes this machine's own
+character at once (in owner authority the other machines learn of a player from its first state, so waiting for the join event would
+deadlock) and one per other seated player, and frees them when the player leaves:
+
+```csharp
+var spawner = new OneLobbyNetPlayerSpawner { Scene = GD.Load<PackedScene>("res://Hero.tscn") };
+spawner.SpawnPoint = peer => new Vector3(peer * 2f, 1f, 0f);
+spawner.PlayerSpawned += (peer, character, isLocal) => GD.Print("player " + peer + " is here" + (isLocal ? " (this machine)" : ""));
+AddChild(spawner);
+var players = spawner.Start(lobby, menu.Client!.Blueprint!);   // the layer: players.Stats, players.TryRewound(...), players.HostAction(...)
+```
+
+**What is proven, in these words.** The node, the spawner and the sample are proven in one headless Godot process on an in-memory network
+(`NetPlayerDemo.tscn -- --netplayer-selfcheck`, last line `NETPLAYER_SELF_OK (n checks)`, run by `clients/dotnet/scaffold-test.sh` in CI).
+The two-process run of the sample (`clients/dotnet/demo-godot/net-player-test.sh`, host and joiner on 127.0.0.1) needs the WebRTC natives in
+the demo project, no CI step fetches them for it, and it has never run. Nobody has seen a networked player move in a Godot C# window, the
+smoothing numbers are the plan's and not tuned by eye, and no real link (Wi-Fi, the internet, a relay) has carried it. To look at it yourself, open two
+windows (both `--local`, which keeps every socket on 127.0.0.1):
+
+```
+godot --path clients/dotnet/demo-godot res://NetPlayerDemo.tscn -- --host --local --name=Sam
+godot --path clients/dotnet/demo-godot res://NetPlayerDemo.tscn -- --join=127.0.0.1:47810 --local --name=Alex
+```
+
 ## 11. C# (plain .NET, Godot C#, Unity)
 
 `OneLobby.Replication` has the same layer on the same wire, so a C# peer, a JS peer and a GDScript peer can be in one game:
 `NetPlayers` (the layer; no engine type anywhere in it), with `PlayerCodec` / `PlayerWire` (the bytes) under it. **The Unity
-component is section 12; a Godot C# node does not exist yet** (the next lane). Until then a Godot game calls the layer from its own
-`Node`: pump it every frame, hand it your player each tick, draw the other players from `Get(peer)`, and
+`NetPlayer` component is section 12; the Godot C# node is section 10b. A game with its own engine glue calls the layer from its own
+`MonoBehaviour` or `Node`: pump it every frame, hand it your player each tick, draw the other players from `Get(peer)`, and
 make the characters yourself from `PlayerJoined` / `PlayerLeft`. Names are the JS ones in PascalCase; a state is a `PlayerState`
 struct (`X Y Z Vx Vy Vz Yaw Pitch OnGround Mode Item Aiming Blocking Health Alive Team Teleport`, doubles for the numbers), an
 input is a `NetPlayerInput` struct (`MoveX MoveY Yaw Pitch` and a `PlayerButtons` flags value), event arguments are one `ActionArgs`
@@ -393,7 +518,9 @@ Behaviour is the other two clients' (spec section 13 lists what an implementer t
 renumbers events it relays, a repeated input does not step and the host quantises after each step, the owner's teleport counter
 moves by 1 and the host's by 4, and on the host `Get(peer)` for another player is the host's own record one tick behind,
 interpolated through the hit-rewind history. A host-authority owner has no `Local` until the host's first state of it arrives and
-sends and steps no input before that. A `Shoot` with `View` 0 gets your render tick x 256.
+sends and steps no input before that. A host in `Host` authority with no `Step` gets one `InvalidOperationException`, from the first `Pump()` that
+needs the step and after everything else in that pump has run; later pumps do not throw, players that need the step do not move, and
+setting `Step` later works at once. A `Shoot` with `View` 0 gets your render tick x 256.
 
 Things that differ from JS, on purpose: states are structs (no allocation per frame, copied by value), `Local` and `Get` are
 `PlayerState?` instead of `undefined`, `OnAction` is one event for every action, `SetLocalState` takes the whole state (JS merges a
@@ -415,7 +542,7 @@ Three roles, as in the Godot node:
 | on | the component does |
 |---|---|
 | the machine that owns the player, `"owner"` | each `FixedUpdate` it reads the character (position, velocity from the `CharacterController` or `Rigidbody`, grounded from the controller, yaw from the transform; a character with only a `Transform` gets its speed measured over the last rendered frames) plus the values you set on it (`Pitch`, `Mode`, `Item`, `Aiming`, `Blocking`, `Health`, `Alive`, `Team`, and `OnGround` when there is no controller) and calls `SetLocalState`. You move your character as you always did. `AutoMode` (on) derives `Mode` (idle, walk, jump, fall) from the movement. It runs after your scripts (`DefaultExecutionOrder(100)`) |
-| the machine that owns the player, `"host"` | you call `SetInput(NetPlayerInput)` (or `SetInput(move, yaw, pitch, buttons)`) any time; each `FixedUpdate` the component hands the latest to `SetLocalInput`. The layer predicts with `Step` (a `PlayerStepFunc` you set on the component or the spawner; without one the component logs one clear error; the layer would throw from `Pump()` every tick, so the spawner pumps only the lobby until a `Step` is set), and each rendered frame the component writes `Local` + `Smoother.Offset` into the transform. `Local` is null until the host's first state of the player has arrived: the component writes nothing before that (never the origin), and the character stays where the game put it (the spawner's `SpawnPoint`, which is also where the host spawns it) |
+| the machine that owns the player, `"host"` | you call `SetInput(NetPlayerInput)` (or `SetInput(move, yaw, pitch, buttons)`) any time; each `FixedUpdate` the component hands the latest to `SetLocalInput`. The layer predicts with `Step` (a `PlayerStepFunc` you set on the component or the spawner; without one the component logs one clear error; the layer throws once from the first `Pump()` that needs it and then keeps pumping, so the spawner's pumping only the lobby until a `Step` is set is no longer needed), and each rendered frame the component writes `Local` + `Smoother.Offset` into the transform. `Local` is null until the host's first state of the player has arrived: the component writes nothing before that (never the origin), and the character stays where the game put it (the spawner's `SpawnPoint`, which is also where the host spawns it) |
 | every other machine | each rendered frame (after the layer was pumped) it writes `Get(PeerId)` into the transform (position and yaw; a teleport snaps because the layer does) and exposes the rest as read-only properties (a set is ignored). The renderers stay off until the first state has arrived (`HideUntilFirstState`) |
 
 **What it does to a `CharacterController` or `Rigidbody` that it places** (every remote character, and the local one in authority `"host"`): it disables the `CharacterController` (writing a transform under an enabled controller is undone by the controller) and makes a non-kinematic `Rigidbody` kinematic with interpolation off; `Unbind()` (and destroying the component) puts both back as they were. A character the owner moves is left alone, except that the component switches the controller off around a write it makes itself (`Teleport`, a host correction). To place your own `CharacterController` character from code, use `SetPosition(Vector3)` or `Teleport(Vector3)`, not `transform.position`. The play-mode tests run each kind.
@@ -503,7 +630,7 @@ public sealed class Game : MonoBehaviour
 }
 ```
 
-The component allocates nothing of its own per frame (states are structs; `FixedUpdate` and `LateUpdate` do arithmetic and calls). What does allocate is the layer's event dispatch (`GetInvocationList` per raised event, noted in its source) and your own handlers. One thing to know about the layer: a second layer made on a lobby that is already playing waits for the host's next full snapshot (up to its 5 s keyframe) before it sees any player; the spawner test measured 1.6 s.
+The component allocates nothing of its own per frame (states are structs; `FixedUpdate` and `LateUpdate` do arithmetic and calls). What does allocate is the layer's event dispatch (`GetInvocationList` per raised event, noted in its source) and your own handlers. One thing to know about the layer: a second layer or session made on a lobby that is already playing (the first one's ack still stands on the host) waits until the host falls back to a full snapshot (64 ticks, about 2 s; at most its 5 s keyframe) before it sees any player; the spawner test measured 1.6 s. The first session on a lobby has no such wait. Spec section 13 has the smallest fix, which is not built.
 
 **What is proven, in these words.** Everything on the Unity side is proven in one editor process on an in-memory network (`clients/unity/com.onelobby.unity/Tests/Runtime/OneLobbyNetPlayerTests.cs`: owner authority with a bare transform, a `CharacterController` and a `Rigidbody`, host authority, the Animator map, the spawner, 2D and a host correction) and by two built players of the sample on one PC over 127.0.0.1 (`clients/unity/net-player-test.sh`, ending with `NETPLAYER_OK` in the host's log). Unity is not in CI: every Unity result is a local run on one editor version (6000.2.7f2). Nobody has seen a networked player move in a Unity window, the smoothing numbers are the plan's and not tuned by eye, and no real link (Wi-Fi, the internet, a relay) has carried it. To look at it yourself, build the sample as a player (the script leaves one at `.tmp-unity/np/Builds/Windows/Game.exe`) and open two windows, both `--local`, which keeps every socket on 127.0.0.1 (the game starts when the second player is in):
 

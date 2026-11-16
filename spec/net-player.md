@@ -370,4 +370,18 @@ then run the same command without the variable: the plain run only reads the fil
 - In `"host"` mode the owner has no local state until the host's first state of its own player arrives (section 5.2, step 2): do
   not start the predictor from the default state, do not send or step inputs before it, and expect no snap and no `corrected` from
   that first state.
+- A spectator must not keep a character: a joiner's roster says "player" for its own peer until the host's room snapshot arrives,
+  and the layer never announces a local spectator, so a spawner that made the local character at once looks at the roster on
+  every tick, takes the character back when it says spectator and makes it again when it says player.
+- A host in `"host"` mode with no step function reports it **once** (JS and C#: one exception from the first `pump()` / `Pump()`
+  that needed the step, thrown after everything else in that pump has run; GDScript: one `push_error`), keeps pumping what does
+  not need the step (roster, snapshots, events), does not move the players that need it, and works as soon as the step is set,
+  with no restart. Throwing on every tick is wrong.
+- A second layer or session made on a lobby that is already playing sees no player until the host's next full snapshot (the host
+  holds the first session's ack, encodes against a baseline the new session does not have, and only after 64 ticks falls back to a
+  full one: about 2 s, at most the 5 s keyframe). The first session on a lobby has no such wait. With the wire as it is, nothing a
+  client sends changes that (`spec/replication.md`: an `ack` of 0 or lower than the one held is ignored). The smallest fix, not
+  built because it changes what a field of the input message means: the host treats an input with `ack` 0 from a client whose
+  stored ack is above 0 as "this client holds no baseline" and calls `SendFullSnapshot(peer)`; no new byte, and an old host just
+  keeps the wait.
 - Time stamps: `tick` in the message is host ticks; `view` is the render tick x 256 as an unsigned 32-bit number.
