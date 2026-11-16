@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate } from "../blueprint.js";
-import { NATIVES_MARKER, verifyPin } from "../vendor.js";
+import { LEGACY_PIN, NATIVES_MARKER, verifyPin } from "../vendor.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
@@ -67,6 +67,13 @@ export function godotChecks() {
       async run(ctx) {
         if (!existsSync(join(ctx.dir, "addons/onelobby/client.gd")))
           return { status: "fail", detail: "addons/onelobby/ is missing (no client.gd).", next: "Run: npx create-onelobby --into . (it copies the add-on and writes PIN.json)." };
+        const replaceWith = "Run: npx create-onelobby --into . (it replaces addons/onelobby/ whole: files the new add-on does not have are removed, so old and new never mix).";
+        if (existsSync(join(ctx.dir, `addons/onelobby/${LEGACY_PIN}`)))
+          return {
+            status: "fail",
+            detail: `addons/onelobby/ is an older add-on (it has a ${LEGACY_PIN} file, newer ones have PIN.json), so its files may be a mix of old and new versions.`,
+            next: replaceWith,
+          };
         if (!existsSync(join(ctx.dir, "addons/onelobby/PIN.json")))
           return { status: "skipped", detail: "addons/onelobby/PIN.json is missing, so the add-on cannot be compared (adopt it with: npx create-onelobby --into .)" };
         let pin;
@@ -76,6 +83,13 @@ export function godotChecks() {
           if (e?.code === "bad_pin") return { status: "fail", detail: e.message, next: "Restore it from git, or run: npx create-onelobby --into . --force." };
           return { status: "fail", detail: `addons/onelobby/PIN.json is not valid JSON (${e.message}).`, next: "Restore it from git, or run: npx create-onelobby --into . --force." };
         }
+        const stale = pin.added.filter((p) => !p.endsWith(".uid")); // a .uid is Godot's own file beside a script
+        if (stale.length)
+          return {
+            status: "fail",
+            detail: `addons/onelobby/ holds ${stale.length} file(s) that PIN.json does not list, so old and new add-on files are mixed: ${stale.slice(0, 6).join(", ")}${stale.length > 6 ? ", ..." : ""}.`,
+            next: `Run: npx create-onelobby --into . --force (it replaces addons/onelobby/ whole and removes these; copy out anything of yours in that folder first).`,
+          };
         const bits = [pin.edited.length && `edited: ${pin.edited.join(", ")}`, pin.missing.length && `missing: ${pin.missing.join(", ")}`, pin.added.length && `added: ${pin.added.join(", ")}`].filter(Boolean);
         const count = Object.keys(pin.pin.files ?? {}).length;
         const commit = String(pin.pin.source?.commit ?? "unknown").slice(0, 7);
@@ -131,13 +145,15 @@ export function godotChecks() {
         const f = facts(ctx);
         if (!f.direct) return { status: "skipped", detail: "hosting.direct is false in onelobby.json (the game hosts through a lobby server only)" };
         if (existsSync(join(ctx.dir, "tests/multiplayer.gd"))) {
+          const t0 = Date.now();
           const r = await g(ctx, ["-s", "res://tests/multiplayer.gd"], { timeoutMs: 120000 });
+          const secs = ((Date.now() - t0) / 1000).toFixed(1);
           if (/^MULTIPLAYER_OK/m.test(r.out) && !r.timedOut) return { status: "ok", detail: "two peers on 127.0.0.1, host and join by code, one message each way: the game's tests/multiplayer.gd" };
           const fail = /^MULTIPLAYER_FAIL (.*)$/m.exec(r.out)?.[1];
           return {
             status: "fail",
-            detail: `two peers on 127.0.0.1 did not connect: ${r.timedOut ? "tests/multiplayer.gd did not finish in time" : (fail ?? `no MULTIPLAYER_OK (${lastError(r.out)})`)}.`,
-            next: "Run: godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd and read its output; check that nothing blocks Godot on 127.0.0.1.",
+            detail: `two peers on 127.0.0.1 did not connect: ${r.timedOut ? "tests/multiplayer.gd did not finish in time" : (fail ?? `no MULTIPLAYER_OK (${lastError(r.out)})`)} (${secs} s; the test waits up to 15 s for the link).`,
+            next: "Run: godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd and read its output. If it prints MULTIPLAYER_OK, the failure was a slow start (the first run after an import, or a busy PC: one run of this took 18.4 s and failed, the next 3.0 s and passed with nothing changed), so run verify once more; if it fails again, check that nothing blocks Godot on 127.0.0.1.",
           };
         }
         const res = probeResult(await probe(ctx, ["--route=direct"]), "direct", probeByHand("direct"));

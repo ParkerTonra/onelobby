@@ -48,9 +48,11 @@ export const SHAPES = [
       ["open world", 3],
       ["free roam", 3],
       ["host runs the world", 3],
-      ["cooperative", 2],
-      ["co op", 2],
-      ["coop", 2],
+      ["host sends snapshots", 3],
+      ["host sends the world", 3],
+      ["cooperative", 3],
+      ["co op", 3],
+      ["coop", 3],
       ["base building", 2],
       ["survival", 1],
       ["crafting", 1],
@@ -180,8 +182,14 @@ export const PAUSE_MODIFIERS = [
   { value: "anyone", terms: ["rts", "real time strategy", "strategy", "city builder", "4x"], why: "a strategy game is worth pausing: any player can ask, and the host stops the frames" },
 ];
 
+/** Words that make a game competitive: with one of these a co-op sentence is still a host-decides game (see the first VETOES row). */
+export const COMPETITIVE_TERMS = ["shooter", "fps", "hitscan", "hit scan", "battle royale", "brawler", "racing", "physics", "pvp", "versus", "competitive", "deathmatch"];
+
 /** A veto on one shape. `engine`: only for that engine; `unless`: terms in the description that lift a penalty; `ban`: the shape can never win. */
 export const VETOES = [
+  // a co-op game whose host runs the world is a snapshot game even when it says "not deterministic" or "host authoritative": that wording alone
+  // is the replication shape's strongest hint, so without a competitive word the co-op words win
+  { shape: "replication", terms: ["co op", "coop", "cooperative"], unless: COMPETITIVE_TERMS, penalty: 3, note: "your description says co-op and nothing competitive, so the proposal is the co-op snapshot shape (the host runs the world), not the competitive one: add a word like shooter or versus if the host decides everything" },
   { shape: "lockstep", terms: ["nondeterministic"], ban: true, note: "your description says the simulation is not deterministic, so lockstep is out: the peers would drift apart" },
   { shape: "lockstep", engine: "unity", terms: ["physics", "rigidbody", "ragdoll", "racing", "vehicle"], ban: true, note: "Unity physics is not deterministic, so lockstep is out" },
   { shape: "lockstep", terms: ["physics", "rigidbody", "ragdoll"], unless: ["deterministic", "lockstep"], penalty: 3, note: "physics does not run the same on every peer unless you say it is deterministic" },

@@ -34,6 +34,7 @@ import {
   buildPin,
   loadNatives,
   packageVersion,
+  olderAddonPin,
   sha256,
   verifyPin,
 } from "./vendor.js";
@@ -92,6 +93,10 @@ export function planUpdate({ target, opts, cwd, flavor = GDSCRIPT }) {
   const { pinPath: PIN_PATH, dir: ADDON_DIR } = flavor;
   const rel = relative(cwd, target) || ".";
   let pinState;
+  // an add-on with an older pin format (a `PIN` file) or none: its files are its own pin, so it is replaced whole, nothing counted as an edit
+  const older = ADDON_DIR === "addons/onelobby" ? olderAddonPin(target) : null;
+  if (older) pinState = { ok: true, pin: older.pin, edited: [], missing: [], added: [] };
+  else
   try {
     pinState = verifyPin(target, ADDON_DIR, { tolerate: flavor.tolerate });
   } catch (e) {

@@ -191,7 +191,7 @@ describe("update: local changes stop it (exit 1) unless --force", () => {
 describe("update: no PIN.json", () => {
   it("is a clear error that names --into", async () => {
     await game();
-    rmSync(at("game/addons/onelobby/PIN.json"));
+    rmSync(at("game/addons/onelobby"), { recursive: true });
     const r = await j(UPDATE);
     expect(r.code).toBe(1);
     expect(r.json.error.code).toBe("no_pin");

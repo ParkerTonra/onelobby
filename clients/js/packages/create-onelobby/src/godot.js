@@ -1,12 +1,13 @@
 // The `godot-gdscript` template: a new Godot 4 project, or `--into` an existing GDScript project. Plans first (no writes, no
 // download), then applies. The engine-neutral parts (vendoring, pin, blocks, zip) live in vendor.js.
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { addAutoload, isCSharpProject } from "./godot-project.js";
+import { checkNameClashes, declaredClasses } from "./godot-names.js";
 import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
 import {
   GITATTRIBUTES_LINES,
@@ -20,6 +21,7 @@ import {
   applyBlock,
   buildPin,
   loadNatives,
+  planAddonReplace,
 } from "./vendor.js";
 
 const templates = join(dirname(fileURLToPath(import.meta.url)), "../templates/godot-gdscript");
@@ -28,6 +30,7 @@ const read = (...p) => readFileSync(join(templates, ...p), "utf8").replace(/\r\n
 export const GODOT_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/main/docs/recipes/godot-gdscript.md";
 export const AUTOLOAD_NAME = "Net";
 export const AUTOLOAD_PATH = "res://net.gd";
+const ADDON_PREFIX = "addons/onelobby/";
 /** The port a direct host listens on unless told otherwise (OneLobbyDirectHost.DEFAULT_PORT). */
 export const DEFAULT_DIRECT_PORT = 47810;
 
@@ -130,16 +133,29 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
   const files = [];
   const notes = [];
   const abs = (p) => join(target, ...p.split("/"));
+  // --into: refuse a name the game already owns (before anything is decided or written), and replace an add-on that is already there whole
+  let replace = null;
+  if (into) {
+    checkNameClashes({ target, classes: declaredClasses(addon.files, ADDON_PREFIX), autoload: { name: AUTOLOAD_NAME, file: "net.gd" }, ignore: new Set(["net.gd", "tests/multiplayer.gd"]) });
+    replace = planAddonReplace({ target, source: addon, force: opts.force });
+  }
   for (const f of wanted) {
     const content = bytes(f.content);
     const p = abs(f.path);
     let action = "create";
     if (existsSync(p)) {
       if (statSync(p).isDirectory()) throw new CliError("exists", `${f.path} is a folder, expected a file`);
-      action = readFileSync(p).equals(content) ? "unchanged" : opts.force ? "overwrite" : "skip";
+      const same = readFileSync(p).equals(content);
+      if (same) action = "unchanged";
+      else if (replace && f.path.startsWith(ADDON_PREFIX)) action = "overwrite"; // the add-on is replaced whole (planAddonReplace stopped on edits)
+      else if (f.path === "onelobby.json") action = "skip"; // your choices and their reasons: --force keeps it too
+      else action = opts.force ? "overwrite" : "skip";
     }
     files.push({ path: f.path, content, action });
   }
+  if (replace) for (const r of replace.remove) files.push({ path: ADDON_PREFIX + r, content: null, action: "remove" });
+  // the files of the game this run found with other content: kept or (--force) replaced, said apart from the add-on
+  const collisions = files.filter((f) => !f.path.startsWith(ADDON_PREFIX) && (f.action === "skip" || (f.action === "overwrite" && existsSync(abs(f.path))))).map((f) => ({ path: f.path, action: f.action === "skip" ? "kept" : "replaced" }));
 
   // .gitignore and .gitattributes: a managed block, replaced in place or appended once
   for (const [path, lines, head] of [
@@ -179,7 +195,7 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
   natives.version = WEBRTC_NATIVE_VERSION;
   natives.zipSha256 = WEBRTC_NATIVE_ZIP_SHA256;
   natives.folder = `${NATIVES_DIR}/`;
-  return { files, natives, notes, addon: { commit: addon.commit, from: addon.from }, slug, netPlayer };
+  return { files, natives, notes, addon: { commit: addon.commit, from: addon.from, ...(replace ? { replaces: { kind: replace.kind, from: replace.from, to: replace.to, created: replace.create.length, overwritten: replace.overwrite.length, unchanged: replace.unchanged.length, removed: replace.remove, edited: replace.edited, unlisted: replace.unlisted } } : {}) }, collisions, slug, netPlayer };
 }
 
 /** Write a plan: the files that are create / update / overwrite, then the natives. Returns { written, natives }. */
@@ -193,14 +209,28 @@ export async function applyGodot(plan, { target, opts, cwd, fetchImpl }) {
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, content);
   };
+  const removed = [];
   for (const f of plan.files) {
     if (f.action === "create" || f.action === "update" || f.action === "overwrite") {
       put(f.path, f.content);
       written.push(f.path);
+    } else if (f.action === "remove") {
+      rmSync(join(target, ...f.path.split("/")), { force: true });
+      removed.push(f.path);
+    }
+  }
+  for (const path of removed) {
+    // an old folder the removal emptied goes too (never above the add-on's own folder)
+    for (let d = dirname(path); d.startsWith(ADDON_PREFIX); d = dirname(d)) {
+      try {
+        rmdirSync(join(target, ...d.split("/")));
+      } catch {
+        break; // not empty, or already gone
+      }
     }
   }
   for (const f of nativeFiles) put(f.path, f.content);
-  return { written, nativeFiles: nativeFiles.length };
+  return { written, removed, nativeFiles: nativeFiles.length };
 }
 
 /** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes). `players`: { authority, space }. */
@@ -211,6 +241,25 @@ export function netPlayerLines({ authority, space }) {
     '  var spawner := OneLobbyNetPlayerSpawner.new(); spawner.scene = preload("res://my_player.tscn"); add_child(spawner); spawner.start(lobby, OneLobbyConfig.load_file())   # lobby: the menu\'s game_started lobby; one character per player appears and goes by itself',
     `  (${authority === "host" ? 'authority "host": also set spawner.step_function = your pure step(state, input, dt) before spawner.start; ' : ""}docs/recipes/net-player.md section 10)`,
   ];
+}
+
+/** The add-on lines of the printed result: which version replaces which, and what happens to the files. */
+export function addonLines(r, removed) {
+  const same = r.created === 0 && r.overwritten === 0 && removed.length === 0;
+  if (r.kind === "none") return [`Add-on: new, ${r.to}`];
+  if (same) return [`Add-on: ${r.to} (already current)`];
+  const bits = [`${r.overwritten} overwritten`, `${r.created} added`, `${removed.length} removed`];
+  const out = [`Add-on: ${r.from} -> ${r.to}: replaced whole (${bits.join(", ")}); ${ADDON_PREFIX} never holds old and new files together`];
+  if (r.kind === "legacy" || r.kind === "unpinned") out.push("  (no file hashes in the old pin, so edits to it cannot be told from the old copy: git has what was there)");
+  if (removed.length) out.push(...removed.slice(0, 20).map((p) => `  ${p} (removed: the new add-on has no such file)`), ...(removed.length > 20 ? [`  ... and ${removed.length - 20} more removed`] : []));
+  if (r.edited.length || r.unlisted.length) out.push(...r.edited.map((p) => `  ${ADDON_PREFIX}${p} (your edit overwritten: --force)`), ...r.unlisted.map((p) => `  ${ADDON_PREFIX}${p} (not in the old pin, removed: --force)`));
+  return out;
+}
+
+/** One line for a game file this run found with other content. */
+export function collisionLine(c) {
+  if (c.path === "onelobby.json") return "  onelobby.json: differs, kept (it holds your choices and their reasons; --force keeps it too: delete the file to write a new one)";
+  return c.action === "kept" ? `  ${c.path}: differs, left as it is (--force replaces it)` : `  ${c.path}: differs, replaced (--force)`;
 }
 
 /** The `next` lines for the printed result. */
@@ -224,8 +273,10 @@ export function godotNext({ into, rel, plan }) {
   next.push("godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd   # expect MULTIPLAYER_OK");
   if (into) {
     next.push(
-      "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn",
-      "connect it: $Menu.game_started.connect(func(lobby): ...); $Menu.returned_to_lobby.connect(func(lobby): ...); $Menu.left.connect(func(): ...)",
+      "add the menu where your game opens (it is a Control with its own scene). In a scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn, and give it the client from the parent's _enter_tree: $Menu.client = Net.client",
+      'built in code (a runtime CanvasLayer, no scene file): var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate(); menu.client = Net.client; layer.add_child(menu)   # set client BEFORE add_child',
+      "connect it: menu.game_started.connect(func(lobby): ...); menu.returned_to_lobby.connect(func(lobby): ...); menu.left.connect(func(): ...)   # game_started hands you the OneLobbyLobby (host and joiner both get it); a menu inside a scene your game replaces: set menu.pump = false",
+      "a game that reads its own --host / --join flags: set menu.boot_flags = false (the menu then ignores all four of --host --join --name --local --autostart); see the skill's wiring step",
       "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
       ...(players ? netPlayerLines(players) : []),
       `follow ${GODOT_RECIPE_URL}`,
@@ -256,9 +307,11 @@ export async function runGodot(ctx) {
   const rel = relative(io.cwd, target) || ".";
   const listed = plan.files.filter((f) => f.action === "create" || f.action === "update" || f.action === "overwrite");
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
+  const removed = plan.files.filter((f) => f.action === "remove").map((f) => f.path);
+  const replaces = plan.addon.replaces;
   const unchanged = plan.files.filter((f) => f.action === "unchanged").map((f) => f.path);
   const natives = plan.natives;
-  const wouldChange = listed.length > 0 || natives.status === "install";
+  const wouldChange = listed.length > 0 || removed.length > 0 || natives.status === "install";
   const next = godotNext({ into, rel, plan });
   const result = {
     ok: true,
@@ -267,6 +320,8 @@ export async function runGodot(ctx) {
     blueprint,
     files: listed.map((f) => f.path),
     skipped,
+    collisions: plan.collisions,
+    ...(removed.length ? { removed } : {}),
     unchanged: unchanged.length,
     natives: { status: natives.status, version: natives.version, zipSha256: natives.zipSha256, folder: natives.folder, ...(natives.source ? { source: natives.source } : {}), ...(natives.reason ? { reason: natives.reason } : {}) },
     addon: plan.addon,
@@ -281,11 +336,15 @@ export async function runGodot(ctx) {
   const text = (verb) => {
     const out = [];
     if (!wouldChange) out.push(`Nothing changed: ${target} already has everything (${unchanged.length} files unchanged).`);
-    else out.push(`${verb} ${target}`, ...listed.map((f) => `  ${f.path}${f.action === "create" ? "" : ` (${f.action})`}`));
+    else {
+      out.push(`${verb} ${target}`);
+      if (replaces) out.push(...addonLines(replaces, removed));
+      out.push(...listed.filter((f) => !(replaces && f.path.startsWith(ADDON_PREFIX))).map((f) => `  ${f.path}${f.action === "create" ? "" : ` (${f.action})`}`));
+    }
     if (natives.status === "install") out.push(`  ${natives.folder} (webrtc-native ${natives.version}, from ${natives.source === "download" ? "a checked download" : natives.source === "zip" ? "--webrtc-zip" : "--webrtc-dir"})`);
     if (natives.status === "skipped") out.push("WebRTC natives not installed (--no-natives).");
     if (natives.status === "present") out.push(`${natives.folder} is already there; natives left as they are.`);
-    if (skipped.length) out.push(`Skipped (already exist and differ; use --force to overwrite):`, ...skipped.map((p) => `  ${p}`));
+    if (plan.collisions.length) out.push("Collides with files already in your game:", ...plan.collisions.map((c) => collisionLine(c)));
     for (const n of plan.notes) out.push(`Note: ${n}`);
     return out.join("\n");
   };

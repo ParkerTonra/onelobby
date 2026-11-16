@@ -148,6 +148,103 @@ export function verifyPin(projectDir, folder = ADDON_DIR, { tolerate } = {}) {
   return { ok: !edited.length && !missing.length && !added.length, pin, edited, missing, added };
 }
 
+// ---- an add-on that is already in the game ---------------------------------------------------------------------------
+
+/** The pin an older create-onelobby (or a hand copy) left: a file `PIN` holding the add-on's commit, not `PIN.json`. */
+export const LEGACY_PIN = "PIN";
+const short7 = (sha) => (typeof sha === "string" && /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 7) : "unknown");
+
+/**
+ * What `addons/onelobby/` of a game holds now: `kind` is "none" (no folder, or an empty one), "pinned" (a PIN.json), "legacy" (an older
+ * `PIN` file, with or without a PIN.json beside it: that is a mixed add-on, so the PIN.json is not trusted) or "unpinned" (files, no pin).
+ * `label` names the version ("33bcf81 (legacy PIN file)"), `files` is every file below the folder ({ path, content }, LF text), and a pinned
+ * add-on also carries `pin`, `edited`, `missing` and `added` (see verifyPin). Throws CliError("bad_pin") for a PIN.json that cannot be read.
+ */
+export function installedAddon(projectDir, folder = ADDON_DIR) {
+  const root = join(projectDir, ...folder.split("/"));
+  if (!existsSync(root) || !statSync(root).isDirectory()) return { kind: "none", label: "none", files: [] };
+  const files = readTree(root);
+  if (!files.length) return { kind: "none", label: "none", files };
+  const text = (name) => files.find((f) => f.path === name)?.content.toString("utf8");
+  const legacy = text(LEGACY_PIN);
+  if (legacy !== undefined) return { kind: "legacy", label: `${short7(legacy.trim().split(/\s+/)[0])} (legacy PIN file)`, files };
+  if (text("PIN.json") !== undefined) {
+    let state;
+    try {
+      state = verifyPin(projectDir, folder);
+    } catch (e) {
+      if (e instanceof CliError) throw e;
+      throw new CliError("bad_pin", `${folder}/PIN.json is not valid JSON (${e.message}); restore it from git, or delete it and the add-on files and run: npx create-onelobby --into .`);
+    }
+    const v = state.pin?.createOnelobby;
+    return { kind: "pinned", label: `${short7(state.pin?.source?.commit)} (create-onelobby ${typeof v === "string" ? v : "unknown"})`, files, ...state };
+  }
+  return { kind: "unpinned", label: "unknown (no pin file)", files };
+}
+
+/**
+ * The add-on of a game that has no PIN.json it can trust (a legacy `PIN` file, or no pin at all), as a pin of its own files' hashes so
+ * `update` can treat every file as unedited and replace the folder whole: { pin, label } or null (no add-on, or a PIN.json: use verifyPin).
+ */
+export function olderAddonPin(projectDir, folder = ADDON_DIR) {
+  const old = installedAddonLoose(projectDir, folder);
+  if (old.kind !== "legacy" && old.kind !== "unpinned") return null;
+  const files = {};
+  for (const f of old.files) files[f.path] = sha256(f.content);
+  const commit = old.kind === "legacy" ? (old.files.find((f) => f.path === LEGACY_PIN).content.toString("utf8").trim().split(/s+/)[0] ?? "unknown") : "unknown";
+  return { pin: { createOnelobby: "unknown", source: { commit }, files }, label: old.label };
+}
+
+/** installedAddon without reading a PIN.json (kind "pinned" is reported as such, nothing verified). */
+function installedAddonLoose(projectDir, folder) {
+  const root = join(projectDir, ...folder.split("/"));
+  if (!existsSync(root) || !statSync(root).isDirectory()) return { kind: "none", files: [] };
+  const files = readTree(root);
+  if (!files.length) return { kind: "none", files };
+  const legacy = files.find((f) => f.path === LEGACY_PIN);
+  if (legacy) return { kind: "legacy", label: `${short7(legacy.content.toString("utf8").trim().split(/s+/)[0])} (legacy PIN file)`, files };
+  if (files.some((f) => f.path === "PIN.json")) return { kind: "pinned", files };
+  return { kind: "unpinned", label: "unknown (no pin file)", files };
+}
+
+/** The label of the add-on a run brings, in the same form as installedAddon's. */
+export const incomingAddonLabel = (commit) => `${short7(commit)} (create-onelobby ${packageVersion()})`;
+
+/**
+ * Replace a game's add-on whole with `source` (addonSource()): returns what a run would do, writing nothing.
+ * { kind, from, to, create, overwrite, unchanged, remove, edited, unlisted }: paths relative to the add-on folder, PIN.json not included
+ * (the caller writes the new pin). `remove` is every file of the old add-on the new one does not have, a legacy `PIN` file included, so an
+ * old copy never stays beside the new files. A pinned add-on whose files were edited, or that holds files its pin does not list, stops
+ * with CliError("local_changes") naming each, unless `force`; a legacy or unpinned add-on has no hashes to tell edits from the old copy, so it
+ * is replaced (git has the old files).
+ */
+export function planAddonReplace({ target, source, force = false, folder = ADDON_DIR }) {
+  const old = installedAddon(target, folder);
+  const wanted = new Map(source.files.map((f) => [f.path, f.content]));
+  const have = new Map(old.files.map((f) => [f.path, f.content]));
+  const create = [];
+  const overwrite = [];
+  const unchanged = [];
+  for (const [path, content] of wanted) {
+    if (!have.has(path)) create.push(path);
+    else if (have.get(path).equals(content)) unchanged.push(path);
+    else overwrite.push(path);
+  }
+  const remove = [...have.keys()].filter((p) => p !== "PIN.json" && !wanted.has(p));
+  const edited = old.kind === "pinned" ? old.edited.filter((p) => !wanted.has(p) || overwrite.includes(p)) : [];
+  const unlisted = old.kind === "pinned" ? old.added.filter((p) => remove.includes(p)) : [];
+  if ((edited.length || unlisted.length) && !force) {
+    const lines = [...edited.map((p) => `  edited   ${folder}/${p}`), ...unlisted.map((p) => `  unlisted ${folder}/${p} (not in its PIN.json)`)];
+    throw new CliError(
+      "local_changes",
+      `the add-on in ${target} no longer matches its ${folder}/PIN.json; nothing was changed:\n${lines.join("\n")}\nKeep your edits (copy them out), then rerun with --force: it replaces the add-on whole (edited files overwritten, unlisted files removed).`,
+      undefined,
+      { edited, unlisted },
+    );
+  }
+  return { kind: old.kind, from: old.label, to: incomingAddonLabel(source.commit), create: create.sort(), overwrite: overwrite.sort(), unchanged: unchanged.sort(), remove: remove.sort(), edited, unlisted };
+}
+
 // ---- natives: Godot's WebRTC GDExtension -------------------------------------------------------------------------------
 
 export const WEBRTC_NATIVE_VERSION = "1.2.2-stable";

@@ -268,10 +268,14 @@ describe("godot-gdscript: --into", () => {
     expect(text("mine/project.godot")).not.toContain("[autoload]"); // their net.gd, so no autoload was added
     expect(r.json.notes.join(" ")).toContain("net.gd already exists");
     const human = await cli(["--into", "mine", ...FROM, "--no-natives"]);
-    expect(human.out).toContain("Skipped (already exist and differ; use --force to overwrite):");
+    expect(human.out).toContain("Collides with files already in your game:");
+    expect(human.out).toContain("net.gd: differs, left as it is (--force replaces it)");
+    expect(r.json.collisions.map((c) => `${c.path}:${c.action}`).sort()).toEqual(["net.gd:kept", "onelobby.json:kept"]);
     const forced = await j(["--into", "mine", ...FROM, "--no-natives", "--force"]);
-    expect(forced.json.skipped).toEqual([]);
-    expect(JSON.parse(text("mine/onelobby.json")).version).toBe(1);
+    expect(forced.json.skipped).toEqual(["onelobby.json"]); // --force replaces net.gd but keeps onelobby.json: it holds the game's choices
+    expect(forced.json.collisions).toEqual(expect.arrayContaining([{ path: "net.gd", action: "replaced" }, { path: "onelobby.json", action: "kept" }]));
+    expect(text("mine/onelobby.json")).toBe("mine");
+    expect(text("mine/net.gd")).not.toContain("my own net");
     expect(text("mine/project.godot")).toContain('Net="*res://net.gd"');
   });
 

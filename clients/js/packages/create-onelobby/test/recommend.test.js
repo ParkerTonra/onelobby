@@ -47,6 +47,14 @@ const SENTENCES = [
   ["online card game", "turn-based", "raw", 4, ["card game"]],
   ["chess", "turn-based", "raw", 2, ["chess"]],
   ["physics racing game in Godot", "replication", "replication", 4, ["physics", "racing"]],
+  // a co-op game that already has host-run multiplayer: "not deterministic" and "host authoritative" must not turn it into the competitive shape
+  ["Free-roam 3D first-person co-op game in Godot GDScript for up to 4 players: the host runs the world and sends snapshots to joiners, which predict their own actions; not deterministic, frame-driven, 10 Hz sim tick", "coop-snapshots", "replication", 4, ["free-roam", "co-op", "host runs the world"]],
+  ["3D co-op game in Godot GDScript for up to 4 players, host authoritative, frame-driven, not deterministic", "coop-snapshots", "replication", 4, ["co-op"]],
+  ["co-op game where the host sends snapshots to the joiners", "coop-snapshots", "replication", 4, ["co-op", "host sends snapshots"]],
+  ["cooperative first-person game for 3 players, not deterministic", "coop-snapshots", "replication", 3, ["cooperative"]],
+  // controls: a competitive word keeps the competitive shape, and "not deterministic" alone still means it
+  ["co-op shooter for 4 players, not deterministic", "replication", "replication", 4, ["shooter", "not deterministic"]],
+  ["4 player arena game, host authoritative, not deterministic", "replication", "replication", 4, ["not deterministic"]],
   // the rest of section 5, in other words
   ["4 player party minigames in Godot", "lockstep", "lockstep", 4, ["party", "minigames"]],
   ["RTS with a seeded simulation in the browser, 60 Hz", "lockstep", "lockstep", 4, ["rts", "seeded"]],

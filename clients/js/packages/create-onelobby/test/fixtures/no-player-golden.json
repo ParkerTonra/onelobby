@@ -6,7 +6,7 @@
   "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
-  "net.gd": "fe3e7ca693201f17f1e3660189a598da53b88c3a8a8d2b331feb7f461fe848f9",
+  "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
   "onelobby.json": "1b4eeea0ad203f8073871674b98017a40d8ae809e68a10ffe12baf361fc126b9",
   "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
   "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
@@ -18,7 +18,7 @@
   "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
-  "net.gd": "fe3e7ca693201f17f1e3660189a598da53b88c3a8a8d2b331feb7f461fe848f9",
+  "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
   "onelobby.json": "28fb6dde49bdb2f84f1bfd5e7329bbcaecef76b91e61dc923b0dea15c0aa4538",
   "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
   "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
