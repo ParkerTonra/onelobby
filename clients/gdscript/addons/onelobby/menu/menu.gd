@@ -14,6 +14,11 @@ extends Control
 ##     same object is `client.lobby`. Hand it, the peer ids (`lobby.local_peer_id`, `lobby.host_peer_id`, `lobby.is_host`) and the roster
 ##     (`lobby.room.players()`) to your session; with `sync.mode` raw you send and receive your own bytes on it (`lobby.send`, `lobby.broadcast`,
 ##     `lobby.message_received`) and keep pumping it from the client (`client.pump()`; the menu does it unless `pump` is off).
+##   - ORDER: `game_started` fires with the menu's screen already PLAYING. Set your own role and "line is live" state BEFORE you attach the lobby to your
+##     session or panel (`role = ...` first, then `attach(lobby)`): anything that refreshes on the lobby's roster signals while the menu says PLAYING reads your
+##     state at once, and a panel that finds no live line calls `menu.leave()` and hangs up both peers. The host's `game_started` also comes after the room's
+##     countdown (3 s by default), `start_on_host` included: your world keeps running solo until then.
+##   - Inside your own Container, give the menu a size: `menu.custom_minimum_size = Vector2(520, 460)` and expand flags (a full-rect Control has no minimum of its own).
 ##   - The menu has a room step your game may not have had: after Host (or Join) the lobby page shows the roster, Ready and the host's Start button.
 ##     Nothing starts until the host presses Start (or `model.start_game()`, or `--autostart`).
 ##   - `pump`: on (the default) the menu turns the client's `auto_pump` off and pumps it from its own `_process`, so the pump stops when the menu is freed.

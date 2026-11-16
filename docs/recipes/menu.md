@@ -18,6 +18,8 @@ func _ready() -> void:
 
 
 func _on_game_started(lobby: OneLobbyLobby) -> void:
+	# the menu already shows its PLAYING screen here: set your own role and "line is live" state FIRST, then attach the lobby to your session or panel
+	# (a panel that refreshes on the roster and finds no live line calls menu.leave(), and both peers hang up)
 	print("start the match with ", lobby.room.players().size(), " players")
 
 
@@ -82,6 +84,11 @@ The process command line is read once per process. The first menu that is built 
 
 One switch (`boot_flags = false`) turns all five off: set it when the game reads flags of those names itself (the menu and the game would both act on `--host`), and call
 `menu.model.host()`, `join()` or `apply_local()` yourself. The menu still reads `--local` on its own to keep the connection check off. Tests give the flags to a menu with `boot_args` instead of the process command line.
+
+The host's `game_started` fires after the room's countdown (3 s by default, `room.countdown_seconds`), also with `start_on_host`: the world keeps ticking solo
+meanwhile and the session attaches when the signal arrives. **Inside your own panel** give the menu a size: in a `Container` parent set
+`menu.custom_minimum_size = Vector2(520, 460)` and the expand size flags before `add_child`; in a plain `Control` parent it fills the parent through its full-rect
+anchors, so size the parent.
 
 ## A game that hosts from its running world
 
