@@ -2,6 +2,7 @@
 # CI runner for the GDScript client: every default test, one summary line. Loopback only (127.0.0.1), no internet.
 #   usage: GODOT=/path/to/godot clients/gdscript/ci-test.sh
 # Needs: addons/godot_webrtc (fetch-webrtc.sh), node deps (conformance/, clients/js built), dotnet 8 for the lobby server.
+# scaffold-unit / scaffold-e2e need clients/js built too (create-onelobby); the e2e reuses addons/godot_webrtc, no second download.
 # Not run here (opt-in, need internet): direct-test.sh public, nostr-interop-gdscript.mjs --real, TURN flags,
 # tests/sign_bench.gd is a timing bench (run for its BIP340 vectors only, no timing assertion).
 set -uo pipefail
@@ -45,6 +46,9 @@ step sign_bench "${G[@]}" -s res://tests/sign_bench.gd
 step direct-test bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
 step nostr-interop env GODOT="$GODOT" node "$ROOT/integration/nostr-interop-gdscript.mjs"
+# create-onelobby's godot-gdscript template: its unit tests (no network), then scaffold a project and run its own two-peer test
+step scaffold-unit bash -c 'cd "$1/clients/js/packages/create-onelobby" && npx vitest run test/vendor.test.js test/godot.test.js' _ "$ROOT"
+step scaffold-e2e env GODOT="$GODOT" bash "$HERE/scaffold-test.sh"
 
 # lobby server on loopback for e2e.gd
 echo "::group::server"
