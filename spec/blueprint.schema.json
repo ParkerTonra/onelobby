@@ -233,11 +233,22 @@
       "properties": {
         "$comment": { "type": "string" },
         "kind": {
-          "description": "drop-in: the <one-lobby> element (web). generated: menus written into the game. none: you build it. Default: drop-in for engine web, generated otherwise.",
+          "description": "drop-in: the <one-lobby> element (web). generated: menus written into the game. none: you build it. Default: drop-in for engine web and godot-gdscript (the menu scene), generated otherwise.",
           "enum": ["drop-in", "generated", "none"]
         },
         "entry": { "description": "Where multiplayer lives in the game's menus, e.g. \"Main menu: Play together\".", "type": "string" },
-        "theme": { "description": "Drop-in only.", "enum": ["light", "dark", "auto"], "default": "auto" }
+        "theme": { "description": "Drop-in only (the web element). The Godot menu uses the engine theme: restyle it with a Theme resource.", "enum": ["light", "dark", "auto"], "default": "auto" }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "type": "string" },
+        "reportToHost": { "description": "A joiner that cannot connect tells the host why (cause and step only, never an address). Off sends nothing.", "type": "boolean", "default": true },
+        "logSize": { "description": "How many lines the net log keeps (the log a player can copy).", "type": "integer", "minimum": 50, "maximum": 5000, "default": 500 },
+        "relayProbe": { "description": "After a failed connect with a relay set, ask the relay whether it refused the login or never answered.", "type": "boolean", "default": true },
+        "showConnectionCheck": { "description": "The drop-in menu shows the Connection check button (it contacts public STUN servers when pressed).", "type": "boolean", "default": true }
       }
     }
   },

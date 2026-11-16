@@ -68,6 +68,7 @@ export interface Blueprint {
     readonly discord: boolean;
   };
   readonly ui: { readonly kind: "drop-in" | "generated" | "none"; readonly entry?: string; readonly theme: "light" | "dark" | "auto" };
+  readonly diagnostics: { readonly reportToHost: boolean; readonly logSize: number; readonly relayProbe: boolean; readonly showConnectionCheck: boolean };
 }
 
 /** What you may write: only `game.id` is required. */
@@ -132,6 +133,7 @@ export interface BlueprintInput {
     discord?: boolean;
   };
   ui?: { $comment?: string; kind?: "drop-in" | "generated" | "none"; entry?: string; theme?: "light" | "dark" | "auto" };
+  diagnostics?: { $comment?: string; reportToHost?: boolean; logSize?: number; relayProbe?: boolean; showConnectionCheck?: boolean };
 }
 
 /** Identity function for TypeScript completion in a `.ts` config (like Vite's `defineConfig`). */
@@ -222,6 +224,7 @@ const ROOT: Node = obj(
     }),
     platforms: obj({ steam: { k: "steam" }, epic: { k: "epic" }, discord: bool }),
     ui: obj({ kind: en("drop-in", "generated", "none"), entry: str(), theme: en("light", "dark", "auto") }),
+    diagnostics: obj({ reportToHost: bool, logSize: int(50, 5000), relayProbe: bool, showConnectionCheck: bool }),
   },
   ["game"],
 );
@@ -370,6 +373,7 @@ function fill(input: Record<string, unknown>): Blueprint {
   const session = sect(input.session);
   const platforms = sect(input.platforms);
   const ui = sect(input.ui);
+  const diagnostics = sect(input.diagnostics);
   const tickRate = (sync.tickRate as number | undefined) ?? 20;
   const web = engine === "web";
   const out = {
@@ -422,9 +426,15 @@ function fill(input: Record<string, unknown>): Blueprint {
     },
     platforms: { steam: platforms.steam ?? false, epic: platforms.epic ?? false, discord: platforms.discord ?? false },
     ui: {
-      kind: ui.kind ?? (web ? "drop-in" : "generated"),
+      kind: ui.kind ?? (web || engine === "godot-gdscript" ? "drop-in" : "generated"),
       ...(ui.entry !== undefined ? { entry: ui.entry } : {}),
       theme: ui.theme ?? "auto",
+    },
+    diagnostics: {
+      reportToHost: diagnostics.reportToHost ?? true,
+      logSize: diagnostics.logSize ?? 500,
+      relayProbe: diagnostics.relayProbe ?? true,
+      showConnectionCheck: diagnostics.showConnectionCheck ?? true,
     },
   };
   return out as unknown as Blueprint;

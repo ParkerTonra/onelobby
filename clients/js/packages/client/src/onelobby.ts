@@ -354,6 +354,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       peerTimeoutMs: bp.session.peerTimeoutMs,
       rememberSeat: overrides.rememberSeat ?? bp.lobby.rejoin,
       room: blueprintRoom(bp),
+      diagnostics: { reportToHost: bp.diagnostics.reportToHost, logSize: bp.diagnostics.logSize, ...(bp.diagnostics.relayProbe ? {} : { relayProbe: null }) },
       advanced: overrides.advanced,
     });
     (kit as { blueprint?: Blueprint }).blueprint = bp;

@@ -46,7 +46,11 @@
         "platforms.discord": false,
         "ui.kind": "generated",
         "ui.entry": null,
-        "ui.theme": "auto"
+        "ui.theme": "auto",
+        "diagnostics.reportToHost": true,
+        "diagnostics.logSize": 500,
+        "diagnostics.relayProbe": true,
+        "diagnostics.showConnectionCheck": true
       }
     },
     {
@@ -67,7 +71,22 @@
     {
       "name": "godot_gdscript_defaults",
       "input": { "game": { "id": "com.example.ants" }, "engine": "godot-gdscript" },
-      "expect": { "engine": "godot-gdscript", "hosting.direct": true, "hosting.server": false, "lobby.joinLink": false, "ui.kind": "generated" }
+      "expect": { "engine": "godot-gdscript", "hosting.direct": true, "hosting.server": false, "lobby.joinLink": false, "ui.kind": "drop-in" }
+    },
+    {
+      "name": "diagnostics_switches",
+      "input": { "game": { "id": "a" }, "diagnostics": { "reportToHost": false, "logSize": 50, "relayProbe": false, "showConnectionCheck": false } },
+      "expect": { "diagnostics.reportToHost": false, "diagnostics.logSize": 50, "diagnostics.relayProbe": false, "diagnostics.showConnectionCheck": false }
+    },
+    {
+      "name": "diagnostics_partial",
+      "input": { "game": { "id": "a" }, "diagnostics": { "logSize": 5000 } },
+      "expect": { "diagnostics.reportToHost": true, "diagnostics.logSize": 5000, "diagnostics.relayProbe": true, "diagnostics.showConnectionCheck": true }
+    },
+    {
+      "name": "gdscript_ui_can_be_overridden",
+      "input": { "game": { "id": "a" }, "engine": "godot-gdscript", "ui": { "kind": "none" } },
+      "expect": { "ui.kind": "none" }
     },
     {
       "name": "hash_follows_tick_rate",
@@ -185,6 +204,10 @@
     },
     { "name": "rate_limit_partial", "input": { "game": { "id": "a" }, "session": { "rateLimit": { "messages": 10 } } }, "error": { "path": "session.rateLimit.perMs", "rule": "required" } },
     { "name": "name_length_25", "input": { "game": { "id": "a" }, "players": { "maxNameLength": 25 } }, "error": { "path": "players.maxNameLength", "rule": "range" } },
+    { "name": "diagnostics_log_size_low", "input": { "game": { "id": "a" }, "diagnostics": { "logSize": 10 } }, "error": { "path": "diagnostics.logSize", "rule": "range" } },
+    { "name": "diagnostics_log_size_high", "input": { "game": { "id": "a" }, "diagnostics": { "logSize": 5001 } }, "error": { "path": "diagnostics.logSize", "rule": "range" } },
+    { "name": "diagnostics_report_string", "input": { "game": { "id": "a" }, "diagnostics": { "reportToHost": "no" } }, "error": { "path": "diagnostics.reportToHost", "rule": "type" } },
+    { "name": "diagnostics_unknown_key", "input": { "game": { "id": "a" }, "diagnostics": { "logLevel": 3 } }, "error": { "path": "diagnostics.logLevel", "rule": "unknown_key" } },
     { "name": "steam_bad_shape", "input": { "game": { "id": "a" }, "platforms": { "steam": "480" } }, "error": { "path": "platforms.steam", "rule": "type" } },
     { "name": "hosting_none_explicit", "input": { "game": { "id": "a" }, "hosting": { "direct": false, "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },
     { "name": "hosting_none_by_default", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },

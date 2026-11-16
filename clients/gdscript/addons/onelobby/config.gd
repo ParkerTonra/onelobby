@@ -58,6 +58,9 @@ var chat := {}
 var session := {}
 var platforms := {}
 var ui := {}
+## The diagnostics switches (spec/diagnostics.md): report_to_host, log_size (50 to 5000), relay_probe, show_connection_check
+## (the drop-in menu's Connection check button). `from_config` applies the first three to the client.
+var diagnostics := {}
 
 static var _root: Dictionary = {}
 
@@ -196,6 +199,7 @@ func _publish() -> void:
 	session = _snake(data["session"], [])
 	platforms = _snake(data["platforms"], ["epic"])
 	ui = _snake(data["ui"], [])
+	diagnostics = _snake(data["diagnostics"], [])
 
 
 ## Keys camelCase -> snake_case; the values of `keep` (user data) are copied as they are.
@@ -273,6 +277,7 @@ static func _schema() -> Dictionary:
 		}),
 		"platforms": _obj({"steam": {"k": "steam"}, "epic": {"k": "epic"}, "discord": b}),
 		"ui": _obj({"kind": _enum(["drop-in", "generated", "none"]), "entry": _str(), "theme": _enum(["light", "dark", "auto"])}),
+		"diagnostics": _obj({"reportToHost": b, "logSize": _int(50, 5000), "relayProbe": b, "showConnectionCheck": b}),
 	}, ["game"])
 
 
@@ -453,6 +458,7 @@ static func _fill(input: Dictionary) -> Dictionary:
 	var session_in := _sect(input.get("session"))
 	var platforms_in := _sect(input.get("platforms"))
 	var ui_in := _sect(input.get("ui"))
+	var diag_in := _sect(input.get("diagnostics"))
 	var tick_rate: int = sync_in.get("tickRate", 20)
 	var web: bool = engine_v == "web"
 	var out := {
@@ -509,9 +515,15 @@ static func _fill(input: Dictionary) -> Dictionary:
 	if session_in.has("rateLimit"):
 		out["session"]["rateLimit"] = session_in["rateLimit"]
 	out["platforms"] = {"steam": platforms_in.get("steam", false), "epic": platforms_in.get("epic", false), "discord": platforms_in.get("discord", false)}
-	out["ui"] = {"kind": ui_in.get("kind", "drop-in" if web else "generated"), "theme": ui_in.get("theme", "auto")}
+	out["ui"] = {"kind": ui_in.get("kind", "drop-in" if (web or engine_v == "godot-gdscript") else "generated"), "theme": ui_in.get("theme", "auto")}
 	if ui_in.has("entry"):
 		out["ui"]["entry"] = ui_in["entry"]
+	out["diagnostics"] = {
+		"reportToHost": diag_in.get("reportToHost", true),
+		"logSize": diag_in.get("logSize", 500),
+		"relayProbe": diag_in.get("relayProbe", true),
+		"showConnectionCheck": diag_in.get("showConnectionCheck", true),
+	}
 	return out
 
 

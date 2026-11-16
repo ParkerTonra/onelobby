@@ -62,6 +62,11 @@ namespace OneLobby
     public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
     /// <summary><see cref="Kind"/>: "drop-in", "generated" or "none". <see cref="Theme"/>: "light", "dark" or "auto".</summary>
     public sealed record UiSection(string Kind, string? Entry, string Theme);
+    /// <summary>The diagnostics switches (spec/diagnostics.md); <see cref="LogSize"/> is 50..5000. <see cref="ShowConnectionCheck"/> is for a drop-in menu.</summary>
+    public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck)
+    {
+        public static readonly DiagnosticsSection Defaults = new DiagnosticsSection(true, NetLog.DefaultCapacity, true, true);
+    }
 
     /// <summary>
     /// The settings file <c>onelobby.json</c> (spec/blueprint.schema.json, docs/design/blueprint.md), validated and with
@@ -76,6 +81,9 @@ namespace OneLobby
 
         /// <summary>The room layer's defaults (<c>room</c>; spec/room.md s.10).</summary>
         public RoomSection Room { get; init; } = RoomSection.Defaults;
+
+        /// <summary>The diagnostics switches (<c>diagnostics</c>); <see cref="ToConfig"/> applies them to <see cref="OneLobbyConfig.Diagnostics"/>.</summary>
+        public DiagnosticsSection Diagnostics { get; init; } = DiagnosticsSection.Defaults;
 
         /// <summary>
         /// Default public Nostr relays (the JS <c>DEFAULT_NOSTR_RELAYS</c>, same URLs in the same order; probed 2026-10-26,
@@ -126,7 +134,10 @@ namespace OneLobby
             return new OneLobbyConfig(Game.Id, Game.NetVersion, server,
                 Sync.Mode == "lockstep" ? SyncMode.Lockstep : SyncMode.Raw, Sync.TickRate, Sync.HashEveryTicks,
                 displayName ?? "", Hosting.RelayOnly, Hosting.DirectPort)
-            { ReadyTimeout = TimeSpan.FromMilliseconds(Session.ReadyTimeoutMs), PeerTimeout = TimeSpan.FromMilliseconds(Session.PeerTimeoutMs) };
+            {
+                ReadyTimeout = TimeSpan.FromMilliseconds(Session.ReadyTimeoutMs), PeerTimeout = TimeSpan.FromMilliseconds(Session.PeerTimeoutMs),
+                Diagnostics = new DiagnosticsOptions { ReportToHost = Diagnostics.ReportToHost, LogSize = Diagnostics.LogSize, RelayProbe = Diagnostics.RelayProbe },
+            };
         }
 
         /// <summary>
@@ -233,6 +244,10 @@ namespace OneLobby
                 if (Ui.Entry != null) w.WriteString("entry", Ui.Entry);
                 w.WriteString("theme", Ui.Theme);
                 w.WriteEndObject();
+                w.WriteStartObject("diagnostics");
+                w.WriteBoolean("reportToHost", Diagnostics.ReportToHost); w.WriteNumber("logSize", Diagnostics.LogSize);
+                w.WriteBoolean("relayProbe", Diagnostics.RelayProbe); w.WriteBoolean("showConnectionCheck", Diagnostics.ShowConnectionCheck);
+                w.WriteEndObject();
                 w.WriteEndObject();
             }
             return Encoding.UTF8.GetString(ms.ToArray());
@@ -304,7 +319,7 @@ namespace OneLobby
 
         private static void Structure(JsonElement root)
         {
-            Object(root, "", new[] { "game" }, new[] { "version", "game", "engine", "hosting", "lobby", "room", "sync", "players", "chat", "session", "platforms", "ui" }, (k, v) =>
+            Object(root, "", new[] { "game" }, new[] { "version", "game", "engine", "hosting", "lobby", "room", "sync", "players", "chat", "session", "platforms", "ui", "diagnostics" }, (k, v) =>
             {
                 switch (k)
                 {
@@ -442,6 +457,13 @@ namespace OneLobby
                             else Enum(uv, "ui.theme", "light", "dark", "auto");
                         });
                         break;
+                    case "diagnostics":
+                        Object(v, "diagnostics", Array.Empty<string>(), new[] { "reportToHost", "logSize", "relayProbe", "showConnectionCheck" }, (dk, dv) =>
+                        {
+                            if (dk == "logSize") Int(dv, "diagnostics.logSize", 50, 5000);
+                            else Bool(dv, "diagnostics." + dk);
+                        });
+                        break;
                 }
             });
         }
@@ -530,6 +552,7 @@ namespace OneLobby
             var session = Sec(root, "session");
             var platforms = Sec(root, "platforms");
             var ui = Sec(root, "ui");
+            var diag = Sec(root, "diagnostics");
             var roomJson = Sec(root, "room");
 
             var web = engine == "web";
@@ -581,9 +604,10 @@ namespace OneLobby
                 new SessionSection(S(session, "hostLeaves", "end"), S(session, "pause", "off"), I(session, "readyTimeoutMs", 15000),
                     I(session, "peerTimeoutMs", 0), rate, B(session, "runInBackground", true)),
                 new PlatformsSection(steam, epic, B(platforms, "discord", false)),
-                new UiSection(S(ui, "kind", web ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
+                new UiSection(S(ui, "kind", web || engine == "godot-gdscript" ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
             {
                 Room = BuildRoom(roomJson, lobby),
+                Diagnostics = new DiagnosticsSection(B(diag, "reportToHost", true), I(diag, "logSize", NetLog.DefaultCapacity), B(diag, "relayProbe", true), B(diag, "showConnectionCheck", true)),
             };
 
             // cross-key rules (spec/blueprint.schema.json x-rules), in order

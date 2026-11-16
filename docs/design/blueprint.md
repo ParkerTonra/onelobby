@@ -272,9 +272,18 @@ what makes the hand-edit path real: the file wins even over code that still call
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `web`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4 |
+| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `web` and `godot-gdscript`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element on the web, the `menu.tscn` scene in GDScript); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4; docs/recipes/menu.md |
 | `ui.entry` | free text, e.g. `"Settings > Multiplayer tab"`, `"Main menu: Play together"` | surveyed | S | new | the agent's plan; Mirror offline/online scene slots are the engine-side analogue |
-| `ui.theme` | `"light"` \| `"dark"` \| `"auto"` | `auto` | R (drop-in only) | exists (`theme` attribute) | |
+| `ui.theme` | `"light"` \| `"dark"` \| `"auto"` | `auto` | R (drop-in only) | exists (`theme` attribute); does not apply to Godot, whose menu uses the engine theme | |
+
+### 4j2. `diagnostics` (switches that exist as code options)
+
+| Key | Type | Default | R/S | Today |
+|---|---|---|---|---|
+| `diagnostics.reportToHost` | bool | `true` | R | a joiner that cannot connect tells the host why (cause and step, never an address); `reportToHost` / `ReportToHost` / `report_to_host` |
+| `diagnostics.logSize` | int 50 to 5000 | `500` | R | lines the net log keeps; `logSize` / `LogSize` / `log_size` |
+| `diagnostics.relayProbe` | bool | `true` | R | ask the relay after a failed connect whether it refused the login or never answered |
+| `diagnostics.showConnectionCheck` | bool | `true` | R (drop-in menus only) | the Godot menu shows its Connection check button (the check contacts public STUN servers when pressed) |
 
 ### 4k. Example
 

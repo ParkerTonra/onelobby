@@ -173,6 +173,20 @@ namespace OneLobby.Tests
             Assert.Equal(Visibility.Unlisted, Blueprint.Parse(@"{""game"":{""id"":""a""}}").ToLobbyOptions().Visibility);
         }
 
+        [Fact]
+        public void DiagnosticsSwitchesReachTheConfig()
+        {
+            var d = Blueprint.Parse(@"{""game"":{""id"":""a""}}");
+            Assert.Equal(new DiagnosticsSection(true, 500, true, true), d.Diagnostics);
+            var o = Blueprint.Parse(@"{""game"":{""id"":""a""},""diagnostics"":{""reportToHost"":false,""logSize"":50,""relayProbe"":false,""showConnectionCheck"":false}}");
+            var cfg = o.ToConfig();
+            Assert.False(cfg.Diagnostics.ReportToHost);
+            Assert.Equal(50, cfg.Diagnostics.LogSize);
+            Assert.False(cfg.Diagnostics.RelayProbe);
+            Assert.False(o.Diagnostics.ShowConnectionCheck);
+            Assert.Equal("drop-in", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-gdscript""}").Ui.Kind);
+        }
+
         // ---- enforcement -------------------------------------------------------------------------------------------
 
         private static (Rig rig, LobbyClient client) BlueprintClient(string json, string name = "Ann")

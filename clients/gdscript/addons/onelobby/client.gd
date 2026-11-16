@@ -121,7 +121,8 @@ func _exit_tree() -> void:
 ## `hosting.lobbyServer`; the file is the bottom layer, so a settings screen or an environment variable goes here).
 ## Always returns a client: when the file is invalid (or asks for a sync mode GDScript lacks: "replication"),
 ## `config_error` is set and its first host / join / list fails with it. `sync.mode`, `sync.tickRate` and
-## `sync.hashEveryTicks` set `sync_mode`, `tick_rate` and `hash_every_ticks`; `chat.text` and `session.pause` switch the
+## `sync.hashEveryTicks` set `sync_mode`, `tick_rate` and `hash_every_ticks`; `diagnostics.reportToHost`, `logSize` and `relayProbe` set `report_to_host`,
+## `log_size` and `relay_probe`; `chat.text` and `session.pause` switch the
 ## lobby's chat and pause helpers (`lobby.chat.send` raises "chat_disabled", `lobby.pause.request` "pause_disabled").
 ##
 ##     var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Sam"})
@@ -155,6 +156,9 @@ static func from_config(source: Variant = OneLobbyConfig.DEFAULT_PATH, overrides
 	c.relay_only = cfg.hosting["relay_only"]
 	c.ready_timeout_ms = cfg.session["ready_timeout_ms"]
 	c.peer_timeout_ms = cfg.session["peer_timeout_ms"]
+	c.report_to_host = cfg.diagnostics["report_to_host"]
+	c.log_size = cfg.diagnostics["log_size"]
+	c.relay_probe = cfg.diagnostics["relay_probe"]
 	return c
 
 
