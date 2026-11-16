@@ -325,7 +325,7 @@ behaves as before apart from better error text.
 | fact | JS (browser) | JS (Node, libdatachannel) | C# / GDScript (libdatachannel) |
 |---|---|---|---|
 | candidate types | from signaling text | same | same |
-| `relay` | relay candidate seen: `ok`; `icecandidateerror` 401/403: `refused`, 701: `unreachable`; gathering done and none: `failed` | relay candidate seen: `ok`; gathering done and none: `failed`, then a raw TURN probe says `refused` / `unreachable` | same as Node; a raw probe over a UDP socket |
+| `relay` | relay candidate seen: `ok`; `icecandidateerror` 401/403: `refused`, 701: `unreachable`; gathering done and none: `failed` | relay candidate seen: `ok`; gathering done (`failed`) or still going (`pending`) at the deadline with none: a raw TURN probe says `refused` / `unreachable` (else `failed` / `pending`) | same as Node; a raw probe over a UDP socket |
 | `stun` | the ICE list | same | same |
 | `heard` | candidate-pair stats `requestsReceived` | not exposed: null | not exposed: null |
 | `nat` | connection check | connection check | connection check |

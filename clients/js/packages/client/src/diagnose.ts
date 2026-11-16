@@ -271,12 +271,9 @@ export function cleanReport(input: unknown): DiagnosisReport | null {
   const remote = typeList((candidateTypes as Record<string, unknown>).remote);
   if (!local || !remote) return null;
   if (typeof clientVersion !== "string" || !VERSION_RE.test(clientVersion)) return null;
-  const out: DiagnosisReport = { cause, stage, elapsedMs, relaySet, candidateTypes: { local, remote }, clientVersion };
-  if (natType !== undefined) out.natType = natType as DiagnosisReport["natType"];
   // key order is the spec's (cause, stage, elapsedMs, relaySet, natType?, candidateTypes, clientVersion)
-  return natType !== undefined
-    ? { cause, stage, elapsedMs, relaySet, natType: out.natType, candidateTypes: out.candidateTypes, clientVersion }
-    : out;
+  const out: DiagnosisReport = { cause, stage, elapsedMs, relaySet, ...(natType !== undefined ? { natType: natType as DiagnosisReport["natType"] } : {}), candidateTypes: { local, remote }, clientVersion };
+  return out;
 }
 
 // ---- the connection check's verdict and NAT classification (spec/diagnostics.md s.8) --------------------------------

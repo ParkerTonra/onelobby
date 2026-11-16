@@ -741,7 +741,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private finishGivingUp(): void {
-    if (this.gaveUp) return;
+    if (this.gaveUp || this.ended || this.isReady) return;
     this.gaveUp = true;
     // what the host link saw (states, signals, timings), so a test log of a failed connect says where it stalled
     const hostLink = this.links.get(this.hostPeerId);
