@@ -210,3 +210,88 @@ describe("a player layer on a host that has no clients", () => {
     expect(layer.get(layer.localPeerId)!.x).toBeGreaterThan(3);
   });
 });
+
+describe("the host draws the other players (get(peer) on the host, one tick behind and interpolated)", () => {
+  // a player at 9.63 m/s (the fastest the path goes) travels this far in one 30 Hz tick
+  const TICK_TRAVEL_M = 9.63 / 30;
+  for (const mode of ["owner", "host"] as const) {
+    it(`${mode}: two remote players move smoothly between host ticks, a teleport snaps, the host's own player is unchanged`, async () => {
+      const s = await scene(mode, { lossRate: 0, jitterMs: 0 });
+      // A walks the path, B walks it from another phase
+      drive(s);
+      if (mode === "owner") {
+        s.bl.on("tick", () => {
+          const { teleport: _t, ...p } = pathAt(s.rig.nowMs, 2);
+          s.bl.setLocalState(p);
+        });
+        s.hl.on("tick", () => {
+          const { teleport: _t, ...p } = pathAt(s.rig.nowMs, 4);
+          s.hl.setLocalState(p);
+        });
+      } else {
+        s.bl.on("tick", () => {
+          const t = s.rig.nowMs / 1000;
+          s.bl.setLocalInput({ moveX: Math.sin(0.8 * t + 2), moveY: Math.cos(0.8 * t + 2), yaw: 90 });
+        });
+      }
+      await s.rig.run(3);
+      const last = new Map<number, { x: number; y: number; z: number }>();
+      let frames = 0;
+      let repeats = 0;
+      let biggest = 0;
+      let missing = 0;
+      for (let i = 0; i < 300; i++) {
+        await s.rig.step();
+        for (const peer of [s.a.peerId, s.b.peerId]) {
+          const v = s.hl.get(peer);
+          if (!v) {
+            missing++;
+            continue;
+          }
+          const prev = last.get(peer);
+          if (prev) {
+            const d = Math.hypot(v.x - prev.x, v.y - prev.y, v.z - prev.z);
+            frames++;
+            if (d === 0) repeats++;
+            biggest = Math.max(biggest, d);
+          }
+          last.set(peer, { x: v.x, y: v.y, z: v.z });
+        }
+        // the host's own player is its own record, as before
+        expect(s.hl.get(s.hl.localPeerId)).toBe(s.hl.local);
+      }
+      console.log(`host draws others (${mode}): ${frames} frames of 2 players, ${repeats} repeated a position, largest step ${biggest.toFixed(3)} m (one tick of travel at most ${TICK_TRAVEL_M.toFixed(3)} m)`);
+      expect(missing).toBe(0);
+      expect(repeats).toBe(0);
+      expect(biggest).toBeLessThan(TICK_TRAVEL_M);
+
+      // a teleport of A snaps (once, no slide), B keeps moving
+      const seen: { x: number; y: number; z: number }[] = [];
+      for (let i = 0; i < 120; i++) {
+        if (i === 30) s.hl.teleportPlayer(s.a.peerId, { x: 60, z: 60 });
+        await s.rig.step();
+        const v = s.hl.get(s.a.peerId)!;
+        seen.push({ x: v.x, y: v.y, z: v.z });
+        if (mode === "owner" && i === 40) break; // the owner of A is told to take the host's state; the snap is what is tested here
+      }
+      const d: number[] = [];
+      for (let i = 1; i < seen.length; i++) d.push(Math.hypot(seen[i].x - seen[i - 1].x, seen[i].y - seen[i - 1].y, seen[i].z - seen[i - 1].z));
+      const big = d.filter((x) => x > 40).length;
+      const slide = d.filter((x) => x > 1 && x < 40).length;
+      console.log(`host draws others (${mode}) teleport: ${big} frame(s) jumped over 40 m, ${slide} frame(s) slid between 1 and 40 m`);
+      expect(big).toBe(1);
+      expect(slide).toBe(0);
+    });
+  }
+
+  it("a player with a single record is held where it is, and a player that is not in the world is undefined", async () => {
+    const rig = new PlayerRig({ lossRate: 0, jitterMs: 0, layer: { authority: "host", step: walkStep, spawn: (peer) => ({ x: 50 + peer }) } });
+    const { layer: hl } = await rig.hostPlayers();
+    const { p: a } = await rig.joinPlayers("a");
+    expect(hl.get(a.peerId)).toBeUndefined();
+    for (let i = 0; i < 400 && !hl.get(a.peerId); i++) await rig.step(); // stop at the first frame the player exists: at most one record
+    const v = hl.get(a.peerId)!;
+    expect(v.x).toBeCloseTo(50 + a.peerId, 1);
+    expect(hl.get(a.peerId + 100)).toBeUndefined();
+  });
+});

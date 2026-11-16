@@ -284,10 +284,17 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
   /**
    * One player's state to draw now. The local player: `local`. A remote player: its state at render time (about 100 ms behind,
    * more on a jittery link), turning on the shortest arc, carried on by its velocity for at most 250 ms past the newest
-   * snapshot, then held. Undefined while the player is not in the world.
+   * snapshot, then held. On the host a remote player is the host's own record one tick behind, interpolated through the
+   * hit-rewind history (so a host that draws the others sees them move smoothly); one record alone, or a teleport between
+   * two records, is held, never blended. Undefined while the player is not in the world.
    */
   get(peerId: number): PlayerState | undefined {
     if (peerId === this.localPeerId) return this.known.has(peerId) || this.haveLocal || this.authority === "host" ? this.local : undefined;
+    if (this.isHost) {
+      const hp = this.hostPlayers.get(peerId);
+      if (!hp || !hp.spawned) return undefined;
+      return this.history.trySample(peerId, this.session.clock.tick - 1 + this.session.clock.alpha) ?? hp.state;
+    }
     const id = this.known.get(peerId);
     if (id === undefined) return undefined;
     const s = this.session.trySample(id, this.schema);

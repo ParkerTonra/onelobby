@@ -43,7 +43,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients,
-		_test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8,
+		_test_host_draws_others, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -388,6 +388,82 @@ func _test_host_without_clients() -> void:
 	l.tick.connect(func(_n: int) -> void: l.set_local_input({"move_x": 1.0, "move_y": 0.0, "yaw": 0.0}))
 	rig.run(1.0)
 	_check(float((l.get_state(l.local_peer_id) as Dictionary)["x"]) > 3.0, "a host with no clients steps its own player")
+
+
+## A host that draws the other players: `get_state(peer)` on the host is its own record one tick behind, interpolated (the JS twin is
+## the test "the host draws the other players" in net-player-host.test.ts).
+func _test_host_draws_others() -> void:
+	var tick_travel := 9.63 / 30.0 # the fastest the path goes, over one 30 Hz tick
+	for mode: String in MODES:
+		var s := _scene(mode, {"loss_rate": 0.0, "jitter_ms": 0.0})
+		var rig: Rig = s["rig"]
+		var hl: OneLobbyNetPlayers = s["hl"]
+		var al: OneLobbyNetPlayers = s["al"]
+		var bl: OneLobbyNetPlayers = s["bl"]
+		var apeer := _peer(s)
+		var bpeer := (s["b"] as Base.RepPlayer).peer_id()
+		_drive(s) # A walks the path, B walks it from another phase
+		if mode == "owner":
+			bl.tick.connect(func(_n: int) -> void: bl.set_local_state(_path_at(rig.now_ms(), 2.0)))
+			hl.tick.connect(func(_n: int) -> void: hl.set_local_state(_path_at(rig.now_ms(), 4.0)))
+		else:
+			bl.tick.connect(func(_n: int) -> void:
+				var t := rig.now_ms() / 1000.0
+				bl.set_local_input({"move_x": sin(0.8 * t + 2.0), "move_y": cos(0.8 * t + 2.0), "yaw": 90.0}))
+		rig.run(3.0)
+		var last := {}
+		var frames := 0
+		var repeats := 0
+		var biggest := 0.0
+		var missing := 0
+		var own_same := true
+		for i in 300:
+			rig.step()
+			for peer: int in [apeer, bpeer]:
+				var v: Variant = hl.get_state(peer)
+				if v == null:
+					missing += 1
+					continue
+				var cur: Dictionary = v
+				if last.has(peer):
+					var d := _dist3(cur, last[peer])
+					frames += 1
+					if d == 0.0:
+						repeats += 1
+					biggest = maxf(biggest, d)
+				last[peer] = cur
+			if hl.get_state(hl.local_peer_id) != hl.local_state():
+				own_same = false
+		print("host draws others (%s): %d frames of 2 players, %d repeated a position, largest step %.3f m (one tick of travel at most %.3f m)" % [mode, frames, repeats, biggest, tick_travel])
+		_check(missing == 0, "host draws others %s: both remote players have a state" % mode)
+		_check(repeats == 0, "host draws others %s: no frame repeats a position while the player moves" % mode)
+		_check(biggest < tick_travel, "host draws others %s: no step larger than one tick of travel" % mode)
+		_check(own_same, "host draws others %s: the host's own player is its own state" % mode)
+		# a teleport of A snaps (once, no slide)
+		var watched := Path.new()
+		for i in 40:
+			if i == 30:
+				hl.teleport_player(apeer, {"x": 60.0, "z": 60.0})
+			rig.step()
+			watched.add(float(rig.now_ms()), hl.get_state(apeer))
+		var d := _steps(watched)
+		var big := d.filter(func(x: float) -> bool: return x > 40.0).size()
+		var slide := d.filter(func(x: float) -> bool: return x > 1.0 and x < 40.0).size()
+		print("host draws others (%s) teleport: %d frame(s) jumped over 40 m, %d frame(s) slid between 1 and 40 m" % [mode, big, slide])
+		_check(big == 1, "host draws others %s: a teleport snaps in one frame" % mode)
+		_check(slide == 0, "host draws others %s: and nothing slides" % mode)
+	# a player with a single record is held where it is; a player that is not in the world is null
+	var rig2: Rig = Rig.player_rig({"loss_rate": 0.0, "jitter_ms": 0.0, "layer": {"authority": "host", "step": Callable(self, "_walk_step"), "spawn": func(peer: int) -> Dictionary: return {"x": 50.0 + float(peer)}}})
+	var hl2: OneLobbyNetPlayers = rig2.host_players()["layer"]
+	var a2 := rig2.join_players("a")
+	var apeer2: int = (a2["p"] as Base.RepPlayer).peer_id()
+	_check(hl2.get_state(apeer2) == null, "host draws others: a player that is not in the world yet is null")
+	var guard := 0
+	while hl2.get_state(apeer2) == null and guard < 400:
+		rig2.step() # stop at the first frame the player exists: at most one record
+		guard += 1
+	_check(hl2.get_state(apeer2) != null and absf(float((hl2.get_state(apeer2) as Dictionary)["x"]) - (50.0 + float(apeer2))) < 0.1, "host draws others: a single record is held at the spawn point")
+	_check(hl2.get_state(apeer2 + 100) == null, "host draws others: an unknown peer is null")
 
 
 # ====================================================================== D1 to D9 ========================================
