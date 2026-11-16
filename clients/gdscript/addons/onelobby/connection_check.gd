@@ -197,25 +197,94 @@ static func _has_turn(s: Dictionary) -> bool:
 	return false
 
 
+## Name resolution without blocking a frame: `begin` starts it, `poll` is asked once per frame. The default asks the
+## system (`IP.resolve_hostname_queue_item`, a worker thread); a test gives the probe one that answers from a list or never.
+class OLResolver:
+	extends RefCounted
+
+	## Starts resolving `host`; returns a ticket, or -1 when it cannot start.
+	func begin(host: String) -> int:
+		return IP.resolve_hostname_queue_item(host, IP.TYPE_ANY)
+
+	## null while the answer is pending; otherwise every address of the name, in the system's order (empty: it does not resolve).
+	func poll(ticket: int) -> Variant:
+		match IP.get_resolve_item_status(ticket):
+			IP.RESOLVER_STATUS_WAITING:
+				return null
+			IP.RESOLVER_STATUS_DONE:
+				var out := PackedStringArray()
+				for a: Variant in IP.get_resolve_item_addresses(ticket):
+					out.append(str(a))
+				return out
+		return PackedStringArray()
+
+	func cancel(ticket: int) -> void:
+		IP.erase_resolve_item(ticket)
+
+
+## The address to ask: the first IPv4 one, else the first of any family ("" when there is none). Godot's WebRTC connects
+## over IPv4 here, so the IPv4 answer is the one that says whether a join will work; a name that has no IPv4 address is
+## asked over the other family, because that is all there is.
+static func pick_address(addresses: PackedStringArray) -> String:
+	for a in addresses:
+		if a.is_valid_ip_address() and not a.contains(":"):
+			return a
+	return addresses[0] if not addresses.is_empty() else ""
+
+
 ## One UDP socket; `exchange` sends a request and waits for an answer `parse` accepts, with one retransmit.
 class OLProbe:
 	extends RefCounted
 	var udp := PacketPeerUDP.new()
 	var ok := false
 	var local_port := 0
+	var resolver: OneLobbyConnectionCheck.OLResolver
+	var _resolved := {}
 
-	func _init(bind_address: String) -> void:
+	func _init(bind_address: String, res: OneLobbyConnectionCheck.OLResolver = null) -> void:
+		resolver = res if res != null else OneLobbyConnectionCheck.OLResolver.new()
 		ok = udp.bind(0, bind_address) == OK
 		if ok:
 			local_port = udp.get_local_port()
 
+	## The address to send to for `host`: a literal address as it is, a name through the resolver, polled once per frame
+	## for at most `ms` (so a slow DNS answer costs time but never a frame). "" when it does not resolve in time.
+	func resolve(tree: SceneTree, host: String, ms: int) -> String:
+		if host.is_valid_ip_address():
+			return host
+		if _resolved.has(host):
+			return _resolved[host]
+		var t0 := Time.get_ticks_msec()
+		var ticket := resolver.begin(host)
+		if ticket < 0:
+			return ""
+		var out := ""
+		while true:
+			var r: Variant = resolver.poll(ticket)
+			if r != null:
+				out = OneLobbyConnectionCheck.pick_address(r)
+				break
+			if Time.get_ticks_msec() - t0 >= ms:
+				break
+			await tree.process_frame
+		resolver.cancel(ticket)
+		if out != "":
+			_resolved[host] = out
+		return out
+
 	## Returns what `parse(bytes)` made of the first acceptable answer within `ms` (null when nothing valid came back).
+	## `ms` covers the name lookup too.
 	func exchange(tree: SceneTree, target: Dictionary, request: PackedByteArray, parse: Callable, ms: int) -> Variant:
 		if not ok:
 			return null
-		if udp.set_dest_address(str(target["host"]), int(target["port"])) != OK:
-			return null # the name does not resolve: nothing can answer
+		var start := Time.get_ticks_msec()
+		var addr: String = await resolve(tree, str(target["host"]), ms)
+		if addr == "" or udp.set_dest_address(addr, int(target["port"])) != OK:
+			return null # the name does not resolve (in time): nothing can answer
 		var t0 := Time.get_ticks_msec()
+		ms -= t0 - start
+		if ms <= 0:
+			return null
 		var retransmit_at := mini(OneLobbyConnectionCheck.RETRANSMIT_MS, ms / 3)
 		udp.put_packet(request)
 		var resent := false
@@ -269,11 +338,11 @@ static func _probe_turn(tree: SceneTree, p: OLProbe, s: Dictionary, ms: int) -> 
 ## Probes a relay entry on its own (a fresh UDP socket): "ok", "refused" (the server answered and turned the login down),
 ## "unreachable" (no answer) or "unknown" (a turns: URL, a tcp transport, no socket). A lobby uses it to tell relay_refused
 ## from relay_unreachable after a failed connect.
-static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS) -> String:
+static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS, resolver: OLResolver = null) -> String:
 	var t := _turn_target(server)
 	if t.is_empty():
 		return "unknown"
-	var p := OLProbe.new("127.0.0.1" if all_loopback([t]) else "*")
+	var p := OLProbe.new("127.0.0.1" if all_loopback([t]) else "*", resolver)
 	var r := "unknown"
 	if p.ok:
 		r = await _probe_turn(tree, p, server, ms)
@@ -283,7 +352,7 @@ static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS) ->
 
 ## Checks what this network allows. `options`: stun (Array of URLs, default Google and Cloudflare), ice_servers (the
 ## player's TURN entry: the first turn: one is tested), timeout_ms (8000 for the whole check), server_timeout_ms (1500 per
-## server, one retransmit at a third), bind_address. Returns {udp, natType, relay, verdict, message}.
+## server, one retransmit at a third), bind_address, resolver (an OLResolver; tests only). Returns {udp, natType, relay, verdict, message}.
 static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 	var stun: Array = options.get("stun", DEFAULT_STUN)
 	var turn: Dictionary = {}
@@ -305,7 +374,7 @@ static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 	if bind == "":
 		bind = "127.0.0.1" if all_loopback(all) else "*"
 	var findings := {"udp": "unknown", "natType": "unknown", "relay": "unknown" if not turn.is_empty() else "none"}
-	var p := OLProbe.new(bind)
+	var p := OLProbe.new(bind, options.get("resolver", null))
 	if p.ok:
 		# one after the other from the same socket: a NAT that maps by destination shows two ports
 		var answers: Array = []
