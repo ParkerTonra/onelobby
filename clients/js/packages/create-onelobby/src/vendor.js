@@ -83,6 +83,8 @@ export const ADDON_DIR = "addons/onelobby";
 export const PIN_PATH = `${ADDON_DIR}/PIN.json`;
 /** The C# menu's folder (godot-csharp): the only OneLobby source a C# game copies in (the rest comes from NuGet). */
 export const MENU_DIR = "addons/onelobby_menu";
+/** The C# networked player's folder (godot-csharp, only for a game with `sync.player`): the two [GlobalClass] scripts, vendored and pinned like the menu but in a pin of its own. */
+export const NET_PLAYER_DIR = "addons/onelobby_net_player";
 
 const sortKeys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortKeys(o[k])])) : o);
 
@@ -124,9 +126,10 @@ export function checkPinFiles(pin, folder = ADDON_DIR) {
 
 /**
  * Compare a project's add-on with its PIN.json: { ok, pin, edited, missing, added }. `edited`: a pinned file whose bytes
- * (CRLF read as LF) no longer match; `missing`: pinned but gone; `added`: a file in the add-on folder the pin does not list.
+ * (CRLF read as LF) no longer match; `missing`: pinned but gone; `added`: a file in the add-on folder the pin does not list (not one that
+ * `tolerate` accepts: the .cs.uid file Godot writes beside a script it imports).
  */
-export function verifyPin(projectDir, folder = ADDON_DIR) {
+export function verifyPin(projectDir, folder = ADDON_DIR, { tolerate } = {}) {
   const pinFile = join(projectDir, ...folder.split("/"), "PIN.json");
   if (!existsSync(pinFile)) return { ok: false, pin: null, edited: [], missing: [], added: [], error: "no_pin" };
   const pin = JSON.parse(readFileSync(pinFile, "utf8"));
@@ -141,7 +144,7 @@ export function verifyPin(projectDir, folder = ADDON_DIR) {
   }
   const added = readTree(root)
     .map((f) => f.path)
-    .filter((p) => p !== "PIN.json" && !(p in pin.files));
+    .filter((p) => p !== "PIN.json" && !(p in pin.files) && !(tolerate && tolerate.test(p))); // tolerate: files Godot writes by itself (a script's .uid)
   return { ok: !edited.length && !missing.length && !added.length, pin, edited, missing, added };
 }
 
@@ -237,6 +240,10 @@ export const GITATTRIBUTES_LINES = ["addons/onelobby/** text eol=lf"];
 /** The managed lines for a Godot C# game: the same as GDScript plus what `dotnet build` regenerates. */
 export const CSHARP_GITIGNORE_LINES = [...GITIGNORE_LINES, "bin/", "obj/"];
 export const CSHARP_GITATTRIBUTES_LINES = [`${MENU_DIR}/** text eol=lf`];
+/** The same for a game with the networked player folder too. */
+export const CSHARP_PLAYER_GITATTRIBUTES_LINES = [...CSHARP_GITATTRIBUTES_LINES, `${NET_PLAYER_DIR}/** text eol=lf`];
+/** Godot writes `<Script>.cs.uid` beside every script it imports; the net player folder is vendored without them, so a pin check must not call them edits. */
+export const NET_PLAYER_TOLERATE = /\.uid$/;
 
 /** The menu bundled in this package by scripts/build.mjs, or absent when the package was built without it. */
 const packagedMenu = () => join(PKG_ROOT, "vendor", "csharp-menu");
@@ -261,4 +268,28 @@ export function menuSource({ addonFrom, cwd } = {}) {
     throw new CliError("addon_missing", 'this create-onelobby has no C# menu bundled (run "npm run build" in the package, or pass --addon-from <repo checkout>)');
   const meta = JSON.parse(readFileSync(join(packagedMenu(), "source.json"), "utf8"));
   return { files: readTree(dir).filter((f) => f.path !== "PIN.json"), commit: meta.commit, from: "package" };
+}
+
+/** The folder holding OneLobbyNetPlayer.cs for `--addon-from <folder>`: a repo checkout, the demo project, the project that has it, or the folder itself. */
+export function resolveNetPlayerFolder(from, cwd = process.cwd()) {
+  const base = resolve(cwd, from);
+  for (const c of [join(base, "clients/dotnet/demo-godot/addons/onelobby_net_player"), join(base, "demo-godot/addons/onelobby_net_player"), join(base, "addons/onelobby_net_player"), base]) {
+    if (existsSync(join(c, "OneLobbyNetPlayer.cs"))) return { dir: c, root: base };
+  }
+  throw new CliError("bad_addon_from", `--addon-from: no OneLobbyNetPlayer.cs in ${base} (looked for clients/dotnet/demo-godot/addons/onelobby_net_player, addons/onelobby_net_player and the folder itself)`);
+}
+
+const packagedNetPlayer = () => join(PKG_ROOT, "vendor", "csharp-net-player");
+
+/** The C# networked player folder to vendor: { files: [{ path, content }] (relative to addons/onelobby_net_player/), commit, from }. */
+export function netPlayerSource({ addonFrom, cwd } = {}) {
+  if (addonFrom !== undefined) {
+    const { dir, root } = resolveNetPlayerFolder(addonFrom, cwd);
+    return { files: readTree(dir).filter((f) => f.path !== "PIN.json" && !NET_PLAYER_TOLERATE.test(f.path)), commit: gitHead(root), from: "local" };
+  }
+  const dir = join(packagedNetPlayer(), "onelobby_net_player");
+  if (!existsSync(join(dir, "OneLobbyNetPlayer.cs")))
+    throw new CliError("addon_missing", 'this create-onelobby has no C# networked player bundled (run "npm run build" in the package, or pass --addon-from <repo checkout>)');
+  const meta = JSON.parse(readFileSync(join(packagedNetPlayer(), "source.json"), "utf8"));
+  return { files: readTree(dir).filter((f) => f.path !== "PIN.json" && !NET_PLAYER_TOLERATE.test(f.path)), commit: meta.commit, from: "package" };
 }

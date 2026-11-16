@@ -1,0 +1,56 @@
+{
+ "gd": {
+  ".gitattributes": "66eca2cf668b4baa8e745d4d75a06705fb8e683a192d557a87d854dd434fd6bf",
+  ".gitignore": "a0861ad00331d864f5e76f153e0db4f55f669ba16dc3da6122b345368ab82b80",
+  ".olc/my-game.json": "66f353d9e66e6a07f617bb1a2ea39e2adb74f4c9ab6de19f988617ec6fd56089",
+  "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
+  "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
+  "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
+  "net.gd": "fe3e7ca693201f17f1e3660189a598da53b88c3a8a8d2b331feb7f461fe848f9",
+  "onelobby.json": "1b4eeea0ad203f8073871674b98017a40d8ae809e68a10ffe12baf361fc126b9",
+  "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
+  "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
+ },
+ "gd-replication": {
+  ".gitattributes": "66eca2cf668b4baa8e745d4d75a06705fb8e683a192d557a87d854dd434fd6bf",
+  ".gitignore": "a0861ad00331d864f5e76f153e0db4f55f669ba16dc3da6122b345368ab82b80",
+  ".olc/my-game.json": "66f353d9e66e6a07f617bb1a2ea39e2adb74f4c9ab6de19f988617ec6fd56089",
+  "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
+  "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
+  "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
+  "net.gd": "fe3e7ca693201f17f1e3660189a598da53b88c3a8a8d2b331feb7f461fe848f9",
+  "onelobby.json": "28fb6dde49bdb2f84f1bfd5e7329bbcaecef76b91e61dc923b0dea15c0aa4538",
+  "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
+  "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
+ },
+ "cs": {
+  ".gitattributes": "05579fbcafcbcafcc3d31478f248438c4ab37486be839080ba8bd73686fd0524",
+  ".gitignore": "bcc450d662e278cee6afddeb99eab5e94dfd23fb7e9ff4fcb1881101b3b75f35",
+  ".olc/my-game.json": "28ebc882687aae2a16b8be0875f57173dd9c6c406c3417d3056611b9f417473c",
+  "AGENTS.md": "676a1335f9e1af33c1f299ec6cfa787639d31c4b92e6686cbe7d880aafa12bc4",
+  "Main.cs": "78bef920bbeb3ecd57b8e601409f9a3167af8046d3e133e6ee1c5fddbc5f07d7",
+  "Main.tscn": "303b69b179227cd03a7148cd13ac8f7c61d8648e19fa1905c59203e699af9184",
+  "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",
+  "OneLobbyNet.cs": "2d91b86a6db779a45878b3c68088afaa0c60dc171ee6bd2289cac2848e76f7ad",
+  "nuget.config": "922fbc5385f0385512122d15dab63e5fe71bf370a981a5b1d191b13d7af698b9",
+  "onelobby.json": "22019dfea10f2eb6c2e32054fc5281afed0724eacd85b1cc24da3a228995b617",
+  "project.godot": "d59fd31697a50d97f3c14f33441e16cf9c40a03da178522e10b58edb09dfb0a9",
+  "tests/MultiplayerTest.cs": "435fb17f8d9890f9768fcdaaed59e18faaa133df4c4e304457af341aa3e7e9f8",
+  "tests/MultiplayerTest.tscn": "577d47f0e85d003eb7ae08b0fb98f18224f9f80b5d7af1ae08ac62fea4f91ff5"
+ },
+ "cs-replication": {
+  ".gitattributes": "05579fbcafcbcafcc3d31478f248438c4ab37486be839080ba8bd73686fd0524",
+  ".gitignore": "bcc450d662e278cee6afddeb99eab5e94dfd23fb7e9ff4fcb1881101b3b75f35",
+  ".olc/my-game.json": "28ebc882687aae2a16b8be0875f57173dd9c6c406c3417d3056611b9f417473c",
+  "AGENTS.md": "676a1335f9e1af33c1f299ec6cfa787639d31c4b92e6686cbe7d880aafa12bc4",
+  "Main.cs": "78bef920bbeb3ecd57b8e601409f9a3167af8046d3e133e6ee1c5fddbc5f07d7",
+  "Main.tscn": "303b69b179227cd03a7148cd13ac8f7c61d8648e19fa1905c59203e699af9184",
+  "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",
+  "OneLobbyNet.cs": "2d91b86a6db779a45878b3c68088afaa0c60dc171ee6bd2289cac2848e76f7ad",
+  "nuget.config": "922fbc5385f0385512122d15dab63e5fe71bf370a981a5b1d191b13d7af698b9",
+  "onelobby.json": "a443b3d9c53f01663a9f411cb769551b38e2c8ccc69675711f14e290a0e9aec1",
+  "project.godot": "d59fd31697a50d97f3c14f33441e16cf9c40a03da178522e10b58edb09dfb0a9",
+  "tests/MultiplayerTest.cs": "435fb17f8d9890f9768fcdaaed59e18faaa133df4c4e304457af341aa3e7e9f8",
+  "tests/MultiplayerTest.tscn": "577d47f0e85d003eb7ae08b0fb98f18224f9f80b5d7af1ae08ac62fea4f91ff5"
+ }
+}

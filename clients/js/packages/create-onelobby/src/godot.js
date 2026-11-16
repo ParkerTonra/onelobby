@@ -7,6 +7,7 @@ import { CliError } from "./flags.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { addAutoload, isCSharpProject } from "./godot-project.js";
+import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
 import {
   GITATTRIBUTES_LINES,
   GITIGNORE_LINES,
@@ -47,6 +48,49 @@ export function olcEntry({ slug, title, build = false }) {
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
 
+/** The two lines of the generated test that call the player check, and where they go (before the peers leave). */
+const TEST_LEAVE = "\tgl.leave()\n\thl.leave()\n";
+const TEST_PLAYER_CALL = "\tif not await _check_player(hl, gl):\n\t\treturn\n";
+/** The AGENTS.md bullet about the main scene, which a game with players words differently. */
+const AGENTS_MAIN_BULLET = "- `main.tscn` / `main.gd`: the drop-in menu (`addons/onelobby/menu/menu.tscn`) plus a label that shows the roster on `game_started`.\n  Start your game in the `game_started` handler; end it on `returned_to_lobby` or `left`. The menu doc: docs/recipes/menu.md in the OneLobby repo.\n";
+
+/** The files a game with players in the world gets besides the common ones (new project): { path, content }. `read` reads a template file as LF text. */
+export function netPlayerFiles({ authority, space }, read) {
+  const flags = playerFlags({ authority, space });
+  const dim = space === "2d" ? "2d" : "3d";
+  return [
+    { path: "main.tscn", content: read("net-player", "main.tscn") },
+    { path: "main.gd", content: read("net-player", "main.gd") },
+    { path: "player.tscn", content: read("net-player", `player_${dim}.tscn`) },
+    { path: "player.gd", content: pickBlocks(read("net-player", `player_${dim}.gd`), flags) },
+    { path: "game.gd", content: pickBlocks(read("net-player", `game_${dim}.gd`), flags) },
+  ];
+}
+
+/** tests/multiplayer.gd with the player check added: the joiner's player appears on the host with a position, and one jump arrives once. */
+export function multiplayerWithPlayer(base, part, settings) {
+  if (!base.includes(TEST_LEAVE)) throw new Error("tests/multiplayer.gd: the place for the player check moved");
+  return base.replace(TEST_LEAVE, TEST_PLAYER_CALL + TEST_LEAVE) + pickBlocks(part, playerFlags(settings));
+}
+
+/** AGENTS.md of a game with players: the bullets for the character, the game script and the check. */
+export function agentsWithPlayer(agents, { authority, space }) {
+  if (!agents.includes(AGENTS_MAIN_BULLET)) throw new Error("AGENTS.md: the main-scene bullet moved");
+  const what = authority === "host" ? 'the host places every player (`sync.player.authority` "host": `player.gd` gives the node `set_input()` and one pure `step()`)' : "each player's own PC places its player (`sync.player.authority` \"owner\": `player.gd` moves the body as in any single-player game)";
+  const withBullets = agents.replace(
+    AGENTS_MAIN_BULLET,
+    [
+      "- `main.tscn` / `main.gd`: the drop-in menu (`addons/onelobby/menu/menu.tscn`); on `game_started` it opens `game.gd`, and frees it on `returned_to_lobby` or `left`. The menu doc: docs/recipes/menu.md in the OneLobby repo.",
+      `- \`game.gd\`: the game (${space === "2d" ? "a floor and a camera" : "a floor, a light and a camera"}) and an \`OneLobbyNetPlayerSpawner\`: one character per player, created and removed as players come and go. Yours to edit.`,
+      `- \`player.tscn\` / \`player.gd\`: the character (${space === "2d" ? "a square, side-on" : "a capsule"}) with a \`OneLobbyNetPlayer\` child; ${what}. Arrow keys or WASD move it and space jumps. Yours to edit: \`update\` never rewrites them.`,
+      "",
+    ].join("\n"),
+  );
+  const tail = "host, join by code, one message each way.\n";
+  if (!withBullets.includes(tail)) throw new Error("AGENTS.md: the test bullet moved");
+  return withBullets.replace(tail, "host, join by code, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`player.tscn` is used as it is).\n");
+}
+
 function targetState(target) {
   if (!existsSync(target)) return "missing";
   return statSync(target).isDirectory() ? (readdirSync(target).length ? "full" : "empty") : "file";
@@ -57,22 +101,28 @@ function targetState(target) {
  * { files: [{ path, content, action }], natives: { status, ... }, notes, projectGodot? } where action is
  * create | update | overwrite | unchanged | skip. Throws before anything is written when the plan cannot work.
  */
-export function planGodot({ into, target, dirName, blueprint, opts, cwd }) {
+export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlayer = null }) {
   const addon = addonSource({ addonFrom: opts.addonFrom, cwd });
   const title = blueprint.game.title ?? dirName;
   const slug = slugOf(dirName);
   const vars = { title: quoteGd(title), mdTitle: title, recipeUrl: GODOT_RECIPE_URL, webrtcVersion: WEBRTC_NATIVE_VERSION, schemaUrl: SCHEMA_URL };
 
   const wanted = [{ path: "onelobby.json", content: json(blueprint) }];
+  // players in the world (sync.player): a new project gets the character, the game and the check; --into only gets the printed lines
+  const withPlayers = netPlayer !== null && !into;
   if (!into) {
+    const agents = fill(read("AGENTS.md"), { ...vars, title: title.replace(/[\r\n]+/g, " ") });
     wanted.push(
       { path: "project.godot", content: fill(read("_project.godot"), vars) },
-      { path: "main.tscn", content: read("main.tscn") },
-      { path: "main.gd", content: read("main.gd") },
-      { path: "AGENTS.md", content: fill(read("AGENTS.md"), { ...vars, title: title.replace(/[\r\n]+/g, " ") }) },
+      ...(withPlayers ? netPlayerFiles(netPlayer, read) : [{ path: "main.tscn", content: read("main.tscn") }, { path: "main.gd", content: read("main.gd") }]),
+      { path: "AGENTS.md", content: withPlayers ? agentsWithPlayer(agents, netPlayer) : agents },
     );
   }
-  wanted.push({ path: "net.gd", content: fill(read("net.gd"), vars) }, { path: "tests/multiplayer.gd", content: read("tests/multiplayer.gd") });
+  const multiplayerTest = read("tests/multiplayer.gd");
+  wanted.push(
+    { path: "net.gd", content: fill(read("net.gd"), vars) },
+    { path: "tests/multiplayer.gd", content: withPlayers ? multiplayerWithPlayer(multiplayerTest, read("net-player", "multiplayer_part.gd"), netPlayer) : multiplayerTest },
+  );
   for (const f of addon.files) wanted.push({ path: `addons/onelobby/${f.path}`, content: f.content });
   wanted.push({ path: PIN_PATH, content: buildPin({ files: addon.files, commit: addon.commit }) });
   wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
@@ -129,7 +179,7 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd }) {
   natives.version = WEBRTC_NATIVE_VERSION;
   natives.zipSha256 = WEBRTC_NATIVE_ZIP_SHA256;
   natives.folder = `${NATIVES_DIR}/`;
-  return { files, natives, notes, addon: { commit: addon.commit, from: addon.from }, slug };
+  return { files, natives, notes, addon: { commit: addon.commit, from: addon.from }, slug, netPlayer };
 }
 
 /** Write a plan: the files that are create / update / overwrite, then the natives. Returns { written, natives }. */
@@ -153,8 +203,19 @@ export async function applyGodot(plan, { target, opts, cwd, fetchImpl }) {
   return { written, nativeFiles: nativeFiles.length };
 }
 
+/** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes). `players`: { authority, space }. */
+export function netPlayerLines({ authority, space }) {
+  const body = space === "2d" ? "a CharacterBody2D" : "a CharacterBody3D";
+  return [
+    `players in the world (sync.player is on): add a spawner where your game starts, with your character scene (a scene whose root is ${body} with a OneLobbyNetPlayer child, ${authority === "host" ? "driven by set_input() and a step function" : "moved as you always did"}):`,
+    '  var spawner := OneLobbyNetPlayerSpawner.new(); spawner.scene = preload("res://my_player.tscn"); add_child(spawner); spawner.start(lobby, OneLobbyConfig.load_file())   # lobby: the menu\'s game_started lobby; one character per player appears and goes by itself',
+    `  (${authority === "host" ? 'authority "host": also set spawner.step_function = your pure step(state, input, dt) before spawner.start; ' : ""}docs/recipes/net-player.md section 10)`,
+  ];
+}
+
 /** The `next` lines for the printed result. */
 export function godotNext({ into, rel, plan }) {
+  const players = plan.netPlayer ?? null;
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (plan.natives.status === "skipped")
@@ -166,6 +227,7 @@ export function godotNext({ into, rel, plan }) {
       "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn",
       "connect it: $Menu.game_started.connect(func(lobby): ...); $Menu.returned_to_lobby.connect(func(lobby): ...); $Menu.left.connect(func(): ...)",
       "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
+      ...(players ? netPlayerLines(players) : []),
       `follow ${GODOT_RECIPE_URL}`,
     );
   } else {
@@ -189,7 +251,8 @@ export async function runGodot(ctx) {
     if (state === "file") throw new CliError("exists", `${target} is a file`);
     if (state === "full" && !opts.force) throw new CliError("dir_not_empty", `${target} is not empty (use --force to write into it anyway)`);
   }
-  const plan = planGodot({ into, target, dirName, blueprint, opts, cwd: io.cwd });
+  const netPlayer = resolveNetPlayer({ wanted: ctx.netPlayer === true, blueprint, target, into, force: opts.force });
+  const plan = planGodot({ into, target, dirName, blueprint, opts, cwd: io.cwd, netPlayer });
   const rel = relative(io.cwd, target) || ".";
   const listed = plan.files.filter((f) => f.action === "create" || f.action === "update" || f.action === "overwrite");
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
@@ -207,6 +270,7 @@ export async function runGodot(ctx) {
     unchanged: unchanged.length,
     natives: { status: natives.status, version: natives.version, zipSha256: natives.zipSha256, folder: natives.folder, ...(natives.source ? { source: natives.source } : {}), ...(natives.reason ? { reason: natives.reason } : {}) },
     addon: plan.addon,
+    ...(netPlayer ? { netPlayer } : {}),
     notes: plan.notes,
     changed: wouldChange,
     next,

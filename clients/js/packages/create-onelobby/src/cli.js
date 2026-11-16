@@ -19,6 +19,7 @@ import { runCSharp } from "./csharp.js";
 import { runGodot } from "./godot.js";
 import { KEPT_ONELOBBY_JSON, detectEngine, recommend, renderApplied, renderText } from "./recommend.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
+import { answersWantNetPlayer } from "./net-player.js";
 import { runUnity } from "./unity.js";
 import { runUpdate } from "./update.js";
 import { runVerify } from "./verify/index.js";
@@ -253,13 +254,14 @@ export async function run(argv, io) {
 
     // ---- validate with the real loader ----
     const blueprint = await buildBlueprint(answers);
+    const netPlayer = answersWantNetPlayer(answers); // asked for (a flag, --set, --from or the recommendation); the loader fills sync.player either way
 
     if (template === "godot-gdscript" || template === "godot-csharp") {
       const gitInit = (dir) => {
         if (!run_("git", ["init", "-q"], dir, io)) io.stderr.write("create-onelobby: git init failed; continuing without a repository\n");
       };
       const runTemplate = template === "godot-csharp" ? runCSharp : runGodot;
-      return await runTemplate({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation });
+      return await runTemplate({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation, netPlayer });
     }
 
     if (template === "unity") {

@@ -5,6 +5,9 @@
 #      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
 #   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
 #      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
+#   3b. scaffold new projects with players in the world (sync.player: owner 3d, host 2d), import, and run their own tests/multiplayer.gd, which also
+#      proves one thing about the player on the same two peers (the joiner's player appears on the host and follows it, one jump arrives once);
+#      `verify` on the first must list a `player` line that is ok
 #   4. scaffold --into an empty Godot project, the same as 1 and 2 (a main scene that only instances the menu; --local is the menu's own
 #      flag); then a second --into run must change nothing
 # The add-on comes from this checkout (--addon-from) and the natives from the folder fetch-webrtc.sh already unpacked
@@ -88,6 +91,20 @@ verify_check() {
   echo "verify took $((SECONDS - t0)) s"
 }
 verify_check
+echo "::endgroup::"
+
+echo "::group::new projects with players (sync.player: owner 3d, host 2d)"
+for variant in "owner 3d" "host 2d"; do
+  set -- $variant
+  name="players-$1-$2"
+  node "$CLI" "$WORK/$name" --template godot-gdscript --yes --no-git --addon-from "$ROOT" --webrtc-dir "$NATIVES" --mode replication --set "sync.player.authority=$1" --set "sync.player.space=$2" || FAILS=$((FAILS + 1))
+  for f in player.tscn player.gd game.gd; do test -f "$WORK/$name/$f" || { echo "FAIL $name: $f was not written"; FAILS=$((FAILS + 1)); }; done
+  grep -q '_check_player' "$WORK/$name/tests/multiplayer.gd" || { echo "FAIL $name: the generated test has no player check"; FAILS=$((FAILS + 1)); }
+  check "$name" "$WORK/$name"
+done
+node "$CLI" verify "$WORK/players-owner-3d" --godot "$GODOT" > "$WORK/verify-players.out" 2>&1; rc=$?
+grep -E '^(player|wiring|direct):' "$WORK/verify-players.out"
+if [ $rc -ne 0 ] || [ "$(tail -n 1 "$WORK/verify-players.out" | tr -d '\r')" != "VERIFY_OK" ] || ! grep -q -E '^player: +ok' "$WORK/verify-players.out"; then echo "FAIL verify (players): expected VERIFY_OK and an ok player line (exit $rc)"; tail -n 12 "$WORK/verify-players.out"; FAILS=$((FAILS + 1)); fi
 echo "::endgroup::"
 
 echo "::group::--into an empty Godot project"

@@ -132,6 +132,26 @@ menu applies its boot flags right after the scene's `_Ready` calls, so the wirin
 Errors add `bad_csproj`, `bad_packages_from`, `not_csharp_project` (`--template godot-csharp --into` a Godot folder with no `.csproj` or `.sln`).
 Recipe: `docs/recipes/godot-csharp.md`.
 
+## Players in the world (`sync.player`)
+
+A Godot game made with `sync.mode` `replication` AND a `sync.player` section in its answers gets players in the world, in one command, in both Godot
+templates. "In its answers" means a flag, `--set sync.player.authority=owner|host` (or `sync.player.space=2d`), a `--from` file with the section, or the
+recommendation (`--recommend` proposes `sync.player.authority` for the co-op and the shooter shape). `--yes` with the defaults does not turn it on, and
+neither does `--mode replication` alone: the loader fills `sync.player` with its defaults for every replication game, so the written `onelobby.json` cannot say
+whether it was asked for. Any other game is written exactly as before (a test pins the bytes). `--json` has `netPlayer: { authority, space }` when it is on.
+
+| | new project | `--into` |
+|---|---|---|
+| `godot-gdscript` | `player.tscn` + `player.gd` (a `CharacterBody3D` and a capsule, or a `CharacterBody2D` and a square, following `sync.player.space`; a `OneLobbyNetPlayer` child; arrow keys or WASD move it, space jumps; `authority` "owner": plain movement, "host": `set_input()` and a pure `step()`, and the file says which), `game.gd` (a floor, a camera and a `OneLobbyNetPlayerSpawner`), `main.gd` / `main.tscn` that open the game on `game_started`, and the player check in `tests/multiplayer.gd` | nothing new is written (the add-on is vendored whole already); the "Next:" lines print the spawner lines |
+| `godot-csharp` | the same in C#: `Player.tscn` + `Player.cs`, `Game.cs`, `Main.cs` / `Main.tscn`, the player check in `tests/MultiplayerTest.cs`, plus `addons/onelobby_net_player/` (the two `[GlobalClass]` scripts, pinned by `addons/onelobby_net_player/PIN.json`, its own pin file so a game without players has no such folder and `update` needs none) and an `OneLobby.Replication` package reference at the same version as the others | the folder, its pin and the reference are added (the reference in place, like the others); no scene is written; the spawner lines are printed |
+
+The files the game maker is meant to edit (`player.*`, `game.*`, `main.*`, the test) have no pin: `update` never rewrites them. With `--packages-from`, a game with
+players needs `OneLobby.Replication` in the folder at the same version as the three others (`clients/dotnet/pack.sh`; `ONELOBBY_PACK_ONLY` lists it for the end-to-end
+script); a game without players does not. The generated two-peer test proves one thing more about the player on the same two peers: the joiner's player appears on
+the host, follows the joiner, and one jump arrives once; `MULTIPLAYER_OK` stays the verdict line. `--into` with an `onelobby.json` the run keeps decides by that file.
+Not written: the Unity template (it needs Unity runs) and the web template (a web game would need a `NetPlayers` page, `docs/recipes/net-player.md` sections 3 and 4, and
+its sample has no `ReplicationSession` yet: `replication` on web is still refused as `unsupported`).
+
 ## update
 
 `npx create-onelobby update [dir | --into <dir>]` (default: the current folder) brings a game's add-on up to the one bundled in this
@@ -150,7 +170,9 @@ package (or `--addon-from <folder>`).
   to this version (only those attributes or `<Version>` elements; one written as a property such as `$(OneLobbyVersion)` is left and listed;
   `--dry-run` shows each `id from -> to`), or to the folder's version with `--packages-from` (which also refreshes a `nuget.config` this tool
   wrote). The `.csproj` is read before anything is written, so a file it refuses (`bad_csproj`) stops the whole update. It ends with
-  `dotnet build` and the import command.
+  `dotnet build` and the import command. A game made with `sync.player` also has `addons/onelobby_net_player/` with its own `PIN.json`: it is re-vendored the same
+  way in the same run (changed, added and removed files listed under `netPlayer` in `--json`; an edited, added or missing file stops the whole update with
+  `local_changes` unless `--force`), and the `.uid` files Godot writes beside the scripts are not counted as edits.
 - `web`: the dependency is the `onelobby` npm package, so `update` prints the one `npm install onelobby@^<version>` line and
   whether `src/session.js` (or `multiplayer/session.js`) differs from this version's glue. It writes nothing and never runs npm
   (the glue is yours to edit).
@@ -173,6 +195,7 @@ A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `bl
 | `natives` | the WebRTC natives are there and registered (it runs the headless import itself when `.godot/extension_list.cfg` is missing) |
 | `blueprint` | `onelobby.json` loads through the JS loader and through the game's GDScript loader |
 | `wiring` | a static look: some scene or script outside `addons/` and `tests/` uses the drop-in menu (`ui.kind` `none` / `generated`: the client). A bare `--into` fails it until the game is wired; every project the scaffolder writes passes it |
+| `player` | only for a game with the networked player (a scene or script outside `addons/` and `tests/` names `OneLobbyNetPlayer`): a file check right after `wiring`, no process; it needs the node in a scene and a `OneLobbyNetPlayerSpawner` (or `OneLobbyNetPlayers`) that makes the characters, else `FAIL` with the next step. Games without players have no such line |
 | `direct` | two peers on 127.0.0.1, host and join by code, a message each way (the game's `tests/multiplayer.gd`, else a bundled probe) |
 | `nostr` | the same through a LOCAL Nostr relay on 127.0.0.1 (built in), when `hosting.nostr` is on |
 | `turn` | relay-only through a LOCAL TURN server on 127.0.0.1 with a random login given as one pasted line; fails unless the TURN server saw allocations and relayed packets |
@@ -186,6 +209,7 @@ A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `bl
 | `natives` | the WebRTC natives are there and registered (it runs the headless import when `.godot/extension_list.cfg` is missing; Godot may then rewrite the `Godot.NET.Sdk` version in the `.csproj` to its own) | locally, CI |
 | `blueprint` | `onelobby.json` loads through the JS loader and through the game's C# loader (`Blueprint.Parse`, run by `tests/MultiplayerTest`) | locally, CI |
 | `wiring` | as for GDScript, for `OneLobbyMenu` / `OneLobbyMenu.tscn` (not `OneLobbyNet.cs`) | locally, CI |
+| `player` | only for a game with the networked player (a scene or script outside `addons/` and `tests/` names the node, or `addons/onelobby_net_player/` is there): a file check right after `wiring`, no process; a scene with the `OneLobbyNetPlayer` node and a `OneLobbyNetPlayerSpawner` or `NetPlayers` that makes the characters, else `FAIL` with the next step | locally, CI |
 | `direct` | two peers on 127.0.0.1, host and join by address, a message each way (the game's `tests/MultiplayerTest`) | locally, CI |
 | `nostr` | the same through a LOCAL Nostr relay, when `hosting.nostr` is on | locally, CI |
 | `turn` | relay-only through a LOCAL TURN server: the peers connect and the TURN server counts allocations and relayed packets above 0. Connected with 0 relayed packets is a `FAIL` (the links are not relay-only) | locally, CI |

@@ -1,5 +1,6 @@
 // `create-onelobby verify`: prove a game's multiplayer on this machine, 127.0.0.1 only, and say so in one verdict line.
 //   godot-gdscript: godot, addon-pin, natives, blueprint, wiring, direct, nostr, turn, server   (godot.js)
+//   (a Godot game with the networked player also gets `player`, right after wiring: wiring.js)
 //   godot-csharp:   godot, dotnet, menu-pin, natives, blueprint, wiring, direct, nostr, turn, server   (csharp.js)
 //   unity:          unity, package, blueprint, wiring, direct, nostr, turn, server        (unity.js)
 //   web:            blueprint, wiring, project-test, nostr, turn                         (web.js)
@@ -15,6 +16,7 @@ import { godotChecks, writeProbe } from "./godot.js";
 import { killAll } from "./procs.js";
 import { unityChecks } from "./unity.js";
 import { webChecks } from "./web.js";
+import { hasNetPlayer, playerCheck } from "./wiring.js";
 
 /** `create-onelobby verify [dir] [--into dir] [options]`. Returns the exit code (0 only for VERIFY_OK). */
 export async function runVerify({ dir, opts, io }) {
@@ -24,6 +26,8 @@ export async function runVerify({ dir, opts, io }) {
 
   const injected = typeof io.verifyChecks === "function"; // a test seam: fake checks, no Godot, no files written
   const checks = injected ? io.verifyChecks(found.kind) : found.kind === "web" ? webChecks() : found.kind === "godot-csharp" ? csharpChecks() : found.kind === "unity" ? unityChecks() : godotChecks();
+  // a game with the networked player gets one more line, `player`, right after `wiring` (a file check; the others are untouched)
+  if (!injected && hasNetPlayer(target, found.kind)) checks.splice(checks.findIndex((c) => c.name === "wiring") + 1, 0, playerCheck());
   const ctx = { dir: target, opts, env: io.env, services: {}, kind: found.kind };
   const notes = [];
   if ((found.kind === "godot-gdscript" || found.kind === "godot-csharp" || found.kind === "unity") && !injected) {

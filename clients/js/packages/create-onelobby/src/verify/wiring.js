@@ -105,3 +105,45 @@ export function blueprintNext(path, fallback) {
     return `A note goes in a key named exactly "$comment", one per object ("${last}" is an unknown key): rename it and put the text of all that object's notes in the one "$comment" string.`;
   return fallback;
 }
+
+// ---- the `player` check: a game with the networked player (a pure file check, like `wiring`) ----------------------------------------
+// It is in the list only when the game has the networked player: a scene or script outside addons/ and tests/ names the node, or (godot-csharp)
+// addons/onelobby_net_player/ is there. Then it needs both halves: a character scene with the OneLobbyNetPlayer node, and something that
+// spawns one character per player (the spawner or the layer). It proves nothing about the link: the `direct` check's test does that.
+const NODE_REGEX = { gd: /\bOneLobbyNetPlayer\b|addons\/onelobby\/net_player\.gd/, cs: /\bOneLobbyNetPlayer\b|addons\/onelobby_net_player\/OneLobbyNetPlayer\.cs/ };
+const SPAWN_REGEX = { gd: /\bOneLobbyNetPlayerSpawner\b|\bOneLobbyNetPlayers\b/, cs: /\bOneLobbyNetPlayerSpawner\b|\bNetPlayers\b/ };
+
+/** True when this Godot game has the networked player (see above). */
+export function hasNetPlayer(dir, kind) {
+  if (kind !== "godot-gdscript" && kind !== "godot-csharp") return false;
+  const csharp = kind === "godot-csharp";
+  if (csharp && existsSync(join(dir, "addons/onelobby_net_player/PIN.json"))) return true;
+  const files = gameFiles(dir, GODOT_FILES, SKIP_DIRS);
+  return firstMatch(dir, files, NODE_REGEX[csharp ? "cs" : "gd"]) !== undefined;
+}
+
+export function playerCheck() {
+  return {
+    name: "player",
+    async run(ctx) {
+      const dir = ctx.dir;
+      const csharp = ctx.kind === "godot-csharp";
+      const files = gameFiles(dir, GODOT_FILES, SKIP_DIRS);
+      const node = firstMatch(dir, files, NODE_REGEX[csharp ? "cs" : "gd"]);
+      const spawn = firstMatch(dir, files, SPAWN_REGEX[csharp ? "cs" : "gd"]);
+      if (node && spawn) return { status: "ok", detail: `${node} has the OneLobbyNetPlayer node, ${spawn} spawns the characters` };
+      const recipe = csharp ? "docs/recipes/net-player.md section 10b" : "docs/recipes/net-player.md section 10";
+      if (node)
+        return {
+          status: "fail",
+          detail: `${node} has a OneLobbyNetPlayer node but no scene or script outside addons/ and tests/ spawns the characters (no OneLobbyNetPlayerSpawner or ${csharp ? "NetPlayers" : "OneLobbyNetPlayers"}), so no player appears in the world.`,
+          next: `Add a spawner where your game starts: ${csharp ? 'new OneLobbyNetPlayerSpawner { Scene = ... }, AddChild, then Start(lobby, blueprint)' : "OneLobbyNetPlayerSpawner.new() with scene set, add_child, then start(lobby, config)"} (${recipe}).`,
+        };
+      return {
+        status: "fail",
+        detail: `no scene or script outside addons/ and tests/ has a OneLobbyNetPlayer node${spawn ? "" : " or a spawner"}, so no player appears in the world (${csharp ? "addons/onelobby_net_player/ is there but unused" : "the game spawns characters without the node"}).`,
+        next: `Put a OneLobbyNetPlayer node under your character scene and spawn it with OneLobbyNetPlayerSpawner (${recipe}).`,
+      };
+    },
+  };
+}

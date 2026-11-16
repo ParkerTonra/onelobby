@@ -67,8 +67,8 @@ export function nugetConfig(source) {
 }
 
 /** The package version a run targets: the feed's with --packages-from, else this create-onelobby's (the version of its published packages). */
-export function targetVersion(opts, cwd) {
-  if (opts.packagesFrom !== undefined) return { ...readFeed(opts.packagesFrom, cwd), from: "feed" };
+export function targetVersion(opts, cwd, ids = ONELOBBY_PACKAGES) {
+  if (opts.packagesFrom !== undefined) return { ...readFeed(opts.packagesFrom, cwd, ids), from: "feed" };
   return { version: ONELOBBY_VERSION, dir: null, from: "registry" };
 }
 

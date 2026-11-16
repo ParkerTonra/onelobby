@@ -44,3 +44,11 @@ const menuOut = join(pkg, "vendor/csharp-menu");
 rmSync(menuOut, { recursive: true, force: true });
 cpSync(menu, join(menuOut, "onelobby_menu"), { recursive: true });
 writeFileSync(join(menuOut, "source.json"), JSON.stringify({ commit }, null, 2) + "\n");
+
+// The Godot C# networked player (OneLobbyNetPlayer.cs and OneLobbyNetPlayerSpawner.cs), bundled for the godot-csharp template when the blueprint has sync.player.
+const netPlayer = join(repo, "clients/dotnet/demo-godot/addons/onelobby_net_player");
+if (!existsSync(join(netPlayer, "OneLobbyNetPlayer.cs"))) throw new Error(`the Godot C# networked player is missing at ${netPlayer}`);
+const netPlayerOut = join(pkg, "vendor/csharp-net-player");
+rmSync(netPlayerOut, { recursive: true, force: true });
+cpSync(netPlayer, join(netPlayerOut, "onelobby_net_player"), { recursive: true });
+writeFileSync(join(netPlayerOut, "source.json"), JSON.stringify({ commit }, null, 2) + "\n");

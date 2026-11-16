@@ -7,6 +7,9 @@
 #      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
 #   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
 #      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
+#   3b. scaffold new projects with players in the world (sync.player: owner 3d, host 2d: addons/onelobby_net_player/ pinned, OneLobby.Replication referenced),
+#      build, import, run their own tests/MultiplayerTest.tscn (it also proves the joiner's player appears on the host and follows it, one jump arrives
+#      once); `verify` on the first lists an ok `player` line; `update` on it is current, and an edited add-on file stops it with local_changes
 #   4. scaffold --into an empty Godot C# project, the same as 1; then a second --into run must change nothing
 #   5. the demo project's menu self-check (MenuDemo.tscn -- --menu-selfcheck, no sockets) prints MENU_OK, and its networked player
 #      self-check (NetPlayerDemo.tscn -- --netplayer-selfcheck, in-memory network, no sockets) prints NETPLAYER_SELF_OK
@@ -33,7 +36,7 @@ T0=$SECONDS
 echo "::group::pack the OneLobby packages (local folder, new version)"
 VERSION="0.0.0-scaffold.$(date +%s)"
 FEED="$WORK/feed"
-if ! ONELOBBY_PACK_ONLY="OneLobby.Core OneLobby.Opus OneLobby.Godot OneLobby.Hub OneLobby.Direct" bash "$HERE/pack.sh" "$VERSION" "$FEED" > "$WORK/pack.out" 2>&1; then
+if ! ONELOBBY_PACK_ONLY="OneLobby.Core OneLobby.Opus OneLobby.Godot OneLobby.Hub OneLobby.Direct OneLobby.Replication" bash "$HERE/pack.sh" "$VERSION" "$FEED" > "$WORK/pack.out" 2>&1; then
   tail -n 30 "$WORK/pack.out"; echo "FAIL pack"; exit 1
 fi
 echo "packed $VERSION: $(ls "$FEED" | wc -l) packages in $((SECONDS - T0)) s"
@@ -114,6 +117,32 @@ verify_check() {
 }
 verify_check
 two_process new "$WORK/new"
+echo "::endgroup::"
+
+echo "::group::new projects with players (sync.player: owner 3d, host 2d)"
+T15=$SECONDS
+for variant in "owner 3d" "host 2d"; do
+  set -- $variant
+  name="players-$1-$2"
+  node "$CLI" "$WORK/$name" --template godot-csharp --yes --no-git --godot "$GODOT" --addon-from "$ROOT" --webrtc-dir "$NATIVES" --packages-from "$FEED" --mode replication --set "sync.player.authority=$1" --set "sync.player.space=$2" || FAILS=$((FAILS + 1))
+  for f in Player.tscn Player.cs Game.cs addons/onelobby_net_player/PIN.json; do test -f "$WORK/$name/$f" || { echo "FAIL $name: $f was not written"; FAILS=$((FAILS + 1)); }; done
+  grep -q "OneLobby.Replication\" Version=\"$VERSION\"" "$WORK/$name"/*.csproj || { echo "FAIL $name: the OneLobby.Replication reference is not in the .csproj"; FAILS=$((FAILS + 1)); }
+  check "$name" "$WORK/$name"
+done
+D="$WORK/players-owner-3d"
+node "$CLI" verify "$D" --godot "$GODOT" > "$WORK/verify-players.out" 2>&1; rc=$?
+grep -E '^(player|wiring|direct):' "$WORK/verify-players.out"
+if [ $rc -ne 0 ] || [ "$(tail -n 1 "$WORK/verify-players.out" | tr -d '\r')" != "VERIFY_OK" ] || ! grep -q -E '^player: +ok' "$WORK/verify-players.out"; then echo "FAIL verify (players): expected VERIFY_OK and an ok player line (exit $rc)"; tail -n 12 "$WORK/verify-players.out"; FAILS=$((FAILS + 1)); fi
+# update of the pinned add-on folder: current (the packages come from the same local folder), then an edited file stops it
+node "$CLI" update "$D" --addon-from "$ROOT" --packages-from "$FEED" --no-natives > "$WORK/update-players.out" 2>&1; rc=$?
+cat "$WORK/update-players.out"
+{ [ $rc -eq 0 ] && grep -q 'onelobby_net_player/ is current too' "$WORK/update-players.out"; } || { echo "FAIL update (players): expected the pinned add-on folder to be current (exit $rc)"; FAILS=$((FAILS + 1)); }
+cp "$D/addons/onelobby_net_player/OneLobbyNetPlayer.cs" "$WORK/OneLobbyNetPlayer.cs.orig"
+echo "// edited" >> "$D/addons/onelobby_net_player/OneLobbyNetPlayer.cs"
+node "$CLI" update "$D" --addon-from "$ROOT" --packages-from "$FEED" --no-natives --json > "$WORK/update-edited.out" 2>&1; rc=$?
+{ [ $rc -eq 1 ] && grep -q '"code":"local_changes"' "$WORK/update-edited.out"; } || { echo "FAIL update (players): an edited add-on file should stop the update with local_changes (exit $rc)"; head -c 400 "$WORK/update-edited.out"; FAILS=$((FAILS + 1)); }
+cp "$WORK/OneLobbyNetPlayer.cs.orig" "$D/addons/onelobby_net_player/OneLobbyNetPlayer.cs"
+echo "players done in $((SECONDS - T15)) s"
 echo "::endgroup::"
 
 echo "::group::--into an empty Godot C# project"

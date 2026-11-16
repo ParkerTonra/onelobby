@@ -8,13 +8,16 @@ import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
-import { ONELOBBY_PACKAGES, addReferences, inspectCsproj, newCsproj } from "./csproj.js";
+import { NET_PLAYER_PACKAGES, ONELOBBY_PACKAGES, addReferences, inspectCsproj, newCsproj } from "./csproj.js";
+import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
 import { olcEntry } from "./godot.js";
 import { NUGET_CONFIG_MARK, hasMark, nugetConfig, sourcePath, targetVersion } from "./packages.js";
 import {
   CSHARP_GITATTRIBUTES_LINES,
   CSHARP_GITIGNORE_LINES,
+  CSHARP_PLAYER_GITATTRIBUTES_LINES,
   MENU_DIR,
+  NET_PLAYER_DIR,
   NATIVES_DIR,
   NATIVES_MARKER,
   WEBRTC_NATIVE_VERSION,
@@ -23,6 +26,7 @@ import {
   buildPin,
   loadNatives,
   menuSource,
+  netPlayerSource,
 } from "./vendor.js";
 import { resolveGodot } from "./verify/godot.js";
 
@@ -33,6 +37,8 @@ export const CSHARP_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/m
 /** The Godot.NET.Sdk version a new project gets when no .NET Godot is found: what the OneLobby packages were built and tested against. */
 export const DEFAULT_SDK = "4.5.1";
 export const MENU_PIN_PATH = `${MENU_DIR}/PIN.json`;
+/** The networked player folder has a pin of its own: a game without `sync.player` has no such folder, and `update` must not need it. */
+export const NET_PLAYER_PIN_PATH = `${NET_PLAYER_DIR}/PIN.json`;
 /** A file name as one shell word: double quotes (read the same by PowerShell and bash) around anything but letters, digits, dot, dash and underscore. */
 const shellWord = (name) => (/^[\w.-]+$/.test(name) ? name : `"${name}"`);
 /**
@@ -109,14 +115,76 @@ function checkNoCentralPackages(dir, file) {
   }
 }
 
+/** The files a game with players in the world gets besides the common ones (new project): { path, content }. `read` reads a template file as LF text. */
+export function netPlayerFiles({ authority, space }, read, vars) {
+  const flags = playerFlags({ authority, space });
+  const dim = space === "2d" ? "2d" : "3d";
+  return [
+    { path: "Main.tscn", content: read("net-player", "Main.tscn") },
+    { path: "Main.cs", content: fill(read("net-player", "Main.cs"), vars) },
+    { path: "Player.tscn", content: read("net-player", `Player_${dim}.tscn`) },
+    { path: "Player.cs", content: pickBlocks(fill(read("net-player", `Player_${dim}.cs`), vars), flags) },
+    { path: "Game.cs", content: pickBlocks(fill(read("net-player", `Game_${dim}.cs`), vars), flags) },
+  ];
+}
+
+const TEST_FINISH = "        await _guest.LeaveAsync();\n        await _host.LeaveAsync();\n";
+const TEST_PUMP = "            if (lobby != null) lobby.Pump();\n";
+const TEST_END = "\n}\n";
+
+/** tests/MultiplayerTest.cs with the player check added: the joiner's player appears on the host, follows the joiner, and one jump arrives once. */
+export function multiplayerWithPlayer(base, part, settings) {
+  for (const needle of [TEST_FINISH, TEST_PUMP, TEST_END]) if (!base.includes(needle)) throw new Error("tests/MultiplayerTest.cs: a place for the player check moved");
+  const added = pickBlocks(part, playerFlags(settings));
+  const pumped = base.replace(TEST_PUMP, () => "            if (lobby != null) { if (!_playerPhase) lobby.Pump(); } // while the player spawners run, their layers pump the lobbies\n");
+  const called = pumped.replace(TEST_FINISH, () => '        if (_route == "direct" && !await CheckPlayer(bp)) return;\n' + TEST_FINISH);
+  const end = called.lastIndexOf(TEST_END);
+  return called.slice(0, end) + "\n" + added.replace(/\n+$/, "") + called.slice(end);
+}
+
+/** The AGENTS.md bullets of a game with players: the character, the game script and the check. */
+export function agentsWithPlayer(agents, { authority, space }) {
+  const mainBullet = "- `Main.tscn` / `Main.cs`: the menu plus a label that shows the roster on `GameStarted`. Start your game in that handler; end it on\n  `ReturnedToLobby` or `Left`. The menu doc: docs/recipes/menu.md in the OneLobby repo (\"Godot C#\").\n";
+  const testTail = "host, join by address, one message each way.\n";
+  const packages = "`OneLobby.Core`, `OneLobby.Godot` and `OneLobby.Direct` come from NuGet";
+  for (const needle of [mainBullet, testTail, packages]) if (!agents.includes(needle)) throw new Error("AGENTS.md: a place for the player lines moved");
+  const what = authority === "host" ? 'the host places every player (`sync.player.authority` "host": `Player.cs` gives the node `SetInput()` and one pure `Step()`)' : 'each player\'s own PC places its player (`sync.player.authority` "owner": `Player.cs` moves the body as in any single-player game)';
+  return agents
+    .replace(packages, () => "`OneLobby.Core`, `OneLobby.Godot`, `OneLobby.Direct` and `OneLobby.Replication` (the networked player) come from NuGet")
+    .replace(mainBullet, () =>
+      [
+        "- `Main.tscn` / `Main.cs`: the menu; on `GameStarted` it opens `Game.cs`, and frees it on `ReturnedToLobby` or `Left`. The menu doc: docs/recipes/menu.md in the OneLobby repo (\"Godot C#\").",
+        `- \`Game.cs\`: the game (${space === "2d" ? "a floor and a camera" : "a floor, a light and a camera"}) and an \`OneLobbyNetPlayerSpawner\`: one character per player, created and removed as players come and go. Yours to edit.`,
+        `- \`Player.tscn\` / \`Player.cs\`: the character (${space === "2d" ? "a square, side-on" : "a capsule"}) with a \`OneLobbyNetPlayer\` child; ${what}. Arrow keys or WASD move it and space jumps. Yours to edit: \`update\` never rewrites them.`,
+        "- `addons/onelobby_net_player/`: the two networking scripts (`OneLobbyNetPlayer.cs`, `OneLobbyNetPlayerSpawner.cs`), copied into the game for the same reason as the menu and pinned the same way (`addons/onelobby_net_player/PIN.json`; `npx create-onelobby update` refreshes it). Do not edit them.",
+        "",
+      ].join("\n"),
+    )
+    .replace(testTail, () => "host, join by address, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`Player.tscn` is used as it is).\n");
+}
+
+/** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes). `players`: { authority, space }. */
+export function netPlayerLines({ authority, space }) {
+  const body = space === "2d" ? "a CharacterBody2D" : "a CharacterBody3D";
+  return [
+    `players in the world (sync.player is on): addons/onelobby_net_player/ and the OneLobby.Replication reference are in. Add a spawner where your game starts, with your character scene (a scene whose root is ${body} with a OneLobbyNetPlayer child, ${authority === "host" ? "driven by SetInput() and a step function" : "moved as you always did"}):`,
+    `  var spawner = new OneLobbyNetPlayerSpawner { Scene = GD.Load<PackedScene>("res://MyPlayer.tscn") };${authority === "host" ? " spawner.StepFunction = MyPlayer.Step; // your pure (state, input, dt) => state" : ""}`,
+    `  AddChild(spawner); spawner.Start(lobby, menu.Client!.Blueprint!);   // lobby: the menu's GameStarted lobby; one character per player appears and goes by itself (${space === "2d" ? "also set spawner.SpawnPoint2D" : "optionally spawner.SpawnPoint"}; docs/recipes/net-player.md section 10b)`,
+  ];
+}
+
 /**
  * Work out everything a run would do, writing nothing. Returns
  * { files: [{ path, content, action }], natives, notes, csproj, packages, menu, sdk, slug } where action is
  * create | update | overwrite | unchanged | skip. Throws before anything is written when the plan cannot work.
  */
-export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk }) {
+export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk, netPlayer = null }) {
   const menu = menuSource({ addonFrom: opts.addonFrom, cwd });
-  const feed = targetVersion(opts, cwd);
+  // players in the world (sync.player): the add-on folder, the OneLobby.Replication reference and, in a new project, the character, the game and the check
+  const packageIds = netPlayer ? [...ONELOBBY_PACKAGES, ...NET_PLAYER_PACKAGES] : ONELOBBY_PACKAGES;
+  const player = netPlayer ? netPlayerSource({ addonFrom: opts.addonFrom, cwd }) : null;
+  const withPlayers = netPlayer !== null && !into; // --into writes no scene into somebody's game: it prints the spawner lines
+  const feed = targetVersion(opts, cwd, packageIds);
   const title = blueprint.game.title ?? dirName;
   const slug = slugOf(dirName);
   const abs = (p) => join(target, ...p.split("/"));
@@ -126,7 +194,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
   let ns = assembly;
   let csprojName = `${assembly}.csproj`;
   let csprojPlan = null;
-  const refs = ONELOBBY_PACKAGES.map((id) => ({ id, version: feed.version }));
+  const refs = packageIds.map((id) => ({ id, version: feed.version }));
   if (into) {
     const gd = readFileSync(abs("project.godot"), "utf8");
     csprojName = selectCsproj(target, gd);
@@ -160,21 +228,26 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
 
   const wanted = [{ path: "onelobby.json", content: json(blueprint) }];
   if (!into) {
+    const agents = fill(read("AGENTS.md"), { ...vars, title: title.replace(/[\r\n]+/g, " ") });
     wanted.push(
       { path: "project.godot", content: fill(read("_project.godot"), vars) },
       { path: csprojName, content: newCsproj({ sdkVersion: sdk.version, assembly, rootNamespace: ns, refs }) },
-      { path: "Main.tscn", content: read("Main.tscn") },
-      { path: "Main.cs", content: fill(read("Main.cs"), vars) },
-      { path: "AGENTS.md", content: fill(read("AGENTS.md"), { ...vars, title: title.replace(/[\r\n]+/g, " ") }) },
+      ...(withPlayers ? netPlayerFiles(netPlayer, read, vars) : [{ path: "Main.tscn", content: read("Main.tscn") }, { path: "Main.cs", content: fill(read("Main.cs"), vars) }]),
+      { path: "AGENTS.md", content: withPlayers ? agentsWithPlayer(agents, netPlayer) : agents },
     );
   }
+  const multiplayerTest = fill(read("tests/MultiplayerTest.cs"), vars);
   wanted.push(
     { path: "OneLobbyNet.cs", content: fill(read("OneLobbyNet.cs"), vars) },
-    { path: "tests/MultiplayerTest.cs", content: fill(read("tests/MultiplayerTest.cs"), vars) },
+    { path: "tests/MultiplayerTest.cs", content: withPlayers ? multiplayerWithPlayer(multiplayerTest, fill(read("net-player", "multiplayer_part.cs"), vars), netPlayer) : multiplayerTest },
     { path: "tests/MultiplayerTest.tscn", content: read("tests/MultiplayerTest.tscn") },
   );
   for (const f of menu.files) wanted.push({ path: `${MENU_DIR}/${f.path}`, content: f.content });
   wanted.push({ path: MENU_PIN_PATH, content: buildPin({ files: menu.files, commit: menu.commit }) });
+  if (player) {
+    for (const f of player.files) wanted.push({ path: `${NET_PLAYER_DIR}/${f.path}`, content: f.content });
+    wanted.push({ path: NET_PLAYER_PIN_PATH, content: buildPin({ files: player.files, commit: player.commit }) });
+  }
   wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title, build: `${buildCommand(csprojName)} -nologo -v q` }) });
 
   const files = [];
@@ -209,7 +282,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
   // .gitignore and .gitattributes: a managed block, replaced in place or appended once
   for (const [path, lines, head] of [
     [".gitignore", CSHARP_GITIGNORE_LINES, undefined],
-    [".gitattributes", CSHARP_GITATTRIBUTES_LINES, into ? undefined : "* text=auto\n"],
+    [".gitattributes", player ? CSHARP_PLAYER_GITATTRIBUTES_LINES : CSHARP_GITATTRIBUTES_LINES, into ? undefined : "* text=auto\n"],
   ]) {
     const p = abs(path);
     const there = existsSync(p);
@@ -235,6 +308,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
     csproj: csprojPlan ? { file: csprojPlan.file, added: csprojPlan.added, present: csprojPlan.present } : { file: csprojName, added: refs.map((r) => r.id), present: [] },
     packages: { version: feed.version, from: feed.from, ...(feed.dir ? { folder: feed.dir.replace(/\\/g, "/") } : {}) },
     menu: { commit: menu.commit, from: menu.from },
+    ...(player ? { netPlayer: { commit: player.commit, from: player.from, ...netPlayer } } : {}),
     sdk,
     slug,
     assembly,
@@ -268,6 +342,7 @@ export function csharpNext({ into, rel, plan }) {
       "in that scene's script, in _Ready: OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs());   // the menu applies --host / --join / --name right after, and reads --local itself",
       "connect it: menu.GameStarted += lobby => ...;  menu.ReturnedToLobby += lobby => ...;  menu.Left += () => ...;",
       "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it",
+      ...(plan.netPlayer ? netPlayerLines(plan.netPlayer) : []),
       `follow ${CSHARP_RECIPE_URL}`,
     );
   } else {
@@ -289,7 +364,8 @@ export async function runCSharp(ctx) {
     if (state === "full" && !opts.force) throw new CliError("dir_not_empty", `${target} is not empty (use --force to write into it anyway)`);
   }
   const sdk = into ? { version: "from the project's own .csproj", from: "project" } : chooseSdk({ opts, env: io.env, run: io.godotVersion });
-  const plan = planCSharp({ into, target, dirName, blueprint, opts, cwd: io.cwd, sdk });
+  const netPlayer = resolveNetPlayer({ wanted: ctx.netPlayer === true, blueprint, target, into, force: opts.force });
+  const plan = planCSharp({ into, target, dirName, blueprint, opts, cwd: io.cwd, sdk, netPlayer });
   const rel = relative(io.cwd, target) || ".";
   const listed = plan.files.filter((f) => f.action === "create" || f.action === "update" || f.action === "overwrite");
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
@@ -307,6 +383,7 @@ export async function runCSharp(ctx) {
     unchanged: unchanged.length,
     natives: { status: natives.status, version: natives.version, zipSha256: natives.zipSha256, folder: natives.folder, ...(natives.source ? { source: natives.source } : {}), ...(natives.reason ? { reason: natives.reason } : {}) },
     menu: plan.menu,
+    ...(plan.netPlayer ? { netPlayer: plan.netPlayer } : {}),
     packages: plan.packages,
     csproj: plan.csproj,
     ...(into ? {} : { sdk: { version: plan.sdk.version, from: plan.sdk.from } }),

@@ -5,6 +5,8 @@ import { CliError } from "./flags.js";
 
 /** The packages a Godot C# game references: the core, the Godot transport and the hosting without a server. */
 export const ONELOBBY_PACKAGES = ["OneLobby.Core", "OneLobby.Godot", "OneLobby.Direct"];
+/** What a game with the networked player (`sync.player`) references in addition: the player layer the add-on scripts are written against. */
+export const NET_PLAYER_PACKAGES = ["OneLobby.Replication"];
 
 /** Blank out comments and CDATA with spaces (same length, same line breaks), so tag positions in the result are positions in the text. */
 const mask = (t) => t.replace(/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => m.replace(/[^\r\n]/g, " "));

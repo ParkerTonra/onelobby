@@ -16,6 +16,10 @@ import { hasMark, nugetConfig, sourcePath, targetVersion } from "./packages.js";
 import {
   CSHARP_GITATTRIBUTES_LINES,
   CSHARP_GITIGNORE_LINES,
+  CSHARP_PLAYER_GITATTRIBUTES_LINES,
+  NET_PLAYER_DIR,
+  NET_PLAYER_TOLERATE,
+  netPlayerSource,
   GITATTRIBUTES_LINES,
   GITIGNORE_LINES,
   MENU_DIR,
@@ -40,6 +44,9 @@ const ADDON_DIR = "addons/onelobby";
 /** What differs between the two vendored folders: where it lives, where it comes from, which blocks it brings. */
 const GDSCRIPT = { template: "godot-gdscript", dir: ADDON_DIR, pinPath: PIN_PATH, ignore: GITIGNORE_LINES, attributes: GITATTRIBUTES_LINES, source: (o) => addonSource(o), what: "add-on" };
 const CSHARP = { template: "godot-csharp", dir: MENU_DIR, pinPath: `${MENU_DIR}/PIN.json`, ignore: CSHARP_GITIGNORE_LINES, attributes: CSHARP_GITATTRIBUTES_LINES, source: (o) => menuSource(o), what: "menu", csharp: true };
+/** The game's networked player folder (a godot-csharp game made with `sync.player`): a pin of its own, the same guard, no natives or blocks of its own (the menu's pass has them). */
+const NET_PLAYER_PIN = `${NET_PLAYER_DIR}/PIN.json`;
+const NET_PLAYER = { template: "godot-csharp", dir: NET_PLAYER_DIR, pinPath: NET_PLAYER_PIN, ignore: CSHARP_GITIGNORE_LINES, attributes: CSHARP_PLAYER_GITATTRIBUTES_LINES, source: (o) => netPlayerSource(o), what: "networked player add-on", tolerate: NET_PLAYER_TOLERATE, noNatives: true, noBlocks: true };
 const short = (sha) => (typeof sha === "string" && sha.length >= 7 ? sha.slice(0, 7) : String(sha ?? "unknown"));
 
 /** The managed blocks of .gitignore and .gitattributes, as { path, content, action }. */
@@ -86,7 +93,7 @@ export function planUpdate({ target, opts, cwd, flavor = GDSCRIPT }) {
   const rel = relative(cwd, target) || ".";
   let pinState;
   try {
-    pinState = verifyPin(target, ADDON_DIR);
+    pinState = verifyPin(target, ADDON_DIR, { tolerate: flavor.tolerate });
   } catch (e) {
     if (e instanceof CliError) throw e; // a pin key that escapes the add-on folder
     throw new CliError("bad_pin", `${PIN_PATH} is not valid JSON (${e.message}); restore it from git, or adopt the add-on again with: npx create-onelobby --into ${rel} --force`);
@@ -138,13 +145,14 @@ export function planUpdate({ target, opts, cwd, flavor = GDSCRIPT }) {
   removed.sort();
 
   const files = [...changed.map((path) => ({ path, content: wanted.get(path).content, action: "change" })), ...added.map((path) => ({ path, content: wanted.get(path).content, action: "add" }))];
-  const blocks = blockPlan(target, flavor);
+  const blocks = flavor.noBlocks ? [] : blockPlan(target, flavor);
 
   // natives: the pinned version moved, or the folder is gone
   const present = existsSync(join(target, NATIVES_MARKER));
   const oldNatives = pin.webrtcNative?.version;
   let natives;
-  if (opts.noNatives) natives = { status: "skipped", reason: "--no-natives" };
+  if (flavor.noNatives) natives = { status: "skipped", reason: "the menu's pass handles them" };
+  else if (opts.noNatives) natives = { status: "skipped", reason: "--no-natives" };
   else if (present && oldNatives === WEBRTC_NATIVE_VERSION) natives = { status: "present" };
   else
     natives = {
@@ -277,6 +285,7 @@ function godotText(r, plan, verb, flavor = GDSCRIPT) {
   }
   for (const b of r.blocks) out.push(`  ${b} (managed block)`);
   const n = r.natives;
+  if (flavor.noNatives) return out.join("\n"); // the menu's pass reports them
   if (n.status === "install") out.push(`  ${n.folder} (webrtc-native ${n.version}, from ${n.source === "download" ? "a checked download" : n.source === "zip" ? "--webrtc-zip" : "--webrtc-dir"}; ${n.why})`);
   else if (n.status === "skipped") out.push(`  WebRTC natives not touched (${n.reason}).`);
   else out.push(`  ${n.folder} is already at ${n.version}; natives left as they are.`);
@@ -331,17 +340,34 @@ export async function runUpdate({ dir, opts, io }) {
   if (found.kind === "web") return updateWeb({ io, opts, found, target });
   if (found.kind === "unity") return runUpdateUnity({ target, opts, io });
 
-  const flavor = found.kind === "godot-csharp" ? CSHARP : GDSCRIPT;
+  // a C# game made with sync.player also has addons/onelobby_net_player/ and a pin of its own: both passes are planned before either is
+  // written, so a local change in one of them stops the whole update
+  const withPlayer = found.kind === "godot-csharp" && existsSync(join(target, ...NET_PLAYER_PIN.split("/")));
+  const flavor = found.kind === "godot-csharp" ? { ...CSHARP, attributes: withPlayer ? CSHARP_PLAYER_GITATTRIBUTES_LINES : CSHARP_GITATTRIBUTES_LINES } : GDSCRIPT;
   const plan = planUpdate({ target, opts, cwd: io.cwd, flavor });
+  const playerPlan = withPlayer ? planUpdate({ target, opts, cwd: io.cwd, flavor: NET_PLAYER }) : null;
+  const current = plan.current && (playerPlan?.current ?? true);
   const result = godotResult({ target, plan, dryRun: opts.dryRun, flavor });
+  const playerResult = playerPlan ? godotResult({ target, plan: playerPlan, dryRun: opts.dryRun, flavor: NET_PLAYER }) : null;
+  if (playerResult) {
+    result.netPlayer = { current: playerResult.current, addon: playerResult.addon, files: playerResult.files, overwritten: playerResult.overwritten, kept: playerResult.kept, pin: playerResult.pin };
+    result.current = current;
+    result.changed = !current;
+    if (!current && result.next.length === 0) result.next = godotResult({ target, plan: { ...plan, current: false }, dryRun: false, flavor }).next;
+  }
   const next = result.next.length ? `\nNext:\n  ${result.next.join("\n  ")}\n` : "";
-  if (opts.dryRun || plan.current) {
+  const text = (verb) => {
+    if (current) return godotText(result, plan, verb, flavor) + (playerPlan ? `\n${NET_PLAYER_DIR}/ is current too (${NET_PLAYER.what} commit ${short(playerPlan.addon.commit)}).` : "");
+    return [plan.current ? null : godotText(result, plan, verb, flavor), playerPlan && !playerPlan.current ? godotText(playerResult, playerPlan, verb, NET_PLAYER) : null].filter(Boolean).join("\n");
+  };
+  if (opts.dryRun || current) {
     if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-    else io.stdout.write(`${opts.dryRun && !plan.current ? "Dry run: nothing written, nothing downloaded.\n" : ""}${godotText(result, plan, "Would update", flavor)}\n${next}`);
+    else io.stdout.write(`${opts.dryRun && !current ? "Dry run: nothing written, nothing downloaded.\n" : ""}${text("Would update")}\n${next}`);
     return 0;
   }
   await applyUpdate(plan, { target, opts, cwd: io.cwd, fetchImpl: io.fetch, flavor });
+  if (playerPlan) await applyUpdate(playerPlan, { target, opts, cwd: io.cwd, fetchImpl: io.fetch, flavor: NET_PLAYER });
   if (opts.json) io.stdout.write(JSON.stringify(result) + "\n");
-  else io.stdout.write(`${godotText(result, plan, "Updated", flavor)}\n${next}`);
+  else io.stdout.write(`${text("Updated")}\n${next}`);
   return 0;
 }
