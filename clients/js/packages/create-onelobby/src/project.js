@@ -16,7 +16,7 @@ export function projectDir({ dir, opts, cwd }) {
 }
 
 /**
- * `{ kind, dir, glue? }`: kind "godot-gdscript" (project.godot, no .csproj / .sln), "godot-csharp", "web" (onelobby.json and the
+ * `{ kind, dir, glue? }`: kind "godot-gdscript" (project.godot, no .csproj / .sln), "godot-csharp", "unity", "web" (onelobby.json and the
  * web glue) or null. `requireBlueprint`: a Godot project also needs onelobby.json (verify needs it, update does not).
  */
 export function detectProject(dir, { requireBlueprint = false } = {}) {
@@ -25,6 +25,10 @@ export function detectProject(dir, { requireBlueprint = false } = {}) {
     if (isCSharpProject(readdirSync(dir))) return { kind: "godot-csharp", dir };
     if (requireBlueprint && !has("onelobby.json")) return { kind: null, dir, why: "project.godot but no onelobby.json" };
     return { kind: "godot-gdscript", dir };
+  }
+  if (has("ProjectSettings/ProjectVersion.txt") || (has("ProjectSettings") && has("Assets"))) {
+    if (requireBlueprint && !has("Assets/Resources/onelobby.json")) return { kind: null, dir, why: "a Unity project but no Assets/Resources/onelobby.json" };
+    return { kind: "unity", dir };
   }
   if (has("onelobby.json")) {
     const glue = WEB_GLUE_PATHS.find(has);
@@ -38,6 +42,6 @@ export function detectProject(dir, { requireBlueprint = false } = {}) {
 export const notAProject = (found, command) =>
   new CliError(
     "not_a_project",
-    `${found.dir} is not a OneLobby game this version of create-onelobby can ${command} (${found.why}). Run it in a folder made by create-onelobby (a Godot project (GDScript or C#) with project.godot and onelobby.json, or a web project with onelobby.json and src/session.js), or point it there with --into <dir>.`,
+    `${found.dir} is not a OneLobby game this version of create-onelobby can ${command} (${found.why}). Run it in a folder made by create-onelobby (a Godot project (GDScript or C#) with project.godot and onelobby.json, or a Unity project with Assets/Resources/onelobby.json, or a web project with onelobby.json and src/session.js), or point it there with --into <dir>.`,
   );
 

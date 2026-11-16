@@ -10,7 +10,7 @@ export class CliError extends Error {
 }
 
 /** The templates this release builds (the rest throw template_planned). Lives here so --help and blueprint.js share one list. */
-export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript", "godot-csharp"];
+export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript", "godot-csharp", "unity"];
 const quoted = (list) => list.map((t) => `"${t}"`).join(", ").replace(/, ([^,]*)$/, " and $1");
 export const builtList = () => quoted(IMPLEMENTED_TEMPLATES);
 
@@ -63,6 +63,8 @@ const OPTION_FLAGS = {
   "webrtc-zip": "value",
   "webrtc-dir": "value",
   "packages-from": "value",
+  "package-from": "value",
+  unity: "value",
   "no-natives": "bool",
   godot: "value",
   server: "value",
@@ -137,6 +139,8 @@ export function parseArgs(argv) {
     webrtcZip: undefined,
     webrtcDir: undefined,
     packagesFrom: undefined,
+    packageFrom: undefined,
+    unity: undefined,
     noNatives: false,
     godot: undefined,
     server: undefined,
@@ -184,6 +188,8 @@ export function parseArgs(argv) {
         else if (name === "webrtc-zip") opts.webrtcZip = v;
         else if (name === "webrtc-dir") opts.webrtcDir = v;
         else if (name === "packages-from") opts.packagesFrom = v;
+        else if (name === "package-from") opts.packageFrom = v;
+        else if (name === "unity") opts.unity = v;
         else if (name === "godot") opts.godot = v;
         else if (name === "server") opts.server = v;
         else if (name === "hosting") {
@@ -290,6 +296,12 @@ Usage: create-onelobby [dir] [options]
   --webrtc-zip <file>          install the WebRTC natives from this webrtc-native zip (offline) instead of downloading the pinned release
   --webrtc-dir <folder>        the same from an unpacked add-on folder (the one holding webrtc_native.gdextension)
   --no-natives                 do not install the WebRTC natives (the output says how to fetch them later)
+  godot-csharp only:
+  --packages-from <folder>     use the OneLobby NuGet packages in this folder of .nupkg files (a nuget.config is written) instead of the public registry
+  unity only:
+  --package-from <tgz>         reference this com.onelobby.unity tarball (a file: line in Packages/manifest.json, relative to Packages/) instead of the
+                               release tarball name; build one with clients/unity/build-unity-package.sh --pack or take the unity-dev-package CI artifact
+  --unity <exe>                the Unity editor (else $UNITY, else the Unity Hub's default folder): a new project is made for its version
   -h, --help  --version
 
 update [dir | --into <dir>]  (default: the current folder)
@@ -298,10 +310,13 @@ update [dir | --into <dir>]  (default: the current folder)
                   .gitattributes blocks, and the WebRTC natives when their pinned version moved or the folder is gone (--webrtc-zip, --webrtc-dir,
                   --no-natives as when scaffolding). Ends with the import command. A project with no PIN.json: adopt it with --into first.
   web:            prints the one "npm install onelobby@<version>" line and whether the glue differs from this version's; writes nothing.
+  unity:          moves the com.onelobby.unity line of Packages/manifest.json to this version (only that value; --package-from <tgz> also moves a
+                  file: line, which is otherwise left alone), then prints what to do in Unity. --dry-run shows the edit.
   --dry-run  --json  --force
 verify [dir | --into <dir>]  (default: the current folder)
   runs the checks in order, one line each (ok / FAIL <why> / skipped <why>), then VERIFY_OK or VERIFY_FAIL <check>: <next step> (exit 0 / 1)
   --godot <exe>                Godot 4.4+ (else $GODOT, else "godot" on PATH); always run --headless --audio-driver Dummy
+  --unity <exe>                Unity 6000.0+ (else $UNITY, else the Unity Hub's default folder); always run -batchmode -nographics
   --server <ws://127.0.0.1:port/ws>   also check the lobby-server route, against a server you started on this machine
   --fetch-helpers              download the local TURN helper (npm node-turn, anonymous) into .onelobby/ when it is not there yet
   --json                       one object with the same facts

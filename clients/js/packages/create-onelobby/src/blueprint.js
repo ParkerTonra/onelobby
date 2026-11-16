@@ -68,7 +68,7 @@ const thaw = (o) => JSON.parse(JSON.stringify(o));
  * web: gridpaint is a deterministic lockstep game, and the generated page is the "generated" UI kind.
  */
 export function templateDefaults(template, { title }) {
-  if (template === "godot-gdscript" || template === "godot-csharp") return { game: { title }, hosting: { direct: true, server: false }, ui: { kind: "drop-in" }, chat: { text: true } };
+  if (template === "godot-gdscript" || template === "godot-csharp" || template === "unity") return { game: { title }, hosting: { direct: true, server: false }, ui: { kind: "drop-in" }, chat: { text: true } };
   if (template !== "web") return {};
   return {
     game: { title },
