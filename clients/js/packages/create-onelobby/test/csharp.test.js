@@ -118,7 +118,7 @@ project/assembly_name="MyGame"
     await j(["my-game", "--template", "godot-csharp", ...FROM]);
     const entries = JSON.parse(text("my-game/.olc/my-game.json")).entries;
     const bash = entries.find((e) => e.shell === "bash").command;
-    expect(bash).toBe('dotnet build -nologo -v q || exit 1; G="${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- --join=127.0.0.1:47810 --local --name=Joiner');
+    expect(bash).toBe('dotnet build MyGame.csproj -nologo -v q || exit 1; G="${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- --join=127.0.0.1:47810 --local --name=Joiner');
     expect(entries.find((e) => e.shell === "powershell").command).toContain("-- --join=127.0.0.1:47810 --local --name=Joiner");
     expect(text("my-game/AGENTS.md")).toContain("-- --host --local --name=Sam");
   });
@@ -302,7 +302,7 @@ describe("godot-csharp: update", () => {
     expect(text("my-game/MyGame.csproj")).toBe(csprojBefore.replace(/0\.7\.2-dev\.9/g, "0.7.3-dev.1"));
     expect(text("my-game/addons/onelobby_menu/OneLobbyMenu.cs")).toContain("v2");
     expect(verifyPin(at("my-game"), MENU_DIR).ok).toBe(true);
-    expect(r.json.next[0]).toContain("dotnet build");
+    expect(r.json.next[0]).toContain("dotnet build MyGame.csproj");
     expect(r.json.next[1]).toContain("godot --headless --import");
   });
 

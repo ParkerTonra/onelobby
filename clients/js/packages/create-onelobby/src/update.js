@@ -249,7 +249,7 @@ function godotResult({ target, plan, dryRun, flavor = GDSCRIPT }) {
           nugetConfig: plan.nuget.action,
         }
       : {}),
-    next: plan.current ? [] : flavor.csharp ? ["dotnet build   # restores the OneLobby packages at the new version and builds the game", `${IMPORT_COMMAND}   # a new natives version needs the import`] : [`${IMPORT_COMMAND}   # new class_names (and a new natives version) need the import`],
+    next: plan.current ? [] : flavor.csharp ? [`dotnet build ${plan.csproj.file}   # restores the OneLobby packages at the new version and builds the game`, `${IMPORT_COMMAND}   # a new natives version needs the import`] : [`${IMPORT_COMMAND}   # new class_names (and a new natives version) need the import`],
   };
 }
 

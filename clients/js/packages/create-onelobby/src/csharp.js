@@ -32,7 +32,8 @@ export const CSHARP_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/m
 /** The Godot.NET.Sdk version a new project gets when no .NET Godot is found: what the OneLobby packages were built and tested against. */
 export const DEFAULT_SDK = "4.5.1";
 export const MENU_PIN_PATH = `${MENU_DIR}/PIN.json`;
-export const BUILD_COMMAND = "dotnet build";
+/** The build command for a project file: the .csproj is named because Godot also writes a .sln beside it, and a bare `dotnet build` refuses to pick one. */
+export const buildCommand = (csproj) => `dotnet build ${csproj}`;
 export const IMPORT_COMMAND = "godot --headless --import --path .";
 export const TEST_COMMAND = "godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn";
 
@@ -147,6 +148,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
     ns,
     audio: blueprint.chat?.voice ? "\n[audio]\n\ndriver/enable_input=true\n" : "",
     packagesVersion: feed.version,
+    csproj: csprojName,
     feedNote: feed.from === "feed" ? `, from the local folder named in nuget.config` : "",
   };
 
@@ -167,7 +169,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk })
   );
   for (const f of menu.files) wanted.push({ path: `${MENU_DIR}/${f.path}`, content: f.content });
   wanted.push({ path: MENU_PIN_PATH, content: buildPin({ files: menu.files, commit: menu.commit }) });
-  wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title, build: true }) });
+  wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title, build: `${buildCommand(csprojName)} -nologo -v q` }) });
 
   const files = [];
   const plan = (path, content, exists, same) => {
@@ -251,7 +253,7 @@ export function csharpNext({ into, rel, plan }) {
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (plan.natives.status === "skipped") next.push("fetch the WebRTC natives (not installed yet): npx create-onelobby update   (changes nothing else)");
-  next.push(`${BUILD_COMMAND}   # restores the OneLobby packages and builds the game`);
+  next.push(`${buildCommand(plan.csproj.file)}   # restores the OneLobby packages and builds the game`);
   next.push(`${IMPORT_COMMAND}   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension`);
   next.push(`${TEST_COMMAND}   # expect MULTIPLAYER_OK`);
   if (into) {

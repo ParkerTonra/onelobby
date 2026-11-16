@@ -67,7 +67,7 @@ A new project, or add to the one you have. Use the .NET build of Godot 4.5 or ne
 ```
 npx create-onelobby my-game --template godot-csharp --yes
 cd my-game
-dotnet build                                                                    # restores the OneLobby packages and builds the game
+dotnet build MyGame.csproj                                                      # restores the OneLobby packages and builds the game (the file is named: Godot also writes a .sln)
 godot --headless --import --path .                                              # once: registers the WebRTC extension
 godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn # MULTIPLAYER_OK
 godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --join=127.0.0.1:47810 --local --name=Ann

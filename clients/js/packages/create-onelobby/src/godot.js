@@ -38,8 +38,8 @@ const bytes = (c) => (Buffer.isBuffer(c) ? c : Buffer.from(c, "utf8"));
 /** .olc/<slug>.json: two tasks that open the game as a host window plus a small joiner window on this PC (Godot from $GODOT). */
 export function olcEntry({ slug, title, build = false }) {
   const joiner = `--join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Joiner`;
-  const psBuild = build ? "dotnet build -nologo -v q; if ($LASTEXITCODE -ne 0) { exit 1 }; " : "";
-  const shBuild = build ? "dotnet build -nologo -v q || exit 1; " : "";
+  const psBuild = build ? `${build}; if ($LASTEXITCODE -ne 0) { exit 1 }; ` : ""; // build: a command line (godot-csharp builds first)
+  const shBuild = build ? `${build} || exit 1; ` : "";
   const ps = `${psBuild}$g = if ($env:GODOT) { $env:GODOT } else { 'godot' }; Start-Process -FilePath $g -ArgumentList '--path','.','--','--host','--local','--name=Host'; Start-Sleep -Seconds 4; & $g --path . --resolution 640x360 -- ${joiner}`;
   const sh = `${shBuild}G="\${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- ${joiner}`;
   const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + joiner${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
