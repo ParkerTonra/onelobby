@@ -260,6 +260,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       direct.joinCode = direct.directCode;
       direct.joinCodeKind = direct.directCodeKind;
     }
+    if (direct.joinCode) kit.rememberCode(direct.joinCode);
     direct.joinUrl = o.http && ip ? `http://${ip}:${hub.port}/` : null;
     direct.directHostLog = formatHostLog(port, hub.port, direct.joinCode, direct.joinCodeKind, direct.portMapping, nostrOn ? { directCode: direct.directCode, directCodeKind: direct.directCodeKind, relays: relaysNote } : undefined);
     hub.joinInfo = { joinCode: direct.joinCode, joinCodeKind: direct.joinCodeKind, directCode: direct.directCode, directCodeKind: direct.directCodeKind, joinUrl: direct.joinUrl, port: hub.port };

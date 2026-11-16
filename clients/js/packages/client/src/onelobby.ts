@@ -30,8 +30,9 @@ import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 import { diagnose, type DiagnoseFacts, type Reached } from "./diagnose.js";
-import { NetLog } from "./netlog.js";
+import { NetLog, maskText } from "./netlog.js";
 import { checkConnection, probeRelay, type CheckOptions, type CheckResult } from "./connection-check.js";
+import { PlayerSettings, RELAY_SKIPPED_WARNING, cleanLastCode, cleanName, redactUrl, type EnvSource, type SettingsUse } from "./settings.js";
 
 export const LIB_NAME = "onelobby";
 export const LIB_VERSION = "0.7.2";
@@ -65,6 +66,13 @@ export interface AdvancedOptions {
   playerIdStore?: KeyValueStore | null;
   /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
   banStore?: KeyValueStore | null;
+  /**
+   * Where the player's settings are kept (spec/settings.md s.2). Default: `settingsFile` when given, else `localStorage`
+   * where the page has one, else memory.
+   */
+  settingsStore?: KeyValueStore | null;
+  /** The environment variables that override the saved settings (default: the Node process environment, none in a browser; null: none). */
+  env?: EnvSource | null;
 }
 
 /** Diagnostics switches (spec/diagnostics.md): the net log, the report to the host, the relay probe. All have working defaults. */
@@ -122,6 +130,15 @@ export interface OneLobbyOptions {
   playerIdFile?: string;
   /** Node: a JSON file path that keeps the host's ban list across lobbies and runs (spec/room.md s.5.3). */
   banFile?: string;
+  /**
+   * The player's saved settings (name, relay line, last code, lobby server: spec/settings.md) are applied as defaults and
+   * `lobbyServer` / `displayName` here win over them. `false` switches all of it off; `{ relay: false }` one default.
+   */
+  settings?: false | SettingsUse;
+  /** Node: a JSON file path that keeps the player's settings across runs (the key/value file of `playerIdFile`). */
+  settingsFile?: string;
+  /** @internal `fromConfig`: the blueprint's rules for a saved name. */
+  nameRules?: { max: number; allowed: boolean };
   /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
   room?: RoomOptions;
   /** The net log, the report to the host and the relay probe (see DiagnosticsOptions). */
@@ -227,7 +244,8 @@ export interface DirectLobbyHooks {
   wrapLinks: (inner: LinkFactory) => LinkFactory;
 }
 
-export type OneLobbyEvents = { error: [Error] };
+/** `warning`: a plain sentence for the player (a saved relay line that is skipped); it never holds a credential. */
+export type OneLobbyEvents = { error: [Error]; warning: [string] };
 
 export const DEFAULT_READY_TIMEOUT_MS = 15_000;
 
@@ -290,6 +308,11 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   private idStore: KeyValueStore | null;
   private banStore: KeyValueStore | null;
   private banList: BanList | null = null;
+  /** The player's saved settings (spec/settings.md): `load()`, `effective()`, `save({...})`, `maskedRelay()`. */
+  readonly settings: PlayerSettings;
+  private readonly settingsUse: Required<SettingsUse>;
+  private readonly nameRules: { max: number; allowed: boolean };
+  private relayWarned = false;
   private pid: string | null = null;
   private roomOpts: RoomOptions;
   private nostrConnectFn: RelayConnect | undefined;
@@ -325,6 +348,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       tickRate: bp.sync.tickRate,
       hashEveryTicks: bp.sync.hashEveryTicks,
       displayName: name,
+      nameRules: { max: bp.players.maxNameLength, allowed: bp.players.identity !== "anonymous" },
       relayOnly: bp.hosting.relayOnly,
       readyTimeoutMs: bp.session.readyTimeoutMs,
       peerTimeoutMs: bp.session.peerTimeoutMs,
@@ -371,15 +395,23 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
 
   constructor(o: OneLobbyOptions) {
     super();
+    const self = this;
     const tickRate = o.tickRate ?? 20;
+    const explicitServer = o.lobbyServer ?? "";
+    const explicitName = (o.displayName ?? "").trim();
+    // what the player saved fills in only what the game left empty; read on every use, so a new setting counts at once
     this.options = {
       gameId: o.gameId,
       netVersion: o.netVersion,
-      lobbyServer: o.lobbyServer,
+      get lobbyServer(): string {
+        return explicitServer || self.savedServer();
+      },
       mode: o.mode ?? "lockstep",
       tickRate,
       hashEveryTicks: o.hashEveryTicks ?? tickRate,
-      displayName: (o.displayName ?? "").trim(),
+      get displayName(): string {
+        return explicitName || self.savedName();
+      },
       relayOnly: o.relayOnly ?? false,
       readyTimeoutMs: o.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       peerTimeoutMs: o.peerTimeoutMs ?? 0,
@@ -401,6 +433,11 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const fallback = () => localStore() ?? memoryStore();
     this.idStore = a.playerIdStore !== undefined ? a.playerIdStore : o.playerIdFile ? fileStore(o.playerIdFile) : fallback();
     this.banStore = a.banStore !== undefined ? a.banStore : o.banFile ? fileStore(o.banFile) : fallback();
+    const settingsStore = a.settingsStore !== undefined ? a.settingsStore : o.settingsFile ? fileStore(o.settingsFile) : fallback();
+    this.settings = new PlayerSettings(settingsStore, o.gameId, a.env);
+    const use = o.settings === false ? { name: false, relay: false, server: false, lastCode: false } : (o.settings ?? {});
+    this.settingsUse = { name: use.name !== false, relay: use.relay !== false, server: use.server !== false, lastCode: use.lastCode !== false };
+    this.nameRules = o.nameRules ?? { max: 24, allowed: true };
     this.roomOpts = { ...(o.room ?? {}) };
     const dg = o.diagnostics ?? {};
     this.diagOpts = { reportToHost: dg.reportToHost !== false, relayProbe: dg.relayProbe === undefined ? (s) => probeRelay(s) : dg.relayProbe };
@@ -414,6 +451,37 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     });
     if (dg.logPath) this.netLog.flushOnExit(dg.logPath);
     this.netLog.add("info", `client ${LIB_NAME}-js ${LIB_VERSION} protocol ${PROTO_ID} game version ${o.netVersion}`);
+  }
+
+  // ---- saved settings (spec/settings.md s.5) -------------------------------------------------------------------------
+
+  private savedName(): string {
+    return this.settingsUse.name && this.nameRules.allowed ? cleanName(this.settings.effective().name, this.nameRules.max) : "";
+  }
+
+  private savedServer(): string {
+    return this.settingsUse.server ? this.settings.effective().server : "";
+  }
+
+  /** This player's ICE list: `ice` (the host's `welcome` list) then the saved relay entry, unless it is already there. */
+  private iceWithSettings(ice: IceServer[]): IceServer[] {
+    if (!this.settingsUse.relay) return ice;
+    const { entry, invalid } = this.settings.relayStatus();
+    if (invalid && !this.relayWarned) {
+      this.relayWarned = true;
+      this.netLog.add("info", RELAY_SKIPPED_WARNING);
+      this.emit("warning", RELAY_SKIPPED_WARNING);
+    }
+    if (!entry) return ice;
+    const same = (e: IceServer) => [e.urls].flat().join(",") === [entry.urls].flat().join(",") && e.username === entry.username && e.credential === entry.credential;
+    return ice.some(same) ? ice : [...ice, entry];
+  }
+
+  /** @internal Saves the code of a lobby this player hosted or joined as `lastCode` (a code that does not clean is not saved). */
+  rememberCode(code: string): void {
+    if (!this.settingsUse.lastCode) return;
+    const c = cleanLastCode(code);
+    if (c) this.settings.save({ lastCode: c });
   }
 
   /**
@@ -511,7 +579,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
 
   private async connect(url = this.options.lobbyServer, factory = this.socketFactory, timeoutMs = 0, route: Route = "server"): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
     const t0 = this.clock.now();
-    this.netLog.add("sig", `open route=${route}`, { addr: url });
+    this.netLog.add("sig", `open route=${route}`, { addr: maskText(redactUrl(url), true) });
     let sig: SignalingClient;
     try {
       sig = await this.open(url, factory, timeoutMs);
@@ -585,7 +653,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const lobby = new Lobby({
       signaling: sig,
       state,
-      ice: welcome.ice ?? [],
+      ice: this.iceWithSettings(welcome.ice ?? []),
       features: welcome.features ?? [],
       links: direct?.links ?? this.linkFactory,
       direct: !!direct,
@@ -643,7 +711,9 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
         },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state, undefined, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers });
+      const lobby = this.makeLobby(sig, welcome, state, undefined, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers });
+      this.rememberCode(lobby.code);
+      return lobby;
     } catch (e) {
       sig.close();
       throw e;
@@ -675,7 +745,9 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const { sig, welcome } = await this.connect();
     try {
       const state = await sig.request<LobbyState>({ t: "join", code: norm, ...(opts.password ? { password: opts.password } : {}) }, "lobby");
-      return this.makeLobby(sig, welcome, state, undefined, undefined, { join: joinSetup(opts) });
+      const lobby = this.makeLobby(sig, welcome, state, undefined, undefined, { join: joinSetup(opts) });
+      this.rememberCode(norm);
+      return lobby;
     } catch (e) {
       sig.close();
       this.netLog.add("error", errCode(e), { code: errCode(e) });
@@ -698,6 +770,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       const lobby = this.makeLobby(sig, this.withStun(welcome, t, opts), state, { links: t.links }, undefined, { join: joinSetup(opts) }, t.nostr ? "nostr" : "ip");
       // a joiner's joinCode is what it joined with (normalized), so a HUD can show it on both sides
       lobby.joinCode = t.joinedWith;
+      this.rememberCode(t.joinedWith);
       return lobby;
     } catch (e) {
       sig.close();

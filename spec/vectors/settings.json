@@ -1,0 +1,209 @@
+{
+  "desc": "Player settings (spec/settings.md). 'clean': per field, input -> expected cleaned text ('ok', empty string = none) or 'invalid'. 'mask': a relay line and its masked view. 'load': stored text (null = nothing stored) -> what it reads as. 'save': stored text, a patch, the object that must be stored afterwards (compare as parsed JSON) and the rejected fields. 'env': stored object, a variable map, the effective values. All names, servers and credentials are fakes.",
+  "key": [
+    { "gameId": "com.you.game", "key": "onelobby.settings.com.you.game" }
+  ],
+  "envNames": { "name": "ONELOBBY_NAME", "relay": "ONELOBBY_RELAY", "lastCode": "ONELOBBY_LAST_CODE", "server": "ONELOBBY_LOBBY_SERVER" },
+  "hidden": "<hidden>",
+  "clean": {
+    "name": [
+      { "input": "Sam", "ok": "Sam" },
+      { "input": "  Sam   Jones \t", "ok": "Sam Jones" },
+      { "input": "Sa​m\u0007‮", "ok": "Sam" },
+      { "input": "Zoë", "ok": "Zoë" },
+      { "input": "abcdefghijklmnopqrstuvwxyz0123", "ok": "abcdefghijklmnopqrstuvwx" },
+      { "input": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀", "ok": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀" },
+      { "input": "Player", "ok": "" },
+      { "input": "player", "ok": "player" },
+      { "input": "   ", "ok": "" },
+      { "input": "", "ok": "" }
+    ],
+    "relay": [
+      { "input": "turn:relay.example.com:3478 alice s3cret", "ok": "turn:relay.example.com:3478 alice s3cret" },
+      { "input": "  turn:relay.example.com:3478\n alice\n\ts3cret  \n", "ok": "turn:relay.example.com:3478\n alice\n\ts3cret" },
+      { "input": "TURNS:relay.example.com:443 alice s3cret", "ok": "TURNS:relay.example.com:443 alice s3cret" },
+      { "input": "stun:stun.example.com:3478", "ok": "stun:stun.example.com:3478" },
+      { "input": "{\"urls\":\"turn:relay.example.com:3478\",\"username\":\"alice\",\"credential\":\"s3cret\"}", "ok": "{\"urls\":\"turn:relay.example.com:3478\",\"username\":\"alice\",\"credential\":\"s3cret\"}" },
+      { "input": "   ", "ok": "" },
+      { "input": "", "ok": "" },
+      { "input": "turn:relay.example.com:3478", "invalid": true },
+      { "input": "turn:relay.example.com:3478 alice", "invalid": true },
+      { "input": "alice s3cret", "invalid": true },
+      { "input": "http://relay.example.com alice s3cret", "invalid": true },
+      { "input": "turn:relay.example.com:3478 alice s3cret extra", "invalid": true },
+      { "input": "{not json", "invalid": true }
+    ],
+    "lastCode": [
+      { "input": "7HQ4K2", "ok": "7HQ4K2" },
+      { "input": "7HQ 4K2", "ok": "7HQ4K2" },
+      { "input": " 7hq-4k2 ", "ok": "7HQ4K2" },
+      { "input": "OIL234", "ok": "011234" },
+      { "input": "6B01-RGFE-P2B", "ok": "6B01RGFEP2B" },
+      { "input": "6b01 rgfe p2b", "ok": "6B01RGFEP2B" },
+      { "input": "", "ok": "" },
+      { "input": "   ", "ok": "" },
+      { "input": "7HQ4K", "invalid": true },
+      { "input": "7HQ4KU", "invalid": true },
+      { "input": "7HQ 4K2 extra words", "invalid": true },
+      { "input": "192.168.1.20:47810", "invalid": true },
+      { "input": "6B01-RGFE-P2", "invalid": true }
+    ],
+    "server": [
+      { "input": "wss://lobby.mygame.net/ws", "ok": "wss://lobby.mygame.net/ws" },
+      { "input": "  wss://lobby.mygame.net/ws  ", "ok": "wss://lobby.mygame.net/ws" },
+      { "input": "https://onelobby-server-ab12.onrender.com", "ok": "wss://onelobby-server-ab12.onrender.com" },
+      { "input": "http://localhost:8080", "ok": "ws://localhost:8080" },
+      { "input": "lobby.mygame.net", "ok": "wss://lobby.mygame.net" },
+      { "input": "ws://127.0.0.1:18555/ws", "ok": "ws://127.0.0.1:18555/ws" },
+      { "input": "ws://[::1]:8080/ws", "ok": "ws://[::1]:8080/ws" },
+      { "input": "wss://lobby.mygame.net/ws?token=abc123", "ok": "wss://lobby.mygame.net/ws?token=abc123" },
+      { "input": "wss://sam:pw1234@lobby.mygame.net/ws", "ok": "wss://sam:pw1234@lobby.mygame.net/ws" },
+      { "input": "", "ok": "" },
+      { "input": "   ", "ok": "" },
+      { "input": "lobby", "invalid": true },
+      { "input": "my lobby server", "invalid": true },
+      { "input": "https://YOUR-LOBBY-SERVER.onrender.com", "invalid": true },
+      { "input": "wss://your-server/ws", "invalid": true },
+      { "input": "REPLACE-ME", "invalid": true },
+      { "input": "<your server>", "invalid": true },
+      { "input": "wss://lobby.example.com", "invalid": true },
+      { "input": "https://example.org", "invalid": true },
+      { "input": "wss://lobby.onelobby.example/ws", "invalid": true },
+      { "input": "https://", "invalid": true },
+      { "input": "wss://lobby.mygame.net:99999/ws", "invalid": true },
+      { "input": "wss://lobby.mygame.net:0/ws", "invalid": true }
+    ]
+  },
+  "mask": [
+    { "relay": "turn:relay.example.com:3478 alice s3cret", "masked": "turn:relay.example.com:3478 <hidden> <hidden>" },
+    { "relay": "  turn:relay.example.com:3478\n alice\n\ts3cret  ", "masked": "turn:relay.example.com:3478 <hidden> <hidden>" },
+    { "relay": "{ \"urls\": [\"turn:a.example.com:3478\", \"turns:a.example.com:443\"], \"username\": \"alice\", \"credential\": \"s3cret\" }", "masked": "turn:a.example.com:3478,turns:a.example.com:443 <hidden> <hidden>" },
+    { "relay": "stun:stun.example.com:3478", "masked": "stun:stun.example.com:3478" },
+    { "relay": "", "masked": "" },
+    { "relay": "   ", "masked": "" },
+    { "relay": "alice s3cret", "masked": "<hidden>" }
+  ],
+  "load": [
+    { "name": "nothing stored", "stored": null, "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
+    { "name": "corrupt text", "stored": "not json {", "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
+    { "name": "an array", "stored": "[1,2]", "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
+    { "name": "a number", "stored": "7", "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
+    { "name": "empty text", "stored": "", "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
+    {
+      "name": "all four, stored clean",
+      "stored": "{\"v\":1,\"name\":\"Sam\",\"relay\":\"turn:relay.example.com:3478 alice s3cret\",\"lastCode\":\"7HQ4K2\",\"server\":\"wss://lobby.mygame.net/ws\"}",
+      "values": { "name": "Sam", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "7HQ4K2", "server": "wss://lobby.mygame.net/ws" }
+    },
+    {
+      "name": "hand-edited values are cleaned, bad ones read as empty",
+      "stored": "{\"v\":1,\"name\":\"  Sam \",\"lastCode\":\"7hq-4k2\",\"relay\":\"nonsense\",\"server\":\"lobby\"}",
+      "values": { "name": "Sam", "relay": "", "lastCode": "7HQ4K2", "server": "" }
+    },
+    {
+      "name": "wrong types read as empty",
+      "stored": "{\"name\":5,\"relay\":true,\"lastCode\":null,\"server\":[\"x\"]}",
+      "values": { "name": "", "relay": "", "lastCode": "", "server": "" }
+    },
+    {
+      "name": "unknown fields are ignored on read",
+      "stored": "{\"theme\":\"dark\",\"name\":\"Sam\"}",
+      "values": { "name": "Sam", "relay": "", "lastCode": "", "server": "" }
+    }
+  ],
+  "save": [
+    {
+      "name": "unknown fields are kept",
+      "stored": "{\"v\":1,\"name\":\"Old\",\"theme\":\"dark\",\"extra\":{\"a\":1}}",
+      "patch": { "name": "Sam", "server": "lobby.mygame.net" },
+      "result": { "v": 1, "name": "Sam", "server": "wss://lobby.mygame.net", "theme": "dark", "extra": { "a": 1 } },
+      "rejected": []
+    },
+    {
+      "name": "a corrupt value is replaced",
+      "stored": "garbage",
+      "patch": { "name": "Sam" },
+      "result": { "v": 1, "name": "Sam" },
+      "rejected": []
+    },
+    {
+      "name": "nothing stored yet",
+      "stored": null,
+      "patch": { "name": " Sam ", "lastCode": "7hq 4k2" },
+      "result": { "v": 1, "name": "Sam", "lastCode": "7HQ4K2" },
+      "rejected": []
+    },
+    {
+      "name": "a rejected field is not written, the others are",
+      "stored": "{\"v\":1,\"name\":\"Sam\"}",
+      "patch": { "relay": "nonsense", "lastCode": "7hq4k2", "server": "lobby" },
+      "result": { "v": 1, "name": "Sam", "lastCode": "7HQ4K2" },
+      "rejected": ["relay", "server"]
+    },
+    {
+      "name": "a rejected field keeps the old value",
+      "stored": "{\"v\":1,\"relay\":\"turn:relay.example.com:3478 alice s3cret\"}",
+      "patch": { "relay": "turn:relay.example.com:3478" },
+      "result": { "v": 1, "relay": "turn:relay.example.com:3478 alice s3cret" },
+      "rejected": ["relay"]
+    },
+    {
+      "name": "an empty value clears the field",
+      "stored": "{\"v\":1,\"name\":\"Sam\",\"lastCode\":\"7HQ4K2\"}",
+      "patch": { "name": "" },
+      "result": { "v": 1, "lastCode": "7HQ4K2" },
+      "rejected": []
+    },
+    {
+      "name": "a later format version is kept",
+      "stored": "{\"v\":2,\"name\":\"X\"}",
+      "patch": { "name": "Sam" },
+      "result": { "v": 2, "name": "Sam" },
+      "rejected": []
+    },
+    {
+      "name": "the relay is stored as pasted, trimmed",
+      "stored": null,
+      "patch": { "relay": "  turn:relay.example.com:3478\n alice\n\ts3cret  \n" },
+      "result": { "v": 1, "relay": "turn:relay.example.com:3478\n alice\n\ts3cret" },
+      "rejected": []
+    }
+  ],
+  "env": [
+    {
+      "name": "no variables: the stored values",
+      "stored": { "name": "Sam", "lastCode": "7HQ4K2" },
+      "env": {},
+      "effective": { "name": "Sam", "relay": "", "lastCode": "7HQ4K2", "server": "" }
+    },
+    {
+      "name": "a variable beats the stored value",
+      "stored": { "name": "Sam", "server": "wss://lobby.mygame.net/ws" },
+      "env": { "ONELOBBY_NAME": "  Ann ", "ONELOBBY_LOBBY_SERVER": "lobby.other.net" },
+      "effective": { "name": "Ann", "relay": "", "lastCode": "", "server": "wss://lobby.other.net" }
+    },
+    {
+      "name": "a variable sets what is not stored",
+      "stored": {},
+      "env": { "ONELOBBY_RELAY": "turn:relay.example.com:3478 bob pw99", "ONELOBBY_LAST_CODE": "7hq-4k2" },
+      "effective": { "name": "", "relay": "turn:relay.example.com:3478 bob pw99", "lastCode": "7HQ4K2", "server": "" }
+    },
+    {
+      "name": "an empty variable counts as unset",
+      "stored": { "name": "Sam" },
+      "env": { "ONELOBBY_NAME": "" },
+      "effective": { "name": "Sam", "relay": "", "lastCode": "", "server": "" }
+    },
+    {
+      "name": "an invalid variable is ignored",
+      "stored": { "relay": "turn:relay.example.com:3478 alice s3cret", "server": "wss://lobby.mygame.net/ws" },
+      "env": { "ONELOBBY_RELAY": "nonsense", "ONELOBBY_LOBBY_SERVER": "lobby" },
+      "effective": { "name": "", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "", "server": "wss://lobby.mygame.net/ws" }
+    },
+    {
+      "name": "other variables are not read",
+      "stored": {},
+      "env": { "ONELOBBY_SERVER": "wss://lobby.mygame.net/ws", "ONELOBBY_NAME_X": "Zed" },
+      "effective": { "name": "", "relay": "", "lastCode": "", "server": "" }
+    }
+  ]
+}

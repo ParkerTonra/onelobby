@@ -29,6 +29,9 @@ export type {
 export { BanList } from "./bans.js";
 export type { BanEntry } from "./room-rules.js";
 export type { KeyValueStore } from "./storage.js";
+// The player's saved settings (docs/recipes/settings.md, spec/settings.md): kit.settings, plus the pure helpers.
+export { PlayerSettings, SETTINGS_ENV, maskRelay } from "./settings.js";
+export type { SettingsField, SettingsValues, SettingsUse, SaveResult, EnvSource } from "./settings.js";
 export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";

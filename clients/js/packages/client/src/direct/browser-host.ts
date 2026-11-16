@@ -109,6 +109,7 @@ export async function hostNostr(kit: OneLobby, opts: BrowserHostOptions = {}): P
     lobby.on("sessionEnded", teardown);
 
     lobby.joinCode = code;
+    kit.rememberCode(code);
     lobby.joinCodeKind = "nostr";
     lobby.directCode = "";
     lobby.directCodeKind = "none";

@@ -14,9 +14,13 @@ import { LobbyController, type Player, type SharedState, type UiState } from "./
 import { codeFromUrl, shareUrl } from "../friendly.js";
 import { LOBBY_CSS } from "./styles.js";
 import { lobbyServerUrl } from "./server-url.js";
+import { PlayerSettings } from "../settings.js";
+import { localStore, memoryStore } from "../storage.js";
 
 export const LOBBY_TAG = "one-lobby";
+/** Where versions before the settings store kept the name; read once and moved into `kit.settings` (spec/settings.md). */
 const NAME_KEY = "onelobby-name";
+const gameOf = (el: Element) => el.getAttribute("game") || "onelobby-drop-in";
 
 const TEMPLATE = `
 <div class="card" part="card">
@@ -88,19 +92,31 @@ export interface OneLobbyElement extends HTMLElement {
 }
 
 
-function readStored(): string {
-  try {
-    return localStorage.getItem(NAME_KEY) ?? "";
-  } catch {
-    return "";
-  }
+function settingsFor(game: string): PlayerSettings {
+  return new PlayerSettings(localStore() ?? memoryStore(), game, null);
 }
-function store(name: string): void {
+
+/** The saved name; a name kept by an older version under its own key moves into the settings once. */
+/** @internal */
+export function readStored(game: string): string {
+  const settings = settingsFor(game);
+  const saved = settings.load().name;
+  if (saved) return saved;
   try {
-    localStorage.setItem(NAME_KEY, name);
+    const ls = localStore();
+    const old = ls?.getItem(NAME_KEY);
+    if (ls && old) {
+      settings.save({ name: old });
+      ls.removeItem(NAME_KEY);
+      return settings.load().name;
+    }
   } catch {
-    /* private window */
+    /* unreadable: no name */
   }
+  return "";
+}
+function store(game: string, name: string): void {
+  settingsFor(game).save({ name });
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -163,7 +179,7 @@ function makeClass(): CustomElementConstructor {
     connectedCallback(): void {
       const name = this.getAttribute("name");
       const input = this.$("name") as HTMLInputElement;
-      if (!input.value) input.value = name ?? readStored();
+      if (!input.value) input.value = name ?? readStored(gameOf(this));
       this.$("nameLabel").hidden = !!name;
       this.render();
       if (!this.autoJoined) {
@@ -206,7 +222,7 @@ function makeClass(): CustomElementConstructor {
     private playerName(): string {
       // empty is fine: other players then see "Player 2" and so on
       const v = (this.$("name") as HTMLInputElement).value.trim() || this.getAttribute("name") || "";
-      if (!this.getAttribute("name") && v) store(v);
+      if (!this.getAttribute("name") && v) store(gameOf(this), v);
       return v;
     }
 
@@ -215,7 +231,7 @@ function makeClass(): CustomElementConstructor {
       const server = lobbyServerUrl(this.getAttribute("server"));
       if (!server) throw new OneLobbyError("no_server", "the <one-lobby> tag has no usable server address");
       return new OneLobby({
-        gameId: this.getAttribute("game") || "onelobby-drop-in",
+        gameId: gameOf(this),
         netVersion: this.getAttribute("version") || "1",
         lobbyServer: server,
         mode: "raw",
