@@ -46,32 +46,50 @@ Note each finding with the file and line that told you:
 
 ## 3. Propose
 
-Preview, writing and downloading nothing: `npx create-onelobby --into . --template <engine> --recommend "<sentence>" <flags> --yes
---dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). **Always pass `--template`**: without it
+Preview, writing and downloading nothing: `npx create-onelobby --into . --template <engine> --recommend "<sentence>" --yes
+--dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). `--recommend` fills in its `answers` by
+itself; add a flag only to override one (section 2), not to repeat them. **Always pass `--template`**: without it
 `--into` treats any folder, a Unity one too, as `web`. `--yes` invents the game id `com.example.<folder>`; give the real one with
 `--game-id`. The result holds `blueprint` (the file to be written), `files` (added or updated) and `recommendation`.
 
 Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
 (the command, the files it adds or changes, where the menu goes and which scene or page opens it) and the `limits`. If every value
-is a schema default, build without stopping; otherwise stop for the user's go or edits. After the build, put each reason in the
-file as a `"$comment"` beside its key (the loaders ignore it).
+is a schema default, build without stopping; otherwise stop for the user's go or edits. After the build, put the reasons in the
+file: one key named exactly `"$comment"` in each object (`hosting`, `lobby`, `sync`, ...), holding the reasons for that object's
+keys in one string. The loaders ignore that name only; any other spelling (`"$comment tickRate"`) fails as `unknown_key`.
 
 ## 4. Build
 
 1. Run the previewed command without `--dry-run`; its "Next:" lines are part of the job. Godot downloads the WebRTC natives once
    (pinned, SHA-256 checked, anonymous; offline: `--webrtc-zip <file>`). Godot C# needs the .NET build of Godot and the .NET 8 SDK,
-   and until a release is on NuGet `--packages-from <folder of .nupkg>`. Then `godot --headless --import --path .` (C#: first
-   `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with `exists`: edit by hand.
+   and until a release is on NuGet `--packages-from <folder of .nupkg>`. Then `godot --headless --audio-driver Dummy --import --path .`
+   (C#: first `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with
+   `exists`: edit by hand.
 2. **Wire the drop-in menu where the survey said** (a new project has it as the main scene). Godot `--into` never edits your scenes:
-   instance `addons/onelobby/menu/menu.tscn` (C#: `addons/onelobby_menu/OneLobbyMenu.tscn`) in the menu entry's scene, set
-   `menu.client = Net.client` before its `_ready` (GDScript; `Net` is the autoload the scaffolder registered), connect
-   `game_started(lobby)` (start the match), `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword:
-   `docs/recipes/menu.md`. Never test with `-- --host` without `--local`: it opens a port and reaches public relays.
-3. **Web** `--into` writes `onelobby.json`, `multiplayer/session.js` and `test/multiplayer.mjs` only, and refuses `--ui drop-in`. With
-   no `package.json`: `npm init -y`, `npm pkg set type=module`, `npm install onelobby`. Put the game behind `step(tick, commands) ->
-   hash`, `snapshot()`, `restore(tick, bytes)`, `hash()`, swap it into the test's stand-in `Game`, and draw Host / Join / Start as
-   `docs/recipes/js-web.md` sections 3 and 4 say. The `<one-lobby>` element (`menu.md`, "Web") fits only games that sync through its
-   own `send` / `shared`, not through a Lobby.
+   instance `addons/onelobby/menu/menu.tscn` (C#: `addons/onelobby_menu/OneLobbyMenu.tscn`) in the menu entry's scene (it is a
+   Control; a Node2D scene can hold it as a child). GDScript: give it the client before the menu's own `_ready`, so from the
+   parent's `_enter_tree` (`$Menu.client = Net.client`) when the menu sits in the scene file, or before `add_child` when you
+   instance it in code (`Net` is the autoload the scaffolder registered). Connect `game_started(lobby)` (start the match),
+   `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword: `docs/recipes/menu.md`.
+   **Test on this PC only.** The menu acts on `-- --host` and `-- --join=<code>` by itself, and a plain `--host` opens a port and
+   reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by a new project's `main.gd`, not by the menu, so in a
+   GDScript `--into` game it does nothing (the `.olc` entry the scaffolder wrote passes it all the same) until you add what that
+   `main.gd` does: set `boot_flags = false` on the menu beside `client`, then after the menu's `_ready` (the parent's `_ready`,
+   or after `add_child`): `var args := OS.get_cmdline_user_args()`, and `if "--local" in args:` set `menu.route = "direct"` and
+   `menu.host_options = {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1"}`, then
+   `menu.model.apply_boot_flags(args)`. C#: the "Next:" line's `OneLobbyNet.Wire(menu, args)` reads `--local`. Never run
+   `-- --host` before that is in, and never without `--local`.
+3. **Web** `--into` writes `onelobby.json`, `multiplayer/session.js` and `test/multiplayer.mjs` only: no menu (`ui.kind` stays
+   `generated`, you draw the buttons; `--ui drop-in` is refused) and no `AGENTS.md` (the "AGENTS.md rule" its comments cite is the
+   Rules list in the OneLobby repo's `AGENTS.md`: rule 1, the game owns the command bytes; rule 5, the lobby server URL is a
+   setting). With no `package.json`: `npm init -y`, `npm pkg set type=module`, `npm install onelobby`. Put the game behind
+   `step(tick, commands) -> hash`, `snapshot()`, `restore(tick, bytes)`, `hash()` and swap it into the test's stand-in `Game`.
+   In the page go through `multiplayer/session.js`: `loadBlueprint()`, `makeKit(bp, { displayName })`, `kit.host()` or
+   `kit.join(code)`, then `const s = bindSession(lobby, kit.blueprint, game)` before `lobby.start()`; call
+   `s.pump(performance.now())` every frame and `s.send(bytes)` when the player acts; the match runs while `lobby.phase` is
+   `"in_game"` (`lobby.on("phase", ...)`); keep the old loop for playing alone. A page with no bundler needs the import map of
+   `docs/recipes/js-web.md` section 1; the Host / Join / Start buttons and their errors are its sections 3 and 4. The `<one-lobby>`
+   element (`menu.md`, "Web") fits only games that sync through its own `send` / `shared`, not through a Lobby.
 4. Hand work the template does not cover, after 1 to 3: the game's sim as lockstep frames (`docs/recipes/godot-gdscript.md` section 4b,
    `js-web.md`), replication (`replication.md`), a pause-menu call when `session.pause` is not `off` (`pause.md`), the `by-hand`
    advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check and plain-language errors already
@@ -81,8 +99,9 @@ file as a `"$comment"` beside its key (the loaders ignore it).
    `onelobby.json` yourself against the schema, and say in the report that this path was by hand.
 6. Rules that stay: read `onelobby.json` at run time, never copy its values into code (`OneLobby.fromConfig`,
    `OneLobbyClient.from_config`, `Blueprint.Load`); the game plays offline and every lobby call can fail (show `describeError`);
-   the lobby server URL is a player setting; bump `game.netVersion` when command bytes change. **Relay list**: the scaffolder writes
-   the library's default list unprobed and some are dead. In a scratch folder `npm install onelobby`, then run
+   the lobby server URL is a player setting; bump `game.netVersion` when command bytes change. **Relay list** (only when
+   `hosting.nostr` is on; a web game on a lobby server skips this): the scaffolder writes the library's default list unprobed and
+   some are dead. In a scratch folder `npm install onelobby`, then run
    `node -e "import('onelobby').then(async m => console.log(JSON.stringify((await m.checkNostrRelays(m.DEFAULT_NOSTR_RELAYS, 8000)).filter(r => r.ok).map(r => r.url))))"`
    (anonymous, random keys) and write the result to `hosting.nostrRelays` with a `$comment` naming the date; offline, keep the default.
 
@@ -91,7 +110,8 @@ file as a `"$comment"` beside its key (the loaders ignore it).
 `npx create-onelobby verify` in the game folder (Godot from `--godot <exe>`, else `$GODOT`, else `godot`; headless, loopback only).
 Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that step and run again until `VERIFY_OK`, or until you can
 name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
-runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it. `verify` proves the routes, not your
+runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
+`nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, not your
 wiring, so also boot the game (`godot --headless --audio-driver Dummy --path . --quit-after 90`, no flags; web: `node test/multiplayer.mjs`)
 and read it for errors, and check **offline**: with no lobby server the game still plays and the menu says multiplayer is unavailable.
 `verify` refuses engines the scaffolder does not build (no verdict line); then use the recipe's "Done when" and say which checks you could not run.
