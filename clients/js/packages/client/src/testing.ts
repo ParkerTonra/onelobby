@@ -563,3 +563,7 @@ export class MemorySocket implements SocketLike {
 export function dropSocket(s: SocketLike): void {
   s.close();
 }
+
+// Fake lag, jitter and loss (the C# NetSimTransport): wrap a link factory, pass it as advanced.linkFactory.
+export { NetSimLinkFactory } from "./netsim.js";
+export type { NetSimOptions } from "./netsim.js";

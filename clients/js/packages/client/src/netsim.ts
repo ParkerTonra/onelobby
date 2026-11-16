@@ -9,7 +9,7 @@
  * the added round trip, and with both ends wrapped with the same settings it is the added one-way time.
  *
  * Differences from C# (JS has no transport object, only the link factory; there is no Poll): the wrapper is a
- * {@link LinkFactory} (`kit` option `advanced.linkFactory`), and delayed frames go out on the {@link Clock} (a timer set
+ * {@link LinkFactory} (`kit` option `advanced.linkFactory`; exported from `onelobby/testing`), and delayed frames go out on the {@link Clock} (a timer set
  * for the earliest due frame), so a test drives them with a `ManualClock`. The random stream is mulberry32 of the seed, so
  * a seed repeats a run in JS, but is not the same stream as C#'s `System.Random` or the GDScript generator.
  */

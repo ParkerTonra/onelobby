@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NetSimLinkFactory, type NetSimOptions } from "../src/index.js";
-import { ManualClock } from "../src/testing.js";
+import { ManualClock, NetSimLinkFactory, type NetSimOptions } from "../src/testing.js";
 import type { ChannelName, LinkFactory, PeerLink } from "../src/transport.js";
 
 /** An in-memory pair of links: a frame sent on one arrives on the other at once (the sim does all the delaying). */

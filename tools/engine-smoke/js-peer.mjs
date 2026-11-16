@@ -10,7 +10,8 @@ const req = createRequire(join(root, "clients/js/package.json"));
 const { RTCPeerConnection } = req("node-datachannel/polyfill");
 const { OneLobby, webRtcLinkFactoryFor, parseTurnLine } = await import(pathToFileURL(join(client, "index.js")).href);
 const { hostDirect } = await import(pathToFileURL(join(client, "direct/index.js")).href);
-const { ReplicationSession, NetWriter, NetPlayers, NetSimLinkFactory } = await import(pathToFileURL(join(client, "index.js")).href);
+const { ReplicationSession, NetWriter, NetPlayers } = await import(pathToFileURL(join(client, "index.js")).href);
+const { NetSimLinkFactory } = await import(pathToFileURL(join(client, "testing.js")).href);
 
 const a = {};
 for (const x of process.argv.slice(2)) {
