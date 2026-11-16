@@ -54,6 +54,27 @@ npx create-onelobby verify                       # opens the project in batchmod
 - Never run a player or the editor without `-batchmode` in tests, and never run a player with `--host` without `--local` (127.0.0.1 only, no Nostr, no router request).
 - `clients/unity/scaffold-test.sh` runs all of this end to end on a machine with Unity; it is local only (CI has no Unity licence).
 
+### `--into` a game that already has its own multiplayer (runner, replication, own build)
+
+- **Runner first.** `OneLobbyRunner` builds its `LobbyClient` the first time `Client` is read, and `Blueprint`, `ConfigureConfig` (for example
+  `c => c with { NetVersion = <your wire constant> }`) and `BindAddress` are read then. Add the runner yourself, set them, and only then add
+  the menu: it takes the runner it finds in the scene (or set `menu.Runner`). A menu added first adds a runner of its own and builds the client at once.
+- **No `StartOnHost`, no `--autostart`.** The Unity menu has `Pump`, `AutoHideOnStart`, `BootFlags`, `Runner` and `Client`. To start with no click (a game that hosts from
+  its running world, a headless two-copy run) set `room.autoStart` to `"players"` and `room.autoStartPlayers` to `2` in `onelobby.json`; the room's countdown runs and
+  `GameStarted` fires on both copies. Otherwise the host clicks Start.
+- **`menu.BootFlags = false`** when the game's own code reads `--host` / `--join`: the menu reads them too (default on), and both copies would act.
+- **Event order.** `GameStarted` runs with the menu's screen already `Playing`: set your own role and "line is live" state first, then attach the lobby.
+  `ReturnedToLobby` (back to the room) and `Left` (the player left) end the match. A direct lobby has no host migration.
+- **Your own player build stays yours.** If a script outside `Assets/OneLobby/` calls `BuildPipeline.BuildPlayer`, `--into` writes no
+  `Assets/OneLobby/Editor/BuildPlayer.cs`, adds a note saying so, and prints no "build the Windows player" line; point your `.olc` entry at your own exe. Without such a
+  call it writes `BuildPlayer.cs`, which builds the scenes enabled in File > Build Profiles into `Builds/Windows/Game.exe`. `verify` never builds a player.
+- **Tests.** Run the scaffolder's assembly alone (`-assemblyNames OneLobbyGame.Tests`) and your own PlayMode assembly as a separate run (`-assemblyNames <name>`): the
+  `--local --route=...` flags are for the first only. Close the Unity editor before `verify` or any batchmode run: a project open in the editor cannot be opened
+  again (`Temp/UnityLockfile`), and `verify` says so instead of blaming the tarball.
+- **Saved settings.** `PlayerSettings` keeps the name and relay under the PlayerPrefs key `onelobby.settings.<gameId>`: pick the game id before you import the old keys, and
+  import only while `Load().Name` is empty or "Player".
+- `lobby.joinLink` is `false` for a Unity player: a join link is the share URL of a web page, which a player build does not have (the default is `true` for `web` and `node-browser` only).
+
 The rest of this page is the hand-written way.
 
 ## The short way: the drop-in menu

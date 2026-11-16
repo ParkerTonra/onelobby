@@ -102,7 +102,49 @@ await joiner.leave(); await host.leave();               // leave every lobby, or
 This proves the netcode, not the network: run section 2 against a real server before a release. Chat lines reach every
 peer, the sender included (the host echoes each accepted line), so render chat on `message`, not on send.
 
-## 4. Troubleshooting
+## 4. A Node host and a Node joiner over real WebRTC
+
+For a game whose Node process is a direct host (`browser-game.md`), `create-onelobby verify` starts no JS peers, so this is the test that
+proves the route. Both sides run in one Node script on this PC only: `local: true` binds 127.0.0.1 (no router, no Nostr, no STUN) and
+`port: 0` takes any free port, so another copy of the game on the PC (or a test run that did not end) never collides on 47810. The
+joiner dials the address the host reports. It needs `node-datachannel` (`npm install --save-optional node-datachannel@^0.33.4`); put your
+game's host code where the echo handler is.
+
+```js
+// two-peers.test.mjs   (node two-peers.test.mjs): a Node host and a Node joiner over real WebRTC, loopback only
+import { OneLobby, webRtcLinkFactoryFor } from "onelobby";
+import { hostDirect } from "onelobby/direct";
+import { RTCPeerConnection } from "node-datachannel/polyfill";
+
+const linkFactory = webRtcLinkFactoryFor(RTCPeerConnection);
+const kit = (name) => new OneLobby({ gameId: "com.example.test", netVersion: "1", mode: "raw", lobbyServer: "", displayName: name, rememberSeat: false, advanced: { linkFactory } });
+const within = (ms, p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what}: no answer in ${ms} ms`)), ms).unref())]);
+
+// local: loopback only, no router, no Nostr, no STUN; port 0: any free port, so nothing collides with another copy of the game
+const host = await hostDirect(kit("Sam"), { local: true, port: 0, log: false, maxPlayers: 3 });
+let joiner;
+try {
+  host.onConnection((conn) => { conn.onmessage = (e) => conn.send(`echo ${e.data}`); });   // your game's host code goes here
+  joiner = await within(20000, kit("Ann").joinDirect(host.directAddresses[0]), "join");   // "127.0.0.1:<the real port>"
+  await within(20000, joiner.ready, "link");
+  const ws = joiner.asWebSocket();
+  const answer = new Promise((resolve) => (ws.onmessage = (e) => resolve(e.data)));
+  ws.send("hello");
+  const got = await within(10000, answer, "echo");
+  if (got !== "echo hello") throw new Error(`expected "echo hello", got ${JSON.stringify(got)}`);
+  console.log("PASS host and joiner linked over loopback WebRTC; the page's message reached the host and the answer came back");
+} finally {
+  try { await joiner?.leave(); } catch {}
+  await host.leave();
+}
+process.exit(0);   // node-datachannel keeps native threads alive for a moment
+```
+
+Import the game's code from such a test without starting its server: a `server.js` that listens when it is loaded should export a
+`start()` and call it only from `if (require.main === module)`. Add the script to `package.json` `scripts.test` yourself (`create-onelobby --into`
+never edits an existing `package.json`). Expect one `PASS` line and exit code 0.
+
+## 5. Troubleshooting
 
 - Page loads but Host does nothing: open `DevTools` output via the `[page]` console lines; a wrong lobby URL shows
   "Multiplayer unavailable". Check `curl http://127.0.0.1:8080/healthz`.
@@ -114,4 +156,5 @@ peer, the sender included (the host echoes each accepted line), so render chat o
 
 - `node test-multiplayer.mjs` prints the ok line and exits 0 with the lobby server running.
 - With no server: `node two-players.test.mjs` prints its ok line and exits 0.
+- A game with a Node direct host: `node two-peers.test.mjs` (section 4) prints its PASS line and exits 0.
 - Running it with the lobby server stopped makes the host page show "Multiplayer unavailable" and the game still plays.

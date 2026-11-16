@@ -62,6 +62,7 @@ export async function startHost({ page, port = 47810, openPort = true, onConnect
     advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },
   });
   // One lobby is the whole server (every room or match on it), so size maxPlayers like a server, not a match.
+  // The Node host is a peer and holds one seat itself: with maxPlayers 4, three browsers fit.
   const lobby = await hostDirect(kit, {
     port, maxPlayers: 64, name: "My Game", openPort, http: page,
     rateLimit: { messages: 60, perMs: 1000 },   // per joiner; floods are dropped before you see them
@@ -77,6 +78,24 @@ export async function startHost({ page, port = 47810, openPort = true, onConnect
     kind: lobby.joinCodeKind,      // "internet" | "same_network": tell the host which (direct-ip.md s.5)
     close() { try { lobby.leave(); } catch {} },   // closes the port, removes the router mapping
   };
+}
+```
+
+**A CommonJS game** (`require`, no `"type": "module"`): `onelobby` is ES-module only, and `require("onelobby")` throws
+`ERR_REQUIRE_ESM` before Node 22.12 (`engines` says Node 18). Keep the file CommonJS and load the three modules with a dynamic
+`import()` inside an async function (CommonJS has no top-level `await`):
+
+```js
+async function startHost({ page, onConnection }) {
+  const { OneLobby, webRtcLinkFactoryFor } = await import("onelobby");
+  const { hostDirect } = await import("onelobby/direct");
+  const { RTCPeerConnection } = await import("node-datachannel/polyfill");
+  const kit = OneLobby.fromConfig(JSON.parse(require("node:fs").readFileSync("onelobby.json", "utf8")), {
+    advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },   // WebRTC for Node: without it no browser links
+  });
+  const lobby = await hostDirect(kit, { http: page });   // seats, port, Nostr, origins come from onelobby.json
+  lobby.onConnection(onConnection);
+  return lobby;
 }
 ```
 
@@ -99,7 +118,7 @@ The page needs OneLobby's single-file browser bundle, so serve that too:
 ```js
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-const bundlePath = createRequire(import.meta.url).resolve("onelobby").replace(/index\.js$/, "onelobby.bundle.js");
+const bundlePath = createRequire(import.meta.url).resolve("onelobby/bundle");   // dist/onelobby.bundle.mjs, served at /onelobby.bundle.js
 const files = {
   "/": { type: "text/html; charset=utf-8", body: readFileSync("public/index.html", "utf8")
            .replace("<head>", '<head><meta name="onelobby" content="here">') },
@@ -111,6 +130,11 @@ const files = {
 const host = await startHost({ page: (path) => files[path] ?? null, onConnection });
 console.log(host.off ?? `OneLobby ${host.version}. Send this link: ${host.joinUrl}`);
 ```
+
+The host must serve every file the page loads, from memory: `/`, `/onelobby.bundle.js` (the one URL for the bundle: the page does
+`import { OneLobby } from "/onelobby.bundle.js"`, so it needs no import map), `/onelobby.json` when the page fetches it, and the
+game's own scripts and assets. `OneLobby.fromConfig` in the page needs that json; `new OneLobby({ gameId, netVersion, mode: "raw",
+lobbyServer: "" })` does not.
 
 The `<meta name="onelobby">` marker lets one `index.html` work both from the host's port (join through OneLobby) and
 from any other web server you already run. If the game already shares one page function between its own web server and
@@ -159,7 +183,9 @@ The page must be plain `http`: an `https` page may not open `ws://` to an IP add
 
 The host only upgrades WebSockets whose `Origin` is the page it serves itself (same host and port as the request),
 a loopback page, or one you list in `hostDirect(kit, { allowedOrigins: [...] })`; every other web page gets `403`, so a
-site the host happens to visit cannot reach the lobby. The page this recipe serves needs no setting.
+site the host happens to visit cannot reach the lobby. The page this recipe serves needs no setting. A game that already has
+its own web server (say on port 3000) and keeps serving the page from it needs that origin in `hosting.allowedOrigins`, else
+every join fails with `403`: the simplest fix is to serve the page from `hostDirect`'s `http` callback and drop the old server.
 
 ## 5. What the host needs to know
 
@@ -290,6 +316,14 @@ export function forwardToWorker(lobby: Lobby, worker: Worker): void {
   worker.onmessage = (e: MessageEvent<{ peer: number; bytes: Uint8Array }>) => conns.get(e.data.peer)?.send(e.data.bytes);
 }
 ```
+
+## Testing it on this PC
+
+`hostDirect(kit, { local: true, port: 0 })` is the local run: loopback only, no router, no Nostr, no STUN, and `port: 0` takes any
+free port (read it from `lobby.directAddresses[0]`), so a second copy of the game or an earlier test never collides on 47810.
+A two-peer test over real WebRTC, host and joiner both in Node, is [testing.md section 4](testing.md#4-a-node-host-and-a-node-joiner-over-real-webrtc).
+Import the game's modules from the test without starting its server: a `server.js` that calls `listen` when it is loaded must
+export a `start()` and call it only from `if (require.main === module)`.
 
 ## Done when
 
