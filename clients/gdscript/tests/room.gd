@@ -344,7 +344,7 @@ func _kick_ban_password() -> void:
 	var denied := await _join(h, "Nope", {"password": "wrong"})
 	_check(denied.lobby != null and await _until(func() -> bool: return denied.count("removed") == 1), "with the hub's check off, the host's room still refuses a wrong password")
 	_check(denied.lobby.removal.get("code") == "bad_password" and denied.lobby.removal.get("reason") == "Wrong password." and not denied.lobby.removal.get("ban"), "the joiner is told bad_password with its sentence")
-	_check(await _until(func() -> bool: return denied.ended.size() == 1) and denied.client.last_error.get("code") == "bad_password", "its session ends and the client's error says bad_password")
+	_check(await _until(func() -> bool: return denied.ended.size() == 1) and denied.client.last_error.get("code") == "bad_password", "its session ends and the client's error says bad_password (%s)" % JSON.stringify(denied.client.last_error))
 	_check(hr.entries().size() == 1 and h.count("joined") == 0, "no entry was made for it")
 	hub.password = "pw"
 	var json := JSON.stringify(hr.entries()) + JSON.stringify(hr.settings())

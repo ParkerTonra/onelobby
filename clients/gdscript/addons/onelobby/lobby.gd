@@ -972,6 +972,8 @@ func _on_server_error(error_code: String, disconnected: bool, data: Dictionary =
 		var refused := not is_host and room.supported == null
 		removal = {"code": rc, "reason": OneLobbyRoomRules.removal_reason(rc, OneLobbySignaling.s(data, "closeReason")),
 			"ban": (not disconnected or rc == "banned") and not denied and not refused}
+		if refused and raw_code == rc:
+			_c.raise_error(rc, removal["reason"]) # what the `deny` frame would have said: the client's last_error names the refusal
 	room._on_removed(removal)
 	_end("disconnected" if disconnected else "kicked")
 
