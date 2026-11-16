@@ -87,6 +87,7 @@ for (const route of ["ip", "nostr"] as Route[]) {
       const ann = await join("Ann");
       const spec = await join("Spec", { role: "spectator" });
       await until(() => spec.lobby.room.me?.role === "spectator", "spectator admitted");
+      await until(() => ann.lobby.room.supported === true && host.room.players.length === 2, "the player admitted too");
       expect(host.room.players).toHaveLength(2);
       expect(host.room.spectators).toHaveLength(1);
       await expect(join("Late")).rejects.toMatchObject({ code: "lobby_full" });
