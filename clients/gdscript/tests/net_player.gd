@@ -42,7 +42,7 @@ func _run() -> void:
 	var tests := [
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
-		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients,
+		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
 		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
@@ -388,6 +388,23 @@ func _test_host_without_clients() -> void:
 	l.tick.connect(func(_n: int) -> void: l.set_local_input({"move_x": 1.0, "move_y": 0.0, "yaw": 0.0}))
 	rig.run(1.0)
 	_check(float((l.get_state(l.local_peer_id) as Dictionary)["x"]) > 3.0, "a host with no clients steps its own player")
+
+
+## Authority "host" with no step function: one push_error (the run's output has exactly one "needs a step function" line), the roster and
+## the snapshots go on, players that need the step do not move, and a step set later works (the JS and C# twins throw once instead).
+func _test_host_without_step() -> void:
+	var rig: Rig = Rig.player_rig({"loss_rate": 0.0, "jitter_ms": 0.0, "layer": func(name: String) -> Dictionary: return {"authority": "host", "step": Callable() if name == "host" else Callable(self, "_walk_step")}})
+	var hl: OneLobbyNetPlayers = rig.host_players()["layer"]
+	var a: Dictionary = rig.join_players("a")
+	var al: OneLobbyNetPlayers = a["layer"]
+	hl.tick.connect(func(_n: int) -> void: hl.set_local_input({"move_x": 1.0, "move_y": 0.0, "yaw": 0.0}))
+	rig.run(2.5)
+	_check(hl._warned_step, "host without a step: reported (once: one push_error in the output)")
+	_check(hl.player_ids().has(al.local_peer_id) and al.player_ids().has(hl.local_peer_id), "host without a step: the roster and the snapshots go on")
+	_check(absf(float((hl.get_state(hl.local_peer_id) as Dictionary)["x"])) < 0.05, "host without a step: a player that needs the step does not move")
+	hl.step = Callable(self, "_walk_step") # set later: no restart
+	rig.run(1.5)
+	_check(float((hl.get_state(hl.local_peer_id) as Dictionary)["x"]) > 3.0, "host without a step: the host's own player walks once the step is set")
 
 
 ## A host that draws the other players: `get_state(peer)` on the host is its own record one tick behind, interpolated (the JS twin is

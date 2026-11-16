@@ -325,3 +325,33 @@ describe("the host draws the other players (get(peer) on the host, one tick behi
     expect(hl.get(a.peerId + 100)).toBeUndefined();
   });
 });
+
+describe("authority \"host\" with no step function (reported once, everything else goes on)", () => {
+  it("throws once from the first pump that needs the step, keeps the roster, and works when the step is set later", async () => {
+    const rig = new PlayerRig({ lossRate: 0, jitterMs: 0, layer: (name) => ({ authority: "host", step: name === "host" ? undefined : walkStep }) });
+    const errors: unknown[] = []; // every frame of the rig, the ones inside the join too
+    const frame = rig.step.bind(rig);
+    rig.step = async () => {
+      try {
+        await frame();
+      } catch (e) {
+        errors.push(e);
+      }
+    };
+    const stepFrame = (): Promise<void> => rig.step();
+    const { layer: hl } = await rig.hostPlayers();
+    const { p: a, layer: al } = await rig.joinPlayers("a");
+    hl.on("tick", () => hl.setLocalInput({ moveX: 1, moveY: 0, yaw: 0 }));
+    for (let i = 0; i < 150; i++) await stepFrame();
+    expect(errors.length, "one error for 150 frames of a host with no step").toBe(1);
+    expect(String((errors[0] as Error).message)).toContain("needs a step function");
+    expect(hl.players).toContain(a.peerId);
+    expect(al.players).toContain(hl.localPeerId); // the roster and the snapshots go on
+    expect(Math.abs(hl.get(hl.localPeerId)!.x), "a player that needs the step does not move").toBeLessThan(0.05); // the default state, quantized
+    hl.step = walkStep; // set later: no restart
+    for (let i = 0; i < 90; i++) await stepFrame();
+    expect(errors.length, "and no second error").toBe(1);
+    expect(hl.local!.x, "the host's own player walks now").toBeGreaterThan(3);
+    console.log(`host without a step: ${errors.length} error over 240 frames; the host's player at x ${hl.local!.x.toFixed(2)} after the step was set`);
+  });
+});

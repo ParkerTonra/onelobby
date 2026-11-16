@@ -445,6 +445,12 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     }
     this.playQueue();
     this.sampleTraffic(now);
+    // authority "host" with no step: reported once, after everything that does not need the step has run
+    const missing = this.missingStepError;
+    if (missing) {
+      this.missingStepError = null;
+      throw missing;
+    }
   }
 
   /** Stop listening. The session stays yours. */
@@ -571,8 +577,18 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     if (!p.spawned) this.spawnEntity(p);
   }
 
+  private warnedStep = false;
+  private missingStepError: Error | null = null;
+
   private runStep(s: PlayerState, input: PlayerInput): PlayerState {
-    if (!this.step) throw new Error('authority "host" needs a step function: new NetPlayers(lobby, { authority: "host", step })');
+    if (!this.step) {
+      // reported once (thrown at the end of the pump that first needed it); players that need the step do not move until one is set
+      if (!this.warnedStep) {
+        this.warnedStep = true;
+        this.missingStepError = new Error('authority "host" needs a step function: new NetPlayers(lobby, { authority: "host", step })');
+      }
+      return s;
+    }
     return this.codec.quantize(this.step(s, input, this.dt));
   }
 

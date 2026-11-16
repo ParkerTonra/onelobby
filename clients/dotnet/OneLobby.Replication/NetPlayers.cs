@@ -644,9 +644,20 @@ namespace OneLobby.Replication
             if (!p.Spawned) SpawnEntity(p);
         }
 
+        private bool _warnedStep;
+
         private PlayerState RunStep(PlayerState s, NetPlayerInput input)
         {
-            if (Step == null) throw new InvalidOperationException("authority Host needs a step function: new NetPlayers(lobby, new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = ... })");
+            if (Step == null)
+            {
+                // reported once (rethrown at the end of the Pump that first needed it); players that need the step do not move until one is set
+                if (!_warnedStep)
+                {
+                    _warnedStep = true;
+                    _pending ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(new InvalidOperationException("authority Host needs a step function: new NetPlayers(lobby, new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = ... })"));
+                }
+                return s;
+            }
             return Codec.QuantizeState(Step(s, input, Dt));
         }
 

@@ -300,5 +300,30 @@ namespace OneLobby.Replication.Tests
             Assert.True(Math.Abs(v.Vx) < 0.1);
             Assert.False(hl.TryGet(a.PeerId + 100, out _));
         }
+    
+
+        [Fact]
+        public void AuthorityHostWithNoStepIsReportedOnceTheRestGoesOnAndASetStepWorksWithoutARestart()
+        {
+            var rig = new Rig(new ReplicationConfig(AdaptiveDelay: true), 100, 0, 0) { CatchPumpErrors = true };
+            var host = rig.StartHostLayer(new NetPlayersOptions { Authority = PlayerAuthority.Host });
+            var a = rig.JoinLayer("a", new NetPlayersOptions { Authority = PlayerAuthority.Host, Step = Scene.WalkStep });
+            var hl = host.Layer!;
+            hl.Tick += _ => hl.SetLocalInput(new NetPlayerInput { MoveX = 1, MoveY = 0, Yaw = 0 });
+            rig.Run(2.5);
+            Assert.Single(rig.PumpErrors);
+            Assert.IsType<InvalidOperationException>(rig.PumpErrors[0]);
+            Assert.Contains("needs a step function", rig.PumpErrors[0].Message);
+            Assert.Contains(a.PeerId, hl.Players);
+            Assert.Contains(hl.LocalPeerId, a.Layer!.Players); // the roster and the snapshots go on
+            Assert.True(hl.TryGet(hl.LocalPeerId, out var still));
+            Assert.True(Math.Abs(still.X) < 0.05, "a player that needs the step does not move");
+            hl.Step = Scene.WalkStep; // set later: no restart
+            rig.Run(1.5);
+            Assert.Single(rig.PumpErrors);
+            Assert.True(hl.TryGet(hl.LocalPeerId, out var moved));
+            Assert.True(moved.X > 3, "the host's own player walks now: x " + moved.X);
+            _out.WriteLine($"host without a step: {rig.PumpErrors.Count} error over 4 s; the host's player at x {moved.X:F2} after the step was set");
+        }
     }
 }
