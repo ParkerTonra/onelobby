@@ -594,6 +594,8 @@ func _test_rtt() -> void:
 	rig.run(3.0)
 	_check(a.session.host_peer_id == host.peer_id() and host.session.host_peer_id == host.peer_id(), "rtt: host_peer_id")
 	_check(a.session.rtt_ms >= 70 and a.session.rtt_ms <= 140 and host.session.rtt_ms == 0, "rtt: rtt_ms (%d)" % a.session.rtt_ms)
+	_check(a.session.peer_rtt_ms(host.peer_id()) == a.session.rtt_ms and a.session.peer_rtt_ms(a.peer_id()) == 0, "rtt: peer_rtt_ms on a client")
+	_check(host.session.peer_rtt_ms(a.peer_id()) == 0 and host.session.peer_rtt_ms(host.peer_id()) == 0, "rtt: peer_rtt_ms on the host")
 	_check(a.session.snapshot_age_ms >= 0 and a.session.snapshot_age_ms <= 60, "rtt: snapshot_age_ms (%d)" % a.session.snapshot_age_ms)
 
 

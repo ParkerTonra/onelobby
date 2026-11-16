@@ -469,7 +469,7 @@ Debug view: `rep.describe(bytes)` turns any replication message into a dictionar
 net log (`lobby.get_net_log()`), or set `rep.packet_log_sink = func(line: String) -> void: ...` to get the lines.
 
 Cost, as a plain fact: one delta snapshot of 50 entities with 16-byte states (5 bytes changed in each, 407 bytes on the wire) took
-about 0.14 ms to encode and 0.23 ms to decode in GDScript (average of 200 runs, Godot 4.7.2 headless on Windows, AMD Ryzen 7 9800X3D;
+about 0.14 ms to encode and 0.23 ms to decode in GDScript (average of 200 runs, Godot 4.7.2 headless on Windows, a 2024 desktop CPU;
 `tests/replication_bench.gd`). A host pays the encode once per client per tick.
 
 Tests: `clients/gdscript/tests/replication_rig.gd` is an in-memory network with a virtual clock (`net.latency_ms`, `net.drop_fast`,

@@ -31,7 +31,7 @@ extends RefCounted
 ## (sendFullSnapshot), try_get_input (tryGetInput), rewind_tick (rewindTick), send_snapshot (sendSnapshot), send_event
 ## (sendEvent), reliable_event_bytes_sent_to, server_tick, render_tick, latest_tick, snapshot_age_ms, last_processed_input,
 ## entities, is_mine (isMine), submit_input (submitInput), try_sample (trySample), try_sample_at, try_get_latest
-## (tryGetLatest), find, rtt_ms (rttMs), peer_rtt_ms, traffic_rates (trafficRates), describe, is_replication_payload,
+## (tryGetLatest), find, rtt_ms (rttMs), peer_rtt_ms (peerRttMs), traffic_rates (trafficRates), describe, is_replication_payload,
 ## packet_log, stats, dispose. Signals: entity_spawned, entity_despawned, event_received, event_delivered, event_gap,
 ## other_message (otherMessage), host_lost (hostLost), client_ready (clientReady).
 
@@ -339,6 +339,11 @@ func clients() -> Array[int]:
 
 func is_client_ready(peer_id: int) -> bool:
 	return _client_recs.has(peer_id)
+
+
+## Round trip to `peer_id` in ms. Only a client's round trip to the host is measured; any other peer gives 0.
+func peer_rtt_ms(peer_id: int) -> int:
+	return int(_lobby.ping_ms(_lobby.host_peer_id)) if not is_host and peer_id == host_peer_id else 0
 
 
 ## Host: newest snapshot tick this client acknowledged (0 = none yet: it gets full snapshots).
