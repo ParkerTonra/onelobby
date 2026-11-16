@@ -81,21 +81,15 @@ func _poll_conn(c: OLConn) -> void:
 				if c.session == null:
 					_drop(c, 1013, "full")
 					return
-			_drain(c)
+			while c.ws.get_available_packet_count() > 0:
+				var pkt := c.ws.get_packet()
+				if c.ws.was_string_packet() and c.session != null:
+					_hub.receive(c.session, pkt.get_string_from_utf8())
 		WebSocketPeer.STATE_CLOSED:
-			# what arrived with the close is still the peer's last words (a joiner's `diag` report and `leave`)
-			_drain(c)
 			_drop(c, 0, "")
 		_:
 			if not c.opened and Time.get_ticks_msec() - c.since > HANDSHAKE_MS:
 				_drop(c, 1002, "handshake timeout")
-
-
-func _drain(c: OLConn) -> void:
-	while c.ws.get_available_packet_count() > 0:
-		var pkt := c.ws.get_packet()
-		if c.ws.was_string_packet() and c.session != null:
-			_hub.receive(c.session, pkt.get_string_from_utf8())
 
 
 func _drop(c: OLConn, code: int, reason: String) -> void:

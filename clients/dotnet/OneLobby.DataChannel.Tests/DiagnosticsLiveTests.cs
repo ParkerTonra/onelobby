@@ -18,7 +18,7 @@ namespace OneLobby.DataChannel.Tests;
 
 /// <summary>
 /// The plan's "done when" with real WebRTC: a joiner behind a simulated strict NAT (every candidate it receives is dropped
-/// before it reaches ICE) with no relay gets <c>nat_blocked</c>, the host gets the same sentence and the one-line view.
+/// before it reaches ICE, on both ends) with no relay gets <c>nat_blocked</c>, the host gets the same sentence and the one-line view.
 /// Everything is on 127.0.0.1. Needs the native library, like <see cref="LiveWebRtcTests"/>.
 /// </summary>
 public sealed class DiagnosticsLiveTests : IAsyncLifetime
@@ -78,7 +78,8 @@ public sealed class DiagnosticsLiveTests : IAsyncLifetime
     {
         NativeLib.Require();
         var cfg = new OneLobbyConfig("com.onelobby.dctest", "1", new Uri(_ws), SyncMode.Raw);
-        var hostClient = new LobbyClient(cfg with { DisplayName = "Host" }, new DataChannelTransport { BindAddress = "127.0.0.1" });
+        // both ends hear no candidate (a peer-reflexive path would otherwise form and the link would open)
+        var hostClient = new LobbyClient(cfg with { DisplayName = "Host" }, new StrictNat(new DataChannelTransport { BindAddress = "127.0.0.1" }));
         var joinClient = new LobbyClient(cfg with { DisplayName = "Sam", ReadyTimeout = TimeSpan.FromSeconds(6) },
             new StrictNat(new DataChannelTransport { BindAddress = "127.0.0.1" }));
         Lobby? host = null, joiner = null;
