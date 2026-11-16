@@ -294,12 +294,12 @@ namespace OneLobby.Tests
             RunRelay(turn, "relay_unreachable", "Sam: the relay did not answer, stopped at the connection check after ");
         }
 
-        // Every answer of this relay takes 1.6 s (slow, but it answers): the probe needs about 3.2 s (two answers), longer than the
+        // Every answer of this relay takes 1.5 s (slow, but it answers): the probe needs about 3.0 s (two answers), longer than the
         // 2.5 s the joiner used to wait for it, so the refused login was reported as something else.
         [Fact]
         public void ASlowRelayThatRejectsTheLoginIsStillRelayRefused()
         {
-            using var turn = FakeUdpServer.Turn(false, replyDelayMs: 1600);
+            using var turn = FakeUdpServer.Turn(false, replyDelayMs: 1500);
             RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", precisePacing: true);
         }
 
