@@ -5,8 +5,47 @@ import { validate } from "../blueprint.js";
 import { run } from "./procs.js";
 import { blueprintNext, wiringCheck } from "./wiring.js";
 
-const SKIP_WEBRTC =
-  "running two JS clients over real WebRTC in Node needs node-datachannel, which a web game does not depend on; tools/engine-smoke in the OneLobby repo covers the JS client on this route";
+/**
+ * Does this web project have node-datachannel (the package that gives Node WebRTC)? "installed" (in node_modules), "listed" (in
+ * package.json dependencies, devDependencies or optionalDependencies) or null. Read-only; never runs anything.
+ */
+export function nodeDatachannelIn(dir) {
+  if (existsSync(join(dir, "node_modules", "node-datachannel", "package.json"))) return "installed";
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    for (const k of ["dependencies", "devDependencies", "optionalDependencies"]) if (pkg?.[k] && "node-datachannel" in pkg[k]) return "listed";
+  } catch {
+    /* no package.json, or not JSON: the project does not list it */
+  }
+  return null;
+}
+
+/** The sync.mode in the folder's onelobby.json, or null when it cannot be read (the `blueprint` check reports that). */
+export function syncModeOf(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.sync?.mode ?? "lockstep";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a passing test/multiplayer.mjs proved. It always runs OneLobby's lobby, messages and a lockstep-shaped stand-in Game in memory.
+ * With sync.mode lockstep the game plugs into that test; with raw or replication the game has its own sync and the test cannot
+ * run it, so the line says it proved the stand-in only (VERIFY_OK must not read as "the game's netcode works").
+ */
+export function projectTestDetail(passed, mode) {
+  if (mode === "lockstep" || mode === null) return `test/multiplayer.mjs: ${passed} checks passed, in memory (OneLobby's lobby, messages and the lockstep game bound in this test)`;
+  return `test/multiplayer.mjs: ${passed} checks passed, in memory: this proves OneLobby's lobby and messages and the template's stand-in game only, NOT this game's own netcode (sync.mode ${mode}); run the game's own two-player test and name it in the report`;
+}
+
+/** The true reason `nostr` and `turn` are skipped for this web project (they are never run: verify starts no JS peers for a web game). */
+export function skipReason(dir) {
+  const found = nodeDatachannelIn(dir);
+  if (found)
+    return `node-datachannel is ${found === "installed" ? "installed" : "listed in package.json"} here, so this game can run WebRTC in Node, but verify does not start JS peers for a web game, so this route was not run; the game's own two-peer test over real WebRTC is what proves it (run that test and name it in the report)`;
+  return "verify would need two JS clients over real WebRTC in Node, which needs node-datachannel; this folder has none (not in node_modules, not in package.json), so there is nothing to run here, and a browser page brings its own WebRTC; add node-datachannel and give the game its own two-peer test to prove this route";
+}
 
 export function webChecks() {
   return [
@@ -41,7 +80,7 @@ export function webChecks() {
         const r = await run(process.execPath, ["test/multiplayer.mjs"], { cwd: ctx.dir, env, timeoutMs: 180000 });
         const passed = (r.out.match(/^PASS /gm) ?? []).length;
         const failed = r.out.split(/\r?\n/).filter((l) => /^FAIL /.test(l));
-        if (r.code === 0 && !r.timedOut && failed.length === 0) return { status: "ok", detail: `test/multiplayer.mjs: ${passed} checks passed, in memory (the web game's own two-player test)` };
+        if (r.code === 0 && !r.timedOut && failed.length === 0) return { status: "ok", detail: projectTestDetail(passed, syncModeOf(ctx.dir)) };
         return {
           status: "fail",
           detail: `test/multiplayer.mjs failed: ${r.timedOut ? "it did not finish in time" : (failed[0] ?? `exit ${r.code}${r.error ? ` (${r.error})` : ""}`)}.`,
@@ -49,7 +88,7 @@ export function webChecks() {
         };
       },
     },
-    { name: "nostr", async run() { return { status: "skipped", detail: SKIP_WEBRTC }; } },
-    { name: "turn", async run() { return { status: "skipped", detail: SKIP_WEBRTC }; } },
+    { name: "nostr", async run(ctx) { return { status: "skipped", detail: skipReason(ctx.dir) }; } },
+    { name: "turn", async run(ctx) { return { status: "skipped", detail: skipReason(ctx.dir) }; } },
   ];
 }
