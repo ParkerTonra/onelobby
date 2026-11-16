@@ -247,7 +247,7 @@ export class WebRtcLink implements PeerLink {
 
   send(channel: ChannelName, bytes: Uint8Array): void {
     const ch = this.channels[channel];
-    if (!ch || ch.readyState !== "open") return;
+    if (this.closed || !ch || ch.readyState !== "open") return;
     try {
       ch.send(bytes as unknown as ArrayBuffer);
     } catch (e) {
@@ -258,7 +258,16 @@ export class WebRtcLink implements PeerLink {
         ch.readyState !== "open" ||
         (e as { name?: string })?.name === "InvalidStateError" ||
         /closed|not open/i.test(String((e as { message?: string })?.message ?? e));
-      if (!closed) throw e;
+      if (closed) return;
+      // libdatachannel's "Sending failed, errno=32" (EPIPE) and kin: the peer is gone and the native side knows before
+      // readyState does. That is the link closing, not a bug in the caller: end it once, through the normal close path
+      // (a microtask later, so a caller looping over links is not re-entered), and never throw out of a timer
+      const message = String((e as { message?: string })?.message ?? e);
+      if (/errno=(32|104|107)|sending failed|EPIPE|broken pipe|ECONNRESET/i.test(message)) {
+        queueMicrotask(() => this.fail(`send failed: ${message}`));
+        return;
+      }
+      throw e;
     }
   }
 

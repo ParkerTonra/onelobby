@@ -89,6 +89,27 @@ describe("WebRtcLink", () => {
     expect(() => link.send("reliable", Uint8Array.of(1))).not.toThrow();
   });
 
+  it("a send that hits a gone peer (errno=32) ends the link once and never throws", async () => {
+    // libdatachannel reports a send to a vanished peer as "Sending failed, errno=32" while readyState still says open;
+    // a tick timer calling send must not die on it: the link closes through the normal path, once
+    const link = make();
+    await link.handleSignal({ sdp: { type: "offer", sdp: "v=0" } });
+    const [reliable, fast, voice] = FakePc.last.channels;
+    for (const c of [reliable, fast, voice]) c.open();
+    const closes: string[] = [];
+    link.onClose = (r) => closes.push(r);
+    fast.send = () => {
+      throw new Error("libdatachannel error while sending data channel message: Sending failed, errno=32");
+    };
+    expect(() => link.send("fast", Uint8Array.of(1))).not.toThrow();
+    expect(() => link.send("fast", Uint8Array.of(2))).not.toThrow();
+    await Promise.resolve();
+    expect(() => link.send("reliable", Uint8Array.of(3))).not.toThrow();
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatch(/errno=32/);
+    expect(link.isOpen).toBe(false);
+  });
+
   it("a send that fails on a channel that is still open is thrown, not dropped", async () => {
     // only the closed case is swallowed: a message the channel cannot carry must not vanish without a word
     const link = make();
