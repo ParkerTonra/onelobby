@@ -277,7 +277,10 @@ public class PortMapperTests
         Assert.Equal(7200, gw.Mappings["1 47810"]);
         Assert.Equal(7200, gw.Mappings["2 47810"]);
         m.Dispose();
-        await Task.Delay(200);
+        // Dispose sends the two NAT-PMP deletes and does not wait for the gateway's reply (NatPmpOnce is fire and forget),
+        // so the fake gateway may still be reading them: wait for the condition, not a fixed time
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!gw.Mappings.IsEmpty && sw.ElapsedMilliseconds < 5000) await Task.Delay(10);
         Assert.Empty(gw.Mappings);
         Assert.Equal(new[] { "direct host mapping deleted port=47810 protocols=TCP,UDP mapping=NAT-PMP" }, log);
     }
