@@ -394,7 +394,7 @@ export function unityNext({ into, rel, plan, titleFromFolder = false }) {
   const existing = plan.package.existing;
   if (existing && existing.exists === false) next.push(`the manifest already references ${existing.value} but no such file is in Packages/: put the tarball there or run: npx create-onelobby update --package-from <tarball>`);
   else if (plan.package.from === "default" && !existing) next.push(`put the package tarball next to the manifest: Packages/${defaultTarball()} (the package is not on a registry yet: build it with clients/unity/build-unity-package.sh --pack, or take the unity-dev-package CI artifact; or rerun with --package-from <tarball>)`);
-  if (titleFromFolder) next.push(`game.title in ${BLUEPRINT_PATH} came from the folder name: set the game's own name (rerun with --title "<name>" and --force, or edit the file)`);
+  if (titleFromFolder) next.push(`game.title in ${BLUEPRINT_PATH} came from the folder name: set the game's own name (edit the file, or pass --title "<name>" on the first run)`);
   if (into) {
     next.push(
       `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local / --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local to its command`,
