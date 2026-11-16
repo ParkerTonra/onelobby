@@ -16,7 +16,7 @@ expect() { # expect <wanted exit 0|1> <label> <check args...>
 export -f hold
 expect 0 "loopback sockets pass" lo -- bash -c 'hold 127.0.0.1'
 expect 1 "wildcard sockets fail" any -- bash -c 'hold 0.0.0.0'
-expect 0 "wildcard sockets under --known-gap warn only" gap --known-gap "selftest" -- bash -c 'hold 0.0.0.0'
+expect 0 "wildcard sockets under --known-gap warn only" --known-gap "selftest" gap -- bash -c 'hold 0.0.0.0'
 expect 1 "a run with no socket is blind" none -- sleep 1
 expect 1 "the command's own failure stays a failure" bad -- bash -c 'hold 127.0.0.1; exit 3'
 [ $FAILS -eq 0 ]
