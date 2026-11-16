@@ -295,7 +295,7 @@ describe("engine limits: every shape on every engine loads, and no feature is cl
   });
 
   it("a planned template gives the proposal and no command (it would stop with template_planned)", async () => {
-    const r = await json(["--recommend", "4 player shooter in Unity"]);
+    const r = await json(["--recommend", "4 player shooter in MonoGame"]);
     expect(r.code).toBe(0);
     expect(r.json.runCommand).toBeNull();
     expect(r.json.flags).toContain("--mode");
@@ -458,7 +458,7 @@ describe("with a scaffold run", () => {
     const g = await json(["g", "--recommend", "co-op survival sandbox in Godot", "--yes", "--dry-run", "--no-natives"]);
     expect(g.json.template).toBe("godot-gdscript");
     expect(g.json.recommendation.engine).toMatchObject({ from: "text" });
-    expect((await json(["g", "--recommend", "co-op survival sandbox in Unity", "--yes", "--dry-run"])).json.error.code).toBe("template_planned");
+    expect((await json(["g", "--recommend", "co-op survival sandbox in MonoGame", "--yes", "--dry-run"])).json.error.code).toBe("template_planned");
     const plain = await json(["g", "--recommend", "online card game", "--yes", "--dry-run"]);
     expect(plain.json.template).toBe("web");
     expect(plain.json.recommendation.engine).toMatchObject({ id: "web", from: "default" });

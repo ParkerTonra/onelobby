@@ -270,7 +270,7 @@ describe("--into", () => {
 });
 
 describe("templates", () => {
-  for (const t of ["node-browser", "unity", "dotnet"]) { // godot-gdscript is built: test/godot.test.js; godot-csharp: test/csharp.test.js
+  for (const t of ["node-browser", "dotnet"]) { // godot-gdscript is built: test/godot.test.js; godot-csharp: test/csharp.test.js; unity: test/unity.test.js
     it(`${t} exits 1 with a planned-for-v2 message`, async () => {
       const r = await cli(["g", "--template", t, "--yes", ...NO]);
       expect(r.code).toBe(1);

@@ -323,13 +323,13 @@ describe("godot-gdscript: --into", () => {
 });
 
 describe("templates still planned", () => {
-  for (const t of ["unity"]) {
+  for (const t of ["dotnet"]) {
     it(`${t} is template_planned and the message no longer claims only web exists`, async () => {
       const r = await j(["g", "--template", t, "--yes", "--no-git"]);
       expect(r.code).toBe(1);
       expect(r.json.error.code).toBe("template_planned");
       expect(r.json.error.message).toContain("planned for v2");
-      expect(r.json.error.message).toContain('"web", "godot-gdscript" and "godot-csharp"');
+      expect(r.json.error.message).toContain('"web", "godot-gdscript", "godot-csharp" and "unity"');
       expect(r.json.error.message).not.toContain("only");
     });
   }

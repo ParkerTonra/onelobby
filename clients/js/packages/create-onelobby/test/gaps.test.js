@@ -29,21 +29,22 @@ const put = (path, text = "") => {
 };
 
 describe("--into without --template reads the folder", () => {
-  it("a Unity project is unity (template_planned), not web, and nothing is written", async () => {
+  it("a Unity project is unity, not web, and a dry run writes nothing", async () => {
     put("u/ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.0.1f1\n");
     put("u/Assets/readme.txt");
-    const r = await cli(["--into", "u", "--yes", "--json"]);
-    expect(r.code).toBe(1);
-    expect(r.json.error.code).toBe("template_planned");
-    expect(r.json.error.message).toContain('template "unity"');
-    expect(readdirSync(at("u")).sort()).toEqual(["Assets", "ProjectSettings"]);
+    put("u/Packages/manifest.json", '{"dependencies":{}}');
+    const r = await cli(["--into", "u", "--yes", "--json", "--dry-run"]);
+    expect(r.code).toBe(0);
+    expect(r.json.template).toBe("unity");
+    expect(readdirSync(at("u")).sort()).toEqual(["Assets", "Packages", "ProjectSettings"]);
   });
 
   it("ProjectSettings/ beside Assets/ is unity too, and its .sln does not make it dotnet", async () => {
     put("u2/ProjectSettings/x.asset");
     put("u2/Assets/a.txt");
     put("u2/u2.sln");
-    expect((await cli(["--into", "u2", "--yes", "--json"])).json.error.message).toContain('template "unity"');
+    put("u2/Packages/manifest.json", '{"dependencies":{}}');
+    expect((await cli(["--into", "u2", "--yes", "--json", "--dry-run"])).json.template).toBe("unity");
   });
 
   it("a .csproj or .sln with no project.godot is dotnet (template_planned)", async () => {
@@ -73,7 +74,7 @@ describe("--into without --template reads the folder", () => {
     put("u3/ProjectSettings/ProjectVersion.txt", "x");
     expect((await cli(["--into", "u3", "--template", "web", "--yes", "--json", "--dry-run"])).json.template).toBe("web");
     put("e2/notes.txt", "x");
-    expect((await cli(["--into", "e2", "--yes", "--json", "--recommend", "co-op survival sandbox in Unity"])).json.error.message).toContain('template "unity"');
+    expect((await cli(["--into", "e2", "--yes", "--json", "--recommend", "co-op survival sandbox in MonoGame"])).json.error.message).toContain('template "dotnet"');
   });
 
   it("on a terminal an unknown folder asks for the engine", async () => {
@@ -138,7 +139,7 @@ describe("web --into", () => {
 describe("--help", () => {
   it("names the built templates from the list, godot-csharp included", async () => {
     const r = await cli(["--help"]);
-    expect(r.out).toContain('"web", "godot-gdscript" and "godot-csharp" exist; the rest are planned for v2');
+    expect(r.out).toContain('"web", "godot-gdscript", "godot-csharp" and "unity" exist; the rest are planned for v2');
   });
 });
 

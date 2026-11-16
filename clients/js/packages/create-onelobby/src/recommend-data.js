@@ -223,7 +223,7 @@ export const ENGINES = {
   },
   unity: {
     label: "Unity 6",
-    template: "planned",
+    template: "built",
     recipe: "docs/recipes/unity.md",
     canListen: true,
     modes: ["lockstep", "raw", "replication"],
@@ -245,7 +245,7 @@ export const FEATURE_PROOF = {
   hitRewind: "docs/recipes/replication.md section 2 (C# and JS HistoryRing, rewindTick); GDScript has try_sample_at to rewind by hand (section 6)",
   asWebSocket: "docs/recipes/browser-game.md (JS lobby.asWebSocket); AGENTS.md; no GDScript or C# equivalent",
   lockstepFastInputs: "docs/recipes/godot-gdscript.md section 4: input redundancy on the fast channel is not in the wire yet (commands travel on the reliable channel); no JS or C# lockstep helper repeats inputs either",
-  templates: "docs/design/one-shot.md section 1 (Scaffolder row): web, godot-gdscript and godot-csharp are built, unity is template_planned; src/cli.js refuses sync.mode replication for the web template",
+  templates: "docs/design/one-shot.md section 1 (Scaffolder row): web, godot-gdscript, godot-csharp and unity are built; src/cli.js refuses sync.mode replication for the web template",
 };
 
 /**
