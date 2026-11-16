@@ -371,7 +371,11 @@ namespace OneLobby
         public string ApplyBootFlags(IEnumerable<string>? args)
         {
             var f = ParseBootFlags(args);
-            if (f.Name.Length > 0) SetName(f.Name);
+            if (f.Name.Length > 0)
+            {
+                SetName(f.Name);
+                Changed?.Invoke(); // the start screen's name field follows the model
+            }
             if (f.Join.Length > 0)
             {
                 SetJoinText(f.Join);

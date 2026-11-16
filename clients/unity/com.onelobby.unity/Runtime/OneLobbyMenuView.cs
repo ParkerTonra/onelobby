@@ -42,6 +42,7 @@ namespace OneLobby.Unity
         private string _rosterSig = "", _bansSig = "", _requestsSig = "", _browseSig = "";
         private int _shown = -1;
         private bool _syncing;
+        private bool _nameDirty; // the name field holds text the player typed and the model has not taken yet
         private bool _settingsOpen;
         private bool _roomSeen;
         private float _pingAt;
@@ -138,6 +139,7 @@ namespace OneLobby.Unity
             Lbl(start, "StartNote");
             Lbl(start, "NameLabel");
             var name = Edit(start, "NameEdit");
+            name.RegisterValueChangedCallback(_ => { if (!_syncing) _nameDirty = true; });
             name.RegisterCallback<FocusOutEvent>(_ => CommitName());
             OnEnter(name, CommitName);
             Btn(start, "HostButton", () =>
@@ -273,6 +275,7 @@ namespace OneLobby.Unity
         private void CommitName()
         {
             if (_syncing) return;
+            _nameDirty = false;
             var edit = Get<TextField>("NameEdit");
             var cleaned = Model.SetName(edit.value);
             if (cleaned != edit.value) edit.SetValueWithoutNotify(cleaned);
@@ -456,9 +459,14 @@ namespace OneLobby.Unity
             if (entering)
             {
                 _later(() => _ = m.StartShown()); // not before a boot flag has had its say; the model runs the check once
-                SetText("NameEdit", m.NameText);
                 SetText("JoinEdit", m.JoinText);
                 SetText("PasswordEdit", "");
+            }
+            // The name field follows the model (a --name= boot flag sets it after the first draw) unless the player is typing in it.
+            if (entering || !_nameDirty)
+            {
+                _nameDirty = false;
+                SetText("NameEdit", m.NameText);
             }
         }
 

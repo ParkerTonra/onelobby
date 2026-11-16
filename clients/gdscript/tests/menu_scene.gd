@@ -294,6 +294,24 @@ func _on_open_scene() -> void:
 	_check(state["runs"] == 0, "--local: the check does not run by itself")
 	menu.queue_free()
 	await _frames(2)
+	# --name with no --host or --join (--local keeps the check on open out of this): the name field shows it, and leaving the field keeps it
+	menu = open.call(PackedStringArray(["--name=Zoe", "--local"]), cfg)
+	await _frames(3)
+	var flag_name := menu.get_node("%NameEdit") as LineEdit
+	_check(menu.model.screen == Screen.START and flag_name.text == "Zoe", "--name alone: the name field shows the name (field '%s', model '%s')" % [flag_name.text, menu.model.name_text])
+	flag_name.focus_exited.emit()
+	_check(menu.model.name_text == "Zoe", "--name alone: leaving the name field keeps the name ('%s')" % menu.model.name_text)
+	flag_name.text = "Kim"
+	flag_name.text_changed.emit("Kim") # what typing does
+	menu.model.changed.emit()
+	_check(flag_name.text == "Kim" and menu.model.name_text == "Zoe", "a name being typed survives a redraw (field '%s')" % flag_name.text)
+	flag_name.focus_exited.emit()
+	_check(menu.model.name_text == "Kim", "the typed name is taken when the field is left ('%s')" % menu.model.name_text)
+	menu.model.set_name("Lee")
+	menu.model.changed.emit()
+	_check(flag_name.text == "Lee", "after that the field follows the model again ('%s')" % flag_name.text)
+	menu.queue_free()
+	await _frames(2)
 	# a boot flag that hosts: the start screen is not what the player sees, so nothing runs
 	menu = open.call(PackedStringArray(["--host", "--name=Sam"]), cfg)
 	_check(await _until(func() -> bool: return menu.model.screen == Screen.LOBBY), "boot --host reaches the lobby with a default blueprint")

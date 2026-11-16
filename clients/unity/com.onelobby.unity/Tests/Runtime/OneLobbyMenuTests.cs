@@ -567,6 +567,22 @@ namespace OneLobby.Unity.PlayTests
             Check(off.M.Screen == MenuScreen.Start, "BootFlags off ignores --host");
         }
 
+        [UnityTest]
+        public IEnumerator BootFlagNameAloneFillsTheNameField()
+        {
+            var p = NewPlayer("w", args: new[] { "--name=Zoe" }, bootFlags: true);
+            yield return Frames(4);
+            var field = p.Q<TextField>("NameEdit");
+            Check(p.M.Screen == MenuScreen.Start && field.value == "Zoe", "--name alone: the name field shows the name (field '" + field.value + "', model '" + p.M.NameText + "')");
+            Enter(field); // commits the field, as leaving it does
+            Check(p.M.NameText == "Zoe", "--name alone: committing the name field keeps the name: " + p.M.NameText);
+            field.value = "Kim"; // what typing does
+            p.M.NoteInvited(); // any change redraws the start screen
+            Check(field.value == "Kim" && p.M.NameText == "Zoe", "a name being typed survives a redraw: " + field.value);
+            Enter(field); // commits the field, as leaving it does
+            Check(p.M.NameText == "Kim", "the typed name is taken when the field is committed: " + p.M.NameText);
+        }
+
         // ---- the connection check on open ---------------------------------------------------------------------------------------
 
         [UnityTest]

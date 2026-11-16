@@ -573,6 +573,13 @@ namespace OneLobby.Tests
             Assert.Equal("join", j.M.ApplyBootFlags(new[] { "--join=" + h.M.Lobby!.Code, "--name=Ann" }));
             Assert.True(w.Until(() => j.M.Screen == MenuScreen.Lobby), "the boot joiner reaches the lobby");
             Assert.Equal("", w.New("n").M.ApplyBootFlags(new[] { "--something" }));
+            // --name alone starts nothing, and says the model changed so an open start screen shows the name
+            var named = w.New("p");
+            var changes = 0;
+            named.M.Changed += () => changes++;
+            Assert.Equal("", named.M.ApplyBootFlags(new[] { "--name=Zoe" }));
+            Assert.Equal(("Zoe", MenuScreen.Start), (named.M.NameText, named.M.Screen));
+            Assert.True(changes >= 1, "a name set by --name announces a change");
             w.Run(j.M.LeaveAsync());
             w.Run(h.M.LeaveAsync());
         }

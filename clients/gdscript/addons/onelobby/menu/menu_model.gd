@@ -837,6 +837,7 @@ func apply_boot_flags(args: PackedStringArray) -> String:
 		apply_local()
 	if str(f["name"]) != "":
 		set_name(str(f["name"]))
+		changed.emit() # the start screen's name field follows the model
 	if str(f["join"]) != "":
 		set_join_text(str(f["join"]))
 		join()

@@ -224,6 +224,21 @@ public partial class MenuSelfCheck : Node
             $"boot flags on, --host --local, no direct route given: an error, not a lobby on the server (screen {bare.M.Screen}, code '{bare.M.Error.Code}')");
         bare.Menu.QueueFree();
 
+        // --name alone: the start screen's name field shows it, and leaving the field keeps it
+        var named = NewPlayer("Hal", bootArgs: new[] { "--name=Zoe" }, bootFlags: true);
+        await Frames(4);
+        var nameEdit = named.Menu.GetNode<LineEdit>("%NameEdit");
+        Check(named.M.Screen == MenuScreen.Start && nameEdit.Text == "Zoe", $"boot flags on, --name alone: the name field shows the name (field '{nameEdit.Text}', model '{named.M.NameText}')");
+        nameEdit.EmitSignal(Control.SignalName.FocusExited);
+        Check(named.M.NameText == "Zoe", $"--name alone: leaving the name field keeps the name ('{named.M.NameText}')");
+        nameEdit.Text = "Kim";
+        nameEdit.EmitSignal(LineEdit.SignalName.TextChanged, "Kim"); // what typing does
+        named.M.NoteInvited(); // any change redraws the start screen
+        Check(nameEdit.Text == "Kim" && named.M.NameText == "Zoe", $"a name being typed survives a redraw (field '{nameEdit.Text}')");
+        nameEdit.EmitSignal(Control.SignalName.FocusExited);
+        Check(named.M.NameText == "Kim", $"the typed name is taken when the field is left ('{named.M.NameText}')");
+        named.Menu.QueueFree();
+
         var server = NewPlayer("Gus", bootArgs: new[] { "--host" }, bootFlags: true);
         await Frames(6);
         Check(server.M.Screen == MenuScreen.Lobby && server.Runs == 0, $"boot flags on, --host: hosted, and the check on open stayed out of its way (screen {server.M.Screen}, checks {server.Runs})");

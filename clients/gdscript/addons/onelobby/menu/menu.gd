@@ -82,6 +82,8 @@ var _browse_sig := ""
 var _ping_labels := {} # peer id -> Label
 var _ping_at := 0
 var _syncing := false
+## True while the name field holds text the player typed and the model has not taken yet.
+var _name_dirty := false
 
 
 func _ready() -> void:
@@ -142,6 +144,7 @@ func leave() -> void:
 # ---- wiring ---------------------------------------------------------------------------------------------------------
 
 func _bind() -> void:
+	%NameEdit.text_changed.connect(func(_t: String) -> void: _name_dirty = true)
 	%NameEdit.text_submitted.connect(func(_t: String) -> void: _commit_name())
 	%NameEdit.focus_exited.connect(_commit_name)
 	%HostButton.pressed.connect(func() -> void:
@@ -199,6 +202,7 @@ func _bind() -> void:
 func _commit_name() -> void:
 	if model == null or _syncing:
 		return
+	_name_dirty = false
 	var cleaned := model.set_name(%NameEdit.text)
 	if cleaned != %NameEdit.text:
 		%NameEdit.text = cleaned
@@ -351,8 +355,11 @@ func _draw_start(entering: bool) -> void:
 	%StartCheckLine.visible = model.start_check_line() != ""
 	if entering:
 		model.start_shown.call_deferred() # not before a boot flag has had its say; the model runs the check once
-	if entering:
+	# The name field follows the model (a `--name=` boot flag sets it after the first draw) unless the player is typing in it.
+	if entering or not _name_dirty:
+		_name_dirty = false
 		_set_text(%NameEdit, model.name_text)
+	if entering:
 		_set_text(%JoinEdit, model.join_text)
 		_set_text(%PasswordEdit, "")
 

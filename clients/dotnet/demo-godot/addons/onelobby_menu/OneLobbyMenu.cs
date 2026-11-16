@@ -108,6 +108,7 @@ public partial class OneLobbyMenu : Control
     private readonly Dictionary<int, Label> _pingLabels = new();
     private ulong _pingAt;
     private bool _syncing;
+    private bool _nameDirty; // the name field holds text the player typed and the model has not taken yet
     private bool _hooked;
 
     private T U<T>(string name) where T : Node => GetNode<T>("%" + name);
@@ -220,6 +221,7 @@ public partial class OneLobbyMenu : Control
     private void Bind()
     {
         var m = Model!;
+        U<LineEdit>("NameEdit").TextChanged += _ => _nameDirty = true;
         U<LineEdit>("NameEdit").TextSubmitted += _ => CommitName();
         U<LineEdit>("NameEdit").FocusExited += CommitName;
         U<Button>("HostButton").Pressed += () =>
@@ -273,6 +275,7 @@ public partial class OneLobbyMenu : Control
     private void CommitName()
     {
         if (Model == null || _syncing) return;
+        _nameDirty = false;
         var edit = U<LineEdit>("NameEdit");
         var cleaned = Model.SetName(edit.Text);
         if (cleaned != edit.Text) edit.Text = cleaned;
@@ -426,9 +429,14 @@ public partial class OneLobbyMenu : Control
         if (entering)
         {
             CallDeferred(MethodName.OpenCheck); // not before a boot flag has had its say; the model runs the check once
-            SetText(U<LineEdit>("NameEdit"), m.NameText);
             SetText(U<LineEdit>("JoinEdit"), m.JoinText);
             SetText(U<LineEdit>("PasswordEdit"), "");
+        }
+        // The name field follows the model (a --name= boot flag sets it after the first draw) unless the player is typing in it.
+        if (entering || !_nameDirty)
+        {
+            _nameDirty = false;
+            SetText(U<LineEdit>("NameEdit"), m.NameText);
         }
     }
 
