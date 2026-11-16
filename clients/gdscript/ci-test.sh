@@ -47,7 +47,7 @@ step direct-test bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
 step nostr-interop env GODOT="$GODOT" node "$ROOT/integration/nostr-interop-gdscript.mjs"
 # create-onelobby's godot-gdscript template: its unit tests (no network), then scaffold a project and run its own two-peer test
-step scaffold-unit bash -c 'cd "$1/clients/js/packages/create-onelobby" && npx vitest run test/vendor.test.js test/godot.test.js' _ "$ROOT"
+step scaffold-unit bash -c 'cd "$1/clients/js/packages/create-onelobby" && node scripts/build.mjs && npx vitest run test/vendor.test.js test/godot.test.js' _ "$ROOT"
 step scaffold-e2e env GODOT="$GODOT" bash "$HERE/scaffold-test.sh"
 
 # lobby server on loopback for e2e.gd

@@ -11,6 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 CLI="$ROOT/clients/js/packages/create-onelobby/bin/create-onelobby.js"
 NATIVES="$HERE/addons/godot_webrtc"
+node "$ROOT/clients/js/packages/create-onelobby/scripts/build.mjs" || exit 1   # vendors the blueprint loader and the add-on bundle (CI builds only the client)
 WORK="${SCAFFOLD_TMP:-$(mktemp -d)}/scaffold-e2e"
 rm -rf "$WORK"; mkdir -p "$WORK"
 trap 'rm -rf "$WORK"' EXIT
