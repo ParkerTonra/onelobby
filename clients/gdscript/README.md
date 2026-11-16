@@ -62,6 +62,16 @@ lobby codes of a server lobby only and are not registered with the OS (a deep li
 `shareUrl`, `codeFromUrl`) and C# (`Friendly.DescribeError`, `InviteLink.Make` / `Parse`) through `spec/vectors/describe-error.json` and
 `invite-link.json`.
 
+## Telling the player why a connection failed
+
+`OneLobbyFriendly.describe_error(client.last_error)` returns `cause` and `stage` next to the unchanged code for a failure that
+knows why (`last_error["diagnosis"]` is `{cause, message, hint, stage}`). The host gets `lobby.peer_diagnosis` (`info["line"]`:
+"Sam: strict NAT, no relay set, stopped at the connection check after 15 s."), `client.get_net_log().export()` is the Copy-logs text
+(masked), and `await client.check_connection()` runs the connection check (raw UDP through `PacketPeerUDP`, a TURN Allocate probe
+for the relay). The log is saved to `log_path` (`user://onelobby-netlog.txt`) when the scene tree exits and after every `error`
+entry: GDScript cannot hook a crash. Exports: `report_to_host`, `log_size`, `log_path`, `relay_probe`. See
+`docs/recipes/diagnostics.md`.
+
 ## Text chat, shared pause and lockstep
 
 All three are on the same wire as the JS and C# ones, so GDScript, JS and C# players mix in one lobby (server and Direct,

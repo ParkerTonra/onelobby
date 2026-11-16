@@ -2,7 +2,7 @@
 
 A failed connection should not read "Failed to connect". OneLobby knows how far the attempt got and what the network did, so
 a failure carries a plain cause and one next step, the host sees the same cause for the player who could not join, and a
-log is one click away. The contract is `spec/diagnostics.md` (JS now; C# and GDScript follow it).
+log is one click away. The contract is `spec/diagnostics.md`; JS, C# and GDScript follow it and share its vectors.
 
 Nothing is sent to OneLobby or any third party. The log stays on the player's machine; the only thing that leaves is a small
 report (a cause code, a stage, how long, whether a relay was set; never an address) to the host the player dialed.
@@ -98,3 +98,62 @@ uncaught error. In a browser the log lives in memory; a reload keeps the last se
 (`kit.netLog.exportLastSession()`).
 
 For the pure pieces (tests, other engines), `diagnose(facts)` is exported: the same facts give the same answer in every client.
+
+## 5. C# (.NET, Godot C#, Unity)
+
+Same behaviour, same texts (`spec/vectors/diagnostics.json` runs in `OneLobby.Core.Tests`). A connect failure keeps its
+code and carries `OneLobbyException.Diagnosis` (also `LobbyError.Diagnosis` on the `Error` event); `Friendly.DescribeError`
+returns the cause and step.
+
+```csharp
+// the error screen
+try { lobby = await client.JoinAsync(code); }
+catch (OneLobbyException e)
+{
+    var why = Friendly.DescribeError(e);          // Code "ice_failed", Cause "nat_blocked", Stage "ice"
+    Show(why.Message, why.Hint);                  // "Your network blocks direct connections (strict NAT) and no relay is set."
+}
+// a lobby's ReadyAsync faults with the same kind of exception (e.Diagnosis)
+
+// Copy logs: masked by default; addresses only on request, credentials never
+GUIUtility.systemCopyBuffer = client.NetLog.Export();
+client.NetLog.Save();                             // to DiagnosticsOptions.LogPath; also written on exit and on an unhandled exception
+
+// the host
+lobby.PeerDiagnosis += d => Toast(d.Line);        // "Sam: strict NAT, no relay set, stopped at the connection check after 15 s."
+
+// a menu button (the library never runs it by itself)
+CheckResult r = await client.CheckConnectionAsync(); // raw UDP: two STUN servers from one socket, then a TURN Allocate probe
+Show(r.Message);                                  // "Direct connections: likely to fail. A relay is recommended."
+```
+
+Options live on the config: `config with { Diagnostics = new DiagnosticsOptions { LogSize = 500, LogPath = "...", ReportToHost = true, RelayProbe = true } }`.
+libdatachannel gives no relay error, so a gathering that ends without a relay candidate is `failed` and the client asks the TURN
+server itself (raw UDP) to tell a rejected login from silence. `heard` (the host-side firewall hint) is not exposed there, so a
+host never guesses `firewall`; it shows the joiner's own report. In Unity, `OneLobbyRunner` has `NetLog`, `CheckConnectionAsync`,
+`PeerDiagnosis`, and the fields `NetLogPath` (default `onelobby-netlog.txt` under `persistentDataPath`) and `ReportToHost`; in
+Godot C#, `config.WithNetLog()` saves to `user://onelobby-netlog.txt`.
+
+## 6. GDScript (Godot 4)
+
+```gdscript
+# the error screen: describe_error returns cause and stage for a failure that knows why
+var lobby := await client.join(code)
+if lobby == null:
+    var why := OneLobbyFriendly.describe_error(client.last_error)  # {code: "ice_failed", cause: "nat_blocked", stage: "ice", message, hint}
+    show(why["message"], why.get("hint", ""))
+
+# Copy logs (masked; export(true) unmasks addresses only, credentials never print)
+DisplayServer.clipboard_set(client.get_net_log().export())
+
+# the host
+lobby.peer_diagnosis.connect(func(d: Dictionary) -> void: toast(d["line"]))
+
+# a menu button
+var r: Dictionary = await client.check_connection()  # {udp, natType, relay, verdict, message}, raw UDP via PacketPeerUDP
+```
+
+Exports on `OneLobbyClient`: `report_to_host`, `log_size`, `log_path` (default `user://onelobby-netlog.txt`), `relay_probe`.
+GDScript cannot hook a crash, so the log is saved when the scene tree exits and after every `error` entry (a crash loses only
+what came after the last error entry). The `diag` message works on every route (lobby server, a typed IP, a Nostr code) because
+every GDScript host runs the same hub.

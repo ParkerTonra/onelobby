@@ -2689,6 +2689,10 @@ export interface UdpSocketLike {
 }
 /** A UDP socket over node:dgram, or null where there is none (a browser). */
 export declare function nodeUdp(): UdpSocketLike | null;
+/** True when every target is a loopback address (spec/diagnostics.md s.8): such a check binds 127.0.0.1, not all interfaces. */
+export declare function allLoopback(targets: {
+    host: string;
+}[]): boolean;
 /** `host` and `port` of a `stun:` / `turn:` URL (UDP only: `stuns:`, `turns:` and a tcp transport give null). */
 export declare function iceUrlTarget(url: string): {
     host: string;

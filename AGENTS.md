@@ -238,7 +238,7 @@ Full reference (generated): `docs/api/`.
   The same in C# (`Friendly.DescribeError(e)`, `InviteLink.Make(code, baseUrl)` / `InviteLink.Parse(text)`) and GDScript
   (`OneLobbyFriendly.describe_error(client.last_error)`, `OneLobbyInvite.make(code, base_url)` / `.parse(text)`), word for
   word and link for link, tested by `spec/vectors/describe-error.json` and `invite-link.json`.
-- Telling the player why (JS now; C# and GDScript follow `spec/diagnostics.md`; recipe `docs/recipes/diagnostics.md`): a connect
+- Telling the player why (JS, C# and GDScript, `spec/diagnostics.md`; recipe `docs/recipes/diagnostics.md`): a connect
   failure carries `err.diagnosis` = `{ cause, message, hint, stage }` next to its unchanged code, and `describeError(err)`
   returns that sentence and next step (plus `cause`, `stage`). Causes: `nat_blocked`, `relay_refused`, `relay_unreachable`,
   `udp_blocked`, `firewall`, `version_mismatch`, `host_unreachable`, `signaling_unreachable`, `timeout_unknown`. The host's
@@ -246,7 +246,11 @@ Full reference (generated): `docs/api/`.
   for a joiner who could not connect (a small report, never an address; `diagnostics: { reportToHost: false }` turns it
   off). `kit.netLog.export()` is the Copy-logs text (masked; `{ includeAddresses: true }` unmasks addresses only; also
   `save(path)`, `download()`), and `await kit.checkConnection({ iceServers })` returns `{ udp, natType, relay, verdict,
-  message }` for a menu. Nothing is sent to OneLobby or any third party.
+  message }` for a menu. Nothing is sent to OneLobby or any third party. C#: `OneLobbyException.Diagnosis`,
+  `Friendly.DescribeError(e).Cause`, `lobby.PeerDiagnosis += d => d.Line`, `client.NetLog.Export()`, `await
+  client.CheckConnectionAsync()`, options in `config.Diagnostics`. GDScript: `OneLobbyFriendly.describe_error(client.last_error)`
+  has `cause` and `stage`, `lobby.peer_diagnosis` (`info["line"]`), `client.get_net_log().export()`, `await
+  client.check_connection()`.
 
 ## Integrate a game: the blueprint flow
 
