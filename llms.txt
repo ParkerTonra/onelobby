@@ -28,9 +28,9 @@ build dist/onelobby.global.min.js (window.OneLobby).
 - [Blueprint flow](.claude/skills/onelobby/SKILL.md): survey a game, write onelobby.json (schema [spec/blueprint.schema.json](spec/blueprint.schema.json), design [docs/design/blueprint.md](docs/design/blueprint.md)), build with OneLobby.fromConfig / Blueprint.Load, verify two players
 - [Telling the player why](docs/recipes/diagnostics.md): a plain cause and next step on every connect failure (`err.diagnosis`, `describeError`), the host's `peerDiagnosis` line, `kit.netLog` (Copy logs, masked), `kit.checkConnection()`; spec/diagnostics.md; nothing is sent anywhere but to the host the player dialed (JS, C# and GDScript; `Diagnosis` / `peer_diagnosis` / `NetLog` / `CheckConnectionAsync` / `check_connection`)
 - [Room layer](docs/recipes/room.md): names, per-player data, ready, countdown, spectators, kick and ban with reasons, passwords (JS, C# and GDScript)
-- [Godot 4 C#](docs/recipes/godot-csharp.md): Host / Join / Browse buttons in a Godot project
+- [Godot 4 C#](docs/recipes/godot-csharp.md): add the menu scene (`OneLobbyMenu.tscn`) to a Godot project, or build your own Host / Join / Browse buttons
 - [Godot 4 GDScript](docs/recipes/godot-gdscript.md): the same in GDScript, no .NET (raw and lockstep, chat, pause, room layer)
-- [Godot drop-in menu](docs/recipes/menu.md): one scene (`menu.tscn`) with name, host, join, lobby roster, ready, kick and ban, relay field, connection check and plain-words errors; `game_started` is the whole integration (GDScript)
+- [Godot drop-in menu](docs/recipes/menu.md): one scene (`menu.tscn`) with name, host, join, lobby roster, ready, kick and ban, relay field, connection check and plain-words errors; `game_started` is the whole integration (GDScript); the same scene for Godot C# (`addons/onelobby_menu/OneLobbyMenu.tscn`, `GameStarted`) over the engine-free `MenuModel` in `OneLobby.Core`
 - [Unity 6](docs/recipes/unity.md): the com.onelobby.unity package (UnityTransport over OneLobby.DataChannel/libdatachannel, OneLobbyRunner, voice); desktop now, no WebGL
 - [Browser JS](docs/recipes/js-web.md): the same in a plain web page
 - [Generic .NET](docs/recipes/dotnet-generic.md): console or any engine; DataChannelTransport (libdatachannel WebRTC) for real play, the in-memory transport for tests

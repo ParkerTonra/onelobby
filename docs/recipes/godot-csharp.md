@@ -15,7 +15,45 @@ dotnet add package OneLobby.Godot
 Desktop: copy the `webrtc-native` GDExtension into `addons/` (the demo in `clients/dotnet/demo-godot/` shows where).
 Web export: nothing extra, but see "Web builds" below.
 
-## 2. Autoload `Multiplayer.cs`
+## 2. Add the menu scene
+
+The multiplayer front end (name, Host, Join with a code, an `ip:port` or an invite link, the lobby with a roster, ready, countdown,
+chat, kick and ban, plain-language errors, settings, Browse) is one scene you copy in: `clients/dotnet/demo-godot/addons/onelobby_menu/`
+holds `OneLobbyMenu.cs` and `OneLobbyMenu.tscn`. Godot can only attach a C# script that is a source file inside the game's own
+project, so (unlike `OneLobby.Core` and `OneLobby.Godot`, which come from NuGet) these two files go into your project as they are.
+
+1. Copy the folder `addons/onelobby_menu/` into your project, add `onelobby.json` at its root (`docs/design/blueprint.md`; `engine`
+   `godot-csharp` makes `ui.kind` `drop-in`), and `dotnet build`.
+2. Add `OneLobbyMenu.tscn` to your main scene and connect one event:
+
+```csharp godot
+public partial class Main : Node
+{
+    public override void _Ready()
+    {
+        var menu = GetNode<OneLobbyMenu>("OneLobbyMenu");
+        menu.GameStarted += lobby => GD.Print($"start the match with {lobby.Room.Players.Count} players");
+        menu.ReturnedToLobby += lobby => GD.Print("end the match; the menu is showing the lobby again");
+        menu.Left += () => GD.Print("the player left the lobby");
+    }
+}
+```
+
+That is the whole integration. The menu builds its `LobbyClient` from `onelobby.json` over `GodotTransport`, keeps the player's name,
+last code, lobby server and relay line under `user://onelobby.json`, pumps the client every frame, hides itself while the game runs
+and acts on `--host`, `--join=<code>` and `--name=<name>` after `--`. Its properties, boot flags, rewording and restyling are in
+`menu.md` ("Godot C#"); it is the same scene and the same text table as the GDScript menu. `MenuDemo.tscn` in the demo project
+is a runnable example (`godot --path clients/dotnet/demo-godot res://MenuDemo.tscn -- --host --name=Sam`).
+
+The scene is generated from the GDScript menu's (`node tools/make-menu-scene.mjs`), and a test fails when the two differ, so a
+layout fix lands in both at once.
+
+### Build your own
+
+If your game draws its own menu, the engine-free `MenuModel` in `OneLobby.Core` holds every decision (`menu.md`, "For a controller
+of your own"), or write the plain version below by hand.
+
+### The autoload `Net.cs`
 
 Add it under Project Settings, Autoload, as `Net`. The lobby server is a setting with a pre-filled default.
 
@@ -72,7 +110,7 @@ public partial class Net : Node
 }
 ```
 
-## 3. Host / Join / Browse buttons
+### Host / Join / Browse buttons
 
 ```csharp godot
 public partial class MultiplayerMenu : Control
@@ -103,7 +141,7 @@ public partial class MultiplayerMenu : Control
 }
 ```
 
-## 4. Game traffic
+## 3. Game traffic
 
 Raw mode: `Lobby.Send` / `Broadcast` and `MessageReceived` (see `raw-mode.md`). Lockstep: set `SyncMode.Lockstep` and drain
 frames in `_Process` after `Pump()` (the loop in `AGENTS.md` rule 3 and DESIGN s.11.1): decode each command, call your
@@ -117,7 +155,7 @@ does this) if you use threads. Voice needs `audio/driver/enable_input` on.
 
 ## Done when
 
-- The project builds with `dotnet build` and the menu shows Host / Join / Browse.
+- The project builds with `dotnet build` and the menu scene shows Host / Join / Browse (when `onelobby.json` names a lobby server).
 - With a local `onelobby-server`, two Godot instances (`--lobby-server=ws://127.0.0.1:8080/ws`; use 127.0.0.1, not localhost): one presses Host and shows a
   code, the other joins it, and a message sent by one arrives in the other's `MessageReceived`.
 - With the server address wrong, the game still starts and plays, and the menu shows "Multiplayer unavailable".
