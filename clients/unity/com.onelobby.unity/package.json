@@ -2,7 +2,7 @@
   "name": "com.onelobby.unity",
   "version": "0.7.2",
   "displayName": "OneLobby",
-  "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice, and hosting by IP with a join code (no server). Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) over the engine-agnostic OneLobby.Core, OneLobby.DataChannel (libdatachannel) and OneLobby.Direct.",
+  "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice, and hosting by IP with a join code (no server). Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) and the drop-in multiplayer menu (OneLobbyMenu) over the engine-agnostic OneLobby.Core, OneLobby.DataChannel (libdatachannel) and OneLobby.Direct.",
   "unity": "6000.0",
   "license": "MIT",
   "author": { "name": "OneLobby contributors" },
@@ -12,6 +12,11 @@
       "displayName": "Host / Join",
       "description": "One script with an IMGUI menu: Host, Join by code, send a reliable message, hold V to talk.",
       "path": "Samples~/HostJoin"
+    },
+    {
+      "displayName": "Menu",
+      "description": "The drop-in multiplayer menu: one script, one component on an empty GameObject. Shows \"In game\" when the host starts; works with --host and --join=<code>.",
+      "path": "Samples~/Menu"
     },
     {
       "displayName": "Mic Check",
