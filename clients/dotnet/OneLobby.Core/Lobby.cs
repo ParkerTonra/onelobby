@@ -59,6 +59,8 @@ namespace OneLobby
         private readonly int _you;
         private int _hostId;
         private int _epoch;
+        /// <summary>The last tick applied when this peer claimed host: every host_claim of the epoch carries it.</summary>
+        private long _claimTick;
         private bool _ready;
         private bool _closed;
         private bool _hasState;
@@ -803,7 +805,7 @@ namespace OneLobby
             _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "path"); w.WriteString("path", relayed ? "relayed" : "direct"); }));
             if (IsHost)
             {
-                if (_epoch > 0) SendLink(rec, PeerChannel.Reliable, Wire.BuildHostClaim(_epoch, _you, Lockstep?.Head ?? 0));
+                if (_epoch > 0) SendLink(rec, PeerChannel.Reliable, Wire.BuildHostClaim(_epoch, _you, _claimTick));
             }
             else if (rec.Id == _hostId)
             {
@@ -1450,6 +1452,7 @@ namespace OneLobby
             _hostId = _you;
             _awaitingClaim = false;
             _ready = true;
+            _claimTick = Lockstep?.Head ?? 0; // before this host emits: a link that opens after the grace still carries the claim's own tick
             Chat.AdoptHostCounter();
             foreach (var r in _peers.Values.ToList()) if (r.Id != _you) ConnectPeer(r, true);
             if (Lockstep != null && _phase == LobbyPhase.InGame)
