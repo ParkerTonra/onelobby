@@ -126,6 +126,8 @@ namespace OneLobby.Unity
                 config = config with { PlayerIdFile = string.IsNullOrWhiteSpace(PlayerIdFile) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-player.json") : PlayerIdFile };
             if (config.BanStore == null && config.BanFile == null)
                 config = config with { BanFile = string.IsNullOrWhiteSpace(BanFile) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-bans.json") : BanFile };
+            // the player's own settings (name, relay line, last code, lobby server) live in PlayerPrefs unless the game picked a store
+            if (config.SettingsStore == null && config.SettingsFile == null) config = config with { SettingsStore = new PlayerPrefsStore() };
             return ConfigureConfig != null ? ConfigureConfig(config) : config;
         }
 
@@ -140,7 +142,8 @@ namespace OneLobby.Unity
             }
             else
             {
-                config = new OneLobbyConfig(GameId, NetVersion, new Uri(LobbyServer), Mode, DisplayName: DisplayName);
+                // an empty LobbyServer takes the server the player saved (spec/settings.md s.5), else no_server
+                config = new OneLobbyConfig(GameId, NetVersion, string.IsNullOrWhiteSpace(LobbyServer) ? OneLobby.Blueprint.NoServer : new Uri(LobbyServer), Mode, DisplayName: DisplayName);
                 config = ApplyConfig(config);
             }
             var bind = Bind();

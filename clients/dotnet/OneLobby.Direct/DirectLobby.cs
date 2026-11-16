@@ -227,7 +227,15 @@ namespace OneLobby.Direct
                 ? MapAsync(hub, mapOptions)
                 : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit, Password = o.Password, Room = o.Room }, ct);
-            return FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode);
+            return RememberHostCode(client, FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode));
+        }
+
+        /// <summary>The host's join code is the player's last code (spec/settings.md s.5).</summary>
+        private static async Task<Lobby> RememberHostCode(LobbyClient client, Task<Lobby> host)
+        {
+            var lobby = await host.ConfigureAwait(false);
+            client.RememberCode(lobby.JoinCode);
+            return lobby;
         }
 
         /// <summary>
@@ -439,7 +447,7 @@ namespace OneLobby.Direct
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (!TryUseDirect(client, address, null, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code, client);
         }
 
         /// <summary>As above, with explicit Nostr relays and STUN servers for a version 1 code.</summary>
@@ -448,7 +456,7 @@ namespace OneLobby.Direct
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (nostr == null) throw new ArgumentNullException(nameof(nostr));
             if (!TryUseDirect(client, address, nostr, out var code, out var fail)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code);
+            return WithJoinCode(client.JoinSingleLobbyAsync(password, ct), code, client);
         }
 
         /// <summary>
@@ -481,7 +489,7 @@ namespace OneLobby.Direct
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (!TryUseDirect(client, address, options.Nostr, out var code, out var fail, options.IceServers)) return Task.FromException<Lobby>(fail!);
-            return WithJoinCode(client.JoinSingleLobbyAsync(options.Password, new RoomJoinOptions { Role = options.Role, Data = options.Data }, ct), code);
+            return WithJoinCode(client.JoinSingleLobbyAsync(options.Password, new RoomJoinOptions { Role = options.Role, Data = options.Data }, ct), code, client);
         }
 
         /// <summary>As <see cref="RejoinDirectAsync(LobbyClient, string, string, CancellationToken)"/>, with <see cref="JoinDirectOptions"/> (its Password is not used).</summary>
@@ -498,6 +506,7 @@ namespace OneLobby.Direct
         {
             joinCode = "";
             fail = null;
+            { var saved = client.WithSavedRelay(extraIce); if (saved.Count > 0) extraIce = saved; }
             if (OneLobby.JoinCode.LooksLikeCode(address))
             {
                 if (OneLobby.JoinCode.TryDecodeRoom(address, out var roomHex))
@@ -537,10 +546,11 @@ namespace OneLobby.Direct
         }
 
         /// <summary>A joiner's <see cref="Lobby.JoinCode"/> is what it joined with (the code, normalized), so a HUD can show it on both sides.</summary>
-        private static async Task<Lobby> WithJoinCode(Task<Lobby> join, string code)
+        private static async Task<Lobby> WithJoinCode(Task<Lobby> join, string code, LobbyClient? remember = null)
         {
             var lobby = await join.ConfigureAwait(false);
             lobby.JoinCode = code;
+            remember?.RememberCode(code);
             return lobby;
         }
     }
