@@ -295,7 +295,7 @@ what makes the hand-edit path real: the file wins even over code that still call
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `web`, `godot-gdscript` and `godot-csharp`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element on the web, the `menu.tscn` scene in GDScript, the `OneLobbyMenu.tscn` scene in Godot C#); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4; docs/recipes/menu.md |
+| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `godot-gdscript`, `godot-csharp` and `unity`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element on the web, the `menu.tscn` scene in GDScript, the `OneLobbyMenu.tscn` scene in Godot C#); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4; docs/recipes/menu.md |
 | `ui.entry` | free text, e.g. `"Settings > Multiplayer tab"`, `"Main menu: Play together"` | surveyed | S | new | the agent's plan; Mirror offline/online scene slots are the engine-side analogue |
 | `ui.theme` | `"light"` \| `"dark"` \| `"auto"` | `auto` | R (drop-in only) | exists (`theme` attribute); does not apply to Godot, whose menu uses the engine theme | |
 
@@ -426,7 +426,7 @@ prompt library in the CLI only.
 | `node-browser` | Node host serves the page, direct codes, browser joiners (browser-game recipe) | v2 |
 | `godot-csharp` | `OneLobby.Core`, `.Godot`, `.Direct` from NuGet (`--packages-from <folder>` before a release), the drop-in menu copied in and pinned (`addons/onelobby_menu/`), `OneLobbyNet.cs` wires direct hosting, WebRTC natives, a `tests/MultiplayerTest` scene (landed) | v2 |
 | `godot-gdscript` | autoload `net.gd`, the `addons/onelobby` add-on, the drop-in menu as main scene, WebRTC natives, PIN file (landed) | v2 |
-| `unity` | `OneLobbyRunner`, `com.onelobby.unity` package | v2 |
+| `unity` | the `com.onelobby.unity` package (menu, `OneLobbyRunner`, transport) referenced from `Packages/manifest.json` (`--package-from <tgz>` before a release), `Assets/Resources/onelobby.json`, a boot script that adds the menu (no scene file), a two-peer play-mode test, a player build script, an `.olc` entry; `--into` edits the manifest in place (landed; proved locally only) | v2 |
 | `dotnet` | console / MonoGame, `OneLobby.DataChannel` + `OneLobby.Direct` | v2 |
 
 ### Flags
@@ -455,6 +455,9 @@ create-onelobby [dir] [options]
   --dry-run                    print the plan and the file, write nothing (Angular, Astro)
   --json                       machine-readable result: the file, the file list, next steps (clig.dev)
   --no-install  --no-git       as the other scaffolders
+  unity only:
+  --package-from <tgz>         reference this com.onelobby.unity tarball (a file: line in Packages/manifest.json)
+  --unity <exe>                the Unity editor (else $UNITY, else the Unity Hub's default folder)
   godot-csharp only:
   --packages-from <folder>     take the OneLobby NuGet packages from a folder of .nupkg files (writes nuget.config), e.g. before a release
   --godot <exe>                the .NET Godot whose version picks the Godot.NET.Sdk line (else $GODOT, PATH, else 4.5.1)

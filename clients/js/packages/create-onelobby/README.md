@@ -1,7 +1,7 @@
 # create-onelobby
 
 Scaffold a multiplayer game with [OneLobby](https://github.com/ParkerTonra/onelobby): a browser game (`web`), a Godot 4
-GDScript game (`godot-gdscript`) or a Godot 4 C# game (`godot-csharp`).
+GDScript game (`godot-gdscript`), a Godot 4 C# game (`godot-csharp`) or a Unity 6 game (`unity`).
 
 ## Web
 
@@ -43,7 +43,7 @@ What it installs (the same for both, except the main scene):
   `game_started`), `AGENTS.md`.
 
 `--into` with no `--template` reads the folder: `project.godot` is Godot (C# when a `.csproj` / `.sln` sits beside it), `ProjectSettings/`
-(with `ProjectVersion.txt`, or beside `Assets/`) is `unity` and a `.csproj` / `.sln` without `project.godot` is `dotnet` (both stop as
+(with `ProjectVersion.txt`, or beside `Assets/`) is `unity` and a `.csproj` / `.sln` without `project.godot` is `dotnet` (which stops as
 `template_planned`), a folder with `.html`, `.js` / `.ts` or a `package.json` is `web`, and anything else stops as `engine_unknown`
 (pass `--template`; on a terminal it asks). A description that names the engine still picks it; `--template` always wins;
 `engine.from` says `files` for what the folder told. The GDScript menu reads `--local` itself (the direct route, 127.0.0.1 only, no
@@ -230,7 +230,7 @@ Two uses, one engine behind both:
    nothing else gave. Order of precedence: explicit flags and `--set`, then `--from <onelobby.json>`, then the recommendation,
    then the built-in defaults. The output (text and `--json`) lists the keys that came from it with each one's reason, and the
    ones it proposed that a flag or file kept; `--dry-run` shows the same and writes nothing. When no `--template`, `--from` or
-   Godot project says otherwise, an engine named in the sentence picks the template (a planned one stops as `template_planned`: only `unity`, `dotnet` and `node-browser` are).
+   Godot project says otherwise, an engine named in the sentence picks the template (a planned one stops as `template_planned`: only `dotnet` and `node-browser` are).
    On a terminal without `--yes` or `--no-input` it asks one first question, "Describe your game in one line (Enter to skip)",
    and then shows the recommended values as the defaults of the later prompts.
 
@@ -258,8 +258,7 @@ Honest about this version: a proposal never promises what the engine's client la
 the data for them (`lastProcessedInput`, `trySampleAt`) and the advice row says "by-hand". The `web` template writes only the
 `lockstep` and `raw` sample game, so where the best mode for the game is `replication` it proposes `raw` and the output says so in
 a `limits` row. Input redundancy on the fast channel and an adaptive input delay are not in any lockstep helper yet (advice
-rows `lockstep-fast-inputs` and `adaptive-input-delay`, status `by-hand`). A proposal for a planned template (`unity`,
-`dotnet`, `node-browser`) is printed, with no command to run, because the scaffolder would stop with `template_planned`; one for `godot-csharp` carries a real command.
+rows `lockstep-fast-inputs` and `adaptive-input-delay`, status `by-hand`). A proposal for a planned template (`dotnet`, `node-browser`) is printed, with no command to run, because the scaffolder would stop with `template_planned`; one for `godot-csharp` carries a real command.
 
 ### Examples
 
@@ -393,10 +392,51 @@ really supplied; `overridden` is `{ key, value, recommended, by }` for keys it p
 an answer typed at a prompt (`"your answer"`) kept instead; `dropped` is `{ key, recommended, why }` for the other `sync.*` values
 it proposed when its `sync.mode` was replaced (a tick rate chosen for lockstep is not applied to a raw game).
 
+## Unity
+
+```
+npx create-onelobby my-game --template unity --yes --package-from path/to/com.onelobby.unity-<version>.tgz   # a new Unity 6 project
+npx create-onelobby --into path/to/your-unity-project --package-from path/to/com.onelobby.unity-<version>.tgz # an existing one
+npx create-onelobby update                       # moves the com.onelobby.unity line of Packages/manifest.json to this tool's version
+npx create-onelobby verify                       # opens the project in Unity's batchmode, then VERIFY_OK or VERIFY_FAIL <check>: <next step>
+```
+
+A Unity game takes OneLobby as one package, `com.onelobby.unity`, by a line in `Packages/manifest.json`; the drop-in menu is inside it, so nothing is vendored
+and there is no pin. The package is not on a registry yet: `--package-from <tgz>` writes a `file:` reference (relative to `Packages/`; the
+`unity-dev-package` CI artifact is a tarball with the natives, `clients/unity/build-unity-package.sh --pack` makes one). Without it the line is
+`file:com.onelobby.unity-<version>.tgz` and you put the tarball next to the manifest. `--unity <exe>` (else `$UNITY`, else the Unity Hub's default folder)
+picks the editor a new project is made for (`ProjectSettings/ProjectVersion.txt`); with none found it says so and uses 6000.2.7f2, the version the package was tested with.
+
+- New project: `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json`, `Assets/Resources/onelobby.json` (engine `unity`, `ui.kind` `drop-in`),
+  `Assets/Scripts/Boot.cs` (adds the menu from `[RuntimeInitializeOnLoadMethod]`, so there is no scene file; shows "In game" on `GameStarted`),
+  `Assets/OneLobby/Tests/MultiplayerTests.cs` + `OneLobbyGame.Tests.asmdef` (the two-peer play-mode test: two peers on 127.0.0.1, host and join by address, a message each way,
+  logs `MULTIPLAYER_OK`), `Assets/OneLobby/Editor/BuildPlayer.cs` (`OneLobbyBuild.Windows`, `-executeMethod`), `.olc/<name>.json` (builds the player, then a host window and a
+  small joiner window with `--local`), `AGENTS.md`, and managed `.gitignore` / `.gitattributes` blocks.
+- `--into`: the same except `Boot.cs` and `AGENTS.md`. Scenes and settings are not touched; the manifest gets the package, the test framework (when missing) and any missing built-in
+  module the menu needs, as an in-place edit that keeps every other byte and is safe to run twice (a manifest it cannot parse is refused: `bad_manifest`). A game that
+  already references the package keeps its line (the run says so). The "Next:" lines print the one line that puts the menu into your own start-up.
+- `update`: moves only the package line. A plain version moves to this tool's; `file:com.onelobby.unity-<version>.tgz` (the line this tool writes) moves to the new name; any other `file:` line
+  is left alone unless `--package-from` is given. `--dry-run` shows the edit.
+- `verify` runs Unity with `-batchmode -nographics`, one process at a time (the first run imports the project: a minute or two; the editor must not have the project open):
+
+| Check (unity) | What it proves |
+|---|---|
+| `unity` | an editor is found (`--unity`, `$UNITY`, the Unity Hub's default folder) and is 6000.0 or newer; a different project version is a warning |
+| `package` | the manifest references `com.onelobby.unity` (a `file:` tarball must exist) and Unity opened the project, resolved it (`Packages/packages-lock.json`) and compiled with no errors |
+| `blueprint` | `Assets/Resources/onelobby.json` loads through the JS loader and through the game's C# loader (`--route=config` of the test) |
+| `wiring` | a `.cs` file outside `Packages/` and `Assets/OneLobby/` uses `OneLobbyMenu`, `OneLobbyRunner` or the client (a bare `--into` fails until the menu is added) |
+| `direct`, `nostr`, `turn`, `server` | as for Godot C#: the test run with `--route=...` against a local relay or TURN server on 127.0.0.1; `server` needs `--server` |
+
+The routes run through the test (`-runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests`, route arguments after Unity's own, which Unity ignores) because Unity code
+runs only inside the game's own project and the menu and transport need a player loop. A game without the test files fails the route checks with `npx create-onelobby --into .`
+as the next step. `verify` writes `.onelobby/` (Unity logs and results; gitignored) and what Unity itself writes into a project it opens (`Library/`, `Temp/`, `Logs/`,
+`UserSettings/`, `obj/`, `Packages/packages-lock.json`, `.meta` files). Unity is not in CI (no licence): `clients/unity/scaffold-test.sh` is the end-to-end check, run locally.
+Note: the Unity editor opens listeners on all interfaces by itself (its profiler ports), so Windows may show a firewall prompt the first time it runs.
+
 ## All templates
 
 `create-onelobby --help` lists every flag (one per setting, plus `--set key=value`). `--dry-run` writes nothing (and downloads
-nothing), `--json` prints one machine-readable result, `--into <dir>` adds to an existing project. `node-browser`,
-`unity` and `dotnet` are planned.
+nothing), `--json` prints one machine-readable result, `--into <dir>` adds to an existing project. `node-browser`
+and `dotnet` are planned.
 
 Zero runtime dependencies; Node 18 or newer. Design: `docs/design/blueprint.md` and `docs/design/one-shot.md` in the repository.

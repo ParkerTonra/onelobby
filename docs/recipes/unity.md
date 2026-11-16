@@ -13,6 +13,39 @@ macOS (universal) and Android arm64 have build scripts and a CI job but have not
 `__Internal` build (not done); **not WebGL** (see "WebGL" below). Unity 6000.0 or newer; tested with 6000.2.7f2. API Compatibility Level: the default
 .NET Standard 2.1 works (.NET Framework too).
 
+## One command
+
+`create-onelobby` does section 1 and the menu below for you, and writes a two-peer test. A Unity game takes OneLobby as one package, `com.onelobby.unity`
+(it carries the menu, the transport and the natives), so the tool copies nothing into `Assets/` except the blueprint, a test, a build script and, for a
+new project, a boot script. It needs Unity 6000.0 or newer (the tool looks for `--unity <exe>`, then `$UNITY`, then the Unity Hub's default folder; a new
+project is made for the editor it finds, else 6000.2.7f2).
+
+```
+npx create-onelobby my-game --template unity --yes --package-from path/to/com.onelobby.unity-<version>.tgz   # a new project
+npx create-onelobby --into path/to/your-project --package-from path/to/com.onelobby.unity-<version>.tgz      # an existing Unity project
+cd my-game
+npx create-onelobby verify                       # opens the project in batchmode, then one line: VERIFY_OK or VERIFY_FAIL <check>: <next step>
+```
+
+- New project: `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json` (the package, the test framework and the built-in modules the menu needs),
+  `Assets/Resources/onelobby.json`, `Assets/Scripts/Boot.cs` (adds the menu in every scene from `[RuntimeInitializeOnLoadMethod]`: no scene file;
+  shows an "In game" line on `GameStarted`), `Assets/OneLobby/Tests/` (the two-peer play-mode test and its `.asmdef`), `Assets/OneLobby/Editor/BuildPlayer.cs`
+  (`OneLobbyBuild.Windows`), `.olc/<name>.json` (builds the player, then opens a host and a joiner window with `--local`), `AGENTS.md`, and the managed
+  `.gitignore` / `.gitattributes` blocks.
+- `--into` adds the same except the boot script and `AGENTS.md`: your scenes and settings are not touched, `Packages/manifest.json` is edited in place (only the
+  dependencies it adds; a game that already references `com.onelobby.unity` keeps its line), and the tool prints the lines that put the menu into your own start-up.
+- The package is not on a registry yet. `--package-from <tgz>` writes a `file:` line (relative to `Packages/`); without it the line is
+  `file:com.onelobby.unity-<version>.tgz` and the tarball goes next to `manifest.json` (build one with `clients/unity/build-unity-package.sh --pack`, or take the
+  `unity-dev-package` CI artifact, which has the natives). `npx create-onelobby update` moves that line to the tool's version (a `file:` line you wrote is kept
+  unless `--package-from` is given).
+- The test runs headless: `Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults <abs>.xml -logFile <abs>.log`
+  and logs `MULTIPLAYER_OK` (or `MULTIPLAYER_FAIL <what>`). The first run imports the project (a minute or two). `verify` runs the other routes through the same test with
+  arguments after Unity's own (`--route=nostr --relay=...`), against a local Nostr relay and TURN server that it starts on 127.0.0.1.
+- Never run a player or the editor without `-batchmode` in tests, and never run a player with `--host` without `--local` (127.0.0.1 only, no Nostr, no router request).
+- `clients/unity/scaffold-test.sh` runs all of this end to end on a machine with Unity; it is local only (CI has no Unity licence).
+
+The rest of this page is the hand-written way.
+
 ## The short way: the drop-in menu
 
 Once the package is added (step 1 below), the multiplayer front end is one component: name, Host with a big code, Join by a pasted code,
