@@ -135,9 +135,20 @@ Each is one lane unless noted; order matters for the first three.
     players (adaptive render delay 2 snapshot intervals to 250 ms, carry-on by velocity for at most 250 ms, shortest-arc yaw, teleport counter), action events
     that arrive exactly once (4 repeats on `fast` plus one `reliable`, dropped by sequence number), `HistoryRing` hit rewind, players that come and go with
     their peers. Proven only on the in-memory rig (100 ms, 20 ms jitter, 3% loss, and 30% for the events); no real link, no real engine, and nobody has seen
-    it on a screen. Next: the Godot `NetPlayer` node and the GDScript code (a lane), the Unity component and the C# code (a lane), both from the spec and its
+    it on a screen. Next: the Unity component and the C# code (a lane), from the spec and its
     vectors; not built: your own extra fields and events in `onelobby.json`, an adapter for a JS game engine, section 8 item 3 (a dropped player stays
     visible: today it is despawned at once and a rejoin starts a new player).
+    Landed (the GDScript lane, Godot node): `OneLobbyNetPlayers` (the layer: a port of JS `NetPlayers`, same names in snake_case and the same order of
+    operations), `OneLobbyPlayerCodec` and `OneLobbyPlayerWire` (the preset and kind 5: every case of `spec/vectors/net-player.json` passes in both
+    directions), `OneLobbyReconciler`, `OneLobbyPredictionSmoother`, `OneLobbyHistoryRing`, the session additions (adaptive render delay off by default,
+    the kind hook, per-peer byte counters), and section 7.4 for Godot: the `OneLobbyNetPlayer` node under a `CharacterBody2D` / `CharacterBody3D` /
+    `Node2D` / `Node3D` (owner: reads the parent and the values the game sets; host authority: input plus the game's step function and the smoothed
+    correction; everyone else: writes the smoothed state into the parent; one signal per action event; an `AnimationPlayer` by mode name or an
+    `AnimationTree` by a parameter map), `OneLobbyNetPlayerSpawner` (one character per seated player, the local one marked), and a sample that moves
+    (`clients/gdscript/examples/net_player_demo`). Proven on the replication rig with the same scenario as JS (D1 to D9, `tests/net_player.gd`), in a
+    scene tree on the rig (`tests/net_player_node.gd`), and, in CI only (it needs the WebRTC natives), by two headless processes of the sample on
+    127.0.0.1 (`net-player-test.sh`: the joiner's path and one jump reach the host). Nobody has seen it on a screen, the smoothing numbers are the plan's,
+    and no real link has carried it. Not built: the JS-to-Godot player scenario in `tools/engine-smoke` (needs a `--players` scenario in both peers).
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.

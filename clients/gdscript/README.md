@@ -191,6 +191,23 @@ Tests, no lobby server: `GODOT=... clients/gdscript/direct-test.sh` (two instanc
 pass `public` to use the real relays) and `GODOT=... node integration/nostr-interop-gdscript.mjs` (against the JS client,
 both directions).
 
+## Networked players
+
+`OneLobbyNetPlayer` (a node under the character), `OneLobbyNetPlayerSpawner` (one character per seated player) and `OneLobbyNetPlayers` (the
+layer under them) put players in the world with no player sync of your own: position, facing, movement state, jump / shoot / melee and the rest,
+smooth on the other screens. Settings: `sync.mode: "replication"` and `sync.player` in `onelobby.json` (`docs/design/blueprint.md` section 4e);
+the recipe, both authorities, the signals and the animation maps are in `docs/recipes/net-player.md` section 10, the wire in `spec/net-player.md`.
+Proven on an in-memory rig and by two headless processes of the sample on one PC; nobody has seen it on a screen yet.
+
+```
+godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --host --local --name=Sam
+godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join=127.0.0.1:47810 --local --name=Alex
+```
+
+Tests: `tests/net_player_vectors.gd` (every case of `spec/vectors/net-player.json`), `tests/net_player.gd` (the layer on the rig: D1 to D9),
+`tests/net_player_node.gd` (node and spawner in a scene tree on the rig), `tests/net_player_sample.gd`, and `net-player-test.sh` (the sample as two
+headless processes with `--local`; needs the WebRTC natives, so it runs in CI).
+
 ## Saved player settings
 
 `client.settings` (`OneLobbySettings`) keeps the player's name, TURN relay line, last join code and lobby server in `client.store`
@@ -242,6 +259,10 @@ Recipe: `docs/recipes/settings.md`; contract: `spec/settings.md`; test: `tests/s
 | `addons/onelobby/godot_transport.gd` | `OneLobbyGodotTransport`: WebSocketPeer + WebRTCPeerConnection, 3 negotiated channels (ids 0/1/2) |
 | `addons/onelobby/hub.gd`, `direct_host.gd`, `nostr_*.gd` | Direct mode: the in-process hub, the host, the Nostr relay pool / room / link / sockets, limits |
 | `addons/onelobby/secp256k1.gd`, `nostr_crypto.gd` | pure GDScript BIP340, HKDF, AES-GCM |
+| `addons/onelobby/net_players.gd`, `net_player_wire.gd`, `net_player_codec.gd` | the networked player layer, its tables and kind 5 message, the preset codec (`spec/net-player.md`) |
+| `addons/onelobby/net_player.gd`, `net_player_spawner.gd` | `OneLobbyNetPlayer` (the node under a character), `OneLobbyNetPlayerSpawner` |
+| `addons/onelobby/reconciler.gd`, `prediction_smoother.gd`, `history_ring.gd` | prediction, blended corrections and hit rewind history (twins of the JS and C# helpers) |
+| `examples/net_player_demo/`, `net-player-test.sh` | a sample that moves, and its two-headless-process check |
 | `tests/nostr_unit.gd`, `direct-test.sh`, `tests/direct_e2e.gd`, `tests/direct_interop.gd` | Direct unit tests, two-instance test, interop peer |
 | `tests/relay_retry.gd` | ready-timeout relay-only retry and the ice_failed message (no network) |
 | `tests/vectors.gd` | the shared spec vectors (frames, invalid, chunking, join codes) |

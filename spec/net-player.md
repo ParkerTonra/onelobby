@@ -1,13 +1,15 @@
 # Networked player, version 1 (on top of replication)
 
-Status: **JS only.** The reference implementation is `clients/js/packages/client/src/replication/` (`player-wire.ts`: the
-tables as code, `player.ts`: the layer, `helpers.ts`: `Reconciler`, `PredictionSmoother`, `HistoryRing`). The GDScript
-client and the C# client do not have it yet; the Godot `NetPlayer` node and the Unity `NetPlayer` component come after, built
-from this document and `spec/vectors/net-player.json`.
+Status: **JS and GDScript.** The reference implementation is `clients/js/packages/client/src/replication/` (`player-wire.ts`: the
+tables as code, `player.ts`: the layer, `helpers.ts`: `Reconciler`, `PredictionSmoother`, `HistoryRing`). The GDScript client has it
+too (`clients/gdscript/addons/onelobby/`: `net_player_wire.gd`, `net_player_codec.gd`, `net_players.gd`, `reconciler.gd`,
+`prediction_smoother.gd`, `history_ring.gd`, and the Godot node `net_player.gd` with its spawner `net_player_spawner.gd`), built from
+this document and `spec/vectors/net-player.json`, which it passes in full. The C# client and the Unity `NetPlayer` component come after.
 
-**Proven only on an in-memory network with a virtual clock** (`RepRig`: latency, jitter and loss on a fake link). No two
-processes, no real link and no real game engine have run it, and nobody has seen a networked player move on a screen. The
-smoothing numbers below are the plan's numbers (`docs/design/one-shot.md` section 7.2), not tuned by eye.
+**Proven only on an in-memory network with a virtual clock** (`RepRig` in JS, `tests/replication_rig.gd` in GDScript: latency, jitter and
+loss on a fake link) and, for the GDScript sample, by two headless processes on one PC (CI). No real link and no real game engine window
+have run it, and nobody has seen a networked player move on a screen. The smoothing numbers below are the plan's numbers
+(`docs/design/one-shot.md` section 7.2), not tuned by eye.
 
 This layer is a game-side convention over `spec/replication.md`; it adds one message kind (5) and changes nothing about
 kinds 1 to 4. A game that does not use it sees no new entity, no new message and the same bytes as before.
@@ -325,7 +327,8 @@ then run the same command without the variable: the plain run only reads the fil
 
 ## 13. What a second implementer will trip on
 
-- `Quantize.float` rounds half away from zero in double precision and clamps; `pitch` and `moveX` have even step counts, so 0
+- `Quantize.float` takes its input as a float32 (round every value to float32 first, `spec/replication.md` "Quantization"), then rounds half away
+  from zero in double precision and clamps; `pitch` and `moveX` have even step counts, so 0
   does not round-trip exactly.
 - Left-out fields shorten the state and move the later ones up: the layout depends on the settings, and both ends must agree.
 - The host numbers relayed events itself (section 4.2); the sender's numbers are only for the first hop.

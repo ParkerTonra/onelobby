@@ -1,13 +1,14 @@
-# Networked players (JS)
+# Networked players (JS and GDScript)
 
 Players in the world with no player sync of your own: position, facing, movement state, jump, shoot, melee and the rest,
 smooth on every other screen. Built on `ReplicationSession` (`docs/recipes/replication.md`); the wire and every number are in
 `spec/net-player.md`.
 
-**Status: JS only.** The Godot `NetPlayer` node, the Unity `NetPlayer` component and the GDScript and C# code are the next
-lanes; they will be built from the spec and its vectors. Everything here is proven on an in-memory network with a virtual clock
-and nothing else: no two processes, no real link and no real game engine have run it, and nobody has looked at a networked
-player on a screen. The smoothing numbers are the plan's numbers, not tuned by eye.
+**Status: JS and GDScript** (the GDScript side is section 10: the `OneLobbyNetPlayer` node, the spawner and the layer, the same wire). The
+Unity `NetPlayer` component and the C# code are the next lane; they will be built from the spec and its vectors. The JS side is
+proven on an in-memory network with a virtual clock and nothing else; the GDScript side on the same kind of rig and, in CI, by two
+headless processes of a sample on one PC. No real link and no real game engine window has run it, and nobody has looked at a
+networked player on a screen. The smoothing numbers are the plan's numbers, not tuned by eye.
 
 A game that does not use the layer sees no change: no new entity, no new message, the same bytes.
 
@@ -176,11 +177,135 @@ key: `docs/design/blueprint.md` section 4e. A game's own extra fields and events
 
 ## 9. What is not built yet
 
-- The Godot `NetPlayer` node (reads a `CharacterBody2D` / `CharacterBody3D` and the `AnimationTree`), the Unity component, the
-  GDScript client code and the C# client code of the player layer.
+- The Unity component and the C# client code of the player layer (the Godot node and the GDScript code are section 10; the
+  Godot C# side has no node yet).
 - An adapter for any JS game engine; this layer talks plain numbers.
 - A dropped player is despawned at once (the rejoin window does not keep it frozen), and a rejoin starts a new player.
 - Your own extra state fields and events in `onelobby.json`: send your own entity or `sendEvent` for now.
+
+## 10. Godot (GDScript)
+
+The GDScript client has the same layer on the same wire (a JS peer and a GDScript peer can be in one game): `OneLobbyNetPlayers`
+(the layer, no scene tree), `OneLobbyNetPlayer` (a node under the character) and `OneLobbyNetPlayerSpawner` (one character per
+seated player). Names are snake_case; states, inputs and events are Dictionaries with the keys of `spec/net-player.md` in snake_case
+(`x y z vx vy vz yaw pitch on_ground mode item aiming blocking health alive team teleport`). The settings are `sync.player` of
+`onelobby.json` (`OneLobbyConfig`), and it needs `sync.mode: "replication"`. A scene to look at: `clients/gdscript/examples/net_player_demo`
+(flat floor, capsules that walk and jump, a colour per team, a name per player; it opens after the menu's "game started").
+
+**The node.** Put a `OneLobbyNetPlayer` under the game's character (`CharacterBody3D`, `CharacterBody2D`, or any `Node3D` / `Node2D`;
+2D or 3D follows `sync.player.space`, a parent of the other kind is one clear error). The spawner sets its `peer_id` and binds it.
+
+| on | the node does |
+|---|---|
+| the machine that owns the player, `"owner"` | each physics frame it reads the parent (global position, `velocity` and `is_on_floor()` of a `CharacterBody`, yaw from `rotation_degrees`) plus the values you set on the node (`pitch`, `mode`, `item`, `aiming`, `blocking`, `health`, `alive`, `team`) and hands them to the layer. You move your character as you always did. `auto_mode` (on by default) derives `mode` (idle, walk, jump, fall) from the movement |
+| the machine that owns the player, `"host"` | you call `set_input({...})` each physics frame; the node predicts with your `step_function` (`Callable(state, input, dt) -> state`, the same function on the host and every owner; without one it logs one clear error) and draws the predicted position plus the smoothed correction |
+| every other machine | each rendered frame it writes the smoothed state into the parent (position, yaw; a teleport snaps) and exposes the rest as properties (`pitch`, `mode`, `on_ground`, `item`, `aiming`, `blocking`, `health`, `alive`, `team`, `velocity`). The character stays hidden until its first state has arrived |
+
+| exported property / member | what |
+|---|---|
+| `peer_id` | the peer this player belongs to (the spawner sets it) |
+| `animation_player`, `mode_animations` | path to an `AnimationPlayer`; it plays `mode_animations[mode]` (defaults for idle, walk, run, crouch, jump, fall, swim, climb, fly; a missing animation is skipped silently) |
+| `animation_tree`, `animation_params` | path to an `AnimationTree`; each `{value name: parameter path}` of the map is set (`mode`, `speed`, `on_ground`, `aiming`, `blocking`, `alive`, `health`, `item`, `team`) |
+| `auto_mode`, `hide_until_first_state` | see above |
+| `step_function`, `is_local` | host authority: the step function; true for the player this machine controls |
+
+Signals, one per action event, played at the right tick (a jump lines up with the body that jumps; also for the local player, at
+once): `jumped`, `landed(impact)`, `shot(yaw, pitch, view)`, `melee(swing)`, `reloaded`, `used(target)`, `item_switched(slot)`,
+`thrown(yaw, pitch, power)`, `hit(by, damage)`, `died(by)`, `respawned`, `emoted(emote)`. Methods the owner calls to start one:
+`jump()`, `land(impact)`, `shoot(yaw, pitch)`, `melee_attack(swing)` (`melee` is the signal), `reload()`, `use(target)`,
+`switch_item(slot)`, `throw_item(yaw, pitch, power)`, `emote(id)`, `respawn(to)`, `teleport(to)`; the host raises `hit` and `died` with
+`hurt(by, damage)` and `kill(by)` (it may start any player's event through that player's node).
+
+```gdscript compile file=net_player_character.gd
+extends CharacterBody3D
+## A character scene: this body with a OneLobbyNetPlayer child named NetPlayer. Authority "owner": move it as you always did.
+
+@onready var net: OneLobbyNetPlayer = $NetPlayer
+
+
+func _ready() -> void:
+	net.shot.connect(func(yaw: float, pitch: float, _view: int) -> void: print("bang from ", net.peer_id, " at ", yaw, " ", pitch))
+	net.jumped.connect(func() -> void: print("jump of ", net.peer_id))
+	net.health = 100
+	net.team = 1
+
+
+func _physics_process(delta: float) -> void:
+	if not net.is_local:
+		return # on the other machines the node moves this character
+	velocity.x = Input.get_axis("ui_left", "ui_right") * 5.0
+	velocity.z = Input.get_axis("ui_up", "ui_down") * 5.0
+	velocity.y = velocity.y - 18.0 * delta if not is_on_floor() else 0.0
+	if is_on_floor() and Input.is_action_just_pressed("ui_accept"):
+		velocity.y = 6.0
+		net.jump() # the others get `jumped` at the right moment
+	move_and_slide()
+```
+
+Authority `"host"`: the node moves the character, you give it input and a step (one step of your own movement, on a state dictionary):
+
+```gdscript compile file=net_player_host_character.gd
+extends CharacterBody3D
+## Authority "host": the game gives the node its input each physics frame and a pure step function.
+
+@onready var net: OneLobbyNetPlayer = $NetPlayer
+
+
+func _ready() -> void:
+	net.step_function = Callable(self, "step") # must be deterministic: it also runs on the host
+
+
+func step(state: Dictionary, input: Dictionary, dt: float) -> Dictionary:
+	var out := state.duplicate()
+	out["x"] = float(state["x"]) + float(input["move_x"]) * 6.0 * dt
+	out["z"] = float(state["z"]) + float(input["move_y"]) * 6.0 * dt
+	out["yaw"] = input["yaw"]
+	return out
+
+
+func _physics_process(_delta: float) -> void:
+	if net.is_local:
+		net.set_input({"move_x": Input.get_axis("ui_left", "ui_right"), "move_y": Input.get_axis("ui_up", "ui_down"), "yaw": rotation_degrees.y, "buttons": {"fire": Input.is_action_pressed("ui_accept")}})
+```
+
+**The spawner.** Give `OneLobbyNetPlayerSpawner` the lobby (the menu's `game_started` lobby), the game's `PackedScene` and, optionally, a
+spawn point; it makes the layer (`OneLobbyNetPlayers.from_config`), pumps it every frame, adds one character per seated player
+(your own at once, marked local so you can attach a camera and input), and frees it when the player leaves:
+
+```gdscript compile file=net_player_game.gd
+extends Node3D
+
+@export var character: PackedScene
+var spawner: OneLobbyNetPlayerSpawner
+
+
+func start(lobby: OneLobbyLobby, cfg: OneLobbyConfig) -> void:
+	spawner = OneLobbyNetPlayerSpawner.new()
+	spawner.scene = character
+	spawner.spawn_point = func(peer: int) -> Vector3: return Vector3(float(peer) * 2.0, 1.0, 0.0)
+	spawner.player_spawned.connect(func(peer: int, _node: Node, is_local: bool) -> void:
+		print("player ", peer, " is here", " (this machine)" if is_local else ""))
+	add_child(spawner)
+	var players := spawner.start(lobby, cfg) # the layer: players.stats, players.rewound(...), players.host_action(...)
+	players.limit_violation.connect(func(peer: int, limit: String) -> void: print(peer, " broke the ", limit, " limit"))
+```
+
+A game that wants to do all this itself uses the layer directly (`OneLobbyNetPlayers.from_config(lobby, cfg)`, `pump()` every frame,
+`set_local_state` / `set_local_input`, `get_state(peer)`, `send_action`, `on_action`, ...: the table of section 5 with snake_case names;
+`get` is `get_state`, `latest` is `latest_state`, `local` is `local_state()`, `players` is `player_ids()`, `action` is `send_action` and
+the signal for every action is `action_played`). Where the host draws the other players itself, `get_state(peer)` gives their host
+record one tick behind, interpolated (the JS `get` gives nothing there).
+
+**What is proven, in these words.** Everything on the GDScript side is proven on an in-memory rig (D1 to D9 of
+`clients/gdscript/tests/net_player.gd`, the scene-tree test `net_player_node.gd`) and, in CI, by two headless processes of the sample on
+one PC (`net-player-test.sh`). Nobody has seen a networked player move on a screen, the smoothing numbers are the plan's and not tuned
+by eye, and no real link (Wi-Fi, the internet, a relay) has carried it. To look at it yourself, open two windows (both `--local`, which
+keeps every socket on 127.0.0.1):
+
+```
+godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --host --local --name=Sam
+godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join=127.0.0.1:47810 --local --name=Alex
+```
 
 ## Done when
 
