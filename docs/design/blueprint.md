@@ -215,13 +215,13 @@ window, per-player data. All keys are optional; the host can override each in co
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `sync.mode` | `"raw"` \| `"lockstep"` \| `"replication"` | surveyed; scaffolder default `raw` | both | `raw` and `lockstep` exist (`mode`); `replication` exists in C# only (`OneLobby.Replication`) | Rune (deterministic), 1500 Archers (lockstep), Photon Fusion (host-authoritative) in DESIGN.md s.1 |
+| `sync.mode` | `"raw"` \| `"lockstep"` \| `"replication"` | surveyed; scaffolder default `raw` | both | `raw` and `lockstep` exist (`mode`); `replication` exists in C# (`OneLobby.Replication`) and JS (`ReplicationSession`) | Rune (deterministic), 1500 Archers (lockstep), Photon Fusion (host-authoritative) in DESIGN.md s.1 |
 | `sync.tickRate` | int 1-120 | 20 | R | exists (`tickRate`, 30 Hz in replication) | Unity Netcode Tick Rate; Mirror `sendRate` with its "60-100Hz fast paced ... 1-10Hz slow paced" guidance |
 | `sync.hashEveryTicks` | int | `tickRate` | R | exists (`hashEveryTicks`) | 1500 Archers checksums; Factorio desync detection |
 
 The agent chooses `lockstep` only when the survey finds a fixed-tick loop, seeded RNG and no wall clock or unordered
 iteration (AGENTS.md rule 3); otherwise `raw`, or `replication` for a real-time C# game with host-owned physics or AI.
-`replication` on a non-C# engine is a schema error until a JS port exists.
+`replication` on `godot-gdscript` (or with no engine) is a schema error (`replication_not_gdscript`) until the GDScript port exists.
 
 ### 4f. `players`
 
@@ -302,7 +302,7 @@ The scaffolder and the skill write the full file anyway: a file you can read bea
 
 - `spec/blueprint.schema.json`, draft 2020-12, next to the existing `spec/signaling.schema.json`. Every key has
   `description` (the one-line "why" the agent shows) and `default`. Cross-key rules as `allOf`/`if`/`then`: at least one
-  hosting mode; `listed` and `approveJoins` not both; `migrate` needs `server`; `replication` needs a C# engine.
+  hosting mode; `listed` and `approveJoins` not both; `migrate` needs `server`; `replication` needs an explicit engine other than `godot-gdscript`.
 - Shipped three ways: in the npm package (`onelobby/blueprint.schema.json`, so the `$schema` URL above works from
   unpkg or jsDelivr with a pinned version), as an embedded resource in `OneLobby.Core` (C# validates with the same
   file), and in the repo for the test vectors.

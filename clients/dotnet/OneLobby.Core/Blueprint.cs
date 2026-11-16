@@ -243,7 +243,6 @@ namespace OneLobby
     internal static class BlueprintValidator
     {
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9._-]{1,64}$", RegexOptions.CultureInvariant);
-        private static readonly string[] CSharpEngines = { "godot-csharp", "unity", "dotnet" };
 
         private static BlueprintException Err(string path, string rule, string msg) => new BlueprintException(path, rule, msg);
         private static string P(string parent, string key) => parent.Length == 0 ? key : parent + "." + key;
@@ -594,8 +593,8 @@ namespace OneLobby
                 throw Err("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
             if (web && bp.Hosting.Direct)
                 throw Err("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
-            if (bp.Sync.Mode == "replication" && Array.IndexOf(CSharpEngines, engine) < 0)
-                throw Err("sync.mode", "replication_needs_csharp", "replication needs engine godot-csharp, unity or dotnet");
+            if (bp.Sync.Mode == "replication" && (engine == "godot-gdscript" || engine == null))
+                throw Err("sync.mode", "replication_not_gdscript", "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)");
             if (bp.Sync.Mode == "replication" && bp.Session.HostLeaves == "migrate")
                 throw Err("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
             var lateJoinGiven = lobby is { } lg && lg.TryGetProperty("lateJoin", out _);

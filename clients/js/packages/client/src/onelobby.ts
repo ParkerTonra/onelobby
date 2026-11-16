@@ -344,7 +344,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       gameId: bp.game.id,
       netVersion: bp.game.netVersion,
       lobbyServer: overrides.lobbyServer ?? bp.hosting.lobbyServer,
-      mode: bp.sync.mode === "lockstep" ? "lockstep" : "raw", // replication is C# only; JS speaks raw
+      mode: bp.sync.mode === "lockstep" ? "lockstep" : "raw", // replication rides a raw lobby: build a ReplicationSession on it
       tickRate: bp.sync.tickRate,
       hashEveryTicks: bp.sync.hashEveryTicks,
       displayName: name,

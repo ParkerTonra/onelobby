@@ -190,9 +190,8 @@
     { "name": "hosting_none_by_default", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },
     { "name": "listed_and_approve", "input": { "game": { "id": "a" }, "lobby": { "listed": true, "approveJoins": true } }, "error": { "path": "lobby", "rule": "listed_and_approve" } },
     { "name": "web_direct", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "direct": true } }, "error": { "path": "hosting.direct", "rule": "direct_needs_listener" } },
-    { "name": "replication_on_web", "input": { "game": { "id": "a" }, "engine": "web", "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
-    { "name": "replication_on_gdscript", "input": { "game": { "id": "a" }, "engine": "godot-gdscript", "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
-    { "name": "replication_no_engine", "input": { "game": { "id": "a" }, "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_needs_csharp" } },
+    { "name": "replication_on_gdscript", "input": { "game": { "id": "a" }, "engine": "godot-gdscript", "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_not_gdscript" } },
+    { "name": "replication_no_engine", "input": { "game": { "id": "a" }, "sync": { "mode": "replication" } }, "error": { "path": "sync.mode", "rule": "replication_not_gdscript" } },
     { "name": "migrate_with_replication", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "server": true }, "sync": { "mode": "replication" }, "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_with_replication" } },
     { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } }
   ],

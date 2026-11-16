@@ -529,8 +529,8 @@ static func _cross_rules(d: Dictionary, input: Dictionary) -> Dictionary:
 		return _fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true")
 	if eng == "web" and h["direct"]:
 		return _fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)")
-	if s["mode"] == "replication" and not ["godot-csharp", "unity", "dotnet"].has(eng):
-		return _fail("sync.mode", "replication_needs_csharp", "replication needs engine godot-csharp, unity or dotnet")
+	if s["mode"] == "replication" and (eng == null or eng == "godot-gdscript"):
+		return _fail("sync.mode", "replication_not_gdscript", "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)")
 	if s["mode"] == "replication" and ses["hostLeaves"] == "migrate":
 		return _fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end")
 	var late_given := _sect(input.get("lobby")).has("lateJoin")
