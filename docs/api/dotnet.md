@@ -388,6 +388,19 @@ public interface ITransport
     void Poll();
 ```
 
+## OneLobby.Core/InMemoryLanNet.cs
+
+```csharp
+/// An in-memory UDP network: sends to 127.0.0.1:port reach the socket bound there; broadcasts go nowhere. No OS socket exists.
+public sealed class InMemoryLanNet
+    /// Sockets made so far (each Factory call).
+    public int Created;
+    public readonly List<string> Sent;
+    public Func<ILanUdp> Factory;
+    /// Sockets bound right now: 0 when nothing is open.
+    public int BoundCount { get; }
+```
+
 ## OneLobby.Core/InMemoryNetwork.cs
 
 ```csharp
@@ -873,6 +886,8 @@ public sealed record MenuBanRow(string Key, string Text);
 public sealed record MenuRequest(int PeerId, string Name);
 /// A line of the lobby's chat log, with the sender's name.
 public sealed record MenuChatLine(int PeerId, string Name, string Text);
+/// One LAN game row. Text is plain text (never markup); Lock the password mark ("" when none); Note says why CanJoin is false.
+public sealed record MenuLanRow(string Address, int Port, string Name, string HostName, int Players, int MaxPlayers, bool HasPassword, bool SameVersion, string Text, string Lock, bool CanJoin, string Note);
 /// The settings the room layer lets the host change; AutoStart is off, all_ready or players.
 public sealed record MenuLobbySettings(string AutoStart, int MinPlayers, int CountdownSeconds, bool LateJoin);
 /// The drop-in menu's brain: which screen is showing and every decision behind it. No engine types: it takes its LobbyClient by injection (and the clipboard, the connection check and the direct routes as delegates), so a Godot controller, a Unity one or a test drives it the same way. It is a port of the GDScript OneLobbyMenuModel. var m = new MenuModel(client) { Clipboard = text => GodotClipboard.Set(text) }; m.SetJoinText("7HQ 4K2"); await m.JoinAsync(); // Screen: Connecting, then Lobby (or Error with a plain sentence) m.ToggleReady(); The client must be pumped (LobbyClient.Pump, every frame) for anything that waits to finish; everything runs on the pumping thread. HostAsync and JoinAsync never throw: a failure becomes the Error screen. Changed fires after any state change. Texts come from MenuText.
@@ -908,6 +923,14 @@ public sealed class MenuModel
     public Action<string>? Clipboard { get; set; }
     /// Runs the connection check: gets CheckOptions. Default: the client's own.
     public Func<CheckOptions?, Task<CheckResult>>? CheckRunner { get; set; }
+    /// LAN games for a game with no blueprint (with one, hosting.lan decides): the Browse screen shows a "LAN games" list.
+    public bool Lan { get; set; }
+    /// False where the client cannot open a UDP socket (a web player): there is no LAN list.
+    public bool LanSupported { get; set; }
+    /// Makes the finder (default: client.CreateLanFinder(options)). A test passes one over an in-memory network.
+    public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
+    /// The clock for "nothing found after 3 seconds" (default: a stopwatch).
+    public Func<long>? NowMs { get; set; }
     public CheckOptions? CheckOptions { get; set; }
     public MenuScreen Screen { get; private set; }
     public Lobby? Lobby { get; private set; }
@@ -923,6 +946,9 @@ public sealed class MenuModel
     public IReadOnlyList<MenuRequest> Requests { get; private set; }
     public IReadOnlyList<LobbySummary> BrowseItems { get; private set; }
     public string BrowseStatus { get; private set; }
+    /// "online" or "lan": the list the Browse screen opened on last in this run (first time: Online).
+    public string BrowseTab { get; private set; }
+    public string LanPasswordText { get; private set; }
     public string SettingsNote { get; private set; }
     public string RelayNote { get; private set; }
     public string ServerText { get; private set; }
@@ -944,6 +970,14 @@ public sealed class MenuModel
     public int MaxNameLength;
     /// Browse needs a lobby server address (and a blueprint that uses one).
     public bool CanBrowse();
+    /// True when this game has LAN discovery on (blueprint hosting.lan; with no blueprint, Lan) and the client can open UDP.
+    public bool LanAvailable;
+    /// The Browse button shows when the lobby server list or the LAN list is available.
+    public bool BrowseAvailable;
+    /// True when the Browse screen shows the two-button tab bar (both lists are available).
+    public bool BrowseTabsShown;
+    /// "online" or "lan": the list the Browse screen shows now.
+    public string ShownList;
     public bool ConnectionCheckShown;
     /// The menu runs the connection check once when it opens: on unless diagnostics.checkOnOpen is false ("button only"), the check is hidden (showConnectionCheck false), or the menu is LocalOnly.
     public bool CheckOnOpenEnabled;
@@ -1027,11 +1061,35 @@ public sealed class MenuModel
     /// Runs the connection check and keeps its one-line verdict and three facts.
     public async Task RunCheckAsync();
     public async Task OpenBrowseAsync();
+    /// Picks a tab ("online" or "lan") on the Browse screen. Leaving the LAN tab closes the finder; opening it starts one.
+    public async Task SetBrowseTabAsync(string tab);
+    /// Refresh: asks the server again, or asks the LAN now.
     public async Task RefreshBrowseAsync();
     /// The text of a browse row: "Name (Host) 2/4".
     public static string BrowseRowText(LobbySummary s);
     /// Joins a listed lobby.
     public async Task JoinListedAsync(string code);
+    /// How long the LAN list says "looking" before it says nothing was found.
+    public const int LanEmptyAfterMs;
+    /// True while a finder exists (the LAN list is the shown list). A test counts this.
+    public bool FinderRunning;
+    public void SetLanPassword(string text);
+    /// For the view: the menu left the tree, the application is quitting, or the menu was hidden. The finder goes; the screen stays.
+    public void Shutdown();
+    /// For the view: the menu is visible again; a LAN list that is on screen looks again.
+    public void Resume();
+    /// For the view, every frame (any screen): reads the finder's answers while the LAN list is up and lets "nothing found" appear after 3 seconds.
+    public void Pump();
+    /// The LAN list's rows, in the finder's order (first seen first; not re-sorted).
+    public IReadOnlyList<MenuLanRow> LanRows();
+    /// The sentence under the LAN list's title: still looking, nothing found (after 3 seconds), the socket failed, or LAN switched off. "" with rows.
+    public string LanStatusText();
+    /// The status line of the shown list.
+    public string ListStatus;
+    /// The title of the Browse screen: it says which list when only one is available.
+    public string BrowseTitle;
+    /// Joins row index of the LAN list through the join path, as if its "address:port" had been typed. The finder stops with the screen.
+    public async Task JoinLanAsync(int index);
 ```
 
 ## OneLobby.Core/MenuText.cs

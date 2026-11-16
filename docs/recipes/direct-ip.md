@@ -369,8 +369,8 @@ Facts a game can run into with `hostDirect` / `hostNostr` (same numbers in C# an
 
 Players on one local network can find a direct host without typing a code: the host answers a broadcast question and each
 player's game lists the answers. Typing the host's `ip:port` (or a join code) keeps working in every game. Wire, limits and
-timers: [spec/lan-discovery.md](../../spec/lan-discovery.md). The menu tab that draws the list is not part of the library
-yet; the finder gives a menu its rows.
+timers: [spec/lan-discovery.md](../../spec/lan-discovery.md). The drop-in menus draw the list in a "LAN games" list on their Browse
+screen ([menu.md](menu.md), "LAN games"); the finder gives any other menu its rows.
 
 **Turn it on.** Off unless the game asks: `"hosting": { "direct": true, "lan": true }` in `onelobby.json` (it needs
 `hosting.direct`), or the host option `lan` in code (C# `DirectHostOptions.Lan`, Node `hostDirect(kit, { lan: true })`,
@@ -421,7 +421,9 @@ broadcast `255.255.255.255` and, in C# and Node, the directed broadcast of each 
 a VPN or virtual adapter sends the limited one out of one card only); GDScript asks the limited broadcast only, because
 Godot does not give a card's netmask. A test or a `--local` game passes `127.0.0.1` as the only target: the finder then binds
 `127.0.0.1` and a host with `listen_address` / `BindAddress` / `bindHost` `127.0.0.1` answers on `127.0.0.1` only, so
-nothing leaves the machine.
+nothing leaves the machine. Only a loopback `listen_address` / `BindAddress` / `bindHost` counts as "this PC only": `127.x.x.x`,
+`localhost` and `::1` all keep the answering socket on `127.0.0.1` (JS and GDScript matched C# here; an exact `127.0.0.1` was the
+only form before).
 
 **Firewall (known by design, not measured).** The finder opens no fixed port and receives only answers to its own
 questions; a host already listens for direct joins (section 6). Whether Windows shows an "allow this app?" prompt for the

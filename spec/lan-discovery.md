@@ -1,7 +1,8 @@
 # LAN discovery (wire version 1)
 
-Status: library built in JS (Node), C# and GDScript, 2026-11-16. Proven only on one machine over 127.0.0.1. Nothing here
-has been run on a real network with two machines yet. The menu tab that draws the list is a separate piece of work.
+Status: library built in JS (Node), C# and GDScript, 2026-11-16; the "LAN games" list of the drop-in menus (GDScript, Godot C#,
+Unity) is built on it (`docs/recipes/menu.md`). Proven only on one machine over 127.0.0.1. Nothing here has been run on a real
+network with two machines yet.
 
 A game on the same local network finds a direct host without a code. It is **opt-in**: off unless `onelobby.json` has
 `hosting.lan: true` (needs `hosting.direct`), or the host option `lan` is passed in code. Typing the host's `ip:port`
@@ -136,7 +137,8 @@ with a reason, and the list stays empty.
 
 ## 7. Not measured
 
-Whether Windows Firewall shows an "allow this app?" prompt for the finder or the answering host in a shipped game has
-not been measured. By design: the finder opens no fixed port and receives only answers to its own questions; a direct
+The menus' "LAN games" list exists and was run over 127.0.0.1 only (a `--local` host and a `--local` joiner; the menus ask
+`127.0.0.1`). Whether Windows Firewall shows an "allow this app?" prompt for the finder or the answering host in a shipped game
+has not been measured. By design: the finder opens no fixed port and receives only answers to its own questions; a direct
 host already listens for direct joins. Nothing here has been seen on a real network with two machines (a real router,
 a real broadcast, a real firewall, a network that blocks broadcast between clients).

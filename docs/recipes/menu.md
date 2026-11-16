@@ -32,7 +32,7 @@ func _on_left() -> void:
 ## What it shows
 
 - **Start.** Name (cleaned with the room's name rules and saved), Host, Join (cleaned as typed; offers the last code; also takes a pasted invite sentence, a bare code, an `ip:port` or an invite link), Password,
-  Browse (only when a lobby server is set), Settings.
+  Browse (when a lobby server is set or LAN games are on, see "LAN games"), Settings.
 - **Connecting.** What is being tried, and Cancel.
 - **Lobby.** The code, large, with Copy code and Copy invite (the sentence `Join my game in <Game>: code 7HQ 4K2`, the game's `game.title`, or `Join my game: code 7HQ 4K2` with no title; when `invite_base` is set and the code is a lobby-server code, a space and the invite link follow); the roster
   (host mark, ready, watching, reconnecting, ping); a Ready toggle; for the host Start (everyone sees the countdown, the host can
@@ -120,13 +120,55 @@ removal reasons), so they are reworded at their source.
 | `ui.kind` | `drop-in` (the default for `godot-gdscript` and `godot-csharp`) is this menu; `generated` / `none` mean you draw your own |
 | `players.identity: "anonymous"` | no name field |
 | `players.maxNameLength` | the name is cut at this length |
-| `hosting.server` / `hosting.lobbyServer` | Host and Join use the lobby server; without them a direct lobby with a Nostr code. Browse needs a server. |
+| `hosting.server` / `hosting.lobbyServer` | Host and Join use the lobby server; without them a direct lobby with a Nostr code. The Online list in Browse needs a server. |
+| `hosting.lan` (needs `hosting.direct`) | Browse gets a "LAN games" list, and a lobby the menu hosts direct answers LAN questions. Off: no list, no socket. |
 | `lobby.approveJoins` | the host sees Let in / Refuse |
 | `chat.text` | the lobby shows the chat box |
 | `room.*` | countdown, auto start, spectators, late join, seat rules: the room layer's, shown as it runs |
 | `diagnostics.showConnectionCheck` | false hides the Connection check button in Settings, and the check never runs by itself |
 | `diagnostics.checkOnOpen` | false: the check runs only on the button (default true: once, when the menu opens) |
 | `diagnostics.reportToHost`, `logSize`, `relayProbe` | applied to the client by `from_config` |
+
+## LAN games
+
+A game with `"hosting": { "direct": true, "lan": true }` in `onelobby.json` shows the games on the same local network in the menu,
+and a click joins one. The library half is `docs/recipes/direct-ip.md` section 7b and `spec/lan-discovery.md`; this is what the menu
+does with it. Typing the host's `ip:port` in the Join box keeps working in every game.
+
+- **Where.** The Browse screen has two lists: the lobby server's ("Online") and "LAN games". With both available a two-button tab bar
+  picks one, and the screen opens on the tab used last in this run (first time: Online). With only one available there is no tab bar,
+  the list fills the screen and the title says which ("Online games" / "LAN games"). The start screen's Browse button shows when
+  either is available. LAN is available when the blueprint has `hosting.lan` true and the client can open UDP; a game with no
+  blueprint turns it on with the menu property `lan` (GDScript `lan`, Godot C# `Lan`, Unity `Lan`; default off).
+- **Looking only while the list is shown.** The menu makes and starts the finder when the LAN list becomes the shown list and stops it
+  (the socket closes, the object is dropped) when it stops being shown for any reason: the other tab, Back, a join, a game starting,
+  the menu hidden or disabled, taken out of the tree or freed, the application closing. At any other time no finder and no socket exist.
+- **Rows.** One per host, first seen first (the finder's order; not re-sorted): lobby name, host player's name, `2/4`, and
+  "Needs a password" when one is needed. Names are shown as plain text, never markup. A host on another version stays listed,
+  greyed, its Join disabled, with the sentence the menu already uses for a version mismatch ("You and the host are running different
+  versions of the game."). A full lobby stays clickable: the join answers as it does today.
+- **Sentences** (`MenuText` keys, the same in every menu): `lan_looking` (shown at once), `lan_empty` (after 3 seconds without a row;
+  it says the host can also read out their address), `lan_socket_failed`, `lan_off` (LAN switched off in this game: the UI does not
+  reach it, a finder that reports `off` shows it), `lan_row`, `lan_locked`, and the tab and title keys `browse_tab_online`,
+  `browse_tab_lan`, `browse_title_online`, `browse_title_lan`.
+- **Joining.** A click joins through the menu's own join path with `address:port`, as if typed. The start screen's password box is
+  cleared whenever that screen opens and the Online list has no password field, so the LAN list has one password field
+  (`BrowseLanPasswordEdit`) above its rows; what is typed there goes with the join.
+- **The host side.** A lobby hosted from the menu answers LAN questions when the direct host it starts has the switch on: GDScript
+  (`client.config.direct_options()`) and C# (`Blueprint.ToDirectHostOptions`, which the Unity menu uses itself and the Godot C# demo and
+  the scaffolder's `OneLobbyNet` use) copy `hosting.lan`; with no blueprint the menu's `lan` / `Lan` is passed on (GDScript and
+  Unity do it themselves; a Godot C# game passes `DirectHostOptions.Lan` in its own `HostDirect`). A menu that hosts on the lobby
+  server (`hosting.server` true and not `--local`) hosts no direct lobby, so nothing answers.
+- **`--local`.** A local-only menu (`--local`) gives the finder the single target `127.0.0.1`, so nothing is broadcast, and its own
+  host listens on `127.0.0.1` only. To try it on one PC, open a host window and a second window of the same game, both with `--local`
+  and `hosting.lan` on, and press Browse games in the second. The demos: GDScript
+  `godot --path clients/gdscript res://examples/menu_demo/main.tscn -- --local --host --name=Sam` then
+  `... -- --local --name=Ann`; Godot C# `godot --path clients/dotnet/demo-godot res://MenuDemo.tscn -- --local --host --name=Sam` then
+  `... -- --local --name=Ann`. Both demos' `onelobby.json` have `hosting.lan` on.
+- **Not in the web element.** A browser cannot send UDP, so `<one-lobby>` has no LAN list (the finder there reports `browser`).
+- **Not proven.** Everything here ran over `127.0.0.1` only. Still unproven: a real broadcast on Wi-Fi or cable, a PC with several
+  network cards, a router that blocks broadcast between clients, and whether Windows Firewall asks "allow this app?" for a game whose
+  LAN list is opened or that hosts with the switch on.
 
 ## The connection check on open
 
@@ -349,7 +391,7 @@ It draws the same screens as the Godot menu. `docs/no-code.md` is the guide for 
 | Lobby | The code with Copy code, Copy invite (the sentence, then the invite link) and Copy invite link; the roster with marks (Host, Ready, Watching, Reconnecting, ping where measured, "(you)"); a Ready toggle; for the host Start (everyone sees the countdown; Cancel start), Kick and Ban on every row with an optional reason, the ban list with Unban, the lobby settings the room layer offers (start by itself, players needed, countdown seconds, late join), Let in / Refuse when joins need approval, Back to lobby while a game runs; text chat (last 100 lines) unless the blueprint turns it off; a plain-list note against a host with no room layer. |
 | Removed / error | A title, the plain sentence (a kick or ban shows the host's reason, or the default sentence of the code), the hint, the stable code, Try again (not after a removal), Back, Copy logs and Save logs (a file download; addresses are hidden). |
 | Settings | The relay line (saved, then shown only masked: `turn:host:3478 <hidden> <hidden>`; the typed line is cleared on save and never read back), the lobby server (a page that sets `server=` keeps its own; the saved one is the fallback), the connection check (a verdict line and three facts; it runs only when the button is pressed), Copy logs. |
-| Browse | Listed lobbies from the lobby server with Join, Refresh, and the empty and failure texts. |
+| Browse | Listed lobbies from the lobby server with Join, Refresh, and the empty and failure texts. No LAN list: a browser cannot send UDP. |
 
 Escape goes back one screen (`ui_cancel`): settings and browse to start, an error or a connecting screen to start, a lobby leaves it.
 Enter submits the Join box, the chat line, the relay line and the server line. Focus moves to a sensible control when a screen

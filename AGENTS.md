@@ -339,7 +339,8 @@ per non-default key, build with the scaffolder's template and the drop-in menu (
   `lobby.joinCode` is a Nostr code by default (works with no port forwarded), `lobby.directCode` the IP code for LAN;
   `nostr: false` / blueprint `hosting.nostr: false` is IP codes only (more: section 7 there). LAN games (opt-in,
   `hosting.lan`, off by default; a direct host answers a broadcast question, the finder lists hosts: `client.CreateLanFinder()` /
-  `kit.lanFinder()` / `client.lan_finder()`; spec `spec/lan-discovery.md`, recipe section 7b there; the menu tab is not built yet)
+  `kit.lanFinder()` / `client.lan_finder()`; spec `spec/lan-discovery.md`, recipe section 7b there; the drop-in menus (GDScript, Godot C#, Unity) show a "LAN games" list on Browse when `hosting.lan` is on:
+  `docs/recipes/menu.md` "LAN games"; not in the web element; proven over 127.0.0.1 only)
 - Browser game whose server is a Node process on the host's PC (join link, page served on 47810, WebSocket-shaped
   adapter): `docs/recipes/browser-game.md`
 - Dev console a local tool can reach (`ogc1`: loopback HTTP, token file, off by default): `docs/recipes/game-console.md`

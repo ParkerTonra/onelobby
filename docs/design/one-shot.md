@@ -49,8 +49,11 @@ retry), player-pasted relay line, LAN discovery (same-network broadcast), rejoin
 LAN discovery is built in this release as opt-in: off unless the game maker turns it on in `onelobby.json`; then the menu gets a
 "LAN games" tab and the game listens only while that tab is open. Typing the host's IP and port keeps working in every game.
 Status (2026-11-16): the library half is built in JS (Node), C# and GDScript (`spec/lan-discovery.md`, `hosting.lan`, the host's
-answering socket, the finder and its rows; proven on one machine over 127.0.0.1 only). The "LAN games" menu tab is the next
-lane; a two-PC run on a real network is still owed.
+answering socket, the finder and its rows; proven on one machine over 127.0.0.1 only). Landed (the menu lane): a "LAN games" list on the
+Browse screen of the GDScript, Godot C# and Unity menus (a tab bar when the lobby server list is there too; the finder exists only while
+the list is shown; rows with name, host, players, a password mark and a greyed other-version row; a click joins by `address:port`;
+`--local` asks `127.0.0.1` only; the web element has no list). Run over 127.0.0.1 only: a two-PC run on a real network, several network
+cards, a router that blocks broadcast and the Windows Firewall prompt are still unproven.
 
 **Lobby.** Player names (default name, length clamp, sanitise, dedupe as "Name 2", rename), per-player data (colour,
 avatar index, team or seat), ready toggle, host settings (max players, password on every route, listed or private),
