@@ -111,7 +111,7 @@ namespace OneLobby.Godot
         }
     }
 
-    internal sealed class GodotPeerLink : IPeerLink, IBufferedPeerLink
+    internal sealed class GodotPeerLink : IPeerLink, IBufferedPeerLink, IDiagnosticPeerLink
     {
         private readonly WebRtcPeerConnection _pc = new();
         private readonly WebRtcDataChannel[] _ch = new WebRtcDataChannel[3];
@@ -120,6 +120,18 @@ namespace OneLobby.Godot
         private readonly PeerLinkOptions _opts;
         private bool _everConnected;
         private long _lastState;
+        private bool _turnSet;
+        private bool _relaySeen;
+        private WebRtcPeerConnection.ConnectionState? _lastTraced;
+
+        public Action<string, string>? OnTrace { get; set; }
+
+        /// <summary>
+        /// For a diagnosis (spec/diagnostics.md s.10): Godot's WebRtcPeerConnection reports no gathering state and no relay
+        /// error, so a link with a TURN entry and no relay candidate seen stays <see cref="RelayState.Pending"/> and the lobby asks
+        /// the TURN server itself with a raw probe when the connection stalls.
+        /// </summary>
+        public LinkFacts Facts() => new LinkFacts(_everConnected, !_turnSet ? RelayState.None : _relaySeen ? RelayState.Ok : RelayState.Pending);
 
         public bool Disposed { get; private set; }
         public bool IsFailed { get; private set; }
@@ -144,6 +156,9 @@ namespace OneLobby.Godot
         public GodotPeerLink(PeerLinkOptions options)
         {
             _opts = options;
+            foreach (var s in options.IceServers)
+                foreach (var u in s.Urls)
+                    if (u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)) _turnSet = true;
             var servers = new global::Godot.Collections.Array<global::Godot.Collections.Dictionary>();
             foreach (var s in options.IceServers)
             {
@@ -175,7 +190,11 @@ namespace OneLobby.Godot
                 _pc.SetLocalDescription(type, sdp);
                 _out.Enqueue(PeerSignal.Description(type, sdp));
             };
-            _pc.IceCandidateCreated += (media, index, name) => _out.Enqueue(PeerSignal.Ice(name, media, (int)index));
+            _pc.IceCandidateCreated += (media, index, name) =>
+            {
+                if (name.Contains(" typ relay")) _relaySeen = true;
+                _out.Enqueue(PeerSignal.Ice(name, media, (int)index));
+            };
         }
 
         private WebRtcDataChannel Create(string label, int id, bool ordered, int? maxRetransmits)
@@ -190,6 +209,7 @@ namespace OneLobby.Godot
             if (Disposed || IsFailed) return;
             _pc.Poll();
             var st = _pc.GetConnectionState();
+            if (_lastTraced != st) { _lastTraced = st; OnTrace?.Invoke("ice", "connection " + st.ToString().ToLowerInvariant()); }
             if (st == WebRtcPeerConnection.ConnectionState.Connected) _everConnected = true;
             if (st == WebRtcPeerConnection.ConnectionState.Failed || st == WebRtcPeerConnection.ConnectionState.Closed ||
                 (_everConnected && st == WebRtcPeerConnection.ConnectionState.Disconnected))

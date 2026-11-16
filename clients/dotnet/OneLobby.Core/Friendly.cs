@@ -9,7 +9,9 @@ namespace OneLobby
     /// <param name="Code">The error code (<see cref="LobbyErrorCodes"/>), or <c>unknown</c>.</param>
     /// <param name="Message">One short sentence a player can read.</param>
     /// <param name="Hint">What the player can do about it; null when there is nothing.</param>
-    public sealed record FriendlyError(string Code, string Message, string? Hint = null);
+    /// <param name="Cause">When the error is a connection failure that knows why (spec/diagnostics.md s.9): the cause code, e.g. <c>nat_blocked</c>; the <paramref name="Message"/> and <paramref name="Hint"/> then say why. Null otherwise.</param>
+    /// <param name="Stage">The step that failed (<c>signaling</c>, <c>join</c>, <c>offer</c>, <c>ice</c>, <c>channels</c>, <c>handshake</c>); null with no <paramref name="Cause"/>.</param>
+    public sealed record FriendlyError(string Code, string Message, string? Hint = null, string? Cause = null, string? Stage = null);
 
     /// <summary>
     /// Plain-language error text for players. The wording is the JS client's <c>describeError</c> word for word
@@ -87,7 +89,7 @@ namespace OneLobby
         public static FriendlyError DescribeError(Exception? error)
         {
             if (error == null) return DescribeError((string?)null);
-            if (error is OneLobbyException o) return DescribeError(o.Code, null, o.Message);
+            if (error is OneLobbyException o) return Diagnosed(o.Code, o.Diagnosis) ?? DescribeError(o.Code, null, o.Message);
             var name = error is TimeoutException || error is OperationCanceledException ? "TimeoutError"
                 : error is System.Net.Sockets.SocketException || error is System.Net.WebSockets.WebSocketException || error is System.Net.Http.HttpRequestException ? "NetworkError"
                 : error.GetType().Name;
@@ -95,7 +97,11 @@ namespace OneLobby
         }
 
         /// <summary>Text for a <see cref="LobbyError"/> (the client's <c>Error</c> event).</summary>
-        public static FriendlyError DescribeError(LobbyError error) => DescribeError(error?.Code, null, error?.Message);
+        public static FriendlyError DescribeError(LobbyError error) => Diagnosed(error?.Code, error?.Diagnosis) ?? DescribeError(error?.Code, null, error?.Message);
+
+        /// <summary>A connect failure that knows why says why instead of the generic line for its code (spec/diagnostics.md s.9).</summary>
+        private static FriendlyError? Diagnosed(string? code, Diagnosis? d) =>
+            code != null && d != null && CodeRe.IsMatch(code) ? new FriendlyError(code, d.Message, string.IsNullOrEmpty(d.Hint) ? null : d.Hint, d.Cause, d.Stage) : null;
 
         /// <summary>Text for a bare code or a <c>code: text</c> string such as <c>"lobby_full: lobby is full"</c>; null gives <c>unknown</c>.</summary>
         public static FriendlyError DescribeError(string? codeOrText)

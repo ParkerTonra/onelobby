@@ -81,6 +81,7 @@ namespace OneLobby
         {
             _c = client;
             _t = client.Transport;
+            _startedMs = _t.NowMs;
             Code = msg.Code;
             _you = msg.You;
             _hostId = msg.HostId;
@@ -266,6 +267,13 @@ namespace OneLobby
         /// the timeout off.
         /// </summary>
         public event Action<Peer, string>? PeerFailed;
+        /// <summary>
+        /// Host: a joiner that could not connect told you why (spec/diagnostics.md s.7.3): its roster name, the cause, the same
+        /// sentence it saw, what you can do, and one line for a host screen (<c>Sam: strict NAT, no relay set, stopped at the
+        /// connection check after 15 s.</c>). Needs a hub that lists the <c>diag</c> feature and a joiner with
+        /// <see cref="DiagnosticsOptions.ReportToHost"/> on; at most one per joiner every 10 s.
+        /// </summary>
+        public event Action<PeerDiagnosisInfo>? PeerDiagnosis;
         public event Action<Peer>? JoinRequested;
         public event Action<int>? HostChanged;
         /// <summary>A member (you included) changed its display name mid-session: the peer with its new name, and the old name.</summary>
@@ -505,6 +513,7 @@ namespace OneLobby
 
         internal void Start()
         {
+            Log("lobby", (IsHost ? "hosting" : "joined") + " as peer " + _you + ", host is peer " + _hostId + ", " + _peers.Count + " in the roster");
             if (IsHost)
             {
                 _ready = true;
@@ -575,6 +584,9 @@ namespace OneLobby
                 // the direct attempt stalled: dial the host ourselves through the TURN relay (a host answers an offer)
                 _readyDeadlineMs = now + _readyRetryBudgetMs;
                 _readyRetryBudgetMs = 0;
+                StartRelayProbe();
+                _relayRetried = true;
+                Log("retry", "direct attempt stalled: dialing the host again through the relay only");
                 ConnectPeer(h, true, relayOnly: true);
                 return;
             }
@@ -584,13 +596,163 @@ namespace OneLobby
 
         private void GiveUpConnecting()
         {
+            StartRelayProbe();
+            // wait for the relay probe (at most a moment) so a refused login is told from a silent relay
+            if (_relayProbe != null && !_closed)
+            {
+                _giveUpWait = System.Diagnostics.Stopwatch.StartNew();
+                return;
+            }
+            FinishGivingUp();
+        }
+
+        private const int RelayProbeWaitMs = 2500;
+
+        private void CheckGiveUpWait()
+        {
+            if (_giveUpWait == null) return;
+            if (_relayProbe != null && !_relayProbe.IsCompleted && _giveUpWait.ElapsedMilliseconds < RelayProbeWaitMs) return;
+            _giveUpWait = null;
+            FinishGivingUp();
+        }
+
+        private void FinishGivingUp()
+        {
+            if (_gaveUp || _closed || _ready) return;
+            _gaveUp = true;
             // names the next step; same wording as the JS and GDScript clients
             var msg = IceFailedMessage(HasRelay(_c.Ice));
-            _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg));
-            _c.RaiseError(new LobbyError("ice_failed", msg));
+            var facts = JoinerFacts("ice_failed");
+            var d = Diagnose.Run(facts);
+            Log("diag", "cause " + d.Cause + " stage " + d.Stage + " after " + facts.ElapsedMs + " ms");
+            Log("error", "ice_failed", code: "ice_failed");
+            SendReport(d, facts);
+            _readyTcs.TrySetException(new OneLobbyException("ice_failed", msg) { Diagnosis = d });
+            _c.RaiseError(new LobbyError("ice_failed", msg) { Diagnosis = d });
             if (_closed) return;
             _c.SendRaw(Signaling.Simple("leave"));
             End("ice_failed");
+        }
+
+        // ---- diagnostics (spec/diagnostics.md): facts from the signaling traffic and the link, the report, the host's event ----
+
+        private readonly HashSet<string> _seenLocal = new HashSet<string>(), _seenRemote = new HashSet<string>();
+        private bool _negotiated, _gaveUp, _relayRetried;
+        private readonly long _startedMs;
+        private Task<string>? _relayProbe;
+        private System.Diagnostics.Stopwatch? _giveUpWait;
+        private readonly Dictionary<int, long> _diagAt = new Dictionary<int, long>();
+        private static readonly string[] CandidateOrder = { "host", "srflx", "relay" };
+        private static readonly System.Text.RegularExpressions.Regex CandRe = new System.Text.RegularExpressions.Regex(
+            @"^(?:a=)?candidate:\S+ [0-9]+ \S+ [0-9]+ (\S+) ([0-9]+) typ (host|srflx|prflx|relay)\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        private void Log(string kind, string text, string? addr = null, string? code = null) => _c.NetLog.Add(kind, text, addr, code);
+
+        /// <summary>Counts the candidate types in a signal that crosses the host link (the facts <see cref="Diagnose.Run"/> takes) and logs the step.</summary>
+        private void NoteSignal(string dir, int peerId, PeerSignal s)
+        {
+            var lines = new List<string>();
+            if (s.Sdp != null)
+            {
+                _negotiated = true;
+                Log("sdp", dir + " " + s.SdpType);
+                foreach (var l in s.Sdp.Split('\n')) { var t = l.TrimEnd('\r'); if (t.StartsWith("a=candidate:", StringComparison.Ordinal)) lines.Add(t.Substring(2)); }
+            }
+            else if (s.Candidate != null) lines.Add(s.Candidate);
+            foreach (var line in lines)
+            {
+                var m = CandRe.Match(line);
+                if (!m.Success) continue;
+                var type = m.Groups[3].Value == "prflx" ? "srflx" : m.Groups[3].Value;
+                if (peerId == _hostId && !IsHost) (dir == "out" ? _seenLocal : _seenRemote).Add(type);
+                Log("cand", dir + " " + type, m.Groups[1].Value + ":" + m.Groups[2].Value);
+            }
+        }
+
+        private LinkFacts? HostLinkFacts() => _peers.TryGetValue(_hostId, out var h) ? (h.Link as IDiagnosticPeerLink)?.Facts() : null;
+
+        private Reached ReachedNow()
+        {
+            if (_peers.TryGetValue(_hostId, out var h) && h.Link is { } l)
+            {
+                if (l.IsOpen) return Reached.Channels;
+                if ((l as IDiagnosticPeerLink)?.Facts().IceConnected == true) return Reached.Ice;
+            }
+            return _negotiated ? Reached.Offer : Reached.Joined;
+        }
+
+        private RelayState RelayNow()
+        {
+            if (!HasRelay(_c.Ice)) return RelayState.None;
+            if (_seenLocal.Contains("relay")) return RelayState.Ok;
+            if (_relayProbe is { IsCompleted: true, Status: TaskStatus.RanToCompletion })
+            {
+                var r = _relayProbe.Result;
+                if (r == "refused") return RelayState.Refused;
+                if (r == "unreachable") return RelayState.Unreachable;
+            }
+            return HostLinkFacts()?.Relay ?? RelayState.Pending;
+        }
+
+        private static IReadOnlyList<string> Sorted(HashSet<string> set) => CandidateOrder.Where(set.Contains).ToList();
+
+        private DiagnoseFacts JoinerFacts(string error) => new DiagnoseFacts
+        {
+            Side = "joiner", Route = _c.Route, Error = error,
+            Reached = ReachedNow(),
+            ElapsedMs = Math.Max(0, NowMs - _startedMs),
+            Stun = _c.Ice.Any(s => s.Urls.Any(u => u.StartsWith("stun:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("stuns:", StringComparison.OrdinalIgnoreCase))),
+            Relay = RelayNow(),
+            Local = Sorted(_seenLocal), Remote = Sorted(_seenRemote),
+            Retried = _relayRetried,
+            Nat = Diagnose.NatFact(_c.LastCheck),
+            Heard = null,
+        };
+
+        /// <summary>The stall with a relay set and no relay candidate: ask the TURN server itself why (refused login or silence), where the link cannot tell.</summary>
+        private void StartRelayProbe()
+        {
+            if (_relayProbe != null || IsHost || !_c.Config.Diagnostics.RelayProbe) return;
+            var f = HostLinkFacts();
+            if (f == null || (f.Relay != RelayState.Failed && f.Relay != RelayState.Pending)) return; // links without facts (or with a relay candidate) are not probed
+            var turn = _c.Ice.FirstOrDefault(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
+            if (turn == null) return;
+            var log = _c.NetLog;
+            _relayProbe = ConnectionCheck.ProbeRelayAsync(turn).ContinueWith(t =>
+            {
+                var r = t.Status == TaskStatus.RanToCompletion ? t.Result : "unknown";
+                log.Add("diag", "relay probe " + r);
+                return r;
+            }, TaskScheduler.Default);
+        }
+
+        /// <summary>Joiner: tell the host the cause over the signaling path (hubs that list the <c>diag</c> feature only), once.</summary>
+        private void SendReport(Diagnosis d, DiagnoseFacts facts)
+        {
+            var cfg = _c.Config.Diagnostics;
+            if (!cfg.ReportToHost || IsHost || !_c.Features.Contains("diag")) return;
+            var nat = _c.LastCheck;
+            var natType = nat == null ? null : nat.Udp == "blocked" ? "blocked" : nat.NatType != "unknown" ? nat.NatType : null;
+            var report = new DiagnosisReport(d.Cause, d.Stage, facts.ElapsedMs, facts.Relay != RelayState.None, natType, facts.Local, facts.Remote, LobbyClient.LibVersion);
+            _c.SendRaw(Signaling.Diag(report));
+            Log("diag", "report sent " + d.Cause);
+        }
+
+        /// <summary>Host: a joiner diagnosis came through the hub (<c>diag{from, report}</c>).</summary>
+        private void OnDiag(JsonElement e)
+        {
+            if (!IsHost) return;
+            var from = Signaling.Int(e, "from");
+            if (from == _you || !_peers.TryGetValue(from, out var rec)) return;
+            if (!e.TryGetProperty("report", out var rp)) return;
+            var report = Diagnose.CleanReport(rp);
+            if (report == null) return;
+            var now = NowMs;
+            if (_diagAt.TryGetValue(from, out var last) && now - last < Diagnose.ReportHostGapMs) return;
+            _diagAt[from] = now;
+            var x = Diagnose.Explain(report.Cause, report.Stage, report.ElapsedMs);
+            Log("diag", "report from peer " + from + ": " + x.Cause + " at " + report.Stage);
+            PeerDiagnosis?.Invoke(new PeerDiagnosisInfo(ToPeer(rec), rec.Name, report, x.Message, x.HostHint, Diagnose.HostLine(rec.Name, report.Cause, report.Stage, report.ElapsedMs)));
         }
 
         internal static string IceFailedMessage(bool relayConfigured) =>
@@ -622,6 +784,7 @@ namespace OneLobby
             rec.Hello = false;
             rec.HiSent = false;
             rec.Link = _t.CreatePeerLink(new PeerLinkOptions(rec.Id, initiator, _c.Ice, relayOnly || _c.Config.RelayOnly));
+            if (rec.Link is IDiagnosticPeerLink dl) { var log = _c.NetLog; dl.OnTrace = (kind, text) => log.Add(kind, text); }
             rec.LastRxMs = NowMs;
             if (initiator) rec.Link.StartOffer();
         }
@@ -696,7 +859,7 @@ namespace OneLobby
             foreach (var rec in _peers.Values.ToList())
             {
                 if (rec.Link == null || _closed) continue;
-                while (rec.Link.TryTakeSignal(out var sig)) _c.SendRaw(Signaling.Signal(rec.Id, sig));
+                while (rec.Link.TryTakeSignal(out var sig)) { NoteSignal("out", rec.Id, sig); _c.SendRaw(Signaling.Signal(rec.Id, sig)); }
                 if (rec.Link.IsOpen && !rec.OpenHandled) { rec.OpenHandled = true; rec.OpenedMs = rec.LastRxMs = now; OnLinkOpen(rec); }
                 // drain before handling a failure: frames that arrived before the close are still the peer's last words
                 while (rec.Link != null && rec.Link.TryReceive(out var ch, out var data))
@@ -723,6 +886,7 @@ namespace OneLobby
             }
             CheckFlushes(now);
             CheckCodeWaits(now);
+            CheckGiveUpWait();
             CheckReadyTimer(now);
             if (_closed) return;
             CheckPeerWatches(now);
@@ -802,6 +966,8 @@ namespace OneLobby
         {
             // telemetry (server counts relayed vs direct): one report per connection once ICE has completed
             var relayed = rec.Link!.Relayed;
+            Log("chan", "link to peer " + rec.Id + " open");
+            Log("route", relayed ? "relay" : "direct");
             _c.SendRaw(Signaling.Build(w => { w.WriteString("t", "path"); w.WriteString("path", relayed ? "relayed" : "direct"); }));
             if (IsHost)
             {
@@ -1193,6 +1359,9 @@ namespace OneLobby
                     if (ep > _epoch && id == _hostId) _epoch = ep;
                     return;
                 }
+                case "diag":
+                    OnDiag(e);
+                    return;
                 case "join_request":
                 {
                     if (e.TryGetProperty("peer", out var p)) JoinRequested?.Invoke(new Peer(Signaling.Int(p, "peerId"), Signaling.Str(p, "name"), 0, false));
@@ -1247,6 +1416,7 @@ namespace OneLobby
 
         private void DeliverSignal(PeerRec rec, PeerSignal sig)
         {
+            NoteSignal("in", rec.Id, sig);
             if (rec.Link == null)
             {
                 if (sig.SdpType != "offer" || IsHost) return;

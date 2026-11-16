@@ -59,6 +59,21 @@ namespace OneLobby
         public string? BanFile { get; init; }
         /// <summary>The room layer's defaults for every lobby this client hosts (the blueprint's <c>room</c> fills the same); <see cref="LobbyOptions.Room"/> wins.</summary>
         public RoomOptions? Room { get; init; }
+        /// <summary>The net log, the report to the host and the relay probe (spec/diagnostics.md). Every switch has a working default.</summary>
+        public DiagnosticsOptions Diagnostics { get; init; } = new DiagnosticsOptions();
+    }
+
+    /// <summary>Diagnostics switches (spec/diagnostics.md): all have working defaults.</summary>
+    public sealed record DiagnosticsOptions
+    {
+        /// <summary>Net log ring size: default 500, clamped to 50..5000.</summary>
+        public int LogSize { get; init; } = NetLog.DefaultCapacity;
+        /// <summary>Where the log is saved: on <see cref="NetLog.Save"/> with no path, when the process exits, and when it dies from an unhandled exception. Null: memory only.</summary>
+        public string? LogPath { get; init; }
+        /// <summary>A joiner that gives up tells the host why, over the signaling path it already uses (default true). Hubs without the <c>diag</c> feature get nothing either way.</summary>
+        public bool ReportToHost { get; init; } = true;
+        /// <summary>After a failed connect with a relay set, ask the TURN server with a raw UDP probe whether it refused the login or never answered (default true).</summary>
+        public bool RelayProbe { get; init; } = true;
     }
 
     /// <summary>At most <see cref="Messages"/> raw messages per peer in any <see cref="PerMs"/> window (a fixed window, reset every PerMs).</summary>
@@ -88,7 +103,11 @@ namespace OneLobby
 
     public sealed record DesyncInfo(long Tick, ulong HostHash, ulong LocalHash, int ResyncCount);
 
-    public sealed record LobbyError(string Code, string Message);
+    public sealed record LobbyError(string Code, string Message)
+    {
+        /// <summary>When the error is a connection failure, why (spec/diagnostics.md s.9). The <see cref="Code"/> is unchanged.</summary>
+        public Diagnosis? Diagnosis { get; init; }
+    }
 
     public sealed record ChatLine(int PeerId, uint Id, long Ts, string Text);
 
@@ -98,6 +117,8 @@ namespace OneLobby
     public class OneLobbyException : Exception
     {
         public string Code { get; }
+        /// <summary>When the failure was a connection problem, why (spec/diagnostics.md s.9): the cause, one sentence and one next step. The <see cref="Code"/> is unchanged.</summary>
+        public Diagnosis? Diagnosis { get; set; }
         public OneLobbyException(string code, string message) : base(code + ": " + message) { Code = code; }
     }
 }

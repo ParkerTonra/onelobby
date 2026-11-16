@@ -68,6 +68,7 @@ namespace OneLobby.DataChannel
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void DescriptionCallback(int pc, IntPtr sdp, IntPtr type, IntPtr ptr);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void CandidateCallback(int pc, IntPtr cand, IntPtr mid, IntPtr ptr);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void StateCallback(int pc, State state, IntPtr ptr);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void GatheringCallback(int pc, int state, IntPtr ptr);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void OpenCallback(int id, IntPtr ptr);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void ClosedCallback(int id, IntPtr ptr);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void ErrorCallback(int id, IntPtr error, IntPtr ptr);
@@ -81,6 +82,7 @@ namespace OneLobby.DataChannel
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetLocalDescriptionCallback(int pc, DescriptionCallback cb);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetLocalCandidateCallback(int pc, CandidateCallback cb);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetStateChangeCallback(int pc, StateCallback cb);
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetGatheringStateChangeCallback(int pc, GatheringCallback cb);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetLocalDescription(int pc, byte* type);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcSetRemoteDescription(int pc, byte* sdp, byte* type);
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int rtcAddRemoteCandidate(int pc, byte* cand, byte* mid);

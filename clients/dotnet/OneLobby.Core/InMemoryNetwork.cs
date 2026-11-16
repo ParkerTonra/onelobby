@@ -31,6 +31,7 @@ namespace OneLobby
             public string? CloseReason { get; set; }
             public string GameId = "", NetVersion = "", Name = "", PlayerId = "";
             public int PeerId;
+            public readonly List<long> DiagHits = new();
             public SrvLobby? Lobby;
             public Sock(InMemoryNetwork n) { Net = n; }
             public void Send(string text) { if (State == SocketState.Open) Net.ServerReceive(this, text); }
@@ -58,7 +59,7 @@ namespace OneLobby
             public DateTimeOffset Created;
         }
 
-        private sealed class Link : IPeerLink
+        private sealed class Link : IPeerLink, IDiagnosticPeerLink
         {
             public readonly InMemoryTransport Owner;
             public readonly InMemoryNetwork Net;
@@ -77,21 +78,34 @@ namespace OneLobby
             public bool IsFailed => Failed || (FailAt >= 0 && Net.NowMs >= FailAt);
             public int PingMs => (int)(Net.LatencyMs * 2);
             public bool Relayed => false;
+            public Action<string, string>? OnTrace { get; set; }
+            /// <summary>A link with a TURN entry that is not open models a gathering that ended with no relay candidate (libdatachannel gives no reason).</summary>
+            public LinkFacts Facts() => new LinkFacts(Open, HasTurn() ? (Open ? RelayState.Ok : RelayState.Failed) : RelayState.None);
+            private bool HasTurn() => Options.IceServers.Any(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
+            // what a real description carries: a host and a server-reflexive candidate (documentation addresses)
+            private static string Candidates(string token) => "\r\na=candidate:1 1 UDP 2122317823 192.0.2.10 40001 typ host\r\na=candidate:2 1 UDP 1686052607 198.51.100.7 51000 typ srflx raddr 192.0.2.10 rport 40001\r\n";
             public void StartOffer()
             {
                 Net.Offers[Token] = this;
-                Out.Enqueue(PeerSignal.Description("offer", "offer:" + Token));
+                OnTrace?.Invoke("ice", "gathering complete");
+                Out.Enqueue(PeerSignal.Description("offer", "offer:" + Token + Candidates(Token)));
             }
             public void ApplySignal(PeerSignal s)
             {
                 if (s.Sdp == null) return;
                 if (s.SdpType == "offer" && !Initiator)
                 {
-                    var token = s.Sdp.Substring("offer:".Length);
+                    var token = s.Sdp.Substring("offer:".Length).Split((char)13)[0];
                     if (!Net.Offers.TryGetValue(token, out var offerer) || offerer.Failed) return;
-                    if (Net.CanConnect != null && !Net.CanConnect(offerer.Options, Options)) return; // ICE never completes
+                    if (Net.CanConnect != null && !Net.CanConnect(offerer.Options, Options))
+                    {
+                        // ICE never completes, but this side still gathers and sends its candidates, as a real link does
+                        Out.Enqueue(PeerSignal.Ice("candidate:1 1 UDP 2122317823 192.0.2.20 40002 typ host", "0", 0));
+                        Out.Enqueue(PeerSignal.Ice("candidate:2 1 UDP 1686052607 198.51.100.8 51001 typ srflx raddr 192.0.2.20 rport 40002", "0", 0));
+                        return;
+                    }
                     Other = offerer; offerer.Other = this;
-                    Out.Enqueue(PeerSignal.Description("answer", "answer:" + token));
+                    Out.Enqueue(PeerSignal.Description("answer", "answer:" + token + Candidates(token)));
                 }
                 else if (s.SdpType == "answer" && Initiator && Other != null)
                 {
@@ -224,7 +238,7 @@ namespace OneLobby
         /// What <c>welcome.features</c> lists: <c>set_name</c> (rename) and <c>room</c> (passwords, spectator slots, player id bans,
         /// kick codes). Empty plays an older hub, <c>{ "set_name" }</c> one from before the room layer.
         /// </summary>
-        public IReadOnlyList<string> Features { get; set; } = new[] { "set_name", "room" };
+        public IReadOnlyList<string> Features { get; set; } = new[] { "set_name", "room", "diag" };
         private bool RoomFeature => Features.Contains("room");
 
         public void Advance(long ms) => NowMs += ms;
@@ -328,6 +342,26 @@ namespace OneLobby
                         var sig = Signaling.ParseSignal(e);
                         if (sig == null) return;
                         Reply(dest, ForwardSignal(s.PeerId, sig));
+                        break;
+                    }
+                    case "diag":
+                    {
+                        // the hub relays a joiner's diagnosis to the host only (spec/diagnostics.md s.7.2); an older hub ignores the type
+                        if (!Features.Contains("diag")) break;
+                        var dl = s.Lobby;
+                        if (dl == null || dl.HostId == s.PeerId) { Reply(s, Signaling.Build(w => { w.WriteString("t", "error"); w.WriteString("code", "bad_request"); w.WriteString("msg", "no host to report to"); w.WriteStartObject("data"); w.WriteString("field", "report"); w.WriteEndObject(); })); return; }
+                        var report = e.TryGetProperty("report", out var rp) && text.Length <= Diagnose.ReportMaxBytes ? Diagnose.CleanReport(rp) : null;
+                        if (report == null) { Reply(s, Signaling.Build(w => { w.WriteString("t", "error"); w.WriteString("code", "bad_request"); w.WriteString("msg", "report must be a small diagnosis report"); w.WriteStartObject("data"); w.WriteString("field", "report"); w.WriteEndObject(); })); return; }
+                        s.DiagHits.RemoveAll(at => NowMs - at >= Diagnose.ReportWindowMs);
+                        if (s.DiagHits.Count >= Diagnose.ReportsPerWindow)
+                        {
+                            var retry = Diagnose.ReportWindowMs - (NowMs - s.DiagHits[0]);
+                            Reply(s, Signaling.Build(w => { w.WriteString("t", "error"); w.WriteString("code", "rate_limited"); w.WriteString("msg", "too many reports"); w.WriteStartObject("data"); w.WriteNumber("retryAfterMs", retry); w.WriteEndObject(); }));
+                            return;
+                        }
+                        s.DiagHits.Add(NowMs);
+                        if (dl.Members.TryGetValue(dl.HostId, out var hostSock))
+                            Reply(hostSock, Signaling.Build(w => { w.WriteString("t", "diag"); w.WriteNumber("from", s.PeerId); w.WritePropertyName("report"); report.Write(w); }));
                         break;
                     }
                     case "set_name":

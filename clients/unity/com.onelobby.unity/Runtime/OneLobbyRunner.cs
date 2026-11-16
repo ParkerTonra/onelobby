@@ -51,6 +51,12 @@ namespace OneLobby.Unity
         [Tooltip("File that keeps the host's ban list across lobbies and runs (Lobby.Room.Bans). Empty = onelobby-bans.json under " +
                  "Application.persistentDataPath. Set before the first Host/Join.")]
         public string BanFile = "";
+        [Tooltip("Where the connection log (why a connection failed) is saved: when the game quits, when it crashes, and on LobbyClient.NetLog.Save(). " +
+                 "Empty = onelobby-netlog.txt under Application.persistentDataPath. The log stays on this machine, addresses masked. Set before the first Host/Join.")]
+        public string NetLogPath = "";
+        [Tooltip("When a join fails, tell the host why (cause and step only: no address, no name, no free text) over the lobby connection already in use. " +
+                 "Same as DiagnosticsOptions.ReportToHost. Set before the first Host/Join.")]
+        public bool ReportToHost = true;
 
         private LobbyClient? _client;
         private bool _clientIsDirect;
@@ -66,6 +72,12 @@ namespace OneLobby.Unity
         public event Action<LobbyError>? Error;
         /// <summary>Raised when <see cref="Lobby"/> changes (a lobby was hosted/joined, or the session ended).</summary>
         public event Action<Lobby?>? LobbyChanged;
+        /// <summary>Host: a joiner could not connect and told you why (<see cref="PeerDiagnosisInfo.Line"/> is one line for a host screen), on the main thread.</summary>
+        public event Action<PeerDiagnosisInfo>? PeerDiagnosis;
+        /// <summary>The connection log of the current client: <c>NetLog.Export()</c> is the text a player copies.</summary>
+        public NetLog NetLog => Client.NetLog;
+        /// <summary>Checks what this network allows (UDP, NAT type, relay login) from a menu; never runs by itself. See <see cref="LobbyClient.CheckConnectionAsync"/>.</summary>
+        public Task<CheckResult> CheckConnectionAsync(CheckOptions? options = null) => Client.CheckConnectionAsync(options);
 
         /// <summary>Extra config applied when the client is created (for OneLobbyConfig fields not exposed above).</summary>
         public Func<OneLobbyConfig, OneLobbyConfig>? ConfigureConfig;
@@ -102,6 +114,14 @@ namespace OneLobby.Unity
         private OneLobbyConfig ApplyConfig(OneLobbyConfig config)
         {
             if (RelayOnly) config = config with { RelayOnly = true };
+            config = config with
+            {
+                Diagnostics = config.Diagnostics with
+                {
+                    LogPath = config.Diagnostics.LogPath ?? (string.IsNullOrWhiteSpace(NetLogPath) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-netlog.txt") : NetLogPath),
+                    ReportToHost = config.Diagnostics.ReportToHost && ReportToHost,
+                },
+            };
             if (config.PlayerIdStore == null && config.PlayerIdFile == null)
                 config = config with { PlayerIdFile = string.IsNullOrWhiteSpace(PlayerIdFile) ? System.IO.Path.Combine(Application.persistentDataPath, "onelobby-player.json") : PlayerIdFile };
             if (config.BanStore == null && config.BanFile == null)
@@ -287,6 +307,7 @@ namespace OneLobby.Unity
         private Lobby Adopt(Lobby lobby)
         {
             Lobby = lobby;
+            lobby.PeerDiagnosis += d => PeerDiagnosis?.Invoke(d);
             lobby.SessionEnded += _ =>
             {
                 if (Lobby != lobby) return;

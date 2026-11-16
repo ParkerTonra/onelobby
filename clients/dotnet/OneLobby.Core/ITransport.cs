@@ -67,6 +67,22 @@ namespace OneLobby
         long ReliableBufferedBytes { get; }
     }
 
+    /// <summary>What a link knows for a diagnosis (spec/diagnostics.md s.2).</summary>
+    /// <param name="IceConnected">A candidate pair was selected (ICE connected), whether or not the channels opened.</param>
+    /// <param name="Relay">The TURN allocation; <see cref="RelayState.None"/> when the link has no TURN entry. <see cref="RelayState.Failed"/>: gathering ended with no relay candidate and the reason is not known.</param>
+    public sealed record LinkFacts(bool IceConnected, RelayState Relay);
+
+    /// <summary>
+    /// Optional on an <see cref="IPeerLink"/>: what the link tells a diagnosis (ICE steps for the net log, and the facts
+    /// above). A link without it gets a diagnosis from the signaling traffic alone.
+    /// </summary>
+    public interface IDiagnosticPeerLink
+    {
+        /// <summary>Called with a net log kind (<c>ice</c>, <c>chan</c>, <c>route</c>) and a text with no address or credential.</summary>
+        Action<string, string>? OnTrace { get; set; }
+        LinkFacts Facts();
+    }
+
     /// <summary>What a transport needs to build one peer link.</summary>
     /// <param name="RemotePeerId">The peer at the other end.</param>
     /// <param name="Initiator">True: this side creates the offer.</param>

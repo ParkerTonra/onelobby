@@ -115,6 +115,8 @@ namespace OneLobby
         public static string Approve(int peerId, bool ok) => Build(w => { w.WriteString("t", "approve"); w.WriteNumber("peerId", peerId); w.WriteBoolean("ok", ok); });
         public static string Meta(IReadOnlyDictionary<string, string> m) => Build(w => { w.WriteString("t", "meta"); WriteMeta(w, "meta", m); });
         public static string SetName(string name) => Build(w => { w.WriteString("t", "set_name"); w.WriteString("name", name); });
+        /// <summary>The joiner's diagnosis for the host (spec/diagnostics.md s.7.2); the hub rebuilds and forwards it.</summary>
+        public static string Diag(DiagnosisReport report) => Build(w => { w.WriteString("t", "diag"); w.WritePropertyName("report"); report.Write(w); });
         public static string Ping(int n) => Build(w => { w.WriteString("t", "ping"); w.WriteNumber("n", n); });
         public static string Pong(int n) => Build(w => { w.WriteString("t", "pong"); w.WriteNumber("n", n); });
 

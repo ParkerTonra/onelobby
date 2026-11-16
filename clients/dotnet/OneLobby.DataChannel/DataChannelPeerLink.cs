@@ -17,7 +17,7 @@ namespace OneLobby.DataChannel
     /// finds nothing and is dropped. No GCHandle is needed: native code only ever holds ids, never managed pointers.
     /// </para>
     /// </summary>
-    internal sealed unsafe class DataChannelPeerLink : IPeerLink, IBufferedPeerLink, IRemoteAddressPeerLink
+    internal sealed unsafe class DataChannelPeerLink : IPeerLink, IBufferedPeerLink, IRemoteAddressPeerLink, IDiagnosticPeerLink
     {
         private const int DisconnectGraceMs = 4000;
         private static readonly string[] Labels = { "reliable", "fast", "voice" };
@@ -27,6 +27,7 @@ namespace OneLobby.DataChannel
         private static readonly Rtc.DescriptionCallback DescriptionCb = OnDescription;
         private static readonly Rtc.CandidateCallback CandidateCb = OnCandidate;
         private static readonly Rtc.StateCallback StateCb = OnState;
+        private static readonly Rtc.GatheringCallback GatheringCb = OnGathering;
         private static readonly Rtc.OpenCallback OpenCb = OnOpen;
         private static readonly Rtc.ClosedCallback ClosedCb = OnClosed;
         private static readonly Rtc.ErrorCallback ErrorCb = OnError;
@@ -49,6 +50,23 @@ namespace OneLobby.DataChannel
         private int _pathTries;
         private long _nextPathMs;
         private bool _relayed;
+        private volatile bool _turnSet, _gathered, _relaySeen, _everConnected;
+        /// <summary>Net log steps (<c>ice</c>, <c>chan</c>): texts with no address or credential. Set by the lobby; called from native threads.</summary>
+        public Action<string, string>? OnTrace { get; set; }
+
+        /// <summary>
+        /// What a diagnosis needs (spec/diagnostics.md s.10): whether ICE connected and what the TURN allocation did.
+        /// libdatachannel reports no relay error, so a gathering that completed without a relay candidate is <c>Failed</c>
+        /// (refused or unreachable, not known); the lobby then asks the TURN server itself with a raw probe.
+        /// </summary>
+        public LinkFacts Facts() => new LinkFacts(_everConnected,
+            !_turnSet ? RelayState.None : _relaySeen ? RelayState.Ok : _gathered ? RelayState.Failed : RelayState.Pending);
+
+        private void Trace(string kind, string text)
+        {
+            try { OnTrace?.Invoke(kind, text); } catch (Exception) { /* a log line never breaks a connection */ }
+        }
+
         /// <summary>The selected ICE pair once known (diagnostics and tests), e.g. "a=candidate:... 47810 typ host".</summary>
         internal string? LocalCandidate { get; private set; }
         internal string? RemoteCandidate { get; private set; }
@@ -93,6 +111,7 @@ namespace OneLobby.DataChannel
                 foreach (var u in s.Urls)
                     if (ToLibUrl(u, s.Username, s.Credential) is { } lu) urls.Add(lu);
             if (urls.Count == 0 && !options.NoIceServers) urls.Add(DataChannelTransport.DefaultStun);
+            _turnSet = urls.Exists(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase));
 
             var strings = new List<IntPtr>();
             try
@@ -143,6 +162,7 @@ namespace OneLobby.DataChannel
             Rtc.rtcSetLocalDescriptionCallback(_pc, DescriptionCb);
             Rtc.rtcSetLocalCandidateCallback(_pc, CandidateCb);
             Rtc.rtcSetStateChangeCallback(_pc, StateCb);
+            Rtc.rtcSetGatheringStateChangeCallback(_pc, GatheringCb);
 
             // negotiated channels with fixed ids, identical on both ends (DESIGN s.8)
             for (var i = 0; i < 3; i++)
@@ -207,19 +227,31 @@ namespace OneLobby.DataChannel
         {
             if (!ById.TryGetValue(pc, out var l)) return;
             var text = Rtc.FromUtf8z(cand) ?? "";
+            if (text.Contains(" typ relay")) l._relaySeen = true;
             if (!l._opts.RelayOnly || RelayCandidates.IsRelay(text)) l._out.Enqueue(PeerSignal.Ice(text, Rtc.FromUtf8z(mid) ?? "", 0));
         }
 
         [MonoPInvokeCallback(typeof(Rtc.StateCallback))]
         private static void OnState(int pc, Rtc.State state, IntPtr ptr)
         {
-            if (ById.TryGetValue(pc, out var l)) l._state = (int)state;
+            if (!ById.TryGetValue(pc, out var l)) return;
+            l._state = (int)state;
+            if (state == Rtc.State.Connected) l._everConnected = true;
+            l.Trace("ice", "connection " + state.ToString().ToLowerInvariant());
+        }
+
+        [MonoPInvokeCallback(typeof(Rtc.GatheringCallback))]
+        private static void OnGathering(int pc, int state, IntPtr ptr)
+        {
+            if (!ById.TryGetValue(pc, out var l)) return;
+            if (state == 2) l._gathered = true; // rtcGatheringState: 0 new, 1 in progress, 2 complete
+            l.Trace("ice", state == 2 ? "gathering complete" : state == 1 ? "gathering" : "gathering new");
         }
 
         [MonoPInvokeCallback(typeof(Rtc.OpenCallback))]
         private static void OnOpen(int dc, IntPtr ptr)
         {
-            if (ById.TryGetValue(dc, out var l) && l.IndexOf(dc) is var i && i >= 0) Volatile.Write(ref l._open[i], 1);
+            if (ById.TryGetValue(dc, out var l) && l.IndexOf(dc) is var i && i >= 0) { Volatile.Write(ref l._open[i], 1); l.Trace("chan", "open " + Labels[i]); }
         }
 
         [MonoPInvokeCallback(typeof(Rtc.ClosedCallback))]

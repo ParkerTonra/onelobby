@@ -82,6 +82,7 @@ namespace OneLobby.Tests
             var h = rig.Await(hc.HostAsync(new LobbyOptions("raw", 4)));
             var cfg = Rig.Config("g", mode: SyncMode.Raw);
             if (timeout is { } t) cfg = cfg with { ReadyTimeout = t };
+            cfg = cfg with { Diagnostics = new DiagnosticsOptions { RelayProbe = false } }; // these tests use made-up relay names: no real lookups
             var gc = new LobbyClient(cfg, rig.Net.CreateTransport());
             rig.Clients.Add(gc);
             return (rig, h, gc);

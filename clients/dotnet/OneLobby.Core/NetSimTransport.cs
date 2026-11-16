@@ -61,7 +61,7 @@ namespace OneLobby
         private bool Lose(PeerChannel ch) =>
             ch != PeerChannel.Reliable && Options.LossPercent > 0 && _rng.NextDouble() * 100 < Options.LossPercent;
 
-        private sealed class SimLink : IPeerLink, IBufferedPeerLink
+        private sealed class SimLink : IPeerLink, IBufferedPeerLink, IDiagnosticPeerLink
         {
             private readonly NetSimTransport _t;
             private readonly IPeerLink _inner;
@@ -75,6 +75,12 @@ namespace OneLobby
             public bool IsFailed => _inner.IsFailed;
             public int PingMs => _inner.PingMs;
             public bool Relayed => _inner.Relayed;
+            public Action<string, string>? OnTrace
+            {
+                get => (_inner as IDiagnosticPeerLink)?.OnTrace;
+                set { if (_inner is IDiagnosticPeerLink d) d.OnTrace = value; }
+            }
+            public LinkFacts Facts() => (_inner as IDiagnosticPeerLink)?.Facts() ?? new LinkFacts(_inner.IsOpen, RelayState.None);
             public void StartOffer() => _inner.StartOffer();
             public void ApplySignal(PeerSignal signal) => _inner.ApplySignal(signal);
             public bool TryTakeSignal(out PeerSignal signal) => _inner.TryTakeSignal(out signal);
