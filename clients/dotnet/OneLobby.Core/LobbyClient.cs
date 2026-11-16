@@ -78,6 +78,13 @@ namespace OneLobby
         }
 
         /// <summary>The list plus this player's saved relay entry, unless it is already in it (spec/settings.md s.5).</summary>
+        /// <summary>
+        /// The lobby server this client uses now as text, e.g. <c>wss://lobby.mygame.example/ws</c>: the config's, or (when the
+        /// config has none) the one the player saved in the settings; empty when there is none or the client is direct.
+        /// </summary>
+        public string EffectiveServer => Direct || ReferenceEquals(HubUri, OneLobby.Blueprint.NoServer) ? "" : HubUri.ToString();
+
+
         internal IReadOnlyList<IceServer> WithSavedRelay(IReadOnlyList<IceServer>? ice)
         {
             var list = ice ?? Array.Empty<IceServer>();
@@ -125,6 +132,8 @@ namespace OneLobby
         internal ISignalingSocket? Socket { get; private set; }
 
         private Op? _op;
+        private long _opStartMs;
+        private (string Mine, string Theirs)? _opVersions;
         private Lobby? _lobby;
         private bool _welcomed;
         private bool _helloWired;
@@ -135,6 +144,28 @@ namespace OneLobby
 
         public event Action<LobbyError>? Error;
 
+        /// <summary>The library version the report carries (<c>0.7.2</c>).</summary>
+        internal static readonly string LibVersion = ReadVersion();
+
+        private static string ReadVersion()
+        {
+            var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(LobbyClient).Assembly)?.InformationalVersion ?? "0.7.2";
+            var plus = v.IndexOf('+');
+            return plus >= 0 ? v.Substring(0, plus) : v;
+        }
+
+        /// <summary>
+        /// The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. <c>NetLog.Export()</c> is
+        /// the text a player copies; addresses are masked unless asked for, credentials never print. It stays on this machine.
+        /// </summary>
+        public NetLog NetLog { get; }
+
+        /// <summary>The last <see cref="CheckConnectionAsync"/> result: its NAT reading joins a later failure's diagnosis and the report to the host.</summary>
+        public CheckResult? LastCheck { get; private set; }
+
+        /// <summary>How this client reaches lobbies: <c>server</c> (code), <c>ip</c> (typed address) or <c>nostr</c>.</summary>
+        internal string Route => !Direct ? "server" : _hubUri.Scheme == "onelobby-nostr" ? "nostr" : "ip";
+
         public LobbyClient(OneLobbyConfig config, ITransport transport)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
@@ -142,6 +173,26 @@ namespace OneLobby
             _hubUri = config.LobbyServer;
             _use = config.Settings ?? new SettingsOptions();
             Settings = new PlayerSettings(config.SettingsStore ?? (config.SettingsFile != null ? KeyValueStores.FromFile(config.SettingsFile) : KeyValueStores.Memory()), config.GameId, config.SettingsEnv);
+            var dg = config.Diagnostics ?? new DiagnosticsOptions();
+            var t0 = transport.NowMs;
+            NetLog = new NetLog(dg.LogSize, () => Transport.NowMs - t0, new NetLogMeta("onelobby-dotnet " + LibVersion, Signaling.Proto, "dotnet"), dg.LogPath);
+            if (!string.IsNullOrEmpty(dg.LogPath)) NetLog.FlushOnExit(dg.LogPath);
+            NetLog.Add("info", "client onelobby-dotnet " + LibVersion + " protocol " + Signaling.Proto + " game version " + config.NetVersion);
+        }
+
+        /// <summary>
+        /// Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
+        /// one socket) and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the
+        /// client connects with) and the TURN entry in <c>options.IceServers</c> (default: the ICE servers of the last lobby server
+        /// welcome). A menu runs it on demand; the library never does.
+        /// </summary>
+        public async Task<CheckResult> CheckConnectionAsync(CheckOptions? options = null)
+        {
+            var o = options ?? new CheckOptions { IceServers = Ice };
+            var r = await ConnectionCheck.CheckAsync(o).ConfigureAwait(false);
+            LastCheck = r;
+            NetLog.Add("info", "connection check udp=" + r.Udp + " nat=" + r.NatType + " relay=" + r.Relay + " verdict=" + r.Verdict);
+            return r;
         }
 
         /// <summary>
@@ -302,6 +353,8 @@ namespace OneLobby
                     "no lobby server address (set hosting.lobbyServer in onelobby.json or pass lobbyServerOverride; direct-only games use HostDirectAsync)"));
             if (_lobby != null && expect[0] == "lobby") return Task.FromException<T>(new InvalidOperationException("already in a lobby; leave it first"));
             var tcs = new TaskCompletionSource<T>();
+            _opStartMs = Transport.NowMs;
+            _opVersions = null;
             var op = new Op { Request = request, Build = build, Expect = expect, DeadlineMs = Transport.NowMs + RequestTimeoutMs };
             if (Direct) op.ConnectDeadlineMs = Transport.NowMs + DirectConnectTimeout;
             op.Complete = e =>
@@ -316,6 +369,7 @@ namespace OneLobby
             if (Socket == null || Socket.State == SocketState.Closed)
             {
                 Socket?.Dispose();
+                NetLog.Add("sig", "open route=" + Route, HubUri.Scheme == "onelobby-nostr" ? null : SettingsRules.RedactUrl(HubUri.ToString()));
                 Socket = Transport.ConnectSignaling(HubUri);
                 _welcomed = false;
                 _helloWired = false;
@@ -347,13 +401,50 @@ namespace OneLobby
             op.Complete(e);
         }
 
+        /// <summary>The error codes a connect failure carries a diagnosis for (spec/diagnostics.md s.9).</summary>
+        private static readonly string[] DiagnosedCodes = { "connect_failed", "direct_unreachable", "version_mismatch", "server_closed", "closed" };
+
+        /// <summary>Puts the diagnosis on a connect failure (the code is unchanged) and logs it.</summary>
+        private void Diagnosed(Exception ex)
+        {
+            if (!(ex is OneLobbyException oe) || oe.Diagnosis != null || Array.IndexOf(DiagnosedCodes, oe.Code) < 0) return;
+            // a failure after the welcome is a refused join: only a version mismatch is about connecting
+            if (_welcomed && oe.Code != "version_mismatch") return;
+            var facts = new DiagnoseFacts
+            {
+                Side = "joiner", Route = Route, Error = oe.Code,
+                Reached = _welcomed ? Reached.Signaling : Reached.None,
+                ElapsedMs = Math.Max(0, Transport.NowMs - _opStartMs),
+                Versions = _opVersions,
+            };
+            oe.Diagnosis = Diagnose.Run(facts);
+            NetLog.Add("diag", "cause " + oe.Diagnosis.Cause + " stage " + oe.Diagnosis.Stage + " after " + facts.ElapsedMs + " ms");
+        }
+
         private void FailOp(Exception ex)
         {
             var op = _op;
             if (op == null) return;
+            if (ex is OneLobbyException lo) NetLog.Add("error", lo.Code, code: lo.Code);
+            Diagnosed(ex);
             _op = null;
             op.Reg.Dispose();
             op.Fail(ex);
+        }
+
+        /// <summary><c>stun,turn</c> from an ICE list: the kinds only, never a URL or a login.</summary>
+        private static string IceKinds(IReadOnlyList<IceServer> ice)
+        {
+            var kinds = new List<string>();
+            foreach (var s in ice)
+                foreach (var u in s.Urls)
+                {
+                    var c = u.IndexOf(':');
+                    var k = c > 0 ? u.Substring(0, c).ToLowerInvariant() : "other";
+                    if (k != "stun" && k != "stuns" && k != "turn" && k != "turns") k = "other";
+                    if (!kinds.Contains(k)) kinds.Add(k);
+                }
+            return kinds.Count == 0 ? "none" : string.Join(",", kinds);
         }
 
         internal void SendRaw(string json) { if (Socket != null && Socket.State == SocketState.Open) Socket.Send(json); }
@@ -433,6 +524,7 @@ namespace OneLobby
                             ? fs.EnumerateArray().Where(f => f.ValueKind == JsonValueKind.String).Select(f => f.GetString()!).ToArray()
                             : Array.Empty<string>();
                         _welcomed = true;
+                        NetLog.Add("sig", "welcome features=" + (Features.Count == 0 ? "none" : string.Join(",", Features)) + " ice=" + IceKinds(Ice));
                         // a resume answered without a seat: the token is unknown or expired (no lobby message follows)
                         if (_op != null && !_op.Sent && _op.Request == null && _op.Build == null && _helloResume != null && !e.TryGetProperty("peerId", out _))
                         {
@@ -453,6 +545,12 @@ namespace OneLobby
                         // kick{ban:false}: the host disconnected us, no ban (spec/signaling.md)
                         bool disconnected = e.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object &&
                                             d.TryGetProperty("ban", out var ban) && ban.ValueKind == JsonValueKind.False;
+                        if (err.Code == "version_mismatch" && e.TryGetProperty("data", out var vd) && vd.ValueKind == JsonValueKind.Object)
+                        {
+                            var theirs = Signaling.Str(vd, "hostNetVersion");
+                            var mine = Signaling.Str(vd, "yourNetVersion");
+                            _opVersions = theirs.Length > 0 ? (mine.Length > 0 ? mine : Config.NetVersion, theirs) : ((string, string)?)null;
+                        }
                         FailOp(new OneLobbyException(err.Code, err.Message));
                         Error?.Invoke(err);
                         _lobby?.OnServerError(err, disconnected, e.TryGetProperty("data", out var edata) ? edata : default);
