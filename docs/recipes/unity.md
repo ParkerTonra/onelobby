@@ -81,12 +81,12 @@ its Next line say this whenever the line differs from the one this run would wri
 | message rate limit per joiner | `session.rateLimit.messages` and `.perMs` (set both) | `--set session.rateLimit.messages=60 --set session.rateLimit.perMs=1000` |
 | host leaves | `session.hostLeaves` (`end` only without a lobby server) | `--host-leaves` |
 | own rejoin or seat holding | `lobby.rejoin`, `room.rejoinWindowSeconds` | `--no-rejoin` |
-| late join | `lobby.lateJoin`, `room.lateJoin` | `--no-late-join` |
+| late join | `lobby.lateJoin`, `room.lateJoin` | `--no-late-join` (a game with no late join of its own keeps the default `true`) |
 | countdown, minimum players, auto start | `room.countdownSeconds`, `room.minPlayers`, `room.autoStart`, `room.autoStartPlayers` | `--set room.countdownSeconds=0` |
 | port, router request | `hosting.directPort`, `hosting.openPort` | `--port`, `--no-open-port` |
 | Nostr on or off, its relay list | `hosting.nostr`, `hosting.nostrRelays` | `--set hosting.nostr=false`, `--set hosting.nostrRelays=[...]` |
 | lobby server (a hand-coded URL), a server route the game had | `hosting.lobbyServer`, `hosting.server` | `--lobby-server`, `--hosting direct\|server\|both` (**`--hosting both`** when the game had a server route: the recommender answers `server` false and `--into` then turns it off; `server` true with an empty `lobbyServer` takes the server the player saved in the menu's settings, else the server route reports `no_server` and the direct route keeps working) |
-| chat | `chat.text`, `chat.voice` | `--no-chat`, `--voice` (a game with no chat leaves `chat.text` at its default `true`, says the menu's chat is new, and passes `--no-chat` only when the user wants the game unchanged) |
+| chat | `chat.text`, `chat.voice` | `--no-chat`, `--voice` (a game with no chat leaves `chat.text` at its default `true`, says the menu's chat box is a visible change to tell the user, and passes `--no-chat` only when the user wants the game unchanged) |
 | keep running unfocused | `session.runInBackground` | `--set session.runInBackground=false` |
 
 **2. Load the file and build the runner FIRST.** The file is `Assets/Resources/onelobby.json`; the runner takes it as a `TextAsset`:
@@ -172,7 +172,7 @@ public sealed class MyGameNet : MonoBehaviour
 | `OneLobbyMenu.AutoHideOnStart` | `bool`, default true: hides on `GameStarted`, shows on `ReturnedToLobby` |
 | `OneLobbyMenu.StartOnHost` | `bool`, default false: after a successful Host the menu presses Start itself, once; a joiner is unaffected; the countdown still runs (`room.countdownSeconds`, 0 = at once) |
 | `OneLobbyMenu.BeforeHost` | `Func<Task<bool>>?`: asked before every Host (the button and `--host`); `false` cancels, a throw counts as false, a second press while it waits is ignored; null = no question |
-| `OneLobbyMenu.LeaveAsync()`, `.SortingOrder`, `.Model` | `Task`; `int` draw order (default 1000: above your uGUI); the `MenuModel` (`StartOnHost` and `BeforeHost` are on it too) |
+| `OneLobbyMenu.LeaveAsync()` (call it on Esc out of the room step, before `Destroy`), `.SortingOrder`, `.Model` | `Task`; `int` draw order (default 1000: above your uGUI); the `MenuModel` (`StartOnHost` and `BeforeHost` are on it too) |
 | `PlayerSettings` | `new PlayerSettings(IKeyValueStore? store, string gameId, Func<string,string?>? env = null)`; `static string Key(string gameId)` (STATIC: `PlayerSettings.Key(id)`, not on an instance); `SettingsValues Load()` (`Name`, `Relay`, `LastCode`, `Server`); `SaveResult Save(string? name = null, string? relay = null, string? lastCode = null, string? server = null)` (null leaves a field alone, `""` removes it; `SaveResult.Ok`, `.Rejected` lists the fields that did not clean); `Clear()`. Without a client: `new PlayerSettings(new PlayerPrefsStore(), gameId)`; a client's own is `client.Settings` |
 | `Friendly.DescribeError` | `static FriendlyError DescribeError(Exception? error)`, `(LobbyError error)`, `(string? codeOrText)`; `FriendlyError` has `Code`, `Message`, `Hint` (nullable), `Cause`, `Stage` |
 | `Blueprint` properties | the parsed file mirrors the JSON keys in PascalCase: `Game` (`Id`, `NetVersion`, `Title`), `Hosting` (`Direct`, `Server`, `Nostr`, `Relays`, ...), `Lobby` (`MaxPlayers`, ...), `Room`, `Session` (`Pause`, ...), `Players` (`MaxNameLength`, ...), `Chat`; e.g. `Assert.AreEqual(NetProtocol.NetVersion, bp.Game.NetVersion)` as a drift test |
