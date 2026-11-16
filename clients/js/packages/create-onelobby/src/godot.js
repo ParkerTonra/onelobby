@@ -276,7 +276,7 @@ export function godotNext({ into, rel, plan }) {
       "add the menu where your game opens (it is a Control with its own scene). In a scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn, and give it the client from the parent's _enter_tree: $Menu.client = Net.client",
       'built in code (a runtime CanvasLayer, no scene file): var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate(); menu.client = Net.client; layer.add_child(menu)   # set client BEFORE add_child',
       "connect it: menu.game_started.connect(func(lobby): ...); menu.returned_to_lobby.connect(func(lobby): ...); menu.left.connect(func(): ...)   # game_started hands you the OneLobbyLobby (host and joiner both get it); a menu inside a scene your game replaces: set menu.pump = false",
-      "a game that reads its own --host / --join flags: set menu.boot_flags = false (the menu then ignores all four of --host --join --name --local --autostart); see the skill's wiring step",
+      "a game that reads its own --host / --join flags: set menu.boot_flags = false (the menu then ignores all of --host --join --name --local --autostart; with it on, only the first menu in a process acts on --host, --join, --name and --autostart); see the skill's wiring step",
       "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
       ...(players ? netPlayerLines(players) : []),
       `follow ${GODOT_RECIPE_URL}`,

@@ -78,8 +78,14 @@ and no public address (these keys win over `host_options` the game set; its othe
 itself. Without `--local` a game's own `route` and `host_options` are not touched. Never test a game with `--host` and no `--local`: it
 opens a real port and reaches public relays. The GDScript menu needs no game code for it; the C# menu takes it from `OneLobbyNet.Wire`.
 
+The process command line is read once per process. The first menu that is built takes `--host`, `--join=<code>`, `--name=<name>` and `--autostart`; every later menu in the same process (a game that builds one in each world, or after a scene change) acts on none of them, so it does not host or join a second time. `--local` is read by every menu. `boot_args` is never consumed: each menu that has it acts on it.
+
 One switch (`boot_flags = false`) turns all five off: set it when the game reads flags of those names itself (the menu and the game would both act on `--host`), and call
 `menu.model.host()`, `join()` or `apply_local()` yourself. The menu still reads `--local` on its own to keep the connection check off. Tests give the flags to a menu with `boot_args` instead of the process command line.
+
+## A game that hosts from its running world
+
+A game that opens a line from a world that is already running has no room and no Start of its own. The menu is the screen before the match: connect `game_started(lobby)` and attach the game's session there (the host over the world already up, a joiner starting its join session and keeping its solo world until the host's first snapshot). To skip the room step for the host, set `start_on_host = true` before `add_child` (`OneLobbyMenuModel.start_on_host`): after a successful Host the menu presses Start once, so `game_started` fires after the room's countdown (`host_options.room.countdown_seconds`). A joiner is not started by it. The menu hides during the match; a game that opens its own panel mid-match (F2, Esc) keeps its own roster and Leave plate for that.
 
 ## Restyling
 
@@ -187,6 +193,7 @@ or does not answer). While it runs, and when all is well, the start screen says 
 - Switch it off for a game: `"diagnostics": { "checkOnOpen": false }` in `onelobby.json` (the button stays). `showConnectionCheck: false`
   hides the button and the automatic run both.
 - Not again when the player comes back from a lobby or from Settings; the button runs it on demand.
+- A headless run (the display server is `headless`: `--headless`, a game's own tests, a server) never runs it by itself either (`OneLobbyMenuModel.headless`, set from the display server; a test that wants the check sets `headless_default` false before building the menu), so a game's own headless tests that build the menu reach no STUN server.
 - A menu started with `--local` (127.0.0.1 only, see Boot flags) never runs it by itself. The menu reads `--local` from the
   command line itself (`OneLobbyMenuModel.args_say_local`, also when `boot_flags` is off), so the order of your own start-up code does not matter.
 - Tests: give the menu a fake runner (`check_runner` / `CheckRunner` / the controller's `checkRunner`); a test that opens a real menu

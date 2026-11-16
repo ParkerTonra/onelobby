@@ -8,9 +8,11 @@ description: Make a game multiplayer with OneLobby in one pass. Surveys the game
 You turn a single-player game into one that players can host and join, and that keeps working after any server is gone
 (a player hosts from their own machine and shares a join code). The user drives the choices; you propose them with
 reasons. One file holds every choice: `onelobby.json` (at the game's root; Unity: `Assets/Resources/onelobby.json`; schema: `onelobby/blueprint.schema.json` in the
-npm package; design: `docs/design/blueprint.md`). Commands below are `npx create-onelobby ...`; in a clone of the OneLobby
-repo run the same as `node clients/js/packages/create-onelobby/bin/create-onelobby.js ...` (after `npm ci && npm run build`
-in `clients/js`, then `node scripts/build.mjs` in that package). The scaffolder's own rules are not repeated here: it answers,
+npm package; design: `docs/design/blueprint.md`). **In a clone of the OneLobby repo (an unreleased build), run
+`node <clone>/clients/js/packages/create-onelobby/bin/create-onelobby.js ...` for every command below, and never `npx create-onelobby`:
+`npx` fetches the published, older scaffolder (it answers `unknown option: --recommend`).** Build it first: `npm ci && npm run build` in
+`clients/js`, then `node scripts/build.mjs` in that package; `--help` prints on its first line which build it is (a clone's or the
+published package). Everywhere else the commands below are `npx create-onelobby ...`. The scaffolder's own rules are not repeated here: it answers,
 you explain its answer. Run the phases in order. Never skip Verify. Never write "works": name the checks that ran.
 
 ## 1. Survey (read only, change nothing)
@@ -104,7 +106,8 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    nothing starts until the host clicks Start. With `pump` on (the default) the menu turns the client's `auto_pump` off and pumps it from its own `_process`, so the pump stops when the menu is freed: set
    `menu.pump = false` on a menu inside a node the game frees or replaces when the match starts (the autoload's client then keeps pumping itself). The menu reads `--host`, `--join=<code>`, `--name=<name>`, `--local` and `--autostart` from the command line itself: a game that reads flags of
    those names too would act twice (both copies host), so set `menu.boot_flags = false` and open the host or join yourself (`menu.model.apply_local()` for the
-   127.0.0.1-only setup). A menu built in code (a runtime CanvasLayer, no scene file): `var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate()`,
+   127.0.0.1-only setup). The process flags are read once per process: the first menu that builds takes `--host`, `--join`, `--name` and `--autostart` and every later menu
+   (a game that builds one in each world) acts on none of them (`--local` stays on for all), so a game needs no flag of its own for that. A menu built in code (a runtime CanvasLayer, no scene file): `var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate()`,
    `menu.client = Net.client`, then `layer.add_child(menu)`: the client and every export are set before `add_child`. The "Next:" lines name both ways (scene and code).
    **Test on this PC only.** The menu acts on `-- --host` and `-- --join=<code>` by itself, and a plain `--host` opens a port and
    reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by the GDScript menu itself, with no game code, as long as `boot_flags`
@@ -122,8 +125,8 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    element (`menu.md`, "Web") fits only games that sync through its own `send` / `shared`, not through a Lobby.
 4. Hand work the template does not cover, after 1 to 3: the game's sim as lockstep frames (`docs/recipes/godot-gdscript.md` section 4b,
    `js-web.md`), replication (`replication.md`), a pause-menu call when `session.pause` is not `off` (`pause.md`), the `by-hand`
-   advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check (it runs once when the menu opens; `diagnostics.checkOnOpen: false`
-   in `onelobby.json` switches that off, the button stays) and plain-language errors already live in the menu and the library.
+   advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check (it runs once when the menu opens, except with `--local` or in a headless run (no display), where it never runs by itself, so a game's own headless
+   tests that build the menu reach no STUN server; `diagnostics.checkOnOpen: false` in `onelobby.json` switches it off everywhere, the button stays) and plain-language errors already live in the menu and the library.
    **Players in the world are not hand work on Godot or Unity any more:** when the recommendation has `sync.player.authority` (the `coop-snapshots` and `replication` shapes) or you
    pass `--mode replication --set sync.player.authority=owner|host` (add `--set sync.player.space=2d` for a side-on or top-down character: `sync.player.space` is `3d` or `2d`, default `3d`,
    so a 2D game without it gets a 3D player), the same one command writes the networked player: a new GDScript, C# or Unity project gets a character
@@ -151,7 +154,7 @@ Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that 
 name why a check cannot run here. (A `direct` failure that says `never linked` after 15 s can be a slow first start, not a bug: its text says what to try, once.) `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
 runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
 `nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, and in `wiring` that some scene or page uses
-the menu or the glue (a bare `--into` fails it until you wire the game); it does not run your game, so also boot it and read the output for errors. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 90` (no flags).
+the menu or the glue and names them (every file, or the count and the first five: check that your real front end is in the list; a bare `--into` fails it until you wire the game); it does not run your game, so also boot it and read the output for errors. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 90` (no flags).
 Unity: build the player (`Unity.exe -batchmode -nographics -quit -projectPath . -logFile <abs>/build.log -executeMethod OneLobbyBuild.Windows`, the command in the game's `AGENTS.md`), run
 `Builds/Windows/Game.exe -batchmode -nographics -logFile <abs>/boot.log --host --local --name=Sam` for about 20 s and stop that process yourself (a player has no quit flag; the log should say
 `direct host listening` and hold no exception). Web: `node test/multiplayer.mjs`. Check **offline** the same way: with `--local` nothing leaves the PC, and with no lobby server the game still plays and the menu says multiplayer is unavailable.
@@ -195,6 +198,18 @@ sync stays unless the user asks for OneLobby's.
 - **Its own sync stays: `--mode raw`.** `coop-snapshots` and `replication` both answer `sync.mode replication`, which means OneLobby's `ReplicationSession` replaces the game's
   snapshot code. A game that keeps its own codec and sessions passes `--mode raw` (the game sends its own bytes over `lobby.send` / `lobby.broadcast`), and the report says
   "Overrode the recommendation: sync.mode replication -> raw, because <the files that already do it>". Use `replication` only to replace that code on purpose (`docs/recipes/replication.md`).
+- **A game that builds its own `OneLobbyClient`** (in a service or autoload) switches to the autoload's: there is one client per process, `Net.client`. Delete the
+  `OneLobbyClient.from_config(...)` call and write `var client: OneLobbyClient = Net.client` and, when the game adds to the net version at run time, `client.net_version = <its own value>`
+  (the game's own line). Give the same client to the menu (`menu.client = Net.client`).
+- **A game that hosts from its running world** (no room, no Start button: the world is already up when the line opens) uses the menu for the part before the match and
+  attaches its session in `game_started(lobby)`: the host builds its host session over the world that is already running, a joiner builds its join session and keeps its solo
+  world until the host's first snapshot arrives. The menu's room step is not skipped by default; for a host that should not see it set `menu.start_on_host = true` (before `add_child`):
+  after Host the menu presses Start itself, once, and `game_started` fires after the room's countdown. A joiner still sees the room and waits for the host.
+- **A game whose multiplayer UI is an overlay in the world** (an F2 or Esc panel, a roster and Leave plate) keeps that plate for the match: the menu hides itself when the match
+  starts (`auto_hide_on_start`) and shows again on `returned_to_lobby`, so the game's own in-match roster and Leave button (calling `lobby.leave()`) stay, and the menu is only the
+  screen before the match.
+- **Settings**: the client's settings and the player id live in `user://onelobby.json` (the game's user-data folder, outside the game folder), not in the game folder.
+- **`sync.tickRate` in `--mode raw`**: unused (the game ticks itself); leave the default in `onelobby.json`.
 - **Stays hand-built**: the game's session and snapshot code, its wire codec, host migration and rejoin logic (the lobby gives `host_changed` and `resume_token`), its in-world roster, its
   solo start, and anything it adds to the net version at run time (`client.net_version = <its own value>` after `from_config` is the game's own line, not a copy of `onelobby.json`).
 - **Old settings**: read the old name and relay line once and keep them: `client.settings.save({"name": old_name, "relay": old_line})` returns `{ok, rejected}` (a relay line that
