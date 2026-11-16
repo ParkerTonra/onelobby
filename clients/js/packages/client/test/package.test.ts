@@ -82,6 +82,8 @@ describe("export surface", () => {
       "Room", "BanList", "Causes", "diagnose", "NetLog", "checkConnection", "PlayerSettings", "SETTINGS_ENV", "maskRelay",
       "ReplicationSession", "NetWriter", "NetReader", "Quantize", "NetMath", "NetworkClock", "replicated", "ReplicationError",
       "describeReplication", "DEFAULT_REPLICATION_CONFIG",
+      "Reconciler", "PredictionSmoother", "HistoryRing", "NetPlayers", "NET_PLAYER", "PLAYER_TYPE_ID", "PlayerCodec", "defaultPlayerState",
+      "defaultPlayerInput",
     ].sort());
   });
 
