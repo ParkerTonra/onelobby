@@ -1,4 +1,4 @@
-// The networked player in the two Godot templates: when does a game get it, and the small text tools that write its files.
+// The networked player in the two Godot templates and the Unity one: when does a game get it, and the small text tools that write its files.
 // A game gets the player pieces when the blueprint has `sync.mode` "replication" AND the person asked for `sync.player` (a flag, `--set
 // sync.player.authority=...`, a `--from` file, or the recommendation). The loader fills `sync.player` with defaults for every replication
 // blueprint, so the written file cannot tell "asked" from "defaulted": the question is asked of the answers, before the loader runs.
@@ -20,12 +20,13 @@ export function playerSettings(blueprint) {
 /**
  * What the template should write for this run: `{ authority, space }`, or null for a game without the player pieces.
  * `wanted`: the answers asked for it (answersWantNetPlayer). `--into` with an existing onelobby.json that this run will keep (it differs
- * and there is no --force) is decided by that file: replication and a `sync.player` section in it.
+ * and there is no --force) is decided by that file: replication and a `sync.player` section in it. `blueprintPath`: where the template keeps
+ * the blueprint, relative to `target` (the Godot templates: onelobby.json; Unity: Assets/Resources/onelobby.json).
  */
-export function resolveNetPlayer({ wanted, blueprint, target, into, force }) {
+export function resolveNetPlayer({ wanted, blueprint, target, into, force, blueprintPath = "onelobby.json" }) {
   let want = wanted;
   let bp = blueprint;
-  const file = join(target, "onelobby.json");
+  const file = join(target, ...blueprintPath.split("/"));
   if (into && existsSync(file)) {
     const text = readFileSync(file, "utf8");
     let kept = false;

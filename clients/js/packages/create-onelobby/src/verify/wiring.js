@@ -108,7 +108,7 @@ export function blueprintNext(path, fallback) {
 
 // ---- the `player` check: a game with the networked player (a pure file check, like `wiring`) ----------------------------------------
 // It is in the list only when the game has the networked player: a scene or script outside addons/ and tests/ names the node, or (godot-csharp)
-// addons/onelobby_net_player/ is there. Then it needs both halves: a character scene with the OneLobbyNetPlayer node, and something that
+// addons/onelobby_net_player/ is there; unity: a .cs file outside Packages/, Library/ and Assets/OneLobby/ adds the OneLobbyNetPlayer component. Then it needs both halves: a character scene with the OneLobbyNetPlayer node, and something that
 // spawns one character per player (the spawner or the layer). It proves nothing about the link: the `direct` check's test does that.
 // the node: a scene that has it (its script is a resource of the scene) or code that makes one; a mention in a comment is not the node
 const NODE_REGEX = {
@@ -116,9 +116,13 @@ const NODE_REGEX = {
   cs: /addons\/onelobby_net_player\/OneLobbyNetPlayer\.cs|\bnew\s+OneLobbyNetPlayer\b(?!Spawner)/,
 };
 const SPAWN_REGEX = { gd: /\bOneLobbyNetPlayerSpawner\b|\bOneLobbyNetPlayers\b/, cs: /\bOneLobbyNetPlayerSpawner\b|\bNetPlayers\b/ };
+// Unity: code that adds the component (a scene or prefab names it by script id, not by name, so only code is looked at; a mention in a comment is not it)
+const UNITY_NODE_REGEX = /\bAddComponent\s*<\s*OneLobbyNetPlayer\s*>|\bAddComponent\s*\(\s*typeof\s*\(\s*OneLobbyNetPlayer\s*\)|\bRequireComponent\s*\(\s*typeof\s*\(\s*OneLobbyNetPlayer\s*\)/;
+const unityFiles = (dir) => gameFiles(dir, /\.cs$/i, UNITY_SKIP).filter((f) => !f.startsWith("Assets/OneLobby/"));
 
-/** True when this Godot game has the networked player (see above). */
+/** True when this game has the networked player (see above). */
 export function hasNetPlayer(dir, kind) {
+  if (kind === "unity") return firstMatch(dir, unityFiles(dir), UNITY_NODE_REGEX) !== undefined;
   if (kind !== "godot-gdscript" && kind !== "godot-csharp") return false;
   const csharp = kind === "godot-csharp";
   if (csharp && existsSync(join(dir, "addons/onelobby_net_player/PIN.json"))) return true;
@@ -131,6 +135,7 @@ export function playerCheck() {
     name: "player",
     async run(ctx) {
       const dir = ctx.dir;
+      if (ctx.kind === "unity") return unityPlayerCheck(dir);
       const csharp = ctx.kind === "godot-csharp";
       const files = gameFiles(dir, GODOT_FILES, SKIP_DIRS);
       const node = firstMatch(dir, files, NODE_REGEX[csharp ? "cs" : "gd"]);
@@ -149,5 +154,25 @@ export function playerCheck() {
         next: `Put a OneLobbyNetPlayer node under your character scene and spawn it with OneLobbyNetPlayerSpawner (${recipe}).`,
       };
     },
+  };
+}
+
+/** The same check for a Unity game: the component is added by a script and a script spawns the characters. */
+function unityPlayerCheck(dir) {
+  const files = unityFiles(dir);
+  const node = firstMatch(dir, files, UNITY_NODE_REGEX);
+  const spawn = firstMatch(dir, files, SPAWN_REGEX.cs);
+  if (node && spawn) return { status: "ok", detail: `${node} has the OneLobbyNetPlayer component, ${spawn} spawns the characters` };
+  const recipe = "docs/recipes/net-player.md section 12";
+  if (node)
+    return {
+      status: "fail",
+      detail: `${node} has a OneLobbyNetPlayer component but no script outside Packages/ and Assets/OneLobby/ spawns the characters (no OneLobbyNetPlayerSpawner or NetPlayers), so no player appears in the world.`,
+      next: `Add a spawner where your game starts: gameObject.AddComponent<OneLobbyNetPlayerSpawner>() with Factory or Prefab set, then Begin(lobby, blueprint) (${recipe}).`,
+    };
+  return {
+    status: "fail",
+    detail: `no script outside Packages/ and Assets/OneLobby/ adds a OneLobbyNetPlayer component${spawn ? "" : " or a spawner"}, so no player appears in the world.`,
+    next: `Put a OneLobbyNetPlayer component on your character and spawn it with OneLobbyNetPlayerSpawner (${recipe}).`,
   };
 }

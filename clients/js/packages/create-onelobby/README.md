@@ -134,8 +134,8 @@ Recipe: `docs/recipes/godot-csharp.md`.
 
 ## Players in the world (`sync.player`)
 
-A Godot game made with `sync.mode` `replication` AND a `sync.player` section in its answers gets players in the world, in one command, in both Godot
-templates. "In its answers" means a flag, `--set sync.player.authority=owner|host` (or `sync.player.space=2d`), a `--from` file with the section, or the
+A Godot or Unity game made with `sync.mode` `replication` AND a `sync.player` section in its answers gets players in the world, in one command, in the two Godot
+templates and the Unity template. "In its answers" means a flag, `--set sync.player.authority=owner|host` (or `sync.player.space=2d`), a `--from` file with the section, or the
 recommendation (`--recommend` proposes `sync.player.authority` for the co-op and the shooter shape). `--yes` with the defaults does not turn it on, and
 neither does `--mode replication` alone: the loader fills `sync.player` with its defaults for every replication game, so the written `onelobby.json` cannot say
 whether it was asked for. Any other game is written exactly as before (a test pins the bytes). `--json` has `netPlayer: { authority, space }` when it is on.
@@ -143,13 +143,15 @@ whether it was asked for. Any other game is written exactly as before (a test pi
 | | new project | `--into` |
 |---|---|---|
 | `godot-gdscript` | `player.tscn` + `player.gd` (a `CharacterBody3D` and a capsule, or a `CharacterBody2D` and a square, following `sync.player.space`; a `OneLobbyNetPlayer` child; arrow keys or WASD move it, space jumps; `authority` "owner": plain movement, "host": `set_input()` and a pure `step()`, and the file says which), `game.gd` (a floor, a camera and a `OneLobbyNetPlayerSpawner`), `main.gd` / `main.tscn` that open the game on `game_started`, and the player check in `tests/multiplayer.gd` | nothing new is written (the add-on is vendored whole already); the "Next:" lines print the spawner lines |
+| `unity` | `Assets/Scripts/GamePlayer.cs` (a character made in code: a capsule with a `CharacterController` for `owner` authority, a bare capsule for `host`, or a flat square side-on for `space` 2d, which the Unity component supports; a `OneLobbyNetPlayer` component; arrow keys or WASD move it, space jumps; `owner`: plain movement, `host`: `SetInput()` and a pure `Step()`, and the file says which), `Game.cs` (a floor, a light, a camera and a `OneLobbyNetPlayerSpawner`), `Boot.cs` that opens the game on `GameStarted` and ends it on `ReturnedToLobby` and `Left`, `OneLobbyGame.asmdef` (the game's own assembly, so the test can use the character), and the player check in `Assets/OneLobby/Tests/MultiplayerTests.cs` (its `.asmdef` also references `OneLobbyGame` and `OneLobby.Replication.dll`) | no scene or script is written into your game and nothing is vendored (the package has the component); the "Next:" lines print the lines that add the spawner and the component |
 | `godot-csharp` | the same in C#: `Player.tscn` + `Player.cs`, `Game.cs`, `Main.cs` / `Main.tscn`, the player check in `tests/MultiplayerTest.cs`, plus `addons/onelobby_net_player/` (the two `[GlobalClass]` scripts, pinned by `addons/onelobby_net_player/PIN.json`, its own pin file so a game without players has no such folder and `update` needs none) and an `OneLobby.Replication` package reference at the same version as the others | the folder, its pin and the reference are added (the reference in place, like the others); no scene is written; the spawner lines are printed |
 
-The files the game maker is meant to edit (`player.*`, `game.*`, `main.*`, the test) have no pin: `update` never rewrites them. With `--packages-from`, a game with
+The files the game maker is meant to edit (`player.*`, `game.*`, `main.*`, the test; in Unity `GamePlayer.cs`, `Game.cs`, `Boot.cs`, `OneLobbyGame.asmdef`) have no pin: `update` never rewrites them. With `--packages-from`, a game with
 players needs `OneLobby.Replication` in the folder at the same version as the three others (`clients/dotnet/pack.sh`; `ONELOBBY_PACK_ONLY` lists it for the end-to-end
 script); a game without players does not. The generated two-peer test proves one thing more about the player on the same two peers: the joiner's player appears on
-the host, follows the joiner, and one jump arrives once; `MULTIPLAYER_OK` stays the verdict line. `--into` with an `onelobby.json` the run keeps decides by that file.
-Not written: the Unity template (it needs Unity runs) and the web template (a web game would need a `NetPlayers` page, `docs/recipes/net-player.md` sections 3 and 4, and
+the host, follows the joiner, and one jump arrives once; `MULTIPLAYER_OK` stays the verdict line (the Unity test also logs `MULTIPLAYER_PLAYER <numbers>` when its player check passes). `--into` with an `onelobby.json` the run keeps decides by that file
+(for Unity, `Assets/Resources/onelobby.json`). In Unity `verify` has the `player` line too (a file check: a script adds the `OneLobbyNetPlayer` component and a script spawns the characters).
+Not written: the web template (a web game would need a `NetPlayers` page, `docs/recipes/net-player.md` sections 3 and 4, and
 its sample has no `ReplicationSession` yet: `replication` on web is still refused as `unsupported`).
 
 ## update

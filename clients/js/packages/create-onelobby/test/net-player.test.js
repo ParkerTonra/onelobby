@@ -1,5 +1,5 @@
-// The networked player in the two Godot templates (sync.player): when a game gets it, what it gets, what update and verify do with it, and
-// the proof that a game made without it is exactly what it was before. No network, no Godot, no dotnet.
+// The networked player in the two Godot templates and the Unity one (sync.player): when a game gets it, what it gets, what update and verify do with it, and
+// the proof that a game made without it is exactly what it was before. No network, no Godot, no Unity, no dotnet.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -29,6 +29,7 @@ beforeEach(() => {
   writeCheckout(join(cwd, "checkout"));
   writeCheckout(join(cwd, "checkout2"), { "OneLobbyNetPlayer.cs": "public partial class OneLobbyNetPlayer { int v = 2; }\n", "OneLobbyNetPlayerSpawner.cs": NET_FILES["OneLobbyNetPlayerSpawner.cs"], "Extra.cs": "// new\n" });
   writeFileSync(join(cwd, "natives.zip"), fixtureNativesZip());
+  writeFileSync(join(cwd, "com.onelobby.unity-0.7.9-ci.3.tgz"), "x");
   mkdirSync(join(cwd, "feed"));
   for (const id of ["OneLobby.Core", "OneLobby.Godot", "OneLobby.Direct", "OneLobby.Opus", "OneLobby.Replication"]) writeFileSync(join(cwd, `feed/${id}.0.7.2-dev.9.nupkg`), "x");
   mkdirSync(join(cwd, "feed-no-replication"));
@@ -40,7 +41,7 @@ const GODOT_ANSWER = "4.7.2.stable.mono.official.ed1daf0bf\n";
 async function cli(args) {
   let out = "";
   let err = "";
-  const io = { stdout: { write: (s) => (out += s) }, stderr: { write: (s) => (err += s) }, stdin: Readable.from([""]), stdinIsTTY: false, env: {}, cwd, godotVersion: () => GODOT_ANSWER };
+  const io = { stdout: { write: (s) => (out += s) }, stderr: { write: (s) => (err += s) }, stdin: Readable.from([""]), stdinIsTTY: false, env: {}, cwd, godotVersion: () => GODOT_ANSWER, resolveUnity: () => null };
   const code = await main(args, io);
   return { code, out, err };
 }
@@ -53,6 +54,7 @@ const text = (...p) => readFileSync(at(...p), "utf8");
 const tree = (dir, rel = "") => readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? tree(dir, `${rel}${e.name}/`) : [`${rel}${e.name}`])).sort();
 const GD = ["--template", "godot-gdscript", "--yes", "--no-git", "--no-natives"];
 const CS = ["--template", "godot-csharp", "--yes", "--no-git", "--no-natives", "--addon-from", "checkout", "--packages-from", "feed"];
+const UN = ["--template", "unity", "--yes", "--no-git", "--package-from", "com.onelobby.unity-0.7.9-ci.3.tgz"];
 const PLAYER_OWNER = ["--mode", "replication", "--set", "sync.player.authority=owner"];
 const PLAYER_HOST_2D = ["--mode", "replication", "--set", "sync.player.authority=host", "--set", "sync.player.space=2d"];
 
@@ -75,6 +77,20 @@ describe("a game without sync.player is exactly what it was before", () => {
       expect(got).toEqual(golden[name]);
       expect(existsSync(join(root, "player.tscn"))).toBe(false);
       expect(existsSync(join(root, NET_PLAYER_DIR))).toBe(false);
+    });
+  }
+
+  // fixtures/no-player-golden-unity.json: the same for the unity template, made with the scaffolder as it was on dev main 5dce586 (before this change)
+  const goldenUnity = JSON.parse(readFileSync(new URL("./fixtures/no-player-golden-unity.json", import.meta.url), "utf8"));
+  for (const [name, extra] of Object.entries({ unity: [], "unity-replication": ["--mode", "replication"] })) {
+    it(`${name}: the same files with the same bytes`, async () => {
+      const r = await cli([`${name}/my-game`, ...UN, ...extra]);
+      expect(r.code).toBe(0);
+      const root = at(name, "my-game");
+      const got = Object.fromEntries(tree(root).map((p) => [p, createHash("sha256").update(readFileSync(join(root, p))).digest("hex")]));
+      expect(got).toEqual(goldenUnity[name]);
+      expect(existsSync(join(root, "Assets/Scripts/Game.cs"))).toBe(false);
+      expect(existsSync(join(root, "Assets/Scripts/OneLobbyGame.asmdef"))).toBe(false);
     });
   }
 
@@ -366,5 +382,152 @@ describe("the template tools", () => {
     expect(resolveNetPlayer({ wanted: false, blueprint: bp({ player: {} }), target: cwd, into: false })).toBeNull();
     expect(resolveNetPlayer({ wanted: true, blueprint: bp({ mode: "raw" }), target: cwd, into: false })).toBeNull();
     expect(resolveNetPlayer({ wanted: true, blueprint: bp({ player: {} }), target: cwd, into: false })).toEqual({ authority: "owner", space: "3d" });
+  });
+});
+
+describe("unity with sync.player", () => {
+  const PLAYER_HOST_3D = ["--mode", "replication", "--set", "sync.player.authority=host"];
+  const SCRIPTS = ["Assets/Scripts/Boot.cs", "Assets/Scripts/Game.cs", "Assets/Scripts/GamePlayer.cs", "Assets/Scripts/OneLobbyGame.asmdef"];
+
+  it("a new project gets the game, the character, its assembly and a test that checks them; Boot.cs opens the game", async () => {
+    const r = await j(["my-game", ...UN, ...PLAYER_OWNER]);
+    expect(r.code).toBe(0);
+    expect(r.json.netPlayer).toEqual({ authority: "owner", space: "3d" });
+    for (const p of [...SCRIPTS, "Assets/OneLobby/Tests/MultiplayerTests.cs", "AGENTS.md"]) expect(r.json.files).toContain(p);
+    const without = await j(["other", ...UN, "--mode", "replication", "--dry-run"]);
+    expect(r.json.files.filter((p) => !without.json.files.includes(p) && !p.startsWith(".olc"))).toEqual(["Assets/Scripts/Game.cs", "Assets/Scripts/GamePlayer.cs", "Assets/Scripts/OneLobbyGame.asmdef"]);
+    expect(text("my-game/Assets/Scripts/Boot.cs")).toContain("Game.Begin(lobby, blueprint)");
+    expect(text("my-game/Assets/Scripts/Boot.cs")).toContain("class GameBoot");
+    expect(text("my-game/Assets/Scripts/Game.cs")).toContain("AddComponent<OneLobbyNetPlayerSpawner>()");
+    expect(text("my-game/Assets/Scripts/Game.cs")).toContain("PrimitiveType.Cube");
+    expect(text("my-game/Assets/Scripts/Game.cs")).not.toContain("spawner.Step"); // owner: no step
+    expect(text("my-game/Assets/Scripts/GamePlayer.cs")).toContain("root.AddComponent<OneLobbyNetPlayer>()");
+    expect(text("my-game/Assets/Scripts/GamePlayer.cs")).toContain("CharacterController");
+    expect(JSON.parse(text("my-game/Assets/Scripts/OneLobbyGame.asmdef"))).toMatchObject({ name: "OneLobbyGame", references: ["OneLobby.Unity"] });
+    const asmdef = JSON.parse(text("my-game/Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef"));
+    expect(asmdef.references).toContain("OneLobbyGame");
+    expect(asmdef.precompiledReferences).toContain("OneLobby.Replication.dll");
+    expect(text("my-game/Assets/Resources/onelobby.json")).toContain('"player"');
+    for (const f of tree(at("my-game")).filter((p) => /\.(cs|asmdef|md)$/.test(p))) expect(text("my-game", f), f).not.toMatch(/\/\/@/);
+  });
+
+  it("owner authority: the script moves the character and says so; host authority: SetInput and a step function and says so", async () => {
+    await cli(["o", ...UN, ...PLAYER_OWNER]);
+    const owner = text("o/Assets/Scripts/GamePlayer.cs");
+    expect(owner).toContain('Authority "owner"');
+    expect(owner).toContain("_cc.Move(");
+    expect(owner).toContain("Net.Jump()");
+    expect(owner).not.toContain("Net.SetInput(");
+    expect(owner).not.toContain("using OneLobby.Replication");
+    await cli(["h", ...UN, ...PLAYER_HOST_3D]);
+    const host = text("h/Assets/Scripts/GamePlayer.cs");
+    expect(host).toContain('Authority "host"');
+    expect(host).toContain("Net.SetInput(");
+    expect(host).toContain("public static PlayerState Step(");
+    expect(host).not.toContain("_cc.Move");
+    expect(host).not.toContain("CharacterController");
+    expect(text("h/Assets/Scripts/Game.cs")).toContain("spawner.Step = GamePlayer.Step");
+    expect(text("h/AGENTS.md")).toContain('"host"');
+    expect(text("o/AGENTS.md")).toContain("`Assets/Scripts/GamePlayer.cs`");
+    expect(text("o/AGENTS.md")).toContain("then the networked player");
+  });
+
+  it("2d space writes a flat square, an orthographic camera and a 2d spawn point", async () => {
+    await cli(["d", ...UN, ...PLAYER_HOST_2D]);
+    const player = text("d/Assets/Scripts/GamePlayer.cs");
+    expect(player).not.toContain("PrimitiveType.Capsule");
+    expect(player).not.toContain("s.Z");
+    expect(text("d/Assets/Scripts/Game.cs")).toContain("orthographic = true");
+    expect(text("d/Assets/Scripts/Game.cs")).toContain("0.5f, 0f)");
+    expect(text("d/Assets/OneLobby/Tests/MultiplayerTests.cs")).toContain("new Vector3(peer * 2f, 0.5f, 0f)");
+    expect(text("d/Assets/OneLobby/Tests/MultiplayerTests.cs")).toContain("sp.Step = GamePlayer.Step");
+  });
+
+  it("the generated test keeps its verdict line and adds the player check before the peers leave", async () => {
+    await cli(["t", ...UN, ...PLAYER_OWNER]);
+    const t = text("t/Assets/OneLobby/Tests/MultiplayerTests.cs");
+    expect(t).toContain('Finish(true, $"code={code}")');
+    expect(t.indexOf("CheckPlayer(bp)")).toBeGreaterThan(t.indexOf("wrong message"));
+    expect(t.indexOf("CheckPlayer(bp)")).toBeLessThan(t.indexOf("MULTIPLAYER_HOLD"));
+    expect(t).toContain("if (!_playerPhase)");
+    expect(t).toContain("async Task<bool> CheckPlayer(Blueprint bp)");
+    expect(t).toContain("Jumped += ");
+    expect(t).toContain(".Move(new Vector3(6f, 0f, 0f))"); // owner: the owner places its own player
+    expect(t).not.toContain("net.SetInput(");
+    expect(t).not.toMatch(/\/\/@/);
+    expect(t.trimEnd().endsWith("}")).toBe(true);
+    await cli(["t2", ...UN, ...PLAYER_HOST_3D]);
+    const t2 = text("t2/Assets/OneLobby/Tests/MultiplayerTests.cs");
+    expect(t2).toContain("NetPlayerInput { MoveX = 1.0 }");
+    expect(t2).toContain("sp.Step = GamePlayer.Step");
+    expect(t2).not.toContain(".Move(new Vector3(6f");
+  });
+
+  it("the recommendation and a --from file reach the template the way they do for Godot", async () => {
+    const coop = await j(["c", ...UN, "--recommend", "co-op survival sandbox for 4", "--dry-run"]);
+    expect(coop.json.netPlayer).toEqual({ authority: "owner", space: "3d" });
+    expect(coop.json.files).toContain("Assets/Scripts/GamePlayer.cs");
+    const party = await j(["p", ...UN, "--recommend", "4 player party minigames", "--dry-run"]);
+    expect(party.json.netPlayer).toBeUndefined();
+    expect(party.json.files).not.toContain("Assets/Scripts/GamePlayer.cs");
+    writeFileSync(at("on.json"), JSON.stringify({ game: { id: "com.example.on" }, sync: { mode: "replication", player: { authority: "host", space: "2d" } } }));
+    expect((await j(["a", ...UN, "--from", "on.json", "--dry-run"])).json.netPlayer).toEqual({ authority: "host", space: "2d" });
+  });
+
+  it("--into writes no script into the game: it prints the spawner lines; a second run changes nothing", async () => {
+    mkdirSync(at("into/ProjectSettings"), { recursive: true });
+    mkdirSync(at("into/Packages"), { recursive: true });
+    mkdirSync(at("into/Assets"), { recursive: true });
+    writeFileSync(at("into/ProjectSettings/ProjectVersion.txt"), "m_EditorVersion: 6000.0.30f1\n");
+    writeFileSync(at("into/Packages/manifest.json"), '{\n  "dependencies": {\n    "com.unity.modules.ui": "1.0.0"\n  }\n}\n');
+    const r = await j(["--into", "into", ...UN, ...PLAYER_OWNER]);
+    expect(r.code).toBe(0);
+    expect(r.json.netPlayer).toEqual({ authority: "owner", space: "3d" });
+    for (const p of SCRIPTS) expect(existsSync(at("into", p))).toBe(false);
+    expect(tree(at("into", "Assets")).filter((p) => p.endsWith(".cs")).sort()).toEqual(["OneLobby/Editor/BuildPlayer.cs", "OneLobby/Tests/MultiplayerTests.cs"]);
+    expect(text("into/Assets/OneLobby/Tests/MultiplayerTests.cs")).not.toContain("CheckPlayer");
+    expect(text("into/Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef")).not.toContain('"OneLobbyGame"');
+    expect(r.json.next.join("\n")).toContain("OneLobbyNetPlayerSpawner");
+    expect(r.json.next.join("\n")).toContain("spawner.Begin(lobby, menu.Client!.Blueprint)");
+    const host = await j(["--into", "into", ...UN, ...PLAYER_HOST_3D, "--force", "--dry-run"]);
+    expect(host.json.next.join("\n")).toContain("spawner.Step = MyCharacter.Step");
+    const again = await j(["--into", "into", ...UN, ...PLAYER_OWNER]);
+    expect(again.json.changed).toBe(false);
+    // the kept onelobby.json decides: a plain rerun on a game whose file has sync.player still prints the lines
+    const plain = await j(["--into", "into", ...UN]);
+    expect(plain.json.skipped).toContain("Assets/Resources/onelobby.json");
+    expect(plain.json.netPlayer).toEqual({ authority: "owner", space: "3d" });
+  });
+
+  it("update never rewrites the game's own scripts", async () => {
+    await cli(["u", ...UN, ...PLAYER_OWNER]);
+    for (const p of SCRIPTS) writeFileSync(at("u", p), "// mine\n");
+    const r = await j(["update", "u", "--package-from", "com.onelobby.unity-0.7.9-ci.3.tgz"]);
+    expect(r.code).toBe(0);
+    for (const p of SCRIPTS) expect(text("u", p)).toBe("// mine\n");
+  });
+
+  it("verify's player check is in the list only for a game with the component, passes on what the scaffolder writes, and says what is missing", async () => {
+    await cli(["on", ...UN, ...PLAYER_OWNER]);
+    await cli(["plain", ...UN]);
+    expect(hasNetPlayer(at("on"), "unity")).toBe(true);
+    expect(hasNetPlayer(at("plain"), "unity")).toBe(false);
+    const ok = await playerCheck().run({ dir: at("on"), kind: "unity" });
+    expect(ok).toMatchObject({ status: "ok" });
+    expect(ok.detail).toContain("has the OneLobbyNetPlayer component");
+    // the component is added and nothing spawns it (the test and build files under Assets/OneLobby/ do not count)
+    writeFileSync(at("on/Assets/Scripts/Game.cs"), "class Game {}\n");
+    writeFileSync(at("on/Assets/Scripts/Boot.cs"), "class Boot {}\n");
+    const noSpawner = await playerCheck().run({ dir: at("on"), kind: "unity" });
+    expect(noSpawner.status).toBe("fail");
+    expect(noSpawner.detail).toContain("no script outside Packages/ and Assets/OneLobby/ spawns the characters");
+    expect(noSpawner.next).toContain("OneLobbyNetPlayerSpawner");
+    // nothing adds the component any more: the game has no player to check, so the line is not in the list
+    writeFileSync(at("on/Assets/Scripts/GamePlayer.cs"), "class GamePlayer {}\n");
+    expect(hasNetPlayer(at("on"), "unity")).toBe(false);
+    // a spawner with no component
+    writeFileSync(at("on/Assets/Scripts/Game.cs"), "class Game { OneLobbyNetPlayerSpawner s; }\n");
+    writeFileSync(at("on/Assets/Scripts/Other.cs"), "class Other { void F(GameObject g) { g.AddComponent<OneLobbyNetPlayer>(); } }\n");
+    expect(await playerCheck().run({ dir: at("on"), kind: "unity" })).toMatchObject({ status: "ok" });
   });
 });

@@ -11,6 +11,7 @@ import { ONELOBBY_VERSION, SCHEMA_URL } from "./blueprint.js";
 import { PACKAGE_NAME, addDependencies, newManifest } from "./manifest.js";
 import { DEFAULT_DIRECT_PORT } from "./godot.js";
 import { applyBlock } from "./vendor.js";
+import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
 
 const templates = join(dirname(fileURLToPath(import.meta.url)), "../templates/unity");
 const read = (...p) => readFileSync(join(templates, ...p), "utf8").replace(/\r\n/g, "\n"); // LF whatever the checkout did
@@ -27,6 +28,8 @@ export const BUILTIN_MODULES = ["imgui", "ui", "uielements", "audio", "jsonseria
 export const MANIFEST_PATH = "Packages/manifest.json";
 export const BLUEPRINT_PATH = "Assets/Resources/onelobby.json";
 export const TEST_FILES = ["Assets/OneLobby/Tests/MultiplayerTests.cs", "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef"];
+/** A game with players in the world (sync.player) also has its own assembly, so the play-mode test can use the game's character. */
+export const GAME_ASMDEF = "Assets/Scripts/OneLobbyGame.asmdef";
 export const BUILD_FILE = "Assets/OneLobby/Editor/BuildPlayer.cs";
 export const TEST_ASSEMBLY = "OneLobbyGame.Tests";
 export const BUILD_METHOD = "OneLobbyBuild.Windows";
@@ -209,6 +212,77 @@ export function olcEntry({ slug, title }) {
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
 
+// ---- players in the world (sync.player) ------------------------------------------------------------------------------------
+
+/** The files a game with players in the world gets besides the common ones (new project): { path, content }. `read` reads a template file as LF text. */
+export function netPlayerFiles({ authority, space }, read) {
+  const flags = playerFlags({ authority, space });
+  return [
+    { path: "Assets/Scripts/Boot.cs", content: read("net-player", "Boot.cs") },
+    { path: "Assets/Scripts/Game.cs", content: pickBlocks(read("net-player", "Game.cs"), flags) },
+    { path: "Assets/Scripts/GamePlayer.cs", content: pickBlocks(read("net-player", "GamePlayer.cs"), flags) },
+    { path: GAME_ASMDEF, content: read("net-player", "OneLobbyGame.asmdef") },
+  ];
+}
+
+const TEST_PUMP = "                if (_host != null) _host.Pump(); else _hostClient?.Pump();\n                if (_guest != null) _guest.Pump(); else _guestClient?.Pump();\n";
+const TEST_HOLD = "            // --hold=SECONDS:";
+const TEST_END = "    }\n}\n";
+const ASMDEF_REFS = '"references": ["OneLobby.Unity", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],';
+const ASMDEF_PRECOMPILED = '"precompiledReferences": ["nunit.framework.dll", "OneLobby.Core.dll", "OneLobby.Direct.dll"],';
+
+/** Assets/OneLobby/Tests/MultiplayerTests.cs with the player check added: the joiner's player appears on the host with a position, and one jump arrives once. */
+export function multiplayerWithPlayer(base, part, settings) {
+  for (const needle of [TEST_PUMP, TEST_HOLD, TEST_END]) if (!base.includes(needle)) throw new Error("MultiplayerTests.cs: a place for the player check moved");
+  const indented = TEST_PUMP.replace(/^/gm, "    ").replace(/ +$/, ""); // the same two lines, one level deeper
+  const guarded = "                // while the player spawners run, their layers pump the two lobbies\n                if (!_playerPhase)\n                {\n" + indented + "                }\n";
+  const pumped = base.replace(TEST_PUMP, () => guarded);
+  const called = pumped.replace(TEST_HOLD, () => `            if (_route == "direct" && !await CheckPlayer(bp)) return;\n${TEST_HOLD}`);
+  const end = called.lastIndexOf(TEST_END);
+  return called.slice(0, end) + "\n" + pickBlocks(part, playerFlags(settings)).replace(/\n+$/, "") + "\n" + called.slice(end);
+}
+
+/** The test's .asmdef of a game with players: it also sees the game's own assembly (the character) and the replication library. */
+export function testAsmdefWithPlayer(base) {
+  for (const needle of [ASMDEF_REFS, ASMDEF_PRECOMPILED]) if (!base.includes(needle)) throw new Error("OneLobbyGame.Tests.asmdef: a place for the player references moved");
+  return base
+    .replace(ASMDEF_REFS, () => '"references": ["OneLobby.Unity", "OneLobbyGame", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],')
+    .replace(ASMDEF_PRECOMPILED, () => '"precompiledReferences": ["nunit.framework.dll", "OneLobby.Core.dll", "OneLobby.Direct.dll", "OneLobby.Replication.dll"],');
+}
+
+/** AGENTS.md of a game with players: the bullets for the game script, the character and the check. */
+export function agentsWithPlayer(agents, { authority, space }) {
+  const bootEnd = 'Yours to edit. The menu doc: docs/recipes/menu.md in the OneLobby repo ("Unity").\n';
+  const bootTail = "  Start your game in that handler; end it on `ReturnedToLobby` or `Left`. It logs";
+  const testTail = "host, join by address, one message each way.\n";
+  const testRefs = "(it references `OneLobby.Unity` and the package's `OneLobby.Core.dll`\n  and `OneLobby.Direct.dll`)";
+  for (const needle of [bootEnd, bootTail, testTail, testRefs]) if (!agents.includes(needle)) throw new Error("AGENTS.md: a place for the player lines moved");
+  const what = authority === "host" ? 'the host places every player (`sync.player.authority` "host": `GamePlayer.cs` gives the component `SetInput()` and one pure `Step()`)' : "each player's own PC places its player (`sync.player.authority` \"owner\": `GamePlayer.cs` moves the character as in any single-player game)";
+  return agents
+    .replace(bootTail, () => "  On `GameStarted` it opens `Game` (below) and ends it on `ReturnedToLobby` or `Left`. It logs")
+    .replace(testRefs, () => "(it references `OneLobby.Unity`, `OneLobbyGame` and the package's `OneLobby.Core.dll`,\n  `OneLobby.Direct.dll` and `OneLobby.Replication.dll`)")
+    .replace(bootEnd, () =>
+      bootEnd +
+      [
+        `- \`Assets/Scripts/Game.cs\`: the game (${space === "2d" ? "a floor and an orthographic camera" : "a floor, a light and a camera"}, built in code) and an \`OneLobbyNetPlayerSpawner\`: one character per player, created and removed as players come and go. Yours to edit.`,
+        `- \`Assets/Scripts/GamePlayer.cs\`: the character (${space === "2d" ? "a square, side-on" : "a capsule"}, made in code) with a \`OneLobbyNetPlayer\` component; ${what}. Arrow keys or WASD move it and space jumps. Yours to edit: \`update\` never rewrites it.`,
+        "- `Assets/Scripts/OneLobbyGame.asmdef`: the game's own assembly, so the play-mode test can use `GamePlayer`. Code of yours that the game scripts need goes in this folder or lists `OneLobbyGame` in its references.",
+        "",
+      ].join("\n"),
+    )
+    .replace(testTail, () => "host, join by address, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`GamePlayer` is used as it is).\n");
+}
+
+/** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes or scripts). `players`: { authority, space }. */
+export function netPlayerLines({ authority, space }) {
+  return [
+    `players in the world (sync.player is on): add a spawner where your game starts, with your character (an object with a OneLobbyNetPlayer on it${authority === "host" ? ", driven by SetInput() and a step function" : ", moved as you always did"}):`,
+    "  var spawner = gameObject.AddComponent<OneLobbyNetPlayerSpawner>(); spawner.Prefab = myCharacter;   // or spawner.Factory = peer => MakeCharacter(peer): code that returns an object with the component",
+    `  ${authority === "host" ? "spawner.Step = MyCharacter.Step; // your pure (state, input, dt) => state\n  " : ""}spawner.Begin(lobby, menu.Client!.Blueprint);   // lobby: the menu's GameStarted lobby; one character per player appears and goes by itself (${space === "2d" ? "also spawner.SpawnPoint; positions use x and y" : "optionally spawner.SpawnPoint"}; docs/recipes/net-player.md section 12)`,
+    "  (your own .asmdef needs OneLobby.Unity in references and OneLobby.Replication.dll in precompiledReferences)",
+  ];
+}
+
 // ---- planning -------------------------------------------------------------------------------------------------------------
 
 /** The menu lines a game with its own start-up adds (--into writes no boot script that would put a menu into it). */
@@ -223,7 +297,7 @@ export const MENU_LINES = [
  * { files: [{ path, content, action }], notes, manifest, package, editor, slug } where action is create | update | overwrite | unchanged | skip.
  * Throws before anything is written when the plan cannot work (a manifest it cannot edit, a tarball that is not there).
  */
-export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor }) {
+export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor, netPlayer = null }) {
   const title = blueprint.game.title ?? dirName;
   const slug = slugOf(dirName);
   const abs = (p) => join(target, ...p.split("/"));
@@ -248,16 +322,19 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor 
   }
 
   const list = [{ path: BLUEPRINT_PATH, content: json(blueprint) }];
+  // players in the world (sync.player): a new project gets the game, the character, its assembly and the check; --into only gets the printed lines
+  const withPlayers = netPlayer !== null && !into;
   if (!into) {
+    const agents = fill(read("AGENTS.md"), vars);
     list.push(
       { path: "ProjectSettings/ProjectVersion.txt", content: `m_EditorVersion: ${editor.version}\n${editor.revision ? `m_EditorVersionWithRevision: ${editor.version} (${editor.revision})\n` : ""}` },
-      { path: "Assets/Scripts/Boot.cs", content: read("Boot.cs") },
-      { path: "AGENTS.md", content: fill(read("AGENTS.md"), vars) },
+      ...(withPlayers ? netPlayerFiles(netPlayer, read) : [{ path: "Assets/Scripts/Boot.cs", content: read("Boot.cs") }]),
+      { path: "AGENTS.md", content: withPlayers ? agentsWithPlayer(agents, netPlayer) : agents },
     );
   }
   list.push(
-    { path: "Assets/OneLobby/Tests/MultiplayerTests.cs", content: read("tests/MultiplayerTests.cs") },
-    { path: "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", content: read("tests/OneLobbyGame.Tests.asmdef") },
+    { path: "Assets/OneLobby/Tests/MultiplayerTests.cs", content: withPlayers ? multiplayerWithPlayer(read("tests/MultiplayerTests.cs"), read("net-player", "multiplayer_part.cs"), netPlayer) : read("tests/MultiplayerTests.cs") },
+    { path: "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", content: withPlayers ? testAsmdefWithPlayer(read("tests/OneLobbyGame.Tests.asmdef")) : read("tests/OneLobbyGame.Tests.asmdef") },
     { path: BUILD_FILE, content: read("editor/BuildPlayer.cs") },
     { path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) },
   );
@@ -292,6 +369,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor 
     package: { value: ref.value, from: ref.from, version: ref.version },
     editor,
     slug,
+    netPlayer,
   };
 }
 
@@ -307,6 +385,7 @@ export function applyUnity(plan, { target }) {
 
 /** The `next` lines for the printed result. */
 export function unityNext({ into, rel, plan }) {
+  const players = plan.netPlayer ?? null;
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (plan.package.from === "default") next.push(`put the package tarball next to the manifest: Packages/${defaultTarball()} (the package is not on a registry yet: build it with clients/unity/build-unity-package.sh --pack, or take the unity-dev-package CI artifact; or rerun with --package-from <tarball>)`);
@@ -315,6 +394,7 @@ export function unityNext({ into, rel, plan }) {
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
       `the blueprint is ${BLUEPRINT_PATH}: change choices there`,
+      ...(players ? netPlayerLines(players) : []),
       `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log`,
       `build the Windows player: Unity -batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}   # ${PLAYER_EXE}`,
       `try it on this PC only: ${PLAYER_EXE} --host --local --name=Sam   (a second window: --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
@@ -343,7 +423,8 @@ export async function runUnity(ctx) {
     if (state === "full" && !opts.force) throw new CliError("dir_not_empty", `${target} is not empty (use --force to write into it anyway)`);
   }
   const editor = chooseEditor({ opts, env: io.env, resolve: io.resolveUnity });
-  const plan = planUnity({ into, target, dirName, blueprint, opts, cwd: io.cwd, editor });
+  const netPlayer = resolveNetPlayer({ wanted: ctx.netPlayer === true, blueprint, target, into, force: opts.force, blueprintPath: BLUEPRINT_PATH });
+  const plan = planUnity({ into, target, dirName, blueprint, opts, cwd: io.cwd, editor, netPlayer });
   const rel = relative(io.cwd, target) || ".";
   const listed = plan.files.filter((f) => f.action === "create" || f.action === "update" || f.action === "overwrite");
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
@@ -361,6 +442,7 @@ export async function runUnity(ctx) {
     package: plan.package,
     manifest: plan.manifest,
     ...(into ? {} : { editor: { version: plan.editor.version, from: plan.editor.from } }),
+    ...(netPlayer ? { netPlayer } : {}),
     notes: plan.notes,
     changed: wouldChange,
     next,

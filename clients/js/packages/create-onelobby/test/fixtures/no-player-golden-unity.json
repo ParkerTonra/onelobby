@@ -1,0 +1,28 @@
+{
+ "unity": {
+  ".gitattributes": "336a312d3517970a385da52fd8360a0c9c8809d53e358bb3382dc9dea8b486e2",
+  ".gitignore": "4c10cf4af71cbfb5e69cf5af204526a0ae420b6bea6f29b7c3af2eab0dafc268",
+  ".olc/my-game.json": "dd816cd744b063f5ec61abbc0722aa9beff69de61feebfdfd4794e7c800ec3f9",
+  "AGENTS.md": "de100a2111a60051ad95bd3f051d6467de14d2c4d0aaaf1ccf6fe40490ee61f3",
+  "Assets/OneLobby/Editor/BuildPlayer.cs": "1417a91278eb2643f5512ce2d0a93031b3c4369c6bc117334a5b36906298c528",
+  "Assets/OneLobby/Tests/MultiplayerTests.cs": "24d21f2a44c3852ce823b27ed8a4647ddbcb0233b670e34fe95554aaa476e72e",
+  "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef": "8723f0cc81f7aa0279e110060fa05b7f1d9bd8d34790dde35c0522a33f380735",
+  "Assets/Resources/onelobby.json": "106ac1a15b91e5c721a7b957e535928255cee78719a1621b312d4f0ee91e8e6b",
+  "Assets/Scripts/Boot.cs": "52c2b9bb35b88b787c87b89f71a94edae20e6dd983261b1f40414a86cc437298",
+  "Packages/manifest.json": "f65fb761eb54dae686983ab27bc0326a5a64d08749d0c1459d1d9848dfbbbd6f",
+  "ProjectSettings/ProjectVersion.txt": "f77597f7eb8dba90cd1ec2f1003284405751baa88d0f201d47a77aaaa66576f4"
+ },
+ "unity-replication": {
+  ".gitattributes": "336a312d3517970a385da52fd8360a0c9c8809d53e358bb3382dc9dea8b486e2",
+  ".gitignore": "4c10cf4af71cbfb5e69cf5af204526a0ae420b6bea6f29b7c3af2eab0dafc268",
+  ".olc/my-game.json": "dd816cd744b063f5ec61abbc0722aa9beff69de61feebfdfd4794e7c800ec3f9",
+  "AGENTS.md": "de100a2111a60051ad95bd3f051d6467de14d2c4d0aaaf1ccf6fe40490ee61f3",
+  "Assets/OneLobby/Editor/BuildPlayer.cs": "1417a91278eb2643f5512ce2d0a93031b3c4369c6bc117334a5b36906298c528",
+  "Assets/OneLobby/Tests/MultiplayerTests.cs": "24d21f2a44c3852ce823b27ed8a4647ddbcb0233b670e34fe95554aaa476e72e",
+  "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef": "8723f0cc81f7aa0279e110060fa05b7f1d9bd8d34790dde35c0522a33f380735",
+  "Assets/Resources/onelobby.json": "8bf25207cf247f108dc77af58a11c6cfbcfc2bfd057a5a5bf24cc57c38d0419d",
+  "Assets/Scripts/Boot.cs": "52c2b9bb35b88b787c87b89f71a94edae20e6dd983261b1f40414a86cc437298",
+  "Packages/manifest.json": "f65fb761eb54dae686983ab27bc0326a5a64d08749d0c1459d1d9848dfbbbd6f",
+  "ProjectSettings/ProjectVersion.txt": "f77597f7eb8dba90cd1ec2f1003284405751baa88d0f201d47a77aaaa66576f4"
+ }
+}

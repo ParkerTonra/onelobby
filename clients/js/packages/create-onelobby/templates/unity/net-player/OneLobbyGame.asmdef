@@ -1,0 +1,14 @@
+{
+    "name": "OneLobbyGame",
+    "rootNamespace": "",
+    "references": ["OneLobby.Unity"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["OneLobby.Core.dll", "OneLobby.Direct.dll", "OneLobby.Replication.dll"],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

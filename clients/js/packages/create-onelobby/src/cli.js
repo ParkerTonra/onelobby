@@ -268,7 +268,7 @@ export async function run(argv, io) {
       const gitInit = (dir) => {
         if (!run_("git", ["init", "-q"], dir, io)) io.stderr.write("create-onelobby: git init failed; continuing without a repository\n");
       };
-      return await runUnity({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation });
+      return await runUnity({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit, recommendation, netPlayer });
     }
 
     // ---- plan ----
