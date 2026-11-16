@@ -134,6 +134,11 @@ func _run() -> void:
 	_test_packet_log()
 	_test_rtt()
 	_test_send_full_snapshot()
+	_test_ack0_second_session()
+	_test_ack0_single_session_long_run()
+	_test_ack0_late_packet_and_tap()
+	_test_ack0_second_session_inputs()
+	_test_ack0_old_session_packet_dropped()
 	_test_input_stats()
 	_test_streams_exactly_once()
 	_test_stream_gap()
@@ -617,6 +622,164 @@ func _test_send_full_snapshot() -> void:
 	_check(fulls >= 1 and fulls <= 8, "resync: only a, until its next ack (%d)" % fulls)
 	_check(host.session.acked_tick(a.peer_id()) > 0, "resync: deltas resume")
 	_check(a.session.entities().size() == 10 and a.despawned.size() == 0 and b.session.entities().size() == 10, "resync: nothing flickers")
+
+
+# ---- ack 0 from a client that had acked: its session started over (spec/replication.md "Resync") ----
+
+const ACK0_WORLD := 5
+const ACK0_NET := [100.0, 0.03, 20.0] # latency ms, loss, jitter ms
+
+
+## The client's session starts over on the same lobby: a new session object, sequence numbers from 1, no snapshot.
+func _ack0_restart(a: Variant) -> void:
+	a.session.dispose()
+	a.attach({"keyframe_seconds": 0})
+
+
+func _ack0_world(latency: float, loss: float, jitter: float) -> Dictionary:
+	var rig := Rig.new({"keyframe_seconds": 0}, latency, loss, jitter)
+	var host := rig.start_host()
+	var a := rig.join("a")
+	for i in ACK0_WORLD:
+		host.session.spawn(ALIEN, 0, _entity(_alien({"x": float(i)})))
+	a.make_input = func(t: int) -> PackedByteArray: return _bytes([t & 0xFF])
+	rig.host_tick = func(_t: int) -> void: host.session.try_get_input(a.peer_id())
+	return {"rig": rig, "host": host, "a": a}
+
+
+func _ack0_world_size(a: Variant) -> int:
+	var w: Array = a.session.client_worlds()
+	return 0 if w.is_empty() else (w[w.size() - 1]["ents"] as Array).size()
+
+
+func _ack0_zero_packet(a: Variant, newest: int, ack: int = 0) -> void:
+	a.lobby.send(a.lobby.host_peer_id, P.encode_input(ack, newest, [{"view256": 0, "bytes": _bytes([1])}]), FAST)
+
+
+func _test_ack0_second_session() -> void:
+	_tests += 1
+	var s := _ack0_world(ACK0_NET[0], ACK0_NET[1], ACK0_NET[2])
+	var rig: Rig = s["rig"]
+	var host: Variant = s["host"]
+	var a: Variant = s["a"]
+	rig.run(3.0)
+	_check(host.session.acked_tick(a.peer_id()) > 0, "ack0: acked before the restart")
+	var fulls0: int = host.session.stats.full_snapshots_sent
+	_ack0_restart(a)
+	_check(_ack0_world_size(a) == 0, "ack0: the new session holds nothing")
+	var sent0 := rig.sent_bytes(host, FAST)
+	var t0 := rig.net.now
+	var ms := -1
+	for _i in 250:
+		if _ack0_world_size(a) == ACK0_WORLD:
+			ms = rig.net.now - t0
+			break
+		rig.step()
+	var ticks: float = float(ms) / float(host.session.clock.tick_ms())
+	print("ack0 second session: world after %d ms (%.1f ticks), extra full snapshots %d, %d bytes sent on fast meanwhile" % [ms, ticks, host.session.stats.full_snapshots_sent - fulls0, rig.sent_bytes(host, FAST) - sent0])
+	_check(ms >= 0 and ticks <= 12.0, "ack0: the second session has the world within 12 ticks (%.1f)" % ticks)
+	rig.run(1.0)
+	var fulls: int = host.session.stats.full_snapshots_sent
+	var bytes := rig.sent_bytes(host, FAST)
+	rig.run(1.5)
+	_check(host.session.stats.full_snapshots_sent - fulls == 0, "ack0: deltas resume (no full snapshot in 1.5 s)")
+	print("ack0 deltas: %.1f bytes per snapshot (fast, lobby frames included)" % (float(rig.sent_bytes(host, FAST) - bytes) / 45.0))
+	_check(host.session.acked_tick(a.peer_id()) > 0, "ack0: the second session acked again")
+
+
+func _test_ack0_single_session_long_run() -> void:
+	_tests += 1
+	var s := _ack0_world(60.0, 0.05, 90.0)
+	var rig: Rig = s["rig"]
+	var host: Variant = s["host"]
+	var a: Variant = s["a"]
+	rig.run(2.0)
+	var zeroed := 0
+	var was: int = host.session.acked_tick(a.peer_id())
+	var full0: int = host.session.stats.full_snapshots_sent
+	for _i in int(120.0 * 1000.0 / float(rig.frame_ms)):
+		rig.step()
+		var now: int = host.session.acked_tick(a.peer_id())
+		if was > 0 and now == 0:
+			zeroed += 1
+		was = now
+	print("ack0 long run: 120 s, jitter 90 ms, 5%% loss: %d restarts, %d full snapshots" % [zeroed, host.session.stats.full_snapshots_sent - full0])
+	_check(zeroed == 0 and host.session.stats.full_snapshots_sent - full0 == 0, "ack0: a single session with jitter and reordering triggers none")
+
+
+func _test_ack0_late_packet_and_tap() -> void:
+	_tests += 1
+	var s := _ack0_world(ACK0_NET[0], ACK0_NET[1], ACK0_NET[2])
+	var rig: Rig = s["rig"]
+	var host: Variant = s["host"]
+	var a: Variant = s["a"]
+	rig.until(func() -> bool: return host.session.acked_tick(a.peer_id()) > 0)
+	var before: int = host.session.acked_tick(a.peer_id())
+	_ack0_zero_packet(a, 2) # an input the old session sent before its first snapshot arrived, delivered after a newer one
+	rig.run(0.1)
+	_check(host.session.acked_tick(a.peer_id()) >= before, "ack0: a late packet with ack 0 right after the first ack is not a restart")
+	rig.run(3.0)
+	var restarts := 0
+	var was: int = host.session.acked_tick(a.peer_id())
+	var seconds := 20
+	for i in int(float(seconds) * 1000.0 / float(rig.frame_ms)):
+		if i % 3 == 0:
+			_ack0_zero_packet(a, 1)
+		rig.step()
+		var now: int = host.session.acked_tick(a.peer_id())
+		if was > 0 and now == 0:
+			restarts += 1
+		was = now
+	var allowed := ceili(float(seconds) * 30.0 / float(host.session.config["history_ticks"]))
+	print("ack0 tap: %d restarts in %d s with an ack 0 every 48 ms (limit %d)" % [restarts, seconds, allowed])
+	_check(restarts >= 1 and restarts <= allowed, "ack0: at most one restart per history length (%d, limit %d)" % [restarts, allowed])
+
+
+func _test_ack0_second_session_inputs() -> void:
+	_tests += 1
+	var s := _ack0_world(ACK0_NET[0], ACK0_NET[1], ACK0_NET[2])
+	var rig: Rig = s["rig"]
+	var host: Variant = s["host"]
+	var a: Variant = s["a"]
+	var handed: Array = []
+	rig.host_tick = func(_t: int) -> void:
+		var f: Dictionary = host.session.try_get_input(a.peer_id())
+		if not f.is_empty():
+			handed.append([int(f["seq"]), bool(f["repeated"])])
+	rig.run(4.0) # the first session reaches sequence ~120
+	var mx := 0
+	for h: Array in handed:
+		if not h[1]:
+			mx = maxi(mx, h[0])
+	_check(mx > 80, "ack0: the first session's inputs reach sequence %d" % mx)
+	var lost0: int = host.session.input_stats_for(a.peer_id())["lost"]
+	handed.clear()
+	_ack0_restart(a)
+	rig.run(2.0)
+	var second: Array = handed.filter(func(h: Array) -> bool: return not h[1] and h[0] < 100)
+	var repeated: int = handed.filter(func(h: Array) -> bool: return h[1]).size()
+	var lost: int = int(host.session.input_stats_for(a.peer_id())["lost"]) - lost0
+	print("ack0 second session inputs: %d applied in 2 s (first seq %d), repeated frames %d, lost %d" % [second.size(), -1 if second.is_empty() else second[0][0], repeated, lost])
+	_check(second.size() > 30 and second[0][0] == 1 and lost <= 3, "ack0: the second session's inputs are applied from sequence 1, nothing counted lost")
+
+
+func _test_ack0_old_session_packet_dropped() -> void:
+	_tests += 1
+	var s := _ack0_world(ACK0_NET[0], ACK0_NET[1], ACK0_NET[2])
+	var rig: Rig = s["rig"]
+	var host: Variant = s["host"]
+	var a: Variant = s["a"]
+	rig.run(3.0)
+	_ack0_restart(a)
+	rig.until(func() -> bool: return host.session.acked_tick(a.peer_id()) == 0, 200)
+	var handed: Array = []
+	rig.host_tick = func(_t: int) -> void:
+		var f: Dictionary = host.session.try_get_input(a.peer_id())
+		if not f.is_empty() and not f["repeated"]:
+			handed.append(int(f["seq"]))
+	_ack0_zero_packet(a, 9000, host.session.clock.tick - 20) # an old-session packet: ack of a tick sent before the restart
+	rig.run(1.5)
+	_check(handed.size() > 10 and not handed.has(9000) and handed[0] < 10, "ack0: an old-session packet in flight after the restart is dropped whole")
 
 
 func _test_input_stats() -> void:

@@ -36,6 +36,7 @@ step replication "${G[@]}" -s res://tests/replication.gd
 step net_player_vectors "${G[@]}" -s res://tests/net_player_vectors.gd
 step net_player "${G[@]}" -s res://tests/net_player.gd
 step net_player_node "${G[@]}" -s res://tests/net_player_node.gd
+step net_player_late_layer "${G[@]}" -s res://tests/net_player_late_layer.gd
 step net_player_sample "${G[@]}" -s res://tests/net_player_sample.gd
 step net_player_two_process bash "$HERE/net-player-test.sh"
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
