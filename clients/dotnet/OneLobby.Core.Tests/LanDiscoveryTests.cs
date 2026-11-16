@@ -255,7 +255,7 @@ namespace OneLobby.Tests
         [Fact]
         public void AskNowAsksAtOnceButNeverFasterThanTheMinimumGap()
         {
-            var (net, _, finder, clock, _) = Pair(() => Info());
+            var (net, _, finder, clock, _) = Pair(() => null); // a host with no lobby never answers: net.Sent then holds only the finder's asks (an answer from the host's thread would race the counts below)
             finder.Start();
             var before = net.Sent.Count;
             for (var i = 0; i < 10; i++) finder.AskNow();
