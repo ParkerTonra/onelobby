@@ -524,6 +524,15 @@ namespace OneLobby.Unity.PlayTests
             Check(zero.Count == 0, $"{label}: every shown control has a size: {string.Join("; ", zero.Take(4))}");
             Check(outside.Count == 0, $"{label}: nothing runs past the right edge: {string.Join("; ", outside.Take(4))}");
             Check(!Texts(root).Contains("sampass77") && !Texts(root).Contains("samuser"), $"{label}: the relay line is in no control");
+            // text drawn straight on the backdrop must be readable on it (the default theme's label colour is dark, and so is the backdrop)
+            var back = Luminance(root.resolvedStyle.backgroundColor);
+            var faint = new List<string>();
+            root.Query<Label>().ForEach(l =>
+            {
+                if (!Shown(l) || string.IsNullOrEmpty(l.text)) return;
+                if (Mathf.Abs(Luminance(l.resolvedStyle.color) - back) < 0.4f) faint.Add($"{(l.name.Length > 0 ? l.name : l.text)} {l.resolvedStyle.color}");
+            });
+            Check(faint.Count == 0, $"{label}: every label is readable on the backdrop: {string.Join("; ", faint.Take(4))}");
             if (expectFocus) Check(p.Menu.FocusedControl.Length > 0, $"{label}: focus is on a control of the menu");
             // every shown, enabled control can take focus (Tab can reach it)
             var stuck = new List<string>();
@@ -536,6 +545,8 @@ namespace OneLobby.Unity.PlayTests
             }
             Check(stuck.Count == 0, $"{label}: every shown control takes focus, not: {string.Join(", ", stuck.Take(4))}");
         }
+
+        private static float Luminance(Color c) => 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 
         // ---- boot flags ----------------------------------------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
-/* The stock look of the OneLobby menu: the engine's default runtime theme plus layout only (spacing, one dark backdrop,
-   two larger sizes). A game restyles it by adding a StyleSheet after this one (OneLobbyMenu.StyleSheets); every control
+/* The stock look of the OneLobby menu: the engine's default runtime theme plus layout only (spacing, one dark backdrop with
+   light label text, two larger sizes). A game restyles it by adding a StyleSheet after this one (OneLobbyMenu.StyleSheets); every control
    has a name from OneLobbyMenu.ControlNames and the classes below. */
 .onelobby-menu {
     position: absolute;
@@ -25,9 +25,11 @@
     padding: 16px;
 }
 
+/* Labels sit straight on the dark backdrop, and the default theme's label text is dark: without a colour they cannot be read. */
 .onelobby-menu Label {
     white-space: normal;
     margin: 2px 0 4px 0;
+    color: rgb(232, 232, 232);
 }
 
 .onelobby-menu Button {
