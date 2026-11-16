@@ -7,6 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { OneLobby, memoryStore } from "../src/internals.js";
+import { checkVerdict } from "../src/diagnose.js";
 import { LobbyController, type ControllerOptions } from "../src/ui/controller.js";
 import "../src/ui/index.js";
 import type { OneLobbyElement } from "../src/ui/element.js";
@@ -28,10 +29,22 @@ function rigKit(r: Rig, label: string): (name: string) => OneLobby {
     });
 }
 
-function mount(attrs: Record<string, string> = {}, r?: Rig, label = "el"): El {
+/** Every element in this file gets a counted fake check runner: the check on open never reaches a socket here. */
+let checkRuns = 0;
+const fakeCheck = (kind: "cone" | "symmetric" = "cone", gate?: Promise<void>): ControllerOptions["checkRunner"] => async () => {
+  checkRuns++;
+  if (gate) await gate;
+  const f = { udp: "ok", natType: kind, relay: "none" } as const;
+  return { ...f, ...checkVerdict(f) };
+};
+
+function mount(attrs: Record<string, string> = {}, r?: Rig, label = "el", setup?: (el: El) => void): El {
   const el = document.createElement("one-lobby") as El;
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  if (r) (el._controller as unknown as { opts: ControllerOptions }).opts.makeKit = rigKit(r, label) as ControllerOptions["makeKit"];
+  const opts = (el._controller as unknown as { opts: ControllerOptions }).opts;
+  if (r) opts.makeKit = rigKit(r, label) as ControllerOptions["makeKit"];
+  opts.checkRunner = fakeCheck();
+  setup?.(el);
   document.body.append(el);
   return el;
 }
@@ -50,6 +63,7 @@ function everything(el: Element): string {
 }
 
 beforeEach(() => {
+  checkRuns = 0;
   document.body.replaceChildren();
   localStorage.clear();
 });
@@ -250,5 +264,94 @@ describe("<one-lobby> screens", () => {
     q(el, "joinForm").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await wait(r, 500);
     expect(el.screen).toBe("lobby");
+  });
+});
+
+// ---- the connection check when the element opens (counted fakes only) ---------------------------------------------------------
+
+describe("<one-lobby> connection check on open", () => {
+  const opts = (el: El) => (el._controller as unknown as { opts: ControllerOptions }).opts;
+  const line = (el: Element) => q(el, "startCheck");
+
+  it("runs once when the element opens, says nothing while it runs and nothing when all is well; Settings is filled in", async () => {
+    const el = mount({ game: "oo1" });
+    await flush();
+    expect(checkRuns).toBe(1);
+    expect(shown(el, "startCheck")).toBe(false);
+    el._controller.openSettings();
+    expect(q(el, "checkVerdict").textContent).toBe("Direct connections: likely to work.");
+    expect(q(el, "checkFacts").children.length).toBe(3);
+    el._controller.back();
+    await flush();
+    expect(checkRuns).toBe(1); // back from Settings: not again
+    q(el, "check").click();
+    await flush();
+    expect(checkRuns).toBe(2); // the button runs it on demand
+  });
+
+  it("a warning is one line on the start screen: the verdict sentence", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const el = mount({ game: "oo2" }, undefined, "el", (e) => (opts(e).checkRunner = fakeCheck("symmetric", gate)));
+    await flush();
+    expect(shown(el, "startCheck")).toBe(false); // while it runs
+    release();
+    await flush();
+    expect(shown(el, "startCheck")).toBe(true);
+    expect(line(el).textContent).toBe("Direct connections: likely to fail. A relay is recommended.");
+  });
+
+  it("checkOnOpen false and showConnectionCheck false run nothing; the button still works for the first", async () => {
+    const off = mount({ game: "oo3" }, undefined, "el", (e) => (e.blueprint = { game: { id: "oo3" }, diagnostics: { checkOnOpen: false } }));
+    await flush();
+    expect(checkRuns).toBe(0);
+    off.shadowRoot!.getElementById("check")!.click();
+    await flush();
+    expect(checkRuns).toBe(1);
+    document.body.replaceChildren();
+    checkRuns = 0;
+    const hidden = mount({ game: "oo4" }, undefined, "el", (e) => (e.blueprint = { game: { id: "oo4" }, diagnostics: { showConnectionCheck: false } }));
+    await flush();
+    expect(checkRuns).toBe(0);
+    hidden._controller.openSettings();
+    expect(q(hidden, "checkBox").hidden).toBe(true);
+  });
+
+  it("Host pressed while the check is running works; the late answer only fills the lines", async () => {
+    const r = newRig();
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const el = mount({ game: "oo5", server: "wss://lobby.mygame.test/ws" }, r, "el", (e) => (opts(e).checkRunner = fakeCheck("symmetric", gate)));
+    await flush();
+    expect(el._controller.checkRunning).toBe(true);
+    await el.host();
+    await wait(r, 500);
+    expect(el.state).toBe("lobby");
+    release();
+    await flush();
+    expect([el.state, el._controller.checkVerdictId, checkRuns]).toEqual(["lobby", "likely_fail", 1]);
+    await el.leave();
+    await flush();
+    expect(shown(el, "startCheck")).toBe(true);
+  });
+
+  it("the element removed from the page while the check runs: the late answer draws nothing and throws nothing", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const el = mount({ game: "oo6" }, undefined, "el", (e) => (opts(e).checkRunner = fakeCheck("symmetric", gate)));
+    await flush();
+    expect(el._controller.checkRunning).toBe(true);
+    let draws = 0;
+    const before = el._controller.onChange;
+    el._controller.onChange = () => {
+      draws++;
+      before();
+    };
+    el.remove();
+    release();
+    await flush();
+    expect(el._controller.checkRunning).toBe(false);
+    expect(shown(el, "startCheck")).toBe(false); // nothing was drawn on the detached element
+    expect(draws).toBeGreaterThan(0); // the controller still got its answer
   });
 });

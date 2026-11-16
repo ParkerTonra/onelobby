@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { OneLobby, memoryStore, PlayerSettings, type Lobby } from "../src/internals.js";
 import { encodeJoinCode } from "../src/joincode.js";
 import { checkVerdict } from "../src/diagnose.js";
+import { parseBlueprint } from "../src/blueprint.js";
 import { describeError } from "../src/friendly.js";
 import { removalReason } from "../src/room-rules.js";
 import { LobbyController, type ControllerOptions, type KitLike } from "../src/ui/controller.js";
@@ -659,5 +660,112 @@ describe("menu controller: join requests, chat and browse", () => {
     const bare = new LobbyController({ makeKit: () => stub(false), maxPlayers: 4 });
     await bare.join("192.168.1.20:47810", "x");
     expect(bare.menuError!.code).toBe("bad_address");
+  });
+});
+
+// ---- the connection check when the menu opens (every runner here is a counted fake: nothing touches the network) ---------------
+
+describe("the connection check when the menu opens", () => {
+  const found = (kind: "cone" | "symmetric" | "blocked" | "refused" | "relay_works") => {
+    const f =
+      kind === "symmetric" ? { udp: "ok", natType: "symmetric", relay: "none" }
+      : kind === "blocked" ? { udp: "blocked", natType: "unknown", relay: "none" }
+      : kind === "refused" ? { udp: "ok", natType: "cone", relay: "refused" }
+      : kind === "relay_works" ? { udp: "blocked", natType: "unknown", relay: "ok" }
+      : { udp: "ok", natType: "cone", relay: "none" };
+    return { ...f, ...checkVerdict(f as never) } as never;
+  };
+  const rigged = (diagnostics?: unknown, kind: Parameters<typeof found>[0] = "cone", gate?: Promise<void>, extra: Partial<ControllerOptions> = {}) => {
+    const r = newRig();
+    const state = { runs: 0 };
+    const P = person(r, "p", {
+      extra: {
+        blueprint: () => parseBlueprint(diagnostics === undefined ? { game: { id: "gridpaint" } } : { game: { id: "gridpaint" }, diagnostics }),
+        checkRunner: async () => {
+          state.runs++;
+          if (gate) await gate;
+          return found(kind);
+        },
+        ...extra,
+      },
+    });
+    return { r, P, state };
+  };
+
+  it("the default runs it once when the start screen first shows, and not again on the way back", async () => {
+    const { r, P, state } = rigged();
+    expect(P.c.checkOnOpenEnabled).toBe(true);
+    expect(state.runs).toBe(0);
+    await P.c.startShown();
+    expect([state.runs, P.c.checkVerdictId, P.c.checkRunning]).toEqual([1, "good", false]);
+    expect(P.c.checkFacts.length).toBe(3);
+    expect(P.c.startCheckLine).toBe("");
+    P.c.openSettings();
+    P.c.back();
+    await P.c.startShown();
+    await P.c.host("Sam");
+    await wait(r, 500);
+    await P.c.leave();
+    await P.c.startShown();
+    expect(state.runs).toBe(1);
+    await P.c.runCheck();
+    expect(state.runs).toBe(2); // the button still runs it
+  });
+
+  it("the start screen line is the verdict sentence for a warning and empty otherwise", async () => {
+    for (const [kind, id, warns] of [["symmetric", "likely_fail", true], ["blocked", "blocked", true], ["refused", "relay_refused", true], ["cone", "good", false], ["relay_works", "relay_works", false]] as const) {
+      const { P } = rigged(undefined, kind);
+      await P.c.startShown();
+      expect(P.c.checkVerdictId, kind).toBe(id);
+      expect(P.c.startCheckLine, kind).toBe(warns ? P.c.checkVerdict : "");
+      if (kind === "symmetric") expect(P.c.startCheckLine).toBe("Direct connections: likely to fail. A relay is recommended.");
+    }
+  });
+
+  it("checkOnOpen false, showConnectionCheck false and a local page run nothing until the button", async () => {
+    const off = rigged({ checkOnOpen: false });
+    await off.P.c.startShown();
+    expect([off.P.c.checkOnOpenEnabled, off.P.c.connectionCheckShown, off.state.runs]).toEqual([false, true, 0]);
+    await off.P.c.runCheck();
+    expect(off.state.runs).toBe(1);
+    const hidden = rigged({ showConnectionCheck: false });
+    await hidden.P.c.startShown();
+    expect([hidden.P.c.checkOnOpenEnabled, hidden.state.runs]).toEqual([false, 0]);
+    const local = rigged(undefined, "cone", undefined, { localOnly: () => true });
+    await local.P.c.startShown();
+    expect(local.state.runs).toBe(0);
+  });
+
+  it("only the start screen counts as opening: the first time it is shown, it runs", async () => {
+    const { P, state } = rigged();
+    P.c.openSettings();
+    await P.c.startShown();
+    expect(state.runs).toBe(0);
+    P.c.back();
+    await P.c.startShown();
+    expect(state.runs).toBe(1);
+  });
+
+  it("a run in progress is never started twice, and Host works while it runs", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const { r, P, state } = rigged(undefined, "symmetric", gate);
+    const first = P.c.runCheck();
+    const open = P.c.startShown();
+    const again = P.c.runCheck();
+    await flush();
+    expect(state.runs).toBe(1);
+    expect(P.c.checkRunning).toBe(true);
+    expect(P.c.startCheckLine).toBe("");
+    await P.c.host("Sam");
+    await wait(r, 500);
+    expect(P.c.state).toBe("lobby");
+    expect(P.c.checkRunning).toBe(true);
+    release();
+    await Promise.all([first, open, again]);
+    expect([P.c.state, P.c.checkVerdictId, state.runs]).toEqual(["lobby", "likely_fail", 1]);
+    expect(P.c.error).toBeNull();
+    await P.c.leave();
+    expect(P.c.startCheckLine).toBe(P.c.checkVerdict);
   });
 });

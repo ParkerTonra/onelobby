@@ -148,7 +148,12 @@ export interface ControllerOptions {
   clipboard?: (text: string) => Promise<boolean> | boolean;
   /** Runs the connection check. Default: the kit's `checkConnection`. */
   checkRunner?: (o: CheckOptions) => Promise<CheckResult>;
+  /** True when nothing may leave this page's machine: the check then never runs by itself (the button still works). Default: false. */
+  localOnly?: () => boolean;
 }
+
+/** The check verdicts (spec/diagnostics.md s.8) that put a line on the start screen. */
+const WARNING_VERDICTS = ["likely_fail", "blocked", "relay_refused", "relay_unreachable"];
 
 /** Wire envelope inside raw frames. Kept tiny and versioned by key names only. */
 type Wire =
@@ -221,6 +226,9 @@ export class LobbyController {
   /** Three lines (UDP, network type, relay), empty before a check. */
   checkFacts: string[] = [];
   checkRunning = false;
+  /** The verdict word of the last finished check ("good", "blocked", ...); "" before one and while it runs. */
+  checkVerdictId = "";
+  private opened = false;
   /** What the last Copy / Save logs did. */
   logNote = "";
   /** What the last Copy code / invite did ("Copied!"). */
@@ -316,6 +324,24 @@ export class LobbyController {
   }
   get connectionCheckShown(): boolean {
     return this.blueprint?.diagnostics.showConnectionCheck !== false;
+  }
+  /** The menu runs the connection check once when it opens: on unless `diagnostics.checkOnOpen` is false ("button only"), `showConnectionCheck` is false, or the page says nothing may leave the machine. */
+  get checkOnOpenEnabled(): boolean {
+    return this.connectionCheckShown && this.blueprint?.diagnostics.checkOnOpen !== false && !(this.opts.localOnly?.() ?? false);
+  }
+  /**
+   * The element calls this whenever it shows the start screen. The first call that finds the start screen up starts the check (when
+   * `checkOnOpenEnabled`); later calls (the way back from a lobby or from Settings) change nothing. A check that is running is never
+   * started twice. Hosting and joining never wait for it. Resolves when the check ends.
+   */
+  startShown(): Promise<void> {
+    if (this.opened || this.screen !== "start") return Promise.resolve();
+    this.opened = true;
+    return this.checkOnOpenEnabled && !this.checkRunning ? this.runCheck() : Promise.resolve();
+  }
+  /** The one line the start screen shows: the verdict sentence when the check found a problem (direct connections likely to fail, UDP blocked, a relay that refuses the login or does not answer), else "". */
+  get startCheckLine(): string {
+    return !this.checkRunning && WARNING_VERDICTS.includes(this.checkVerdictId) ? this.checkVerdict : "";
   }
   /** Text chat shows while a lobby is open and the blueprint has it on. */
   get chatShown(): boolean {
@@ -793,6 +819,7 @@ export class LobbyController {
     if (this.checkRunning) return;
     this.checkRunning = true;
     this.checkVerdict = this.texts.t("check_running");
+    this.checkVerdictId = "";
     this.checkFacts = [];
     this.onChange();
     let r: CheckResult | null = null;
@@ -815,6 +842,7 @@ export class LobbyController {
       const t = this.texts;
       const fact = (prefix: string, value: string, fallback: string) => t.t(t.has(prefix + value) ? prefix + value : fallback);
       this.checkVerdict = r.message;
+      this.checkVerdictId = r.verdict ?? "";
       const relay = r.relay ?? "none";
       this.checkFacts = [
         t.t("check_udp", fact("udp_", r.udp ?? "unknown", "udp_unknown")),

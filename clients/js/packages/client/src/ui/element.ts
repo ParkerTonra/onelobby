@@ -36,6 +36,7 @@ const TEMPLATE = `
   <p class="hint" id="hint" part="hint" hidden></p>
 
   <div id="v-idle" class="view">
+    <p class="hint" id="startCheck" part="start-check" role="status" hidden></p>
     <div class="row">
       <label id="nameLabel" part="name-label"><span data-t="name_label"></span>
         <input id="name" part="name-input" maxlength="24" autocomplete="nickname" data-ph="name_placeholder">
@@ -356,6 +357,10 @@ function makeClass(): CustomElementConstructor {
           }
         }
       }
+      // The check on open: once, when the start screen is first up (after a join link or a resume has had its say).
+      queueMicrotask(() => {
+        if (this.isConnected) void this._controller.startShown();
+      });
     }
 
     disconnectedCallback(): void {
@@ -568,6 +573,8 @@ function makeClass(): CustomElementConstructor {
     }
 
     private render(): void {
+      // A check that ends after the element left the page only fills the controller's lines: nothing is drawn on a detached element.
+      if (!this.isConnected) return;
       const c = this._controller;
       const s = c.state;
       const screen = c.screen;
@@ -642,6 +649,9 @@ function makeClass(): CustomElementConstructor {
       this.$("nameLabel").hidden = !c.namesAllowed || !!this.getAttribute("name");
       (this.$("name") as HTMLInputElement).maxLength = c.maxNameLength;
       this.$("browse").hidden = !c.canBrowse;
+      const line = c.startCheckLine; // the connection check's warning, only when it found one
+      this.$("startCheck").textContent = line;
+      this.$("startCheck").hidden = !line;
     }
 
     private renderLobby(playing: boolean): void {
