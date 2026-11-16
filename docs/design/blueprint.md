@@ -283,7 +283,8 @@ what makes the hand-edit path real: the file wins even over code that still call
 | `diagnostics.reportToHost` | bool | `true` | R | a joiner that cannot connect tells the host why (cause and step, never an address); `reportToHost` / `ReportToHost` / `report_to_host` |
 | `diagnostics.logSize` | int 50 to 5000 | `500` | R | lines the net log keeps; `logSize` / `LogSize` / `log_size` |
 | `diagnostics.relayProbe` | bool | `true` | R | ask the relay after a failed connect whether it refused the login or never answered |
-| `diagnostics.showConnectionCheck` | bool | `true` | R (drop-in menus only) | the Godot menu shows its Connection check button (the check contacts public STUN servers when pressed) |
+| `diagnostics.showConnectionCheck` | bool | `true` | R (drop-in menus only) | the drop-in menu shows its Connection check button (the check contacts public STUN servers when pressed); `false` also means no automatic run |
+| `diagnostics.checkOnOpen` | bool | `true` | R (drop-in menus only) | the drop-in menu runs the connection check once, when it opens (two small UDP questions to public STUN servers, plus the login of the player's own relay line when one is saved; nothing goes to OneLobby); `false` is "button only"; `checkOnOpen` / `CheckOnOpen` / `check_on_open` |
 
 ### 4k. Example
 

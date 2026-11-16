@@ -71,7 +71,8 @@ lobby codes of a server lobby only and are not registered with the OS (a deep li
 knows why (`last_error["diagnosis"]` is `{cause, message, hint, stage}`). The host gets `lobby.peer_diagnosis` (`info["line"]`:
 "Sam: strict NAT, no relay set, stopped at the connection check after 15 s."), `client.get_net_log().export()` is the Copy-logs text
 (masked), and `await client.check_connection()` runs the connection check (raw UDP through `PacketPeerUDP`, a TURN Allocate probe
-for the relay). The log is saved to `log_path` (`user://onelobby-netlog.txt`) when the scene tree exits and after every `error`
+for the relay; names are resolved without blocking a frame and asked over IPv4 first). The drop-in menu runs it once when it opens
+(`diagnostics.checkOnOpen: false` in `onelobby.json` for button only; never with `--local`). The log is saved to `log_path` (`user://onelobby-netlog.txt`) when the scene tree exits and after every `error`
 entry: GDScript cannot hook a crash. Exports: `report_to_host`, `log_size`, `log_path`, `relay_probe`. See
 `docs/recipes/diagnostics.md`.
 

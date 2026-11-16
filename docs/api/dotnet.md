@@ -107,8 +107,8 @@ public sealed record EpicSetting(bool Enabled, IReadOnlyDictionary<string, strin
 public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
 /// Kind: "drop-in", "generated" or "none". Theme: "light", "dark" or "auto".
 public sealed record UiSection(string Kind, string? Entry, string Theme);
-/// The diagnostics switches (spec/diagnostics.md); LogSize is 50..5000. ShowConnectionCheck is for a drop-in menu.
-public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck)
+/// The diagnostics switches (spec/diagnostics.md); LogSize is 50..5000. ShowConnectionCheck and CheckOnOpen are for a drop-in menu (CheckOnOpen false: the check runs only on the button).
+public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck, bool CheckOnOpen = true)
     public static readonly DiagnosticsSection Defaults;
 /// The settings file onelobby.json (spec/blueprint.schema.json, docs/design/blueprint.md), validated and with every default filled in. Immutable. Use LobbyClient.FromBlueprint to run a client from it, or the To... adapters to adopt it one call at a time.
 public sealed record Blueprint(int Version, GameSection Game, string? Engine, HostingSection Hosting, LobbySection Lobby, SyncSection Sync, PlayersSection Players, ChatSection Chat, SessionSection Session, PlatformsSection Platforms, UiSection Ui)
@@ -806,6 +806,10 @@ public sealed class MenuModel
     /// Three lines (UDP, network type, relay), empty before a check.
     public IReadOnlyList<string> CheckFacts { get; private set; }
     public bool CheckRunning { get; private set; }
+    /// The verdict word of the last finished check ("good", "blocked", ...); "" before one and while it runs.
+    public string CheckVerdictId { get; private set; }
+    /// True when nothing may leave this PC (the templates' --local flag, see ArgsSayLocal): the check never runs on its own; the button still works.
+    public bool LocalOnly { get; set; }
     public string LogNote { get; private set; }
     /// Reads the saved name, the last code and the lobby server into the start and settings screens.
     public void LoadDefaults();
@@ -816,6 +820,14 @@ public sealed class MenuModel
     /// Browse needs a lobby server address (and a blueprint that uses one).
     public bool CanBrowse();
     public bool ConnectionCheckShown;
+    /// The menu runs the connection check once when it opens: on unless diagnostics.checkOnOpen is false ("button only"), the check is hidden (showConnectionCheck false), or the menu is LocalOnly.
+    public bool CheckOnOpenEnabled;
+    /// The UI calls this whenever it shows the start screen. The first call that finds the start screen up starts the check (when CheckOnOpenEnabled); later calls (the way back from a lobby or from Settings) change nothing. A check that is running is never started twice. Hosting and joining never wait for it. The task ends when the check does.
+    public Task StartShown();
+    /// The one line the start screen shows: the verdict sentence when the check found a problem (direct connections likely to fail, UDP blocked, a relay that refuses the login or does not answer), else "" (while it runs, before it, and when all is well).
+    public string StartCheckLine;
+    /// True when --local is among the command-line arguments (host and join on 127.0.0.1 only, nothing leaves this PC).
+    public static bool ArgsSayLocal(IEnumerable<string>? args);
     public bool ChatShown;
     public bool ApproveJoinsOn;
     /// Copy invite is always offered while a lobby is open.

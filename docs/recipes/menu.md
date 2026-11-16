@@ -42,7 +42,8 @@ func _on_left() -> void:
 - **Removed / Error.** The sentence and the next step from `OneLobbyFriendly` and `OneLobbyDiagnose`, the code small underneath, Copy logs
   and Save logs (the net log, addresses masked), Back. A kicked or banned player reads the host's reason.
 - **Settings.** The relay line (pasted, only ever shown masked, with its status), the lobby server, the Connection check (a one-line
-  verdict and three facts) and Copy logs.
+  verdict and three facts) and Copy logs. The check runs by itself once, when the menu opens (see "The connection check on open"
+  below), so this page is already filled in; the button runs it again.
 
 ## Hand-off
 
@@ -117,8 +118,28 @@ removal reasons), so they are reworded at their source.
 | `lobby.approveJoins` | the host sees Let in / Refuse |
 | `chat.text` | the lobby shows the chat box |
 | `room.*` | countdown, auto start, spectators, late join, seat rules: the room layer's, shown as it runs |
-| `diagnostics.showConnectionCheck` | false hides the Connection check button in Settings |
+| `diagnostics.showConnectionCheck` | false hides the Connection check button in Settings, and the check never runs by itself |
+| `diagnostics.checkOnOpen` | false: the check runs only on the button (default true: once, when the menu opens) |
 | `diagnostics.reportToHost`, `logSize`, `relayProbe` | applied to the client by `from_config` |
+
+## The connection check on open
+
+Every drop-in menu (GDScript, Godot C#, the `<one-lobby>` element) runs the connection check once, the first time its start screen is
+shown. It asks two public STUN servers one small UDP question each (the two every join already asks), plus the login of the player's
+own relay line when one is saved, in at most 8 seconds; nothing else is contacted and nothing goes to OneLobby. The verdict fills the
+Settings page. On the start screen the menu adds ONE line, the verdict sentence itself ("Direct connections: likely to fail. A relay is
+recommended."), and only when the check found a problem (direct connections likely to fail, UDP blocked, a relay that refuses the login
+or does not answer). While it runs, and when all is well, the start screen says nothing. Hosting and joining are never delayed.
+
+- Switch it off for a game: `"diagnostics": { "checkOnOpen": false }` in `onelobby.json` (the button stays). `showConnectionCheck: false`
+  hides the button and the automatic run both.
+- Not again when the player comes back from a lobby or from Settings; the button runs it on demand.
+- A menu started with `--local` (the templates' flag: 127.0.0.1 only) never runs it by itself. The menu reads `--local` from the
+  command line itself, so the order of your own start-up code does not matter.
+- Tests: give the menu a fake runner (`check_runner` / `CheckRunner` / the controller's `checkRunner`); a test that opens a real menu
+  without one, and without `checkOnOpen: false`, would contact the public STUN servers.
+- Your own controller: call the model's `start_shown()` / `StartShown()` / `startShown()` whenever you draw the start screen and show
+  `start_check_line()` / `StartCheckLine` / `startCheckLine` when it is not empty.
 
 ## For a controller of your own
 

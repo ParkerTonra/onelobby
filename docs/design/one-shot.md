@@ -46,6 +46,8 @@ key where it is a choice.
 **Connecting.** Join code, join by IP or `ip:port`, invite link (and deep link where the platform has one), one join
 call that walks the whole route chain (lobby server, then Nostr code, then direct IP; STUN; TURN if set; relay-only
 retry), player-pasted relay line, LAN discovery (same-network broadcast), rejoin after a drop with the token saved.
+LAN discovery is built in this release as opt-in: off unless the game maker turns it on in `onelobby.json`; then the menu gets a
+"LAN games" tab and the game listens only while that tab is open. Typing the host's IP and port keeps working in every game.
 
 **Lobby.** Player names (default name, length clamp, sanitise, dedupe as "Name 2", rename), per-player data (colour,
 avatar index, team or seat), ready toggle, host settings (max players, password on every route, listed or private),
@@ -150,7 +152,8 @@ information at every step, so it shows it.
    joiner sends its diagnosis to the host it dialed: "Sam: strict NAT, no relay set, stopped at the connection check
    after 15 s." Only to that host; nothing goes anywhere else.
 3. **Connection check** in the menu before playing: NAT type from two STUN servers, UDP reachable, relay reachable and
-   login accepted, and the result in one line ("Direct connections: likely to fail. A relay is recommended.").
+   login accepted, and the result in one line ("Direct connections: likely to fail. A relay is recommended."). The check runs when
+   the co-op menu opens; a game can switch it to "button only" in `onelobby.json` (`diagnostics.checkOnOpen`).
 4. **Net log.** A ring buffer of every connection step with timings (state changes, candidate types, chosen route, errors,
    versions, OS). Written to the player's user folder, flushed on a crash or quit. IP addresses masked by default.
 5. **No harvesting.** Nothing is sent to OneLobby or any server we run. The log stays on the player's machine or goes to the
@@ -175,6 +178,9 @@ From what the games actually ended up with (several changed after setup; the rec
 
 Player count from the design (2-4 default, 8 for party games, spectators separate). Hosting: direct with Nostr codes
 everywhere the engine can listen (games outlive any server), lobby server optional.
+
+Who places a player is decided by the game type: the player's own PC for co-op, the host for competitive, and the player's own PC when
+a game does not say; the game maker can overrule it in `onelobby.json`. Host-decides is built in every engine in this release, last.
 
 ---
 

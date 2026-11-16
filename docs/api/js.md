@@ -476,6 +476,7 @@ export interface Blueprint {
         readonly logSize: number;
         readonly relayProbe: boolean;
         readonly showConnectionCheck: boolean;
+        readonly checkOnOpen: boolean;
     };
 }
 /** What you may write: only `game.id` is required. */
@@ -579,6 +580,7 @@ export interface BlueprintInput {
         logSize?: number;
         relayProbe?: boolean;
         showConnectionCheck?: boolean;
+        checkOnOpen?: boolean;
     };
 }
 /** Identity function for TypeScript completion in a `.ts` config (like Vite's `defineConfig`). */
@@ -3067,6 +3069,8 @@ export interface ControllerOptions {
     clipboard?: (text: string) => Promise<boolean> | boolean;
     /** Runs the connection check. Default: the kit's `checkConnection`. */
     checkRunner?: (o: CheckOptions) => Promise<CheckResult>;
+    /** True when nothing may leave this page's machine: the check then never runs by itself (the button still works). Default: false. */
+    localOnly?: () => boolean;
 }
 /** Wire envelope inside raw frames. Kept tiny and versioned by key names only. */
 type Wire = {
@@ -3138,6 +3142,8 @@ export declare class LobbyController {
     /** Three lines (UDP, network type, relay), empty before a check. */
     checkFacts: string[];
     checkRunning: boolean;
+    /** The verdict word of the last finished check ("good", "blocked", ...); "" before one and while it runs. */
+    checkVerdictId: string;
     /** What the last Copy / Save logs did. */
     logNote: string;
     /** What the last Copy code / invite did ("Copied!"). */
@@ -3161,6 +3167,16 @@ export declare class LobbyController {
     /** The lobby browser needs a lobby server address (and a blueprint that uses one). */
     get canBrowse(): boolean;
     get connectionCheckShown(): boolean;
+    /** The menu runs the connection check once when it opens: on unless `diagnostics.checkOnOpen` is false ("button only"), `showConnectionCheck` is false, or the page says nothing may leave the machine. */
+    get checkOnOpenEnabled(): boolean;
+    /**
+     * The element calls this whenever it shows the start screen. The first call that finds the start screen up starts the check (when
+     * `checkOnOpenEnabled`); later calls (the way back from a lobby or from Settings) change nothing. A check that is running is never
+     * started twice. Hosting and joining never wait for it. Resolves when the check ends.
+     */
+    startShown(): Promise<void>;
+    /** The one line the start screen shows: the verdict sentence when the check found a problem (direct connections likely to fail, UDP blocked, a relay that refuses the login or does not answer), else "". */
+    get startCheckLine(): string;
     /** Text chat shows while a lobby is open and the blueprint has it on. */
     get chatShown(): boolean;
     get approveJoinsOn(): boolean;

@@ -271,6 +271,27 @@ STUN servers = the ones the client already uses to connect (`stun:stun.l.google.
 `stun:stun.cloudflare.com:3478`); the TURN entry = the player's configured relay; both can be passed in. Nothing else is
 contacted.
 
+**The drop-in menus (decision).** A drop-in menu runs the check once, when its start screen is first shown (`diagnostics.checkOnOpen`,
+default `true`; `false` is "button only"). The Settings page then already holds the verdict and the three facts; the start screen
+gets one line, only when the verdict is `likely_fail`, `blocked`, `relay_refused` or `relay_unreachable`: the verdict's own `message`,
+the same in every menu. Nothing is shown while the check runs or when all is well. Rules every menu follows:
+
+- once per menu: coming back to the start screen (from a lobby or from Settings) does not run it again; the Settings button still
+  runs it on demand, and a run in progress is never started twice;
+- never automatic when `diagnostics.showConnectionCheck` is `false` (no button, no run), or when nothing may leave the machine
+  (a menu started with the templates' `--local` flag, and a test's fake check runner);
+- hosting and joining never wait for it, and its answer, which can arrive later, only fills the menu's lines (a menu that was closed
+  or freed meanwhile is never called);
+- the logic lives in the menu model (`OneLobbyMenuModel.start_shown`, `MenuModel.StartShown`, `LobbyController.startShown`), so a menu
+  drawn by another engine gets it by using the model.
+
+This is a menu rule, not a library one: `checkConnection` itself still runs only when something calls it.
+
+**Name lookup (raw UDP clients).** The probe resolves a STUN or TURN name itself and asks the first IPv4 address; it falls back to
+another family only for a name that has no IPv4 address, and uses a literal address as it is. The lookup must never block a frame
+(Godot polls `IP.resolve_hostname_queue_item`) and counts against the per-server limit below. Reason: the kit's WebRTC connects over
+IPv4, and a resolver may list an IPv6 address first that nothing answers on, which would read as "UDP blocked" on a working network.
+
 **Measuring `udp` and `natType`** (at least two STUN servers; one answer is enough for `udp`):
 
 - *Preferred, where a client can open its own UDP socket (Node, Godot `PacketPeerUDP`, .NET `UdpClient`):* bind one UDP

@@ -32,7 +32,8 @@ Async calls throw `OneLobbyException` (`Code` = server error code, or `timeout` 
 A connect failure keeps its code and carries `OneLobbyException.Diagnosis` (`Cause`, `Message`, `Hint`, `Stage`);
 `Friendly.DescribeError(e)` returns them. The host gets `lobby.PeerDiagnosis` (`Line`: "Sam: strict NAT, no relay set, stopped at
 the connection check after 15 s."), `client.NetLog.Export()` is the Copy-logs text (masked), and `await
-client.CheckConnectionAsync()` runs the connection check from a menu. Nothing leaves the machine except a small report to the host
+client.CheckConnectionAsync()` runs the connection check from a menu (the drop-in menu runs it once when it opens;
+`diagnostics.checkOnOpen: false` in `onelobby.json` for button only; never with `--local`). Nothing leaves the machine except a small report to the host
 the player dialed. Switches: `OneLobbyConfig.Diagnostics` (`LogSize`, `LogPath`, `ReportToHost`, `RelayProbe`). See
 `docs/recipes/diagnostics.md` and `spec/diagnostics.md`.
 
