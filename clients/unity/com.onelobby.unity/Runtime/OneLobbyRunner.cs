@@ -15,6 +15,13 @@ namespace OneLobby.Unity
     /// the host's game the server (join code, port 47810; docs/recipes/direct-ip.md). All game logic stays in
     /// OneLobby.Core: this class is plumbing only.
     /// </summary>
+    /// <remarks>
+    /// Set the fields (<see cref="BindAddress"/>, <see cref="LobbyServer"/>, <see cref="RelayOnly"/>, <see cref="Blueprint"/>, ...) any time before
+    /// the first Host/Join call: they are applied when you host or join, not when the client is built. Reading <see cref="Client"/> (or a
+    /// <c>client.Settings</c>) builds the client early; a field set after that is still applied: <see cref="BindAddress"/> at once for the
+    /// next host or join, any other one by building a fresh client for the next lobby (logged, once, naming the field). A field changed while a
+    /// lobby is held takes effect for the next lobby.
+    /// </remarks>
     [DefaultExecutionOrder(-100)] // pump before game scripts read this frame's messages
     public sealed class OneLobbyRunner : MonoBehaviour
     {
@@ -59,6 +66,8 @@ namespace OneLobby.Unity
         public bool ReportToHost = true;
 
         private LobbyClient? _client;
+        private (string Name, object? Value)[]? _builtWith;
+        private string? _appliedBind;
         private bool _clientIsDirect;
         private bool _holdingBackground;
         private bool _previousRunInBackground;
@@ -146,9 +155,8 @@ namespace OneLobby.Unity
                 config = new OneLobbyConfig(GameId, NetVersion, string.IsNullOrWhiteSpace(LobbyServer) ? OneLobby.Blueprint.NoServer : new Uri(LobbyServer), Mode, DisplayName: DisplayName);
                 config = ApplyConfig(config);
             }
-            var bind = Bind();
-            Transport.BindAddress = bind?.ToString();
-            if (bind != null) Debug.Log("OneLobby: bound to " + bind + " only (BindAddress); other machines cannot connect");
+            _builtWith = BuildInputs();
+            ApplyBind();
             ITransport transport = Transport;
             if (NetSim != null)
             {
@@ -162,6 +170,46 @@ namespace OneLobby.Unity
                 : new LobbyClient(config, transport);
             c.Error += e => Error?.Invoke(e);
             return c;
+        }
+
+        /// <summary>The runner fields the client is built from, by name: <see cref="SyncClient"/> compares them with what the live client was built with.</summary>
+        private (string Name, object? Value)[] BuildInputs() => new (string, object?)[]
+        {
+            (nameof(LobbyServer), LobbyServer), (nameof(Blueprint), Blueprint), (nameof(GameId), GameId), (nameof(NetVersion), NetVersion),
+            (nameof(Mode), Mode), (nameof(DisplayName), DisplayName), (nameof(RelayOnly), RelayOnly), (nameof(PlayerIdFile), PlayerIdFile),
+            (nameof(BanFile), BanFile), (nameof(NetLogPath), NetLogPath), (nameof(ReportToHost), ReportToHost),
+            (nameof(ConfigureConfig), ConfigureConfig), (nameof(NetSim), NetSim),
+        };
+
+        /// <summary>Puts <see cref="BindAddress"/> on the transport (the WebRTC sockets read it for every new link); a typo throws before anything listens.</summary>
+        private System.Net.IPAddress? ApplyBind()
+        {
+            var bind = Bind();
+            Transport.BindAddress = bind?.ToString();
+            if (bind != null && _appliedBind != Transport.BindAddress)
+                Debug.Log("OneLobby: bound to " + bind + " only (BindAddress); other machines cannot connect");
+            _appliedBind = Transport.BindAddress;
+            return bind;
+        }
+
+        /// <summary>
+        /// Called before every Host/Join/List: the runner fields are applied here, so it does not matter whether something read
+        /// <see cref="Client"/> (or <c>client.Settings</c>) before they were set. <see cref="BindAddress"/> goes onto the transport; a field the
+        /// client is built from (<see cref="LobbyServer"/>, <see cref="RelayOnly"/>, <see cref="Blueprint"/>, ...) that changed since the client was
+        /// built gets a fresh client, once, and one log line names the field. With a lobby held nothing is rebuilt: the change waits for the next lobby.
+        /// </summary>
+        private void SyncClient()
+        {
+            ApplyBind();
+            if (_client == null || _builtWith == null || Lobby != null) return;
+            var now = BuildInputs();
+            var changed = new List<string>();
+            for (int i = 0; i < now.Length; i++)
+                if (!Equals(now[i].Value, _builtWith[i].Value)) changed.Add(now[i].Name);
+            if (changed.Count == 0) return;
+            Debug.Log("OneLobby: " + string.Join(", ", changed) + " changed after the client was built (something read runner.Client or client.Settings early); " +
+                      "building a fresh client for the next lobby. A reference to the old runner.Client is stale: read it again.");
+            DropClient();
         }
 
         private void Update()
@@ -188,6 +236,7 @@ namespace OneLobby.Unity
         /// </summary>
         public async Task<Lobby> HostDirectAsync(DirectHostOptions? options = null)
         {
+            SyncClient();
             var bind = Bind();
             if (bind != null && options == null)
             {
@@ -237,6 +286,7 @@ namespace OneLobby.Unity
         /// <summary>A direct session leaves the client pointed at a direct hub, so going back to a lobby server gets a fresh one.</summary>
         private LobbyClient ServerClient()
         {
+            SyncClient();
             if (_clientIsDirect) DropClient();
             return Client;
         }
@@ -251,6 +301,7 @@ namespace OneLobby.Unity
 
         private LobbyClient DirectClient()
         {
+            SyncClient();
             _clientIsDirect = true;
             return Client;
         }
