@@ -229,16 +229,11 @@ export function csharpChecks() {
           // the Godot process has already exited: this server may still be reading its last packets
           for (let i = 0; i < 30 && (turn.stats.allocations < 1 || turn.stats.relayed < 1); i++) await new Promise((r) => setTimeout(r, 100));
           if (turn.stats.allocations < 1 || turn.stats.relayed < 1) {
-            // Found while writing this check: on Godot 4.7.2 (.NET) with webrtc-native 1.2.2, OneLobby.Godot passes iceTransportPolicy "relay" and
-            // still gathers host candidates, and a wrong TURN password still connects. The GDScript client's links honour the same setting.
-            const seen = `the peers connected, but the TURN server saw ${turn.stats.allocations} allocations and ${turn.stats.relayed} relayed packets, so the relay was not used`;
-            if (f.relayOnly)
-              return {
-                status: "fail",
-                detail: `${seen}, although hosting.relayOnly is true: the game's links are not relay-only (players' addresses are exposed to each other).`,
-                next: "This is a gap in OneLobby.Godot on Godot's C# build (iceTransportPolicy relay is not enforced); use the GDScript client for relay-only games until it is fixed, or see docs/recipes/godot-csharp.md.",
-              };
-            return { status: "skipped", detail: `${seen}. OneLobby.Godot does not enforce relay-only on Godot's C# build (known gap), so this route proves nothing for the relay path; it matters only when hosting.relayOnly is true` };
+            return {
+              status: "fail",
+              detail: `the peers connected, but the TURN server saw ${turn.stats.allocations} allocations and ${turn.stats.relayed} relayed packets, so the relay was not used: the game's links are not relay-only (players' addresses are exposed to each other).`,
+              next: "Check that the game builds its transport with new GodotTransport() from a current OneLobby.Godot package (update it: dotnet add package OneLobby.Godot) and that no other transport or hand-made WebRTC link carries the game's traffic. " + routeByHand("turn", " --turn=<login line>"),
+            };
           }
           return { status: "ok", detail: `relay-only through a local TURN server on 127.0.0.1:${turn.port}, login pasted as one line: ${turn.stats.allocations} allocations, ${turn.stats.relayed} relayed packets` };
         } finally {
