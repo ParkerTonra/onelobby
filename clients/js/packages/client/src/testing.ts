@@ -105,6 +105,24 @@ export class MemoryNetwork {
   /** Set to drop all traffic in one direction pair for fault injection: key `${from}->${to}` is not tracked; use link.mute(). */
   readonly factory: LinkFactory = { create: (opts) => new MemoryLink(this, opts) };
 
+  // ---- fault injection for data-channel traffic (replication tests). All off by default: delivery is one microtask. ----
+  /** The clock that drives delayed delivery; required when `latencyMs` or `extraDelayMs` is used. */
+  clock: ManualClock | null = null;
+  /** One-way delay for every message, ms. */
+  latencyMs = 0;
+  /** Extra one-way delay for one message on this channel, ms (jitter). */
+  extraDelayMs: ((channel: ChannelName) => number) | null = null;
+  /** Return true to drop a `fast` message (the unreliable channel). */
+  dropFast: (() => boolean) | null = null;
+  /** Return true to drop a `reliable` message (breaks the transport's contract on purpose). */
+  dropReliable: (() => boolean) | null = null;
+  /** Return true to deliver a `reliable` message twice. */
+  duplicateReliable: (() => boolean) | null = null;
+  /** While true, a link that is being opened never opens (a joiner whose data channels do not connect). */
+  blockOpen = false;
+  /** Return true to delay a `reliable` message by 45 ms so the next one overtakes it. */
+  reorderReliable: (() => boolean) | null = null;
+
   /** @internal */
   register(offer: string, link: MemoryLink): void {
     this.offers.set(offer, link);
@@ -177,7 +195,7 @@ export class MemoryLink implements PeerLink {
   }
 
   private open(): void {
-    if (this.closed || this.isOpen) return;
+    if (this.closed || this.isOpen || this.net.blockOpen) return;
     this.isOpen = true;
     this.onOpen?.();
     this.onPath?.("direct");
@@ -189,9 +207,19 @@ export class MemoryLink implements PeerLink {
     if (this.blackhole) return;
     const peer = this.peer;
     const copy = bytes.slice();
-    queueMicrotask(() => {
+    const net = this.net;
+    if (channel === "fast" && net.dropFast?.()) return;
+    if (channel === "reliable" && net.dropReliable?.()) return;
+    const deliver = () => {
       if (peer && peer.isOpen && !peer.closed && !this.closed) peer.onMessage?.(channel, copy);
-    });
+    };
+    let delay = net.latencyMs + (net.extraDelayMs?.(channel) ?? 0);
+    if (channel === "reliable" && net.reorderReliable?.()) delay += 45;
+    const copies = channel === "reliable" && net.duplicateReliable?.() ? 2 : 1;
+    for (let i = 0; i < copies; i++) {
+      if (delay > 0 && net.clock) net.clock.setTimeout(deliver, delay + i);
+      else queueMicrotask(deliver);
+    }
   }
 
   close(): void {

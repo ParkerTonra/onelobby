@@ -54,3 +54,9 @@ export type { RoomMsg, GoneWhy } from "./room-wire.js";
 export { CAUSE_TEXT, STAGE_TEXT, explainCause, hostLine, stageOf, elapsedText, cleanReport, checkVerdict, classifyNat, natFact } from "./diagnose.js";
 export { maskText } from "./netlog.js";
 export { probeRelay } from "./connection-check.js";
+export {
+  ReplicationStats, STREAM_GAP_TIMEOUT_MS, MAX_STREAM_BUFFERED, MAX_STREAM_BUFFERED_BYTES, MAX_STREAM_AHEAD, encodeSnapshot, decodeSnapshot,
+  peekSnapshot, encodeInput, decodeInput, encodeEvent, decodeEvent, encodeStreamEvent, decodeStreamEvent, isReplication, indexOfEntity,
+  ByteWriter, MAX_STATE_BYTES, toHex, fromHex,
+} from "./replication/index.js";
+export type { Ent, World, SnapshotHeader, DecodedInput, InputEntry, Json } from "./replication/index.js";

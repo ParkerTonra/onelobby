@@ -80,6 +80,8 @@ describe("export surface", () => {
       "checkNostrRelays", "DEFAULT_NOSTR_RELAYS", "DEFAULT_NOSTR_STUN", "encodeRoomCode",
       "parseBlueprint", "defineBlueprint", "BlueprintError", "turnLogin", "turnCredential", "parseTurnLine",
       "Room", "BanList", "Causes", "diagnose", "NetLog", "checkConnection", "PlayerSettings", "SETTINGS_ENV", "maskRelay",
+      "ReplicationSession", "NetWriter", "NetReader", "Quantize", "NetMath", "NetworkClock", "replicated", "ReplicationError",
+      "describeReplication", "DEFAULT_REPLICATION_CONFIG",
     ].sort());
   });
 

@@ -450,6 +450,14 @@ export class Lobby extends Emitter<LobbyEvents> {
   get isHost(): boolean {
     return this.localPeerId === this.hostPeerId;
   }
+  /** The kit's monotonic millisecond clock (what the replication layer ticks and timestamps on). */
+  get nowMs(): number {
+    return this.cfg.clock.now();
+  }
+  /** The kit's net log, or null when diagnostics are off: the replication packet log writes here. */
+  get netLog(): NetLog | null {
+    return this.cfg.diag?.log ?? null;
+  }
   get peers(): Peer[] {
     return [...this.roster.values()].sort((a, b) => a.peerId - b.peerId);
   }

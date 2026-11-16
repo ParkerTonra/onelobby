@@ -68,3 +68,13 @@ export { NetLog } from "./netlog.js";
 export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
 export { checkConnection } from "./connection-check.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
+// Binary replication (docs/recipes/replication.md, spec/replication.md): delta snapshots, inputs, events, interpolation.
+// The codec functions (encodeSnapshot, decodeInput, ...) are in onelobby/internals.
+export {
+  ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication,
+  DEFAULT_REPLICATION_CONFIG,
+} from "./replication/index.js";
+export type {
+  EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates,
+  ReplicationEvents, ReplicationErrorCode,
+} from "./replication/index.js";
