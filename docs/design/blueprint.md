@@ -433,6 +433,9 @@ create-onelobby [dir] [options]
   --addon-from <folder>        vendor the add-on from a OneLobby checkout instead of the copy bundled in the package
   --webrtc-zip <file>          install the WebRTC natives from this zip (offline); --webrtc-dir <folder> from an unpacked folder
   --no-natives                 skip the natives and print the command that fetches them later
+
+create-onelobby update [dir | --into <dir>]   re-vendor the add-on (PIN-guarded): --addon-from, --webrtc-zip, --webrtc-dir, --no-natives, --force, --dry-run, --json
+create-onelobby verify [dir | --into <dir>]   prove multiplayer on 127.0.0.1, last line VERIFY_OK / VERIFY_FAIL: --godot <exe>, --server <url>, --fetch-helpers, --json
 ```
 
 Rules: prompt only when stdin is a TTY and neither `--yes` nor `--no-input` is set (clig.dev: "Only use prompts or

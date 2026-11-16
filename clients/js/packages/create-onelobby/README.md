@@ -60,6 +60,60 @@ elsewhere), `not_godot_project`, `template_planned`, `bad_addon_from`, `bad_zip`
 Godot needs one import run after the natives are in place: `godot --headless --import --path .` (it writes
 `.godot/extension_list.cfg` itself; there is nothing to commit for it). Recipe: `docs/recipes/godot-gdscript.md`.
 
+## update
+
+`npx create-onelobby update [dir | --into <dir>]` (default: the current folder) brings a game's add-on up to the one bundled in this
+package (or `--addon-from <folder>`).
+
+- `godot-gdscript`: it reads `addons/onelobby/PIN.json` first. An untouched add-on is replaced file by file (changed, added and
+  removed files are listed) and `PIN.json` is rewritten. A locally edited, added or missing add-on file stops it with the list
+  (exit 1, `local_changes`) unless `--force`, which overwrites the edited, restores the missing, keeps what you added, and says
+  what it did. Nothing outside `addons/onelobby/` changes except the managed `.gitignore` / `.gitattributes` blocks and, when the
+  natives version pinned by this create-onelobby differs from the one in `PIN.json` or `addons/godot_webrtc/` is gone, the natives
+  (a checked download, `--webrtc-zip`, `--webrtc-dir`, or `--no-natives`). No `PIN.json`: error `no_pin`, which names `--into` as
+  the way to adopt the project. Already current: it says so, exit 0, nothing written. It ends with the import command
+  `godot --headless --import --path .` (new `class_name`s need it).
+- `web`: the dependency is the `onelobby` npm package, so `update` prints the one `npm install onelobby@^<version>` line and
+  whether `src/session.js` (or `multiplayer/session.js`) differs from this version's glue. It writes nothing and never runs npm
+  (the glue is yours to edit).
+
+Flags: `--addon-from`, `--webrtc-zip`, `--webrtc-dir`, `--no-natives`, `--force`, `--dry-run`, `--json`. Errors: `no_pin`,
+`bad_pin`, `local_changes` (with `details: { edited, missing, added }` in `--json`), `not_a_project`, `no_such_dir`,
+`template_planned`, plus the natives errors above. (A folder literally named `update` or `verify` is scaffolded as `./update`.)
+
+## verify
+
+`npx create-onelobby verify [dir | --into <dir>]` answers "does multiplayer work here" with no manual steps. It prints one
+line per check (`ok` / `FAIL <why>` / `skipped <why>`) and a last line `VERIFY_OK` (exit 0) or
+`VERIFY_FAIL <first failing check>: <what is wrong and the next step>` (exit 1). `--json` prints one object with the same facts.
+A failed `godot`, `addon-pin`, `natives` or `blueprint` check makes the later ones `skipped`.
+
+| Check (godot-gdscript) | What it proves |
+|---|---|
+| `godot` | the executable: `--godot <exe>`, else `$GODOT`, else `godot` on PATH (Godot 4.4 or newer); always run `--headless --audio-driver Dummy` |
+| `addon-pin` | `addons/onelobby/` matches `PIN.json`; edited files are a warning on the line, not a failure |
+| `natives` | the WebRTC natives are there and registered (it runs the headless import itself when `.godot/extension_list.cfg` is missing) |
+| `blueprint` | `onelobby.json` loads through the JS loader and through the game's GDScript loader |
+| `direct` | two peers on 127.0.0.1, host and join by code, a message each way (the game's `tests/multiplayer.gd`, else a bundled probe) |
+| `nostr` | the same through a LOCAL Nostr relay on 127.0.0.1 (built in), when `hosting.nostr` is on |
+| `turn` | relay-only through a LOCAL TURN server on 127.0.0.1 with a random login given as one pasted line; fails unless the TURN server saw allocations and relayed packets |
+| `server` | host and join through a lobby server, only when `hosting.server` is on AND `--server http://127.0.0.1:<port>` is given (verify never starts the server); else `skipped` with the reason |
+
+| Check (web) | What it proves |
+|---|---|
+| `blueprint` | `onelobby.json` loads through the real loader |
+| `project-test` | the game's own `test/multiplayer.mjs` passes (in memory; needs `npm install` first) |
+| `nostr`, `turn` | `skipped` by design: two JS clients over real WebRTC in Node need node-datachannel, which a web game does not depend on (tools/engine-smoke covers it) |
+
+Flags: `--godot <exe>`, `--server <url>`, `--fetch-helpers`, `--json`. Everything binds 127.0.0.1 on free ports, no window opens,
+nothing it started outlives it (also on a failed check and on Ctrl+C), and it writes only inside the game folder
+(`.onelobby/`, covered by the managed `.gitignore` block).
+
+**Helpers.** The Nostr relay is built in (pure Node). The TURN server is the npm package `node-turn` (pinned), loaded only when
+`verify` runs: from the game's own `node_modules` or from `.onelobby/helpers/`. Without it the `turn` check says
+`skipped` and names the one command; `--fetch-helpers` installs it there (an anonymous npm download). Scaffolding never
+downloads it, so `npm create onelobby` stays zero-dependency and offline-capable.
+
 ## All templates
 
 `create-onelobby --help` lists every flag (one per setting, plus `--set key=value`). `--dry-run` writes nothing (and downloads

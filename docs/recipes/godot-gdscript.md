@@ -18,6 +18,8 @@ godot --headless --import --path .                                         # onc
 godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
 ```
 
+`npx create-onelobby verify` is THE test command: it checks the add-on against `PIN.json`, the natives and `onelobby.json`, then proves two peers on 127.0.0.1 directly, through a local Nostr relay and relay-only through a local TURN server, and ends with one line, `VERIFY_OK` or `VERIFY_FAIL <check>: <next step>` (add `--fetch-helpers` the first time: it downloads the TURN helper anonymously into the gitignored `.onelobby/`). `npx create-onelobby update` re-vendors the add-on when a new one is out (it stops on files you edited unless `--force`, and tells you to run `godot --headless --import --path .` after).
+
 For `--into` the output prints the lines that add `res://addons/onelobby/menu/menu.tscn` to your main scene and connect its signals (section 3).
 A second run changes nothing; files that exist are skipped and listed (`--force` overwrites them). Flags for offline use: `--webrtc-zip <file>`,
 `--webrtc-dir <folder>`, `--no-natives`, `--addon-from <checkout>`; `--dry-run` shows the file list and downloads nothing. A Godot C# project
