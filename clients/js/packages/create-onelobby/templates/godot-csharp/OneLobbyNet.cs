@@ -40,6 +40,7 @@ public static class OneLobbyNet
             options.BindAddress = IPAddress.Loopback;
             options.Nostr = new NostrOptions { Enabled = false };
             options.OpenPort = false;
+            options.PublicAddress = "127.0.0.1"; // the join code a local host shows must work on this PC: it carries this address, not the network one
         }
         return options;
     }
