@@ -7,7 +7,7 @@ description: Make a game multiplayer with OneLobby in one pass. Surveys the game
 
 You turn a single-player game into one that players can host and join, and that keeps working after any server is gone
 (a player hosts from their own machine and shares a join code). The user drives the choices; you propose them with
-reasons. One file holds every choice: `onelobby.json` at the game's root (schema: `onelobby/blueprint.schema.json` in the
+reasons. One file holds every choice: `onelobby.json` (at the game's root; Unity: `Assets/Resources/onelobby.json`; schema: `onelobby/blueprint.schema.json` in the
 npm package; design: `docs/design/blueprint.md`). Commands below are `npx create-onelobby ...`; in a clone of the OneLobby
 repo run the same as `node clients/js/packages/create-onelobby/bin/create-onelobby.js ...` (after `npm ci && npm run build`
 in `clients/js`, then `node scripts/build.mjs` in that package). The scaffolder's own rules are not repeated here: it answers,
@@ -34,8 +34,15 @@ Note each finding with the file and line that told you:
 
 - `answers`: `[key, value, why]` rows, each a blueprint key; they become the proposal. `shape` names the game type
   (`lockstep`, `coop-snapshots`, `replication`, `turn-based`, `own-server`); keep it for the report.
-- `shape: null`: the sentence matched nothing clearly. Answer each of `questions` from the survey where a file and line
-  settle it, ask the user the rest, add the `add` words to the sentence and run again. Do not guess a shape.
+- A **new game has no code to survey**: its sentence is the only input, so write what the players do ("run and jump around an arena
+  together", "co-op", "side view platformer"). Words like run, jump, arena, platform, move around, co-op lead to a shape by themselves (a
+  player world: `fallback: "world"` in the result, with a note saying so) unless the sentence says turn based, puzzle, deterministic or lockstep.
+- `shape: null`: the sentence matched nothing clearly. `candidates` (present only then) lists every shape that scored, best first. Answer each
+  of `questions` from the survey where a file and line settle it, ask the user the rest, add the `add` words to the sentence and run again.
+  When nobody can answer (a new game, no user at hand), use the top `candidates` entry: add its words to the sentence, run again, and say in
+  the report that the shape was the recommender's best candidate. With no candidates at all, ask; do not invent a shape.
+- Players that move in a 2D world: the recommender reads "2D", "side view", "top-down", "side scroller" and "platformer" as
+  `sync.player.space` = `2d` (an explicit "3D" keeps the default `3d`). Say "2D" or "3D" in the sentence of a game with players.
 - `limits`: what this engine's client or template cannot do yet (it wanted X, wrote Y). Tell the user, do not hide it.
 - `advice`: `built-in` is a client feature to use; `by-hand` is work the game must do; `depends` waits on the engine.
 - `engine.template` `"planned"` or `runCommand: null`: the scaffolder cannot write this engine yet; take the by-hand path (4.5).
@@ -64,7 +71,12 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    (pinned, SHA-256 checked, anonymous; offline: `--webrtc-zip <file>`). Godot C# needs the .NET build of Godot and the .NET 8 SDK,
    and until a release is on NuGet `--packages-from <folder of .nupkg>`. Then `godot --headless --audio-driver Dummy --import --path .`
    (C#: first `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with
-   `exists`: edit by hand.
+   `exists`: edit by hand. **Unity needs the package tarball** at the path its manifest names (the "Next:" line says where): a released game
+   takes the release tarball (`com.onelobby.unity-<version>.tgz`, natives included); in a clone, or for an unreleased build, run
+   `clients/unity/fetch-natives.sh` once (anonymous, checked download of the WebRTC libraries), then `clients/unity/build-unity-package.sh --pack`,
+   and put the new `.tgz` there. `--pack` stops with `PACK_FAIL` when `Runtime/Plugins/x86_64/datachannel.dll` would be missing, and `verify`
+   fails `package` for a tarball without it: on Windows two peers never link. Your own code that uses OneLobby from its own `.asmdef` lists
+   `OneLobby.Unity` in `references` (and `OneLobby.Replication.dll` in `precompiledReferences` for the player layer).
 2. **Wire the drop-in menu where the survey said** (a new project has it as the main scene). Godot `--into` never edits your scenes:
    instance `addons/onelobby/menu/menu.tscn` (C#: `addons/onelobby_menu/OneLobbyMenu.tscn`) in the menu entry's scene (it is a
    Control; a Node2D scene can hold it as a child). GDScript: give it the client before the menu's own `_ready`, so from the
@@ -90,8 +102,9 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check (it runs once when the menu opens; `diagnostics.checkOnOpen: false`
    in `onelobby.json` switches that off, the button stays) and plain-language errors already live in the menu and the library.
    **Players in the world are not hand work on Godot or Unity any more:** when the recommendation has `sync.player.authority` (the `coop-snapshots` and `replication` shapes) or you
-   pass `--mode replication --set sync.player.authority=owner|host`, the same one command writes the networked player: a new GDScript, C# or Unity project gets a character
-   (`player.tscn`, `Player.tscn`, `Assets/Scripts/GamePlayer.cs`), a game with the spawner and a player check in its two-peer test (C# also vendors `addons/onelobby_net_player/` and references
+   pass `--mode replication --set sync.player.authority=owner|host` (add `--set sync.player.space=2d` for a side-on or top-down character: `sync.player.space` is `3d` or `2d`, default `3d`,
+   so a 2D game without it gets a 3D player), the same one command writes the networked player: a new GDScript, C# or Unity project gets a character
+   (`player.tscn`, `Player.tscn`, `Assets/Scripts/GamePlayer.cs`), a game with the spawner and a player check in its two-peer test (both ways: the joiner's player on the host and the host's player on the joiner, one `MULTIPLAYER_PLAYER` line each) (C# also vendors `addons/onelobby_net_player/` and references
    `OneLobby.Replication`; Unity needs neither, the package has the component); `--into` adds the vendored parts and prints the spawner lines to put where your game starts (it writes no scene into the game). The `--json` result
    has `netPlayer`. `verify` then has a `player` line. Web does not write it yet (`docs/recipes/net-player.md` sections 3 and 4).
 5. **By hand** (`template_planned`, planned engine, `runCommand: null`): ask the tool, do not assume; its `template_planned` refusal
@@ -112,8 +125,14 @@ Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that 
 name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
 runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
 `nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, and in `wiring` that some scene or page uses
-the menu or the glue (a bare `--into` fails it until you wire the game); it does not run your game, so also boot it (`godot --headless --audio-driver Dummy --path . --quit-after 90`, no flags; web: `node test/multiplayer.mjs`)
-and read it for errors, and check **offline**: with no lobby server the game still plays and the menu says multiplayer is unavailable.
+the menu or the glue (a bare `--into` fails it until you wire the game); it does not run your game, so also boot it and read the output for errors. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 90` (no flags).
+Unity: build the player (`Unity.exe -batchmode -nographics -quit -projectPath . -logFile <abs>/build.log -executeMethod OneLobbyBuild.Windows`, the command in the game's `AGENTS.md`), run
+`Builds/Windows/Game.exe -batchmode -nographics -logFile <abs>/boot.log --host --local --name=Sam` for about 20 s and stop that process yourself (a player has no quit flag; the log should say
+`direct host listening` and hold no exception). Web: `node test/multiplayer.mjs`. Check **offline** the same way: with `--local` nothing leaves the PC, and with no lobby server the game still plays and the menu says multiplayer is unavailable.
+**Players moving across two copies, headless:** the generated two-peer test already prints one `MULTIPLAYER_PLAYER` line per way. For two real copies (Godot GDScript, Godot C#, Unity; a game with the player layer)
+start both with `--local --autostart`: the host starts the match as soon as a second player has joined (no menu click), and every copy walks its own player and prints
+`MULTIPLAYER_PLAYER <me> sees <other> (peer N) move: from x = .. to x = ..` once it sees the other's player move. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --host --local --autostart --name=Sam`,
+then the same with `--join=127.0.0.1:47810 --name=Ann` in place of `--host --name=Sam` (Unity: the built player with `-batchmode -nographics -logFile <abs>.log`). Read both logs.
 `verify` refuses engines the scaffolder does not build (no verdict line); then use the recipe's "Done when" and say which checks you could not run.
 
 ## 6. Report

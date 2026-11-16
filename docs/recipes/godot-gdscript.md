@@ -23,7 +23,7 @@ godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    
 Players in the world are one command too: add `--mode replication --set sync.player.authority=owner` (or `host`; `--set sync.player.space=2d` for a side-on game), or a
 `--recommend "co-op survival sandbox for 4"`, and a new project also gets `player.tscn` / `player.gd` (a character with the `OneLobbyNetPlayer` node that walks and jumps),
 `game.gd` (a floor, a camera and the `OneLobbyNetPlayerSpawner`), a main scene that opens the game when the menu starts it, and a player check in `tests/multiplayer.gd`
-(the joiner's player appears on the host, follows it, one jump arrives once). They are yours to edit; `update` never rewrites them. `--yes` alone does not turn it on. `--into`
+(the joiner's player appears on the host, follows it, one jump arrives once; then the same for the host's player on the joiner; two copies with `--local --autostart` start the match by themselves and print what they see). They are yours to edit; `update` never rewrites them. `--yes` alone does not turn it on. `--into`
 writes no scene into your game: it prints the lines that add the spawner. What the node and the spawner do: `net-player.md` section 10.
 
 For `--into` the output prints the lines that add `res://addons/onelobby/menu/menu.tscn` to your main scene and connect its signals (section 3).

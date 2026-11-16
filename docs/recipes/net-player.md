@@ -327,7 +327,7 @@ godot --path clients/gdscript res://examples/net_player_demo/main.tscn -- --join
 **The scaffolder.** `npx create-onelobby my-game --template godot-gdscript --mode replication --set sync.player.authority=owner --yes` (also `godot-csharp`; `host` for the
 other authority, `--set sync.player.space=2d` for a side-on game; or a `--recommend` sentence of the co-op or shooter shape) writes a new game whose menu opens a game with a
 floor, a camera, the spawner and one character (a capsule or a square that walks and jumps) per player, and a two-peer test that also proves the joiner's player appears on the host,
-follows it, and that one jump arrives once. The C# template also vendors `addons/onelobby_net_player/` (pinned, `update` re-vendors it) and references `OneLobby.Replication`.
+follows it, and that one jump arrives once (then the host's player the same way on the joiner). The C# template also vendors `addons/onelobby_net_player/` (pinned, `update` re-vendors it) and references `OneLobby.Replication`.
 `--into` adds the vendored parts and the reference and prints the lines that add a spawner; it writes no scene into your game. `--yes` alone does not turn it on. Details:
 `clients/js/packages/create-onelobby/README.md`, "Players in the world".
 
@@ -559,7 +559,7 @@ tests (`dotnet test clients/dotnet/OneLobby.Replication.Tests --logger "console;
 **The scaffolder.** `npx create-onelobby my-game --template unity --mode replication --set sync.player.authority=owner --yes --package-from <tgz>` (`host` for the other authority,
 `--set sync.player.space=2d` for a side-on game, or a `--recommend` sentence of the co-op or shooter shape) writes a new game whose menu opens a game (`Assets/Scripts/Game.cs`) with a floor, a light,
 a camera, the spawner and one character (`Assets/Scripts/GamePlayer.cs`: a capsule, or a square for 2d, made in code, that walks and jumps) per player, in its own assembly (`OneLobbyGame.asmdef`),
-and a play-mode test that also proves the joiner's player appears on the host, follows it, and that one jump arrives once. Nothing is vendored (the package has the component); `--into` writes no script
+and a play-mode test that also proves the joiner's player appears on the host, follows it, and that one jump arrives once, then the host's player the same way on the joiner. Nothing is vendored (the package has the component); `--into` writes no script
 or scene into your game and prints the lines that add the spawner. `--yes` alone does not turn it on. Details: `clients/js/packages/create-onelobby/README.md`, "Players in the world".
 
 `com.onelobby.unity` has the layer as a component: `OneLobbyNetPlayer` (one per player, on the character's root object, or on a child with its `Character` field set) and `OneLobbyNetPlayerSpawner` (one character per seated player). Both sit on the C# layer of section 11 (`NetPlayers`), so a Unity peer, a JS peer and a GDScript peer can be in one game. The settings are `sync.player` of `onelobby.json`, and it needs `sync.mode: "replication"`. A sample that moves: the package's `NetPlayer` sample (`Samples~/NetPlayer`: the menu, a floor, one capsule per player with a colour per seat and a name, WASD or arrows to walk, space to jump, built in code with no scene or prefab). The package now lists the `physics` and `animation` modules as dependencies (the component uses `CharacterController`, `Rigidbody` and `Animator`).

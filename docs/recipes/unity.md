@@ -38,6 +38,12 @@ npx create-onelobby verify                       # opens the project in batchmod
   `file:com.onelobby.unity-<version>.tgz` and the tarball goes next to `manifest.json` (build one with `clients/unity/build-unity-package.sh --pack`, or take the
   `unity-dev-package` CI artifact, which has the natives). `npx create-onelobby update` moves that line to the tool's version (a `file:` line you wrote is kept
   unless `--package-from` is given).
+- **Getting the package** (a clone, or a build that is not released yet): a released game takes the release tarball (`com.onelobby.unity-<version>.tgz` on the
+  GitHub release, natives included). From a clone run `clients/unity/fetch-natives.sh` once (anonymous download, SHA-256 checked, puts the WebRTC libraries where
+  the build looks; or build them: `clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1`), then `clients/unity/build-unity-package.sh --pack` and
+  copy the `.tgz` next to `manifest.json`. `--pack` stops with `PACK_FAIL` when the Windows library (`Runtime/Plugins/x86_64/datachannel.dll`) is missing, and
+  `create-onelobby verify` fails its `package` check, before it starts anything, when the tarball has no `datachannel.dll`: on Windows two peers
+  would never link.
 - The test runs headless: `Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults <abs>.xml -logFile <abs>.log --local`
   and logs `MULTIPLAYER_OK` (or `MULTIPLAYER_FAIL <what>`). The first run also imports the project. `verify` runs the other routes through the same test with
   arguments after Unity's own (`--route=nostr --relay=...`), against a local Nostr relay and TURN server that it starts on 127.0.0.1. `--hold=5` keeps the two
