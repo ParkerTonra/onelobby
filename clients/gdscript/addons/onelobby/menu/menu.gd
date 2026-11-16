@@ -11,7 +11,7 @@ extends Control
 ## Nodes a controller (a C# one, or a script of yours) may touch, all with unique names (`%Name`):
 ##   Pages
 ##   start:      StartPage StartTitle StartNote NameLabel NameEdit HostButton JoinLabel JoinEdit JoinButton PasswordEdit
-##               BrowseButton SettingsButton
+##               BrowseButton SettingsButton StartCheckLine
 ##   connecting: ConnectingPage ConnectingLabel ConnectingCancel
 ##   lobby:      LobbyPage CodeCaption CodeLabel CopyCodeButton CopyInviteButton PlayersHeader RosterList RosterNote
 ##               CountdownLabel ReadyButton StartButton CancelStartButton LeaveButton LobbyNote RequestsHeader RequestsList
@@ -66,6 +66,12 @@ var route := "auto":
 		route = v
 		if model != null:
 			model.route = v
+## Runs the connection check instead of client.check_connection (a test gives a fake; see OneLobbyMenuModel.check_runner).
+var check_runner := Callable():
+	set(v):
+		check_runner = v
+		if model != null:
+			model.check_runner = v
 
 var _shown := -1
 var _roster_sig := ""
@@ -91,6 +97,10 @@ func _ready() -> void:
 	model.join_options = join_options
 	model.route = route
 	model.invite_base = invite_base
+	model.check_runner = check_runner
+	# `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
+	# Read here, not from boot_flags: a game that applies the boot flags itself later would be too late for the check on open.
+	model.local_only = OneLobbyMenuModel.args_say_local(boot_args if not boot_args.is_empty() else OS.get_cmdline_user_args())
 	model.changed.connect(_refresh)
 	model.game_started.connect(func(l: OneLobbyLobby) -> void: game_started.emit(l))
 	model.returned_to_lobby.connect(func(l: OneLobbyLobby) -> void: returned_to_lobby.emit(l))
@@ -336,6 +346,10 @@ func _draw_start(entering: bool) -> void:
 	%BrowseButton.visible = model.can_browse()
 	%StartNote.text = model.start_note
 	%StartNote.visible = model.start_note != ""
+	%StartCheckLine.text = model.start_check_line()
+	%StartCheckLine.visible = model.start_check_line() != ""
+	if entering:
+		model.start_shown.call_deferred() # not before a boot flag has had its say; the model runs the check once
 	if entering:
 		_set_text(%NameEdit, model.name_text)
 		_set_text(%JoinEdit, model.join_text)

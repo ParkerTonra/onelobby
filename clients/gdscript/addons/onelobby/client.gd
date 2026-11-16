@@ -43,6 +43,26 @@ const RETIRE_MS := 1500
 @export var peer_timeout_ms := 0
 ## Pump in _process. Turn off to call pump() yourself (e.g. from _physics_process).
 @export var auto_pump := true
+## A joiner that gives up tells the host why (cause and step only: no address, name or free text) over the signaling path
+## it already uses, once, when the hub lists the "diag" feature (spec/diagnostics.md s.7).
+@export var report_to_host := true
+## Where the connection log (`net_log`) is saved: when the scene tree exits, after every error entry and on net_log.save().
+## "" keeps it in memory only. GDScript cannot hook a crash, so a crash loses only what came after the last error entry.
+@export_file var log_path := "user://onelobby-netlog.txt"
+## Net log ring size: 500 by default, clamped to 50..5000.
+@export var log_size := 500
+## After a failed connect with a relay set, ask the TURN server with a raw UDP probe whether it refused the login or never
+## answered (spec/diagnostics.md s.10).
+@export var relay_probe := true
+
+## The library version the report carries.
+const LIB_VERSION := "0.7.2"
+## The last check_connection() result ({udp, natType, relay, verdict, message}); {} before the first one. Its NAT reading
+## joins a later failure's diagnosis and the report to the host.
+var last_check := {}
+var _net_log: OneLobbyNetLog = null
+## How this client reaches lobbies: "server" (code), "ip" (typed address) or "nostr".
+var _route := "server"
 
 ## The lobby you are in, or null.
 var lobby: OneLobbyLobby
@@ -101,7 +121,48 @@ func _process(_delta: float) -> void:
 		pump()
 
 
+## The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. `get_net_log().export()` is the
+## text a player copies; addresses are masked unless asked for, credentials never print. It stays on this machine.
+func get_net_log() -> OneLobbyNetLog:
+	if _net_log == null:
+		_net_log = OneLobbyNetLog.new(log_size, transport.now_ms)
+		_net_log.path = log_path
+		_net_log.set_meta_info("onelobby-gdscript " + LIB_VERSION, "lk1", "godot " + OS.get_name().to_lower())
+		_net_log.add("info", "client onelobby-gdscript %s protocol lk1 game version %s" % [LIB_VERSION, net_version])
+	return _net_log
+
+
+func diag_route() -> String:
+	return _route
+
+
+## Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
+## one socket) and whether a relay takes its login. Contacts only the STUN servers in options.stun (default: the ones the
+## client connects with) and the TURN entry in options.ice_servers (default: the ICE servers of the last lobby server
+## welcome). A menu runs it when it opens (once, unless the game's onelobby.json says `diagnostics.checkOnOpen: false`) and on its button; the library never does. Returns {udp, natType, relay, verdict, message}; the
+## message is one plain line ("Direct connections: likely to fail. A relay is recommended."). Remembered as `last_check`.
+##
+##     var r: Dictionary = await client.check_connection()
+func check_connection(options: Dictionary = {}) -> Dictionary:
+	var o := options.duplicate()
+	if not o.has("ice_servers"):
+		o["ice_servers"] = ice
+	var r: Dictionary = await OneLobbyConnectionCheck.check(get_tree(), o)
+	last_check = r
+	get_net_log().add("info", "connection check udp=%s nat=%s relay=%s verdict=%s" % [r["udp"], r["natType"], r["relay"], r["verdict"]])
+	return r
+
+
+func _notification(what: int) -> void:
+	# the window closing or the tree quitting: save the log (a crash cannot be hooked, see log_path)
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		if _net_log != null:
+			_net_log.flush()
+
+
 func _exit_tree() -> void:
+	if _net_log != null:
+		_net_log.flush()
 	if lobby != null:
 		lobby.leave()
 	if _socket != null:
@@ -368,11 +429,13 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 		var url := "ws://%s:%d/" % [dec["ip"], dec["port"]]
 		remote_ip = str(dec["ip"])
 		_direct_code = OneLobbyJoinCode.encode_ip(remote_ip, int(dec["port"]))
+		_route = "ip"
 		_socket_factory = func() -> OneLobbyTransport.OLSocket: return transport.connect_signaling(url)
 	else:
 		var norm := OneLobbyJoinCode.normalize_dc1(join_code)
 		var relays: Array = options.get("relays", [])
 		_direct_code = OneLobbyJoinCode.group(norm)
+		_route = "nostr"
 		_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
 	var setup := _join_setup(options) if resume == "" else {"pid": player_id(), "bans": bans()}
 	var finish := func(e: Dictionary) -> Variant: return _enter_lobby(e, setup)
@@ -605,8 +668,9 @@ func _remember_code(code: String) -> void:
 		settings.save({"last_code": c})
 
 
-func raise_error(code: String, message: String) -> void:
+func raise_error(code: String, message: String, extra: Dictionary = {}) -> void:
 	last_error = {"code": code, "message": message}
+	last_error.merge(extra)
 	error.emit(code, message)
 
 
@@ -668,11 +732,12 @@ func _run(resume: String, request: String, expect: Array, finish: Callable, time
 	if (_socket == null or _socket.state == OneLobbyTransport.OLSocket.CLOSED) and not _socket_factory.is_valid() and effective_server().is_empty():
 		_fail("no_server", "no lobby server address (set lobby_server, or save one in the multiplayer settings)")
 		return null
-	_op = {"request": "<built>" if build.is_valid() else request, "build": build, "expect": expect, "sent": false, "deadline": transport.now_ms() + timeout_ms, "finish": finish}
+	_op = {"request": "<built>" if build.is_valid() else request, "build": build, "expect": expect, "sent": false, "deadline": transport.now_ms() + timeout_ms, "finish": finish, "started": transport.now_ms()}
 	# A resume needs a fresh hello: if this connection already said hello, drop it and start a new one.
 	if _socket != null and resume != "" and _welcomed:
 		_socket.close()
 	if _socket == null or _socket.state == OneLobbyTransport.OLSocket.CLOSED:
+		get_net_log().add("sig", "open route=" + _route, OneLobbySettings.redact_url(effective_server()) if not _socket_factory.is_valid() else "")
 		_socket = _socket_factory.call() if _socket_factory.is_valid() else transport.connect_signaling(effective_server())
 		_welcomed = false
 		_hello_sent = false
@@ -701,16 +766,34 @@ func _finish_op(e: Dictionary) -> void:
 	_emit_done.call_deferred(finish.call(e))
 
 
-func _fail_op(code: String, message: String) -> void:
+## The error codes a connect failure carries a diagnosis for (spec/diagnostics.md s.9).
+const DIAGNOSED_CODES := ["connect_failed", "direct_unreachable", "version_mismatch", "server_closed", "closed"]
+
+
+func _fail_op(code: String, message: String, versions: Variant = null) -> void:
 	if _op.is_empty():
 		return
+	var started := int(_op.get("started", transport.now_ms()))
 	_op = {}
-	_fail(code, message)
+	var extra := {}
+	# a failure after the welcome is a refused join: only a version mismatch is about connecting
+	if DIAGNOSED_CODES.has(code) and (not _welcomed or code == "version_mismatch"):
+		var facts := {
+			"side": "joiner", "route": _route, "error": code, "reached": "signaling" if _welcomed else "none",
+			"elapsedMs": maxi(0, transport.now_ms() - started), "versions": versions, "relaysUp": null, "stun": false,
+			"relay": "none", "local": [], "remote": [], "retried": false, "nat": "unknown", "heard": null,
+		}
+		var d := OneLobbyDiagnose.diagnose(facts)
+		extra["diagnosis"] = d
+		get_net_log().add("diag", "cause %s stage %s after %d ms" % [d["cause"], d["stage"], int(facts["elapsedMs"])])
+	_fail(code, message, extra)
 	_emit_done.call_deferred(null)
 
 
-func _fail(code: String, message: String) -> void:
+func _fail(code: String, message: String, extra: Dictionary = {}) -> void:
 	last_error = {"code": code, "message": message}
+	last_error.merge(extra)
+	get_net_log().add("error", code, "", code)
 	error.emit(code, message)
 
 
@@ -729,6 +812,7 @@ func _dispatch(text: String) -> void:
 			var fs: Variant = e.get("features")
 			features = fs if fs is Array else []
 			_welcomed = true
+			get_net_log().add("sig", "welcome features=%s" % [",".join(PackedStringArray(features)) if not features.is_empty() else "none"])
 			# a resume answered without a seat: the token is unknown or expired
 			if not _op.is_empty() and not _op["sent"] and _op["request"] == "" and _hello_resume != "" and not e.has("peerId"):
 				_hello_resume = ""
@@ -748,7 +832,10 @@ func _dispatch(text: String) -> void:
 			var data: Variant = e.get("data")
 			var disconnected: bool = data is Dictionary and data.get("ban") is bool and data["ban"] == false
 			if not _op.is_empty():
-				_fail_op(code, msg)
+				var versions: Variant = null
+				if code == "version_mismatch" and data is Dictionary and str(data.get("hostNetVersion", "")) != "":
+					versions = {"mine": str(data.get("yourNetVersion", net_version)), "theirs": str(data["hostNetVersion"])}
+				_fail_op(code, msg, versions)
 			else:
 				raise_error(code, msg)
 			if lobby != null:

@@ -2,7 +2,8 @@ extends SceneTree
 ## The drop-in menu's model (OneLobbyMenuModel) driven with no scene, against real GDScript peers on 127.0.0.1 (direct hosts by
 ## IP, no Nostr, no internet): host, a second player joins by code, roster, ready, start with the countdown, back to lobby, kick
 ## with a reason, ban and a refused rejoin, unban, wrong password, a bad code, an old host, saved name and last code as
-## defaults, chat, join requests, lobby settings, the connection check's lines, and the relay line never being shown.
+## defaults, chat, join requests, lobby settings, the connection check's lines (and its once-on-open rule: counted fake runners, never a real network check), and the relay line
+## never being shown.
 ##   godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/menu.gd
 ## Prints "menu: N passed, M failed"; exits 1 on any failure.
 
@@ -134,6 +135,8 @@ func _run() -> void:
 		await _old_host()
 	if only == "" or only == "extras":
 		await _extras()
+	if only == "" or only == "onopen":
+		await _on_open()
 	print("menu: %d passed, %d failed" % [_pass, _fail])
 	for r: Rig in _all:
 		if r.model.lobby != null and not r.model.lobby.is_closed():
@@ -397,3 +400,142 @@ func _extras() -> void:
 	_check(_rig().model.apply_boot_flags(PackedStringArray(["--something"])) == "", "no flag, nothing started")
 	await bj.model.leave()
 	await bh.model.leave()
+
+
+# ---- the connection check when the menu opens (no network: every runner here is a fake) -------------------------------------
+
+## A model whose runner is a counted fake. `cfg` is the diagnostics section of an onelobby.json ({} for the defaults);
+## `answer` what the fake finds: "cone" (good), "symmetric" (likely to fail), "blocked", "relay_refused", "relay_works".
+## `gate` (when given) holds the runner until gate[0] is true. `state.runs` counts the runs.
+func _open_rig(cfg: Dictionary, answer := "cone", gate: Array = []) -> Dictionary:
+	var c: OneLobbyClient
+	if cfg.is_empty():
+		c = OneLobbyClient.from_config({"game": {"id": "menu-test"}})
+	else:
+		c = OneLobbyClient.from_config({"game": {"id": "menu-test"}, "diagnostics": cfg})
+	c.store = OneLobbyStore.memory()
+	c.settings_env = {}
+	c.log_path = ""
+	c.lobby_server = "ws://127.0.0.1:1/ws"
+	root.add_child(c)
+	var m := OneLobbyMenuModel.new(c)
+	m.route = "direct"
+	m.host_options = {"name": "menu", "max_players": 4, "tcp_port": 0, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1",
+		"udp_port_range": [_next_port, _next_port + 15], "nostr": false, "room": {"countdown_seconds": 1}}
+	_next_port += 20
+	var state := {"runs": 0, "done": 0}
+	m.check_runner = func(_o: Dictionary) -> Dictionary:
+		state["runs"] += 1
+		while not gate.is_empty() and not gate[0]:
+			await process_frame
+		state["done"] += 1
+		match answer:
+			"symmetric":
+				return {"udp": "ok", "natType": "symmetric", "relay": "none"}
+			"blocked":
+				return {"udp": "blocked", "natType": "unknown", "relay": "none"}
+			"relay_refused":
+				return {"udp": "ok", "natType": "cone", "relay": "refused"}
+			"relay_works":
+				return {"udp": "blocked", "natType": "unknown", "relay": "ok"}
+		return {"udp": "ok", "natType": "cone", "relay": "none"}
+	return {"client": c, "model": m, "state": state}
+
+
+func _on_open() -> void:
+	# the default: once, when the start screen is first shown
+	var d := _open_rig({})
+	var m: OneLobbyMenuModel = d["model"]
+	_check(m.check_on_open_enabled(), "check on open is on by default")
+	_check(d["state"]["runs"] == 0 and m.check_verdict == "", "nothing runs before the start screen is shown")
+	await m.start_shown()
+	_check(d["state"]["runs"] == 1 and m.check_verdict_id == "good" and not m.check_running, "the default runs the check once on open")
+	_check(m.check_facts.size() == 3 and m.start_check_line() == "", "the settings lines are filled in, the start screen says nothing when all is well")
+	# coming back to the start screen (from settings, from a lobby) does not run it again
+	m.open_settings()
+	_check(m.back(), "settings closes")
+	await m.start_shown()
+	await m.host()
+	await _until(func() -> bool: return m.room_active())
+	await m.leave()
+	await m.start_shown()
+	_check(d["state"]["runs"] == 1, "coming back to the start screen does not run it again (%d runs)" % d["state"]["runs"])
+	await m.run_check()
+	_check(d["state"]["runs"] == 2, "the button still runs it on demand")
+	d["client"].queue_free()
+
+	# the start screen line: the verdict sentence for each warning, nothing for the rest
+	for case: Array in [["symmetric", "likely_fail"], ["blocked", "blocked"], ["relay_refused", "relay_refused"], ["cone", "good"], ["relay_works", "relay_works"]]:
+		var w := _open_rig({}, case[0])
+		await w["model"].start_shown()
+		var line: String = w["model"].start_check_line()
+		var warn: bool = ["likely_fail", "blocked", "relay_refused"].has(case[1])
+		_check(w["model"].check_verdict_id == case[1] and line == (w["model"].check_verdict if warn else ""), "%s: the start line is %s: '%s'" % [case[1], "the verdict sentence" if warn else "empty", line])
+		w["client"].queue_free()
+	var likely := _open_rig({}, "symmetric")
+	await likely["model"].start_shown()
+	_check(likely["model"].start_check_line() == "Direct connections: likely to fail. A relay is recommended.", "the start line is the library's own sentence: %s" % likely["model"].start_check_line())
+	likely["client"].queue_free()
+
+	# checkOnOpen false: nothing until the button
+	var off := _open_rig({"checkOnOpen": false})
+	await off["model"].start_shown()
+	_check(not off["model"].check_on_open_enabled() and off["state"]["runs"] == 0 and off["model"].connection_check_shown(), "checkOnOpen false: nothing runs on open, the button stays")
+	await off["model"].run_check()
+	_check(off["state"]["runs"] == 1, "checkOnOpen false: the button runs it")
+	off["client"].queue_free()
+
+	# showConnectionCheck false: no button and no automatic run
+	var hidden := _open_rig({"showConnectionCheck": false})
+	await hidden["model"].start_shown()
+	_check(hidden["state"]["runs"] == 0 and not hidden["model"].check_on_open_enabled(), "showConnectionCheck false: nothing runs on open")
+	hidden["client"].queue_free()
+
+	# --local (nothing may leave this PC): no automatic run
+	var loc := _open_rig({})
+	loc["model"].local_only = OneLobbyMenuModel.args_say_local(PackedStringArray(["--host", "--local"]))
+	await loc["model"].start_shown()
+	_check(loc["state"]["runs"] == 0 and not OneLobbyMenuModel.args_say_local(PackedStringArray(["--host"])), "--local: the check does not run by itself")
+	loc["client"].queue_free()
+
+	# not on a screen that is not the start screen; the first time the start screen is shown, it runs
+	var late := _open_rig({})
+	late["model"].open_settings()
+	await late["model"].start_shown()
+	_check(late["state"]["runs"] == 0, "start_shown while another screen is up does nothing")
+	late["model"].back()
+	await late["model"].start_shown()
+	_check(late["state"]["runs"] == 1, "the first time the start screen is shown it runs")
+	late["client"].queue_free()
+
+	# a run in progress is never started twice (button, then open, then button)
+	var gate := [false]
+	var busy := _open_rig({}, "cone", gate)
+	var bm: OneLobbyMenuModel = busy["model"]
+	bm.run_check()
+	bm.start_shown()
+	bm.run_check()
+	await _frames(3)
+	_check(busy["state"]["runs"] == 1 and bm.check_running, "a run in progress is not started twice (%d runs)" % busy["state"]["runs"])
+	gate[0] = true
+	await _until(func() -> bool: return not bm.check_running)
+	busy["client"].queue_free()
+
+	# Host pressed while the check is still running: the lobby opens, the late answer only fills the lines
+	gate = [false]
+	var h := _open_rig({}, "symmetric", gate)
+	var hm: OneLobbyMenuModel = h["model"]
+	hm.start_shown()
+	await _frames(2)
+	_check(hm.check_running and hm.start_check_line() == "", "while it runs the start screen says nothing")
+	hm.set_name("Sam")
+	await hm.host()
+	_check(await _until(func() -> bool: return hm.room_active()), "Host works while the check is running")
+	_check(hm.check_running, "and the check is still running")
+	gate[0] = true
+	_check(await _until(func() -> bool: return not hm.check_running), "the check finishes later")
+	_check(hm.screen == Screen.LOBBY and hm.lobby != null and hm.check_verdict_id == "likely_fail" and hm.error.is_empty(), "the late answer only filled the lines: screen %d, error %s" % [hm.screen, str(hm.error)])
+	await hm.leave()
+	_check(hm.start_check_line() == hm.check_verdict, "back on the start screen the late warning shows")
+	h["client"].queue_free()
+	await _frames(2)

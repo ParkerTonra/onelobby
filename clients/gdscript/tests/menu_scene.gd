@@ -45,7 +45,8 @@ func _frames(n: int) -> void:
 
 
 func _client(display: String) -> OneLobbyClient:
-	var c := OneLobbyClient.from_config({"game": {"id": "menu-scene"}, "engine": "godot-gdscript"})
+	# no check on open here (checkOnOpen false): these tests never touch the network; _on_open_scene covers the check with a fake
+	var c := OneLobbyClient.from_config({"game": {"id": "menu-scene"}, "engine": "godot-gdscript", "diagnostics": {"checkOnOpen": false}})
 	c.display_name = display
 	c.store = OneLobbyStore.memory()
 	c.settings_env = {}
@@ -127,6 +128,7 @@ func _cancel() -> void:
 func _run() -> void:
 	await _layouts()
 	await _smoke()
+	await _on_open_scene()
 	print("menu_scene: %d passed, %d failed" % [_pass, _fail])
 	await _frames(5)
 	quit(1 if _fail > 0 else 0)
@@ -239,3 +241,91 @@ func _smoke() -> void:
 	_check(await _until(func() -> bool: return am.visible and bm.visible and not a.get_node("InGame").visible), "smoke: back to the lobby shows the menu again")
 	a.queue_free()
 	b.queue_free()
+
+
+## The check on open, in the real scene (menu.tscn), with a counted fake runner: once on open and the start-screen line; never with
+## --local or when a boot flag hosts; and a menu freed while the check runs leaves nothing behind that is called later.
+func _on_open_scene() -> void:
+	var packed: PackedScene = load("res://addons/onelobby/menu/menu.tscn")
+	var state := {"runs": 0, "gate": false}
+	var runner := func(_o: Dictionary) -> Dictionary:
+		state["runs"] += 1
+		while not state["gate"]:
+			await process_frame
+		return {"udp": "ok", "natType": "symmetric", "relay": "none"}
+	var cfg := {"game": {"id": "menu-scene"}, "engine": "godot-gdscript"}
+	var open := func(boot: PackedStringArray, blueprint: Dictionary) -> OneLobbyMenu:
+		var menu: OneLobbyMenu = packed.instantiate()
+		var c := OneLobbyClient.from_config(blueprint)
+		c.display_name = "Sam"
+		c.store = OneLobbyStore.memory()
+		c.settings_env = {}
+		c.log_path = ""
+		c.lobby_server = "ws://127.0.0.1:1/ws"
+		menu.client = c
+		menu.boot_flags = not boot.is_empty()
+		menu.boot_args = boot
+		menu.route = "direct"
+		menu.host_options = _host_opts()
+		menu.check_runner = runner
+		root.add_child(menu)
+		return menu
+	# the default: runs once, shows nothing while it runs, shows the verdict on the start screen after, Settings is filled in
+	var menu: OneLobbyMenu = open.call(PackedStringArray(), cfg)
+	await _frames(3)
+	var line: Label = menu.get_node("%StartCheckLine")
+	_check(state["runs"] == 1 and menu.model.check_running and not line.visible, "on open: the check runs once and the start screen shows nothing while it runs")
+	state["gate"] = true
+	await _frames(3)
+	_check(not menu.model.check_running and line.visible and line.text == "Direct connections: likely to fail. A relay is recommended.", "on open: the start screen shows the warning sentence: '%s'" % line.text)
+	menu.model.open_settings()
+	await _frames(2)
+	var verdict: Label = menu.get_node("%CheckVerdict")
+	_check(verdict.visible and verdict.text == line.text and (menu.get_node("%CheckFacts") as Label).text.count("\n") == 2, "on open: Settings shows the verdict and three facts already filled in")
+	menu.model.back()
+	await _frames(2)
+	_check(state["runs"] == 1, "on open: coming back from Settings does not run it again")
+	menu.queue_free()
+	await _frames(2)
+	# --local: never by itself
+	state["runs"] = 0
+	menu = open.call(PackedStringArray(["--local"]), cfg)
+	await _frames(4)
+	_check(state["runs"] == 0, "--local: the check does not run by itself")
+	menu.queue_free()
+	await _frames(2)
+	# a boot flag that hosts: the start screen is not what the player sees, so nothing runs
+	menu = open.call(PackedStringArray(["--host", "--name=Sam"]), cfg)
+	_check(await _until(func() -> bool: return menu.model.screen == Screen.LOBBY), "boot --host reaches the lobby with a default blueprint")
+	await _frames(3)
+	_check(state["runs"] == 0, "a boot --host never ran the check (%d runs)" % state["runs"])
+	menu.queue_free()
+	await _frames(3)
+	# checkOnOpen false, showConnectionCheck false: nothing; the button still works for the first
+	menu = open.call(PackedStringArray(), cfg.merged({"diagnostics": {"checkOnOpen": false}}))
+	await _frames(4)
+	_check(state["runs"] == 0, "checkOnOpen false: nothing runs on open")
+	(menu.get_node("%ConnectionCheckButton") as Button).pressed.emit()
+	await _frames(2)
+	_check(state["runs"] == 1, "checkOnOpen false: the button runs it")
+	state["gate"] = true
+	menu.queue_free()
+	await _frames(3)
+	state["runs"] = 0
+	menu = open.call(PackedStringArray(), cfg.merged({"diagnostics": {"showConnectionCheck": false}}))
+	await _frames(4)
+	_check(state["runs"] == 0, "showConnectionCheck false: nothing runs on open")
+	menu.queue_free()
+	await _frames(3)
+	# the menu freed while the check runs: the answer comes back to a dead node and nothing is called on it
+	state["runs"] = 0
+	state["gate"] = false
+	menu = open.call(PackedStringArray(), cfg)
+	await _frames(3)
+	_check(state["runs"] == 1 and menu.model.check_running, "freed mid-check: the check is running")
+	var model := menu.model
+	menu.queue_free()
+	await _frames(3)
+	state["gate"] = true
+	await _frames(5)
+	_check(not is_instance_valid(menu) and not model.check_running, "freed mid-check: the late answer ended quietly (the model is done, the menu is gone)")
