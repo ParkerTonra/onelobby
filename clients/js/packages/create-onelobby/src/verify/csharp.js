@@ -16,6 +16,7 @@ import { resolveGodot } from "./godot.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
+import { blueprintNext, wiringCheck } from "./wiring.js";
 
 const GODOT_FLAGS = ["--headless", "--audio-driver", "Dummy"];
 export const TEST_SCENE = "res://tests/MultiplayerTest.tscn";
@@ -167,7 +168,7 @@ export function csharpChecks() {
         try {
           bp = await validate(json);
         } catch (e) {
-          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).` };
+          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: blueprintNext(e.path, `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).`) };
         }
         ctx.facts = { direct: bp.hosting.direct, nostr: bp.hosting.nostr, server: bp.hosting.server, relayOnly: bp.hosting.relayOnly, mode: bp.sync.mode };
         const base = `mode ${bp.sync.mode}, direct ${bp.hosting.direct}, nostr ${bp.hosting.nostr}, server ${bp.hosting.server}`;
@@ -178,6 +179,7 @@ export function csharpChecks() {
         return { status: "ok", detail: `${base}; loads in JS and in C#` };
       },
     },
+    wiringCheck(),
     {
       name: "direct",
       async run(ctx) {

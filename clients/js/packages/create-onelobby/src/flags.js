@@ -9,6 +9,11 @@ export class CliError extends Error {
   }
 }
 
+/** The templates this release builds (the rest throw template_planned). Lives here so --help and blueprint.js share one list. */
+export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript", "godot-csharp"];
+const quoted = (list) => list.map((t) => `"${t}"`).join(", ").replace(/, ([^,]*)$/, " and $1");
+export const builtList = () => quoted(IMPLEMENTED_TEMPLATES);
+
 const BOOL = "bool";
 const INT = "int";
 const STR = "str";
@@ -255,7 +260,7 @@ Usage: create-onelobby [dir] [options]
        create-onelobby update [dir] [options]   re-vendor the add-on in a game made by this tool (see "update" below)
        create-onelobby verify [dir] [options]   prove the game's multiplayer on 127.0.0.1: one line, VERIFY_OK or VERIFY_FAIL ... (see "verify" below)
 
-  --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   "web" and "godot-gdscript" exist; the rest are planned for v2
+  --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   ${builtList()} exist; the rest are planned for v2
   --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ only; a Godot GDScript
                                folder (project.godot, no .csproj) gets the add-on, the natives, the autoload and a test (the template is implied)
   --from <onelobby.json>       take every answer from this file (flags still override it)

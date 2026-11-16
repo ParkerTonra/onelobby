@@ -7,6 +7,7 @@ import { NATIVES_MARKER, verifyPin } from "../vendor.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
+import { blueprintNext, wiringCheck } from "./wiring.js";
 
 const PROBE_SOURCE = fileURLToPath(new URL("../../templates/verify/probe.gd", import.meta.url));
 export const PROBE_RES = "res://.onelobby/verify/probe.gd";
@@ -114,7 +115,7 @@ export function godotChecks() {
         try {
           bp = await validate(json);
         } catch (e) {
-          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).` };
+          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: blueprintNext(e.path, `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).`) };
         }
         ctx.facts = { direct: bp.hosting.direct, nostr: bp.hosting.nostr, server: bp.hosting.server, relayOnly: bp.hosting.relayOnly, mode: bp.sync.mode };
         // the same file through the game's own GDScript loader, which adds the rules only GDScript has
@@ -123,6 +124,7 @@ export function godotChecks() {
         return { status: "ok", detail: `mode ${bp.sync.mode}, direct ${bp.hosting.direct}, nostr ${bp.hosting.nostr}, server ${bp.hosting.server}; loads in JS and in GDScript` };
       },
     },
+    wiringCheck(),
     {
       name: "direct",
       async run(ctx) {

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CliError, USAGE, getPath, parseArgs, setPath } from "./flags.js";
+import { CliError, USAGE, builtList, getPath, parseArgs, setPath } from "./flags.js";
 import {
   IMPLEMENTED_TEMPLATES,
   ONELOBBY_VERSION,
@@ -13,11 +13,11 @@ import {
   templateDefaults,
   withDefaults,
 } from "./blueprint.js";
-import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
-import { isCSharpProject } from "./godot-project.js";
+import { intoFiles, intoNext, webProjectFiles } from "./files.js";
+import { sniffFolder } from "./godot-project.js";
 import { runCSharp } from "./csharp.js";
 import { runGodot } from "./godot.js";
-import { detectEngine, recommend, renderApplied, renderText } from "./recommend.js";
+import { KEPT_ONELOBBY_JSON, detectEngine, recommend, renderApplied, renderText } from "./recommend.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
 import { runUpdate } from "./update.js";
 import { runVerify } from "./verify/index.js";
@@ -127,17 +127,18 @@ export async function run(argv, io) {
   if (opts.recommend !== undefined && dir === undefined && opts.into === undefined) return recommendAlone({ opts, io });
 
   const fromFile = opts.from ? readFromFile(opts.from, io.cwd) : undefined;
-  // --into a folder with a project.godot and no --template: a Godot project (C# when a .csproj / .sln sits beside it)
+  // --into with no --template: read the folder (src/godot-project.js sniffFolder): Godot (C# when a .csproj / .sln sits beside project.godot),
+  // Unity or .NET from their files; web only when the folder holds web files
   const intoDir = opts.into !== undefined ? resolve(io.cwd, opts.into) : undefined;
-  const godotInto = intoDir !== undefined && existsSync(join(intoDir, "project.godot"));
-  let template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(readdirSync(intoDir)) ? "godot-csharp" : "godot-gdscript") : undefined);
-  let engineFrom = template === undefined ? undefined : "template";
+  const sniffed = intoDir !== undefined && existsSync(intoDir) && statSync(intoDir).isDirectory() ? sniffFolder(intoDir) : undefined;
+  let template = opts.template ?? fromFile?.engine ?? sniffed?.engine ?? undefined;
+  let engineFrom = template === undefined ? undefined : opts.template !== undefined || fromFile?.engine !== undefined ? "template" : "files";
   const checkTemplate = () => {
     if (!TEMPLATES.includes(template)) throw new CliError("bad_flag", `--template: unknown template "${template}". Choose one of: ${TEMPLATES.join(", ")}.`);
     if (!IMPLEMENTED_TEMPLATES.includes(template))
       throw new CliError(
         "template_planned",
-        `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(", ").replace(/, ([^,]*)$/, " and $1")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
+        `template "${template}" is planned for v2; this release builds ${builtList()}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
       );
   };
   if (template !== undefined) checkTemplate();
@@ -151,8 +152,18 @@ export async function run(argv, io) {
     if (description === undefined && interactive) description = await prompter.ask("Describe your game in one line (Enter to skip)");
     if (template === undefined) {
       const named = description ? detectEngine(description) : null;
-      template = named?.id ?? "web";
-      engineFrom = named ? "text" : "default";
+      if (named) {
+        template = named.id;
+        engineFrom = "text";
+      } else if (sniffed?.web || sniffed === undefined) {
+        template = "web"; // a new project (no folder to read), or a folder that holds web files
+        engineFrom = sniffed ? "files" : "default";
+      } else if (interactive) {
+        template = await askOne(prompter, { key: "engine", type: "enum", values: TEMPLATES, text: `Cannot tell the engine of ${intoDir} (no project.godot, ProjectSettings/, .csproj, .html, .js or package.json)` }, opts.json ? io.stderr : io.stdout);
+        engineFrom = "template";
+      }
+      if (template === undefined)
+        throw new CliError("engine_unknown", `cannot tell what kind of game ${intoDir} holds (no project.godot, ProjectSettings/, .csproj or .sln, .html, .js, .ts or package.json): pass --template <${TEMPLATES.join("|")}>`, "template");
       checkTemplate();
     }
     const rec = description ? recommend({ description, engine: engineFrom === "text" ? undefined : { id: template, from: engineFrom } }) : null;
@@ -251,15 +262,33 @@ export async function run(argv, io) {
     }
 
     // ---- plan ----
-    const files = opts.into !== undefined ? intoFiles({ blueprint }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
     const into = opts.into !== undefined;
+    // web --into: a folder with no package.json gets a minimal one; an existing one is read, never edited
+    const pkgPath = join(target, "package.json");
+    let existingPkg = null;
+    if (into && existsSync(pkgPath)) {
+      try {
+        existingPkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+      } catch {
+        existingPkg = {};
+      }
+    }
+    const files = into ? intoFiles({ blueprint, packageJson: existingPkg !== null ? undefined : { dirName, onelobbyVersion: opts.onelobbyVersion } }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
     if (!into) {
       const state = targetState(target);
       if (state === "file") throw new CliError("exists", `${target} is a file`);
       if (state === "full" && !opts.force) throw new CliError("dir_not_empty", `${target} is not empty (use --force to write into it anyway)`);
     } else {
       const clash = files.filter((f) => existsSync(join(target, f.path))).map((f) => f.path);
-      if (clash.length && !opts.force) throw new CliError("exists", `would overwrite existing files: ${clash.join(", ")} (use --force to overwrite them)`);
+      if (clash.length && !opts.force) {
+        const notApplied = recommendation && clash.includes("onelobby.json");
+        throw new CliError(
+          "exists",
+          `would overwrite existing files: ${clash.join(", ")} (use --force to overwrite them)${notApplied ? `; ${KEPT_ONELOBBY_JSON}` : ""}`,
+          undefined,
+          notApplied ? { recommendation: { applied: [], notApplied: KEPT_ONELOBBY_JSON } } : undefined,
+        );
+      }
     }
 
     const rel = relative(io.cwd, target) || ".";
@@ -271,12 +300,8 @@ export async function run(argv, io) {
       next.push("npm start", "npm test");
       if (blueprint.hosting.server && !blueprint.hosting.lobbyServer) next.push("set hosting.lobbyServer in onelobby.json (or open the page with ?lobby=ws://HOST:8080/ws)");
     } else {
-      next.push(
-        `npm install onelobby@^${ONELOBBY_VERSION}`,
-        'in your game: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/session.js" (OneLobby.fromConfig + a lockstep/raw binding)',
-        `follow ${RECIPE_URL}`,
-        "node test/multiplayer.mjs",
-      );
+      const deps = { ...existingPkg?.dependencies, ...existingPkg?.devDependencies };
+      next.push(...intoNext({ rel, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
     }
 
     const result = { ok: true, dir: target, template, blueprint, files: files.map((f) => f.path), next };

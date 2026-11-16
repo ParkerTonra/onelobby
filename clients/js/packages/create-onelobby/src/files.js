@@ -59,12 +59,39 @@ export function webProjectFiles({ blueprint, dirName, onelobbyVersion = DEFAULT_
 }
 
 /** The files `--into` adds to an existing project: onelobby.json, multiplayer/ glue and the test. */
-export function intoFiles({ blueprint }) {
-  return [
+export function intoFiles({ blueprint, packageJson }) {
+  const files = [
     { path: "onelobby.json", content: json(blueprint) },
     { path: "multiplayer/session.js", content: read("glue", "session.js") },
     { path: "test/multiplayer.mjs", content: conditional(read("glue", "multiplayer-test.mjs"), "into") },
   ];
+  // no package.json in the folder: a minimal one; an existing package.json is never edited
+  if (packageJson) {
+    const pkg = { name: slug(packageJson.dirName) || "onelobby-game", version: "0.1.0", private: true, type: "module", dependencies: { onelobby: packageJson.onelobbyVersion ?? DEFAULT_DEPENDENCY } };
+    files.push({ path: "package.json", content: json(pkg) });
+  }
+  return files;
+}
+
+/**
+ * The "Next:" lines of a web `--into` run, in the order the work happens. `pkg`: { created, hasOnelobby, isModule } (the folder's
+ * package.json as it is after this run).
+ */
+export function intoNext({ rel, pkg, onelobbyVersion = DEFAULT_DEPENDENCY }) {
+  const next = [];
+  if (rel !== ".") next.push(`cd ${rel}`);
+  if (pkg.created) next.push('npm install   # package.json was missing, so a minimal one was written (private, "type": "module", the onelobby dependency)');
+  else {
+    if (!pkg.isModule) next.push('your package.json has no "type": "module" and was left as it is: add it (multiplayer/session.js and test/multiplayer.mjs are ES modules)');
+    next.push(pkg.hasOnelobby ? "npm install" : `npm install onelobby@${onelobbyVersion}   # your package.json was left as it is and does not list onelobby`);
+  }
+  next.push(
+    "put your game behind step(tick, commands) -> hash, snapshot() -> bytes, restore(tick, bytes) and hash(), and swap it for the stand-in Game in test/multiplayer.mjs",
+    'in the page: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/session.js"; const bp = await loadBlueprint(); const kit = makeKit(bp, { displayName }); const lobby = await kit.host() (or await kit.join(code)); const s = bindSession(lobby, kit.blueprint, game) before lobby.start(); call s.pump(performance.now()) every frame and s.send(bytes) when the player acts',
+    "node test/multiplayer.mjs   # expect every check to PASS",
+    `follow ${RECIPE_URL}`,
+  );
+  return next;
 }
 
 /** The glue file this version writes (templates/glue/session.js), for `update` to compare a project copy with. */

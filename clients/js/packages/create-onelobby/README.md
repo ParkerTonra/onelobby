@@ -355,7 +355,7 @@ From the recommendation (coop-snapshots):
 | `matched` | string[] | the words of the sentence that decided the shape, as the sentence wrote them |
 | `engine` | object | the engine the proposal assumed |
 | `engine.id` | string or `null` | a blueprint `engine` value, or `null` when unknown |
-| `engine.from` | string | `"template"` (--template, a --from file or a Godot folder), `"text"` (read from the sentence), `"default"` (the scaffolder's default, scaffold runs only) or `"none"` |
+| `engine.from` | string | `"template"` (--template or a --from file), `"files"` (read from the --into folder: Godot, Unity, .NET or web files), `"text"` (read from the sentence), `"default"` (the scaffolder's default, scaffold runs only) or `"none"` |
 | `engine.words` | string[] | the words that named the engine (only when `from` is `"text"`) |
 | `engine.label` | string or `null` | the engine in words |
 | `engine.template` | string or `null` | `"built"` (create-onelobby writes a project for it) or `"planned"` |

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
+import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { addAutoload, isCSharpProject } from "./godot-project.js";
 import {
@@ -164,7 +165,7 @@ export function godotNext({ into, rel, plan }) {
     next.push(
       "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn",
       "connect it: $Menu.game_started.connect(func(lobby): ...); $Menu.returned_to_lobby.connect(func(lobby): ...); $Menu.left.connect(func(): ...)",
-      "try it: godot --path . -- --host --name=Sam   (a second window: -- --join=<code> --name=Ann)",
+      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
       `follow ${GODOT_RECIPE_URL}`,
     );
   } else {
@@ -210,8 +211,9 @@ export async function runGodot(ctx) {
     changed: wouldChange,
     next,
   };
-  if (ctx.recommendation) result.recommendation = ctx.recommendation.json;
-  const fromRec = ctx.recommendation ? `\n\n${ctx.recommendation.text}` : "";
+  const recommendation = ctx.recommendation && keepOnelobbyJson(ctx.recommendation, plan.files.find((f) => f.path === "onelobby.json")?.action === "skip");
+  if (recommendation) result.recommendation = recommendation.json;
+  const fromRec = recommendation ? `\n\n${recommendation.text}` : "";
   const text = (verb) => {
     const out = [];
     if (!wouldChange) out.push(`Nothing changed: ${target} already has everything (${unchanged.length} files unchanged).`);

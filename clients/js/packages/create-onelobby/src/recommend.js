@@ -242,7 +242,7 @@ export function flagsForRows(rows) {
 const shell = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `"${a.replace(/"/g, '\\"')}"`);
 
 /**
- * The facts for one description. `engine`: { id, from } with from "template" (--template), "default" (the scaffolder's own default)
+ * The facts for one description. `engine`: { id, from } with from "template" (--template), "files" (read from the folder's files, --into), "default" (the scaffolder's own default)
  * or omitted (then the sentence is read: from "text", or id null / from "none"). Throws bad_flag for an empty description.
  */
 export function recommend({ description, engine } = {}) {
@@ -404,7 +404,7 @@ export function renderText(rec) {
   }
   out.push(
     e.id
-      ? `Engine: ${e.id} (${e.label}), from ${e.from === "template" ? "--template" : e.from === "text" ? `the description${e.words?.length ? ` ("${e.words.join(" ")}")` : ""}` : "the scaffolder's default"}${e.template === "planned" ? "; its template is planned, not built yet" : ""}`
+      ? `Engine: ${e.id} (${e.label}), from ${e.from === "template" ? "--template" : e.from === "files" ? "the folder's files" : e.from === "text" ? `the description${e.words?.length ? ` ("${e.words.join(" ")}")` : ""}` : "the scaffolder's default"}${e.template === "planned" ? "; its template is planned, not built yet" : ""}`
       : "Engine: unknown (not given by --template or the description)",
     "",
   );
@@ -445,4 +445,15 @@ export function renderApplied(applied, overridden, shape, dropped = []) {
   for (const o of overridden) out.push(`  kept ${o.key} = ${show(o.value)} from ${o.by} (the recommendation said ${show(o.recommended)})`);
   for (const d of dropped) out.push(`  left out ${d.key} = ${show(d.recommended)}: ${d.why}`);
   return out.join("\n");
+}
+
+export const KEPT_ONELOBBY_JSON = "kept your onelobby.json; the recommendation was not applied";
+
+/**
+ * A scaffold run that finds an onelobby.json it keeps (it differs, and there is no --force) applied none of the recommendation:
+ * the text says so in one line, the JSON has `applied: []` and `notApplied` (the reason). `recommendation`: { json, text }.
+ */
+export function keepOnelobbyJson(recommendation, kept) {
+  if (!kept) return recommendation;
+  return { json: { ...recommendation.json, applied: [], notApplied: KEPT_ONELOBBY_JSON }, text: `${KEPT_ONELOBBY_JSON}.` };
 }

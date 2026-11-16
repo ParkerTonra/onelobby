@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { validate } from "../blueprint.js";
 import { run } from "./procs.js";
+import { blueprintNext, wiringCheck } from "./wiring.js";
 
 const SKIP_WEBRTC =
   "running two JS clients over real WebRTC in Node needs node-datachannel, which a web game does not depend on; tools/engine-smoke in the OneLobby repo covers the JS client on this route";
@@ -23,10 +24,11 @@ export function webChecks() {
           const bp = await validate(json);
           return { status: "ok", detail: `mode ${bp.sync.mode}, direct ${bp.hosting.direct}, server ${bp.hosting.server}` };
         } catch (e) {
-          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).` };
+          return { status: "fail", detail: `onelobby.json does not load: ${e.message}${e.path ? ` (at ${e.path})` : ""}.`, next: blueprintNext(e.path, `Fix ${e.path ?? "that key"} in onelobby.json (the schema describes it).`) };
         }
       },
     },
+    wiringCheck(),
     {
       name: "project-test",
       async run(ctx) {

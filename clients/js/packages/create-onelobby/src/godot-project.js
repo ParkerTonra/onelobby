@@ -1,4 +1,6 @@
 // Editing a Godot project.godot in place: register one autoload and keep every other byte of the file.
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { CliError } from "./flags.js";
 
 /**
@@ -52,3 +54,28 @@ export function addAutoload(text, name, path, { resolveUid } = {}) {
 
 /** Does this folder hold a Godot C# project (a .csproj or .sln next to project.godot)? `names`: the folder's file names. */
 export const isCSharpProject = (names) => names.some((n) => /\.(csproj|sln)$/i.test(n));
+
+const WEB_FILE = /\.(html?|[cm]?[jt]s)$/i;
+
+/** Is there a web file (.html, .js, .mjs, .ts, ...) or a package.json in `dir`, or one or two folders down (not node_modules or dot folders)? */
+function holdsWebFiles(dir, depth = 0) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isFile() && (e.name === "package.json" || WEB_FILE.test(e.name))) return true;
+    if (e.isDirectory() && depth < 2 && e.name !== "node_modules" && !e.name.startsWith(".") && holdsWebFiles(join(dir, e.name), depth + 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * What `--into <dir>` can tell from the files alone, with no --template: `{ engine, web }`. `engine` is "godot-gdscript" / "godot-csharp"
+ * (project.godot), "unity" (ProjectSettings/ProjectVersion.txt, or ProjectSettings/ beside Assets/), "dotnet" (a .csproj / .sln and no
+ * project.godot) or null; `web`: the folder holds web files. Nothing found: both falsy (the caller must not guess web).
+ */
+export function sniffFolder(dir) {
+  const names = readdirSync(dir);
+  const isDir = (n) => existsSync(join(dir, n)) && statSync(join(dir, n)).isDirectory();
+  if (names.includes("project.godot")) return { engine: isCSharpProject(names) ? "godot-csharp" : "godot-gdscript", web: false };
+  if (existsSync(join(dir, "ProjectSettings", "ProjectVersion.txt")) || (isDir("ProjectSettings") && isDir("Assets"))) return { engine: "unity", web: false };
+  if (isCSharpProject(names)) return { engine: "dotnet", web: false };
+  return { engine: null, web: holdsWebFiles(dir) };
+}

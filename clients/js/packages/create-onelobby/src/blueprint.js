@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CliError, getPath, setPath } from "./flags.js";
+import { CliError, IMPLEMENTED_TEMPLATES, getPath, setPath } from "./flags.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ONELOBBY_VERSION = "0.7.2";
 export const SCHEMA_URL = `https://unpkg.com/onelobby@${ONELOBBY_VERSION}/blueprint.schema.json`;
 export const TEMPLATES = ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"];
-export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript", "godot-csharp"];
+export { IMPLEMENTED_TEMPLATES };
 
 let loader;
 async function loadLoader() {

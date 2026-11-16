@@ -2,7 +2,7 @@
 // (the two-player test does). Written by create-onelobby; yours to edit.
 //
 // A game plugs in with four members: step(tick, commands) -> hash, snapshot() -> bytes, restore(tick, bytes), hash().
-// Commands are opaque bytes you define (rule 1 in AGENTS.md); OneLobby never looks inside.
+// Commands are opaque bytes you define: the game owns them, OneLobby never looks inside.
 import { OneLobby } from "onelobby";
 
 const STORAGE_KEY = "onelobby.lobbyServer";
@@ -15,7 +15,7 @@ export async function loadBlueprint(url = "./onelobby.json") {
 }
 
 /**
- * The lobby server URL is a player-editable setting (AGENTS.md rule 5). Precedence: ?lobby= in the page URL, then what
+ * The lobby server URL is a setting the player can change, never a constant in the game. Precedence: ?lobby= in the page URL, then what
  * the player saved, then <meta name="lobby-server">, then hosting.lobbyServer from onelobby.json.
  */
 export function lobbyServerSetting(blueprint) {

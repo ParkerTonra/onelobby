@@ -1,7 +1,7 @@
 // `create-onelobby verify`: prove a game's multiplayer on this machine, 127.0.0.1 only, and say so in one verdict line.
-//   godot-gdscript: godot, addon-pin, natives, blueprint, direct, nostr, turn, server   (godot.js)
-//   godot-csharp:   godot, dotnet, menu-pin, natives, blueprint, direct, nostr, turn, server   (csharp.js)
-//   web:            blueprint, project-test, nostr, turn                                 (web.js)
+//   godot-gdscript: godot, addon-pin, natives, blueprint, wiring, direct, nostr, turn, server   (godot.js)
+//   godot-csharp:   godot, dotnet, menu-pin, natives, blueprint, wiring, direct, nostr, turn, server   (csharp.js)
+//   web:            blueprint, wiring, project-test, nostr, turn                         (web.js)
 // Helpers (a local Nostr relay: built in, relay.js; a local TURN server: npm node-turn, turn.js) are used only while this runs.
 // Everything it starts is stopped again, also on a failed check and on Ctrl+C. It writes only inside the game folder
 // (.onelobby/, covered by the managed .gitignore block).

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
+import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { ONELOBBY_PACKAGES, addReferences, inspectCsproj, newCsproj } from "./csproj.js";
 import { olcEntry } from "./godot.js";
@@ -313,8 +314,9 @@ export async function runCSharp(ctx) {
     changed: wouldChange,
     next,
   };
-  if (ctx.recommendation) result.recommendation = ctx.recommendation.json;
-  const fromRec = ctx.recommendation ? `\n\n${ctx.recommendation.text}` : "";
+  const recommendation = ctx.recommendation && keepOnelobbyJson(ctx.recommendation, plan.files.find((f) => f.path === "onelobby.json")?.action === "skip");
+  if (recommendation) result.recommendation = recommendation.json;
+  const fromRec = recommendation ? `\n\n${recommendation.text}` : "";
   const text = (verb) => {
     const out = [];
     if (!wouldChange) out.push(`Nothing changed: ${target} already has everything (${unchanged.length} files unchanged).`);
