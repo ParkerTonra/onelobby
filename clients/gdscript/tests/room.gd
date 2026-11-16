@@ -154,6 +154,8 @@ func _run() -> void:
 			only = x.substr(7)
 	if only == "" or only == "main":
 		await _main_flow()
+	if only == "" or only == "idle":
+		await _idle_lobby_then_start()
 	if only == "" or only == "kick":
 		await _kick_ban_password()
 	if only == "" or only == "stand":
@@ -170,6 +172,29 @@ func _run() -> void:
 			p.lobby.leave()
 	await _frames(5)
 	quit(1 if _fail > 0 else 0)
+
+
+# ---- a lockstep lobby that sits idle longer than the 3 s silent-host window, then starts ---------------------------------
+# No frames flow in the lobby phase, so the joiners' silent-host clock must start when the game does, not when they joined.
+
+func _idle_lobby_then_start() -> void:
+	var h := await _host("Sam", {"max_players": 3, "room": {"countdown_seconds": 0, "min_players": 2}}, "lockstep")
+	if h == null:
+		return
+	var ann := await _join(h, "Ann")
+	_check(ann.lobby != null and await _until(func() -> bool: return _in(ann)), "idle lobby: a joiner is in")
+	if ann.lobby == null:
+		return
+	var hr := h.lobby.room
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 3600: # longer than OneLobbyLockstep.HOST_SILENCE_MS, with the lobby doing nothing
+		await process_frame
+	_check(hr.start() == "", "idle lobby: the host starts after the long wait")
+	_check(await _until(func() -> bool: return ann.lobby.phase == "in_game" and ann.lobby.lockstep.is_started), "idle lobby: the joiner is told the game started")
+	_check(await _until(func() -> bool: return ann.lobby.lockstep.last_tick > 3), "idle lobby: the joiner's lockstep frames flow (last_tick %d)" % ann.lobby.lockstep.last_tick)
+	_check(ann.ended.is_empty() and not ann.lobby.is_closed(), "idle lobby: the joiner did not declare the host lost")
+	hr.back_to_lobby()
+	await _frames(5)
 
 
 # ---- roster, data, ready, countdown, start, back to lobby, spectators, lockstep rematch ----------------------------------
@@ -243,8 +268,8 @@ func _main_flow() -> void:
 	_check(await _until(func() -> bool: return ar.state == "lobby" and ann.count("cancelled") == 1) and ann.last("cancelled")[1] == "host" and h.last("cancelled")[1] == "host", "cancel_countdown ends it with the reason host everywhere")
 	_check(ar.countdown().is_empty() and hr.all_ready, "no countdown is left and ready flags stay")
 	ann.log.clear()
-	hr.configure({"countdown_ms": 2300})
-	await _until(func() -> bool: return ar.settings()["countdownMs"] == 2300)
+	hr.configure({"countdown_ms": 3000})
+	await _until(func() -> bool: return ar.settings()["countdownMs"] == 3000)
 	_check(hr.start() == "", "start again")
 	_check(await _until(func() -> bool: return ann.count("started") == 1 and bob.lobby.room.state == "started" and sam.lobby.room.state == "started" and hr.state == "started"), "the countdown ends in started on every peer")
 	_check(h.lobby.phase == "in_game" and await _until(func() -> bool: return ann.lobby.phase == "in_game" and sam.lobby.phase == "in_game"), "the lobby phase is in_game everywhere")
