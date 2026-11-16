@@ -318,7 +318,8 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
 
 - Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
-- Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause, room layer): `docs/recipes/godot-gdscript.md`
+- Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause, room layer): `docs/recipes/godot-gdscript.md`; one command:
+  `npx create-onelobby my-game --template godot-gdscript --yes` (or `npx create-onelobby --into <project>`) vendors the add-on and the WebRTC natives, adds the autoload, the menu and a headless two-peer test (`tests/multiplayer.gd` prints `MULTIPLAYER_OK`)
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`

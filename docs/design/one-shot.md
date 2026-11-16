@@ -25,11 +25,11 @@ Missing or half there:
 | Area | Gap |
 |---|---|
 | GDScript | Voice (needs Opus) is missing (replication landed with package 11); text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
-| Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
-| UI | The Godot drop-in menu landed in GDScript (`menu.tscn`) and Godot C# (`OneLobbyMenu.tscn` over the engine-free `MenuModel` in `OneLobby.Core`, `docs/recipes/menu.md`); none yet for Unity (it can draw `MenuModel`). The web `<one-lobby>` element has no kick, ready, settings or browse. |
-| Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. The GDScript and Godot C# menus draw it (roster, ready, countdown, kick, ban, unban); the web element and Unity do not yet. |
+| Scaffolder | `create-onelobby` builds `web` and `godot-gdscript` (a new project, or `--into` a GDScript project: add-on, natives, PIN file, autoload, menu wiring, headless two-peer test); `godot-csharp` and `unity` throw `template_planned`. No `update` or `verify` command yet. |
+| UI | The Godot (GDScript) drop-in menu landed (`menu.tscn`, `docs/recipes/menu.md`); none yet for Godot C# or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
+| Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. The GDScript menu draws it (roster, ready, countdown, kick, ban, unban); the web element, Godot C# and Unity do not yet. |
 | Ban | Per lobby, by IP, forgotten when the lobby ends. No game shows kick/ban in its UI. |
-| Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. The GDScript and Godot C# menus draw the fields (name, masked relay line, lobby server, last code); the web element and Unity do not yet. |
+| Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. The GDScript menu draws the fields (name, masked relay line, lobby server, last code); the web element, Godot C# and Unity do not yet. |
 | Errors | Plain-language `describeError` exists in JS only. Players never see *why* a connection failed. |
 | Verify | No one-command two-peer test for a game; Unity is not in engine-smoke. |
 | Recommendation | The skill has sync-mode rules; the scaffolder asks instead of recommending. |
@@ -100,6 +100,13 @@ Each is one lane unless noted; order matters for the first three.
    `onelobby.json`, olc entry. `create-onelobby update` (re-vendor to a sha or release). `create-onelobby verify`: two
    headless peers on 127.0.0.1 through a local Nostr relay and a local TURN, plus relay-only, one verdict line; Unity
    batchmode where available. 2 lanes.
+   Landed (first half, `godot-gdscript` only): `create-onelobby my-game --template godot-gdscript` and `--into <godot project>`. An engine-neutral
+   vendoring module (`src/vendor.js`, `src/zip.js`, `src/godot-project.js`: add-on bundled at build time with its repo commit or `--addon-from`, a
+   zip reader on `node:zlib` for the webrtc-native release with a pinned SHA-256, `PIN.json` with a SHA-256 per file, managed `.gitignore` /
+   `.gitattributes` blocks, an in-place `[autoload]` edit with `autoload_taken`), the autoload `Net`, `onelobby.json`, the menu as the main scene,
+   `tests/multiplayer.gd` (two peers on 127.0.0.1, `MULTIPLAYER_OK`), an olc entry; a second `--into` run changes nothing; a C# project is
+   `template_planned`. `extension_list.cfg` is not written by the scaffolder: `godot --headless --import` creates it itself once the natives are there.
+   CI: `clients/gdscript/scaffold-test.sh` in the `gdscript` job. Still to do: `godot-csharp` and `unity` templates, `update`, `verify`.
 7. **Architecture recommender** (section 5) in the skill and `create-onelobby --recommend "<one-line game description>"`.
 8. **GDScript sync helpers.** Text chat, shared pause, a lockstep helper with the fast-channel input pattern (section 5).
 9. **Skill rewrite.** Accept GDScript; one pass: survey, propose `onelobby.json` with reasons, build with the templates and

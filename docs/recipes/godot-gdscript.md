@@ -4,6 +4,29 @@ A GDScript-only addon, no .NET: `clients/gdscript/addons/onelobby/`. It does raw
 star, host migration included), lockstep, replication (host-authoritative binary snapshots, `docs/recipes/replication.md` section 6), text chat and the shared pause (section 4b); voice is C# / JS only. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
 `gdscript compile` snippets below are parse-checked by `check-snippets.mjs` when `GODOT` points at a Godot executable.
 
+## One command
+
+`create-onelobby` does sections 1 to 3 below and the test of "Testing headless" for you: it copies the add-on (pinned by `addons/onelobby/PIN.json`),
+installs the WebRTC natives (a download whose SHA-256 is checked), registers the autoload `Net` in `project.godot`, writes `onelobby.json`, a
+`tests/multiplayer.gd` and an olc entry, and keeps the add-on LF in git.
+
+```
+npx create-onelobby my-game --template godot-gdscript --yes                # a new project with the drop-in menu as its main scene
+npx create-onelobby --into path/to/your-project                            # an existing GDScript project; your main scene is not touched
+cd my-game
+godot --headless --import --path .                                         # once: registers the WebRTC extension and the add-on's classes
+godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
+```
+
+For `--into` the output prints the lines that add `res://addons/onelobby/menu/menu.tscn` to your main scene and connect its signals (section 3).
+A second run changes nothing; files that exist are skipped and listed (`--force` overwrites them). Flags for offline use: `--webrtc-zip <file>`,
+`--webrtc-dir <folder>`, `--no-natives`, `--addon-from <checkout>`; `--dry-run` shows the file list and downloads nothing. A Godot C# project
+is refused (`template_planned`): use [godot-csharp.md](godot-csharp.md). Details: `clients/js/packages/create-onelobby/README.md`.
+
+## By hand
+
+What the command did, step by step: sections 1 to 3. The rest of the page (game traffic, chat, pause, lockstep, exporting) is the same either way.
+
 ## 1. Add the addon
 
 Copy `clients/gdscript/addons/onelobby/` into your project's `addons/`. It is plain scripts with `class_name`s

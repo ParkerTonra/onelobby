@@ -401,7 +401,7 @@ prompt library in the CLI only.
 | `web` | browser game, hosted lobby server, drop-in or generated UI | v1 |
 | `node-browser` | Node host serves the page, direct codes, browser joiners (browser-game recipe) | v2 |
 | `godot-csharp` | autoload `Net.cs`, `OneLobby.Godot` | v2 |
-| `godot-gdscript` | autoload `net.gd`, the `addons/onelobby` add-on (the loader exists; the template is planned) | v2 |
+| `godot-gdscript` | autoload `net.gd`, the `addons/onelobby` add-on, the drop-in menu as main scene, WebRTC natives, PIN file (landed) | v2 |
 | `unity` | `OneLobbyRunner`, `com.onelobby.unity` package | v2 |
 | `dotnet` | console / MonoGame, `OneLobby.DataChannel` + `OneLobby.Direct` | v2 |
 
@@ -429,6 +429,10 @@ create-onelobby [dir] [options]
   --dry-run                    print the plan and the file, write nothing (Angular, Astro)
   --json                       machine-readable result: the file, the file list, next steps (clig.dev)
   --no-install  --no-git       as the other scaffolders
+  godot-gdscript only:
+  --addon-from <folder>        vendor the add-on from a OneLobby checkout instead of the copy bundled in the package
+  --webrtc-zip <file>          install the WebRTC natives from this zip (offline); --webrtc-dir <folder> from an unpacked folder
+  --no-natives                 skip the natives and print the command that fetches them later
 ```
 
 Rules: prompt only when stdin is a TTY and neither `--yes` nor `--no-input` is set (clig.dev: "Only use prompts or
