@@ -616,18 +616,24 @@ namespace OneLobby.Tests
 
         // ---- the connection check when the menu opens (every runner here is a counted fake: nothing touches the network) ----------
 
-        private static CheckResult Found(string kind) => kind switch
+        private static CheckResult Found(string kind)
         {
-            "symmetric" => new CheckResult("ok", "symmetric", "none", "x", "x"),
-            "blocked" => new CheckResult("blocked", "unknown", "none", "x", "x"),
-            "relay_refused" => new CheckResult("ok", "cone", "refused", "x", "x"),
-            "relay_works" => new CheckResult("blocked", "unknown", "ok", "x", "x"),
-            _ => new CheckResult("ok", "cone", "none", "x", "x"),
-        };
+            var f = kind switch
+            {
+                "symmetric" => new CheckFindings("ok", "symmetric", "none"),
+                "blocked" => new CheckFindings("blocked", "unknown", "none"),
+                "relay_refused" => new CheckFindings("ok", "cone", "refused"),
+                "relay_works" => new CheckFindings("blocked", "unknown", "ok"),
+                _ => new CheckFindings("ok", "cone", "none"),
+            };
+            var v = Diagnose.CheckVerdict(f);
+            return new CheckResult(f.Udp, f.NatType, f.Relay, v.Verdict, v.Message);
+        }
 
         private static (P P, int[] Runs) OpenRig(World w, string? diagnostics, string answer = "cone", TaskCompletionSource<bool>? gate = null)
         {
-            var json = diagnostics == null ? @"{""game"":{""id"":""menu-test""}}" : @"{""game"":{""id"":""menu-test""},""diagnostics"":" + diagnostics + "}";
+            var server = @"""sync"":{""mode"":""raw""},""hosting"":{""server"":true,""lobbyServer"":""ws://x.test/ws""}";
+            var json = @"{""game"":{""id"":""menu-test""}," + server + (diagnostics == null ? "" : @",""diagnostics"":" + diagnostics) + "}";
             var p = w.FromBlueprint(json);
             p.M.HostOptions = new LobbyOptions("menu", 4) { Room = new RoomOptions { CountdownSeconds = 1 } };
             var runs = new[] { 0 };
