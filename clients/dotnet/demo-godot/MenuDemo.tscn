@@ -1,0 +1,35 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://MenuDemo.cs" id="1_demo"]
+[ext_resource type="PackedScene" path="res://addons/onelobby_menu/OneLobbyMenu.tscn" id="2_menu"]
+
+[node name="MenuDemo" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_demo")
+
+[node name="Menu" parent="." instance=ExtResource("2_menu")]
+layout_mode = 1
+
+[node name="InGame" type="CenterContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Box" type="VBoxContainer" parent="InGame"]
+layout_mode = 2
+
+[node name="Text" type="Label" parent="InGame/Box"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="InGame/Box"]
+layout_mode = 2
+text = "Back to the lobby (host)"
