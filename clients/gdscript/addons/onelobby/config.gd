@@ -49,6 +49,9 @@ var title := ""
 var engine := ""
 var hosting := {}
 var lobby := {}
+## The room layer's section (spec/room.md 10), snake_case: password_required, auto_start, auto_start_players, min_players,
+## countdown_seconds, spectators, late_join, seat_dropped, rejoin_window_seconds and `data` (the declarations as in the file).
+var room := {}
 var sync := {}
 var players := {}
 var chat := {}
@@ -80,8 +83,9 @@ static func parse(source: Variant) -> OneLobbyConfig:
 	if not bad.is_empty():
 		return _failed(bad["path"], bad["rule"], bad["detail"])
 	var cfg := OneLobbyConfig.new()
-	cfg.data = _fill(_strip(json) as Dictionary)
-	bad = _cross_rules(cfg.data)
+	var stripped := _strip(json) as Dictionary
+	cfg.data = _fill(stripped)
+	bad = _cross_rules(cfg.data, stripped)
 	if not bad.is_empty():
 		return _failed(bad["path"], bad["rule"], bad["detail"])
 	cfg._publish()
@@ -123,6 +127,14 @@ func host_options(display_name: String = "") -> Dictionary:
 	}
 	if session.has("rate_limit"):
 		o["rate_limit"] = (session["rate_limit"] as Dictionary).duplicate()
+	return o
+
+
+## The room layer options the file implies, as OneLobbyClient.host() takes them under `room`: the `room` section plus
+## `max_name_length` (players.maxNameLength).
+func room_options() -> Dictionary:
+	var o := room.duplicate(true)
+	o["max_name_length"] = int(players.get("max_name_length", 24))
 	return o
 
 
@@ -177,6 +189,7 @@ func _publish() -> void:
 	engine = str(data.get("engine", ""))
 	hosting = _snake(data["hosting"], [])
 	lobby = _snake(data["lobby"], ["meta"])
+	room = _snake(data["room"], ["data"])
 	sync = _snake(data["sync"], [])
 	players = _snake(data["players"], [])
 	chat = _snake(data["chat"], [])
@@ -244,6 +257,12 @@ static func _schema() -> Dictionary:
 			"maxPlayers": _int(2, 64), "listed": b, "approveJoins": b, "password": b, "lateJoin": b, "rejoin": b, "joinLink": b,
 			"meta": {"k": "meta"},
 		}),
+		"room": _obj({
+			"passwordRequired": b, "autoStart": _enum(["off", "all_ready", "players"]), "autoStartPlayers": _int(2, 64),
+			"minPlayers": _int(1, 64), "countdownSeconds": _int(0, 60), "spectators": _int(0, 64),
+			"lateJoin": _enum(["allow", "spectate", "refuse"]), "seatDropped": _enum(["window", "immediate"]),
+			"rejoinWindowSeconds": _int(0, 600), "data": {"k": "roomdata"},
+		}),
 		"sync": _obj({"mode": _enum(["raw", "lockstep", "replication"]), "tickRate": _int(1, 120), "hashEveryTicks": _int(1, 100000)}),
 		"players": _obj({"identity": _enum(["name", "anonymous", "platform"]), "maxNameLength": _int(1, 24)}),
 		"chat": _obj({"text": b, "voice": b, "voiceMode": _enum(["pushToTalk", "voiceActivity"])}),
@@ -255,6 +274,47 @@ static func _schema() -> Dictionary:
 		"platforms": _obj({"steam": {"k": "steam"}, "epic": {"k": "epic"}, "discord": b}),
 		"ui": _obj({"kind": _enum(["drop-in", "generated", "none"]), "entry": _str(), "theme": _enum(["light", "dark", "auto"])}),
 	}, ["game"])
+
+
+## `room.data`: at most 16 declarations, each {type, min?, max?, maxLength?, values?, default?, hostOnly?} (spec/room.md 4.2).
+static func _check_room_data(v: Variant, path: String) -> Dictionary:
+	if not v is Dictionary:
+		return _fail(path, "type", "must be an object of data declarations")
+	var d: Dictionary = v
+	var keys: Array = d.keys().filter(func(k: Variant) -> bool: return str(k) != "$schema" and str(k) != "$comment")
+	if keys.size() > 16:
+		return _fail(path, "length", "at most 16 keys")
+	var decl := _obj({
+		"type": _enum(["string", "int", "enum", "bool", "color"]), "min": _int(-2147483647, 2147483647), "max": _int(-2147483647, 2147483647),
+		"maxLength": _int(1, 64), "values": {"k": "strarr"}, "default": _str(), "hostOnly": {"k": "bool"},
+	}, ["type"])
+	for k: Variant in keys:
+		var kp := _join(path, k)
+		if not OneLobbyRoomRules.is_data_key(str(k)):
+			return _fail(kp, "pattern", "key must match ^[a-z][a-z0-9_]{0,23}$")
+		var bad := _check(decl, d[k], kp)
+		if not bad.is_empty():
+			return bad
+		var o: Dictionary = d[k]
+		if o["type"] == "enum":
+			var vals: Variant = o.get("values")
+			if not vals is Array or (vals as Array).is_empty():
+				return _fail(_join(kp, "values"), "required", "an enum needs values")
+			if (vals as Array).size() > 16:
+				return _fail(_join(kp, "values"), "length", "at most 16 values")
+			for i in (vals as Array).size():
+				var n := str(vals[i]).length()
+				if n < 1 or n > 32:
+					return _fail(_join(_join(kp, "values"), i), "length", "1 to 32 characters")
+		if _is_num(o.get("min")) and _is_num(o.get("max")) and o["min"] > o["max"]:
+			return _fail(kp, "min_gt_max", "min is more than max")
+		if o.get("default") is String and o["default"] != "":
+			var d2 := o.duplicate()
+			d2["min"] = o["min"] if _is_num(o.get("min")) else 0
+			d2["max"] = o["max"] if _is_num(o.get("max")) else 255
+			if OneLobbyRoomRules.check_data_value(d2, o["default"]) == null:
+				return _fail(_join(kp, "default"), "bad_default", "default fails its own type")
+	return {}
 
 
 static func _fail(path: String, rule: String, detail: String) -> Dictionary:
@@ -338,6 +398,8 @@ static func _check(n: Dictionary, v: Variant, path: String) -> Dictionary:
 					return _fail(_join(path, k), "length", "value is longer than 64 characters")
 		"rate":
 			return _check(_obj({"messages": _int(1), "perMs": _int(1)}, ["messages", "perMs"]), v, path)
+		"roomdata":
+			return _check_room_data(v, path)
 		"steam":
 			if typeof(v) == TYPE_BOOL:
 				return {}
@@ -384,6 +446,7 @@ static func _fill(input: Dictionary) -> Dictionary:
 	var engine_v: Variant = input.get("engine")
 	var hosting_in := _sect(input.get("hosting"))
 	var lobby_in := _sect(input.get("lobby"))
+	var room_in := _sect(input.get("room"))
 	var sync_in := _sect(input.get("sync"))
 	var players_in := _sect(input.get("players"))
 	var chat_in := _sect(input.get("chat"))
@@ -416,10 +479,22 @@ static func _fill(input: Dictionary) -> Dictionary:
 		"listed": lobby_in.get("listed", false),
 		"approveJoins": lobby_in.get("approveJoins", false),
 		"password": lobby_in.get("password", false),
-		"lateJoin": lobby_in.get("lateJoin", true),
+		"lateJoin": lobby_in.get("lateJoin", true if not room_in.has("lateJoin") else room_in["lateJoin"] != "refuse"),
 		"rejoin": lobby_in.get("rejoin", true),
 		"joinLink": lobby_in.get("joinLink", web or engine_v == "node-browser"),
 		"meta": lobby_in.get("meta", {}),
+	}
+	out["room"] = {
+		"passwordRequired": room_in.get("passwordRequired", false),
+		"autoStart": room_in.get("autoStart", "off"),
+		"autoStartPlayers": room_in.get("autoStartPlayers", 2),
+		"minPlayers": room_in.get("minPlayers", 1),
+		"countdownSeconds": room_in.get("countdownSeconds", 3),
+		"spectators": room_in.get("spectators", 0),
+		"lateJoin": room_in.get("lateJoin", "allow" if lobby_in.get("lateJoin", true) else "refuse"),
+		"seatDropped": room_in.get("seatDropped", "window"),
+		"rejoinWindowSeconds": room_in.get("rejoinWindowSeconds", 60),
+		"data": room_in.get("data", {}),
 	}
 	out["sync"] = {"mode": sync_in.get("mode", "raw"), "tickRate": tick_rate, "hashEveryTicks": sync_in.get("hashEveryTicks", tick_rate)}
 	out["players"] = {"identity": players_in.get("identity", "name"), "maxNameLength": players_in.get("maxNameLength", 24)}
@@ -441,9 +516,10 @@ static func _fill(input: Dictionary) -> Dictionary:
 
 
 ## Cross-key rules (x-rules in the schema), in the schema's order.
-static func _cross_rules(d: Dictionary) -> Dictionary:
+static func _cross_rules(d: Dictionary, input: Dictionary) -> Dictionary:
 	var h: Dictionary = d["hosting"]
 	var l: Dictionary = d["lobby"]
+	var r: Dictionary = d["room"]
 	var s: Dictionary = d["sync"]
 	var ses: Dictionary = d["session"]
 	var eng: Variant = d.get("engine")
@@ -457,6 +533,14 @@ static func _cross_rules(d: Dictionary) -> Dictionary:
 		return _fail("sync.mode", "replication_needs_csharp", "replication needs engine godot-csharp, unity or dotnet")
 	if s["mode"] == "replication" and ses["hostLeaves"] == "migrate":
 		return _fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end")
+	var late_given := _sect(input.get("lobby")).has("lateJoin")
+	var room_late: Variant = _sect(input.get("room")).get("lateJoin")
+	if room_late != null and late_given and ((room_late == "refuse") if l["lateJoin"] else (room_late != "refuse")):
+		return _fail("room.lateJoin", "late_join_conflict", "lobby.lateJoin and room.lateJoin disagree")
+	if int(r["minPlayers"]) > int(l["maxPlayers"]):
+		return _fail("room.minPlayers", "min_exceeds_max", "more than lobby.maxPlayers")
+	if r["autoStart"] == "players" and int(r["autoStartPlayers"]) > int(l["maxPlayers"]):
+		return _fail("room.autoStartPlayers", "autostart_exceeds_players", "more than lobby.maxPlayers")
 	if ses["hostLeaves"] == "migrate" and not h["server"]:
 		return _fail("session.hostLeaves", "migrate_needs_server", "migrate needs hosting.server (direct lobbies always end)")
 	return {}

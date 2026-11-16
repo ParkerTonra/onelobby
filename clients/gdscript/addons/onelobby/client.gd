@@ -58,7 +58,12 @@ var config: OneLobbyConfig = null
 ## {code, path, rule, message} when `config` cannot be used (an invalid file, a name the file refuses, a sync mode GDScript
 ## lacks); host / join / list then fail with that code and message. {} otherwise.
 var config_error := {}
+## Where the per-install player id and the host's ban list are kept. Default: the file user://onelobby.json. Set another
+## OneLobbyStore (OneLobbyStore.memory(), or your own subclass) before host() / join().
+var store: OneLobbyStore = null
 
+var _pid := ""
+var _bans: OneLobbyBanList = null
 var _socket: OneLobbyTransport.OLSocket
 ## Direct mode: builds the signaling socket instead of a WebSocket to lobby_server (valid while a direct lobby is open).
 var _socket_factory := Callable()
@@ -145,7 +150,15 @@ static func from_config(source: Variant = OneLobbyConfig.DEFAULT_PATH, overrides
 
 
 ## Creates a lobby. `options`: name, max_players (4), visibility ("public" | "unlisted" | "private"), late_join (true),
-## meta ({} of strings), rate_limit ({messages, per_ms}: host-side cap on raw messages per peer).
+## meta ({} of strings), rate_limit ({messages, per_ms}: host-side cap on raw messages per peer), password (joiners must give
+## it, at most 64 characters; `bad_password` otherwise), data (your own starting player data), room (the room layer's
+## settings, see room_options below). A blueprint's `room` section supplies the defaults.
+##
+## `room`: auto_start ("off" | "all_ready" | "players"), auto_start_players (2), min_players (1), countdown_seconds (3),
+## spectators (0: the spectator cap, on top of max_players), late_join ("allow" | "spectate" | "refuse"), seat_dropped
+## ("window" | "immediate"), rejoin_window_seconds (60), data ({key: {type, min?, max?, maxLength?, values?, default?,
+## hostOnly?}} declarations beyond color, avatar and team), password_required (host() fails with `password_required`
+## unless a password is given), max_name_length (24).
 func host(options: Dictionary = {}) -> OneLobbyLobby:
 	if config != null:
 		# with a config: the file's lobby settings are the defaults; no lobby server in the file (the GDScript default) hosts direct
@@ -158,22 +171,40 @@ func host(options: Dictionary = {}) -> OneLobbyLobby:
 			return null
 		options = _with_defaults(config.host_options(display_name), options)
 	var rl: Dictionary = options.get("rate_limit", {})
+	var room_opts := _room_options(options.get("room", {}))
+	var pw := str(options.get("password", ""))
+	if not _room_host_ok(room_opts, pw):
+		return null
 	var o := options.duplicate()
 	o["relay_only"] = relay_only
-	return await _run("", OneLobbySignaling.create(o, sync_mode, tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
-		var l := _enter_lobby(e)
+	var players := int(o.get("max_players", 4))
+	var spectators := int(OneLobbyRoomRules.resolve_settings(room_opts, players, true)["spectators"])
+	var setup := _host_setup(options, room_opts, pw, players)
+	# built once the hub's `welcome` is in: a hub without the "room" feature has no spectator slots or password
+	var build := func() -> String:
+		var room_hub := features.has("room")
+		var co := o.duplicate()
+		co["max_players"] = players if room_hub else players + spectators
+		if room_opts.has("late_join"):
+			co["late_join"] = room_opts["late_join"] != "refuse"
+		return OneLobbySignaling.create(co, sync_mode, tick_rate, pw if room_hub else "", spectators if room_hub else 0)
+	var finish := func(e: Dictionary) -> Variant:
+		var l := _enter_lobby(e, setup)
 		l.rate_limit = rl
-		return l)
+		return l
+	return await _run("", "", ["lobby"], finish, REQUEST_TIMEOUT_MS, build)
 
 
-## Joins by code ("7HQ 4K2", "7hq-4k2" and look-alike letters are fine).
-func join(join_code: String) -> OneLobbyLobby:
+## Joins by code ("7HQ 4K2", "7hq-4k2" and look-alike letters are fine). `options`: password (the lobby's, if it has one;
+## a wrong one fails with `bad_password`), role ("player" | "spectator"), data (your starting player data: color, avatar,
+## team and the game's own keys; the host validates it).
+func join(join_code: String, options: Dictionary = {}) -> OneLobbyLobby:
 	if config != null:
 		# with a config a lobby code goes to the lobby server, anything else (direct code, address) to join_direct
 		if not _config_usable():
 			return null
 		if OneLobbyJoinCode.normalize(join_code) == "":
-			return await join_direct(join_code)
+			return await join_direct(join_code, options)
 		if not config.hosting["server"] or lobby_server.is_empty():
 			_fail("no_server", "this game has no lobby server (hosting.server is false in onelobby.json): join with a direct code or an address")
 			return null
@@ -181,7 +212,9 @@ func join(join_code: String) -> OneLobbyLobby:
 	if norm == "":
 		_fail("unknown_code", "not a valid join code")
 		return null
-	return await _run("", OneLobbySignaling.join(norm), ["lobby"], _enter_lobby)
+	var setup := _join_setup(options)
+	var finish := func(e: Dictionary) -> Variant: return _enter_lobby(e, setup)
+	return await _run("", OneLobbySignaling.join(norm, str(options.get("password", ""))), ["lobby"], finish)
 
 
 ## Takes your seat back after a dropped connection (lobby.resume_token from before). If the connection to the server is
@@ -190,7 +223,8 @@ func join(join_code: String) -> OneLobbyLobby:
 func rejoin(token: String) -> OneLobbyLobby:
 	if not _config_usable():
 		return null
-	return await _run(token, "", ["lobby"], _enter_lobby)
+	var finish := func(e: Dictionary) -> Variant: return _enter_lobby(e, {"pid": player_id(), "bans": bans()})
+	return await _run(token, "", ["lobby"], finish)
 
 
 ## Direct mode, host: runs the lobby inside this game with no lobby server. Joiners find you through public Nostr
@@ -200,7 +234,7 @@ func rejoin(token: String) -> OneLobbyLobby:
 ##     var lobby := await client.host_direct({"name": "My game", "max_players": 4})
 ##     print("Join code: ", lobby.code)
 ##
-## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit as in host(); relays (wss URLs,
+## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit, data and room as in host(); relays (wss URLs,
 ## default: seven public ones), stun (default: Google and Cloudflare), upnp_port (0 = off: asks the router to forward
 ## that UDP port; best effort, see the README), ice_servers (Array of {urls, username?, credential?}, e.g. a TURN relay
 ## for players behind a strict NAT: sent to every joiner in welcome.ice; OneLobbyTurn.login() mints coturn-style
@@ -217,11 +251,20 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	if lobby != null:
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
+	var room_opts := _room_options(options.get("room", {}))
+	var pw := str(options.get("password", ""))
+	if not _room_host_ok(room_opts, pw):
+		return null
 	var range: Array = options.get("udp_port_range", [])
 	if options.has("udp_port_range") and (range.size() != 2 or int(range[0]) < 1 or int(range[1]) > 65535 or int(range[0]) > int(range[1])):
 		_fail("bad_request", "udp_port_range must be [begin, end] with 1 <= begin <= end <= 65535")
 		return null
-	var d := OneLobbyDirectHost.start(options)
+	# the Direct hub has no spectator slots: it gets players + spectators as its capacity and the room splits it
+	var players := int(options.get("max_players", 4))
+	var cap := players + int(OneLobbyRoomRules.resolve_settings(room_opts, players, true)["spectators"])
+	var hub_options := options.duplicate()
+	hub_options["max_players"] = cap
+	var d := OneLobbyDirectHost.start(hub_options)
 	if d == null:
 		if OneLobbyIpListener.last_error != "" and (options.has("tcp_port") or options.has("udp_port_range") or not bool(options.get("nostr", true))):
 			_fail("port_in_use", "could not listen for joiners by IP: " + OneLobbyIpListener.last_error)
@@ -247,10 +290,15 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	var o := options.duplicate()
 	o["relay_only"] = relay_only
 	o["visibility"] = "unlisted"
-	var result: Variant = await _run("", OneLobbySignaling.create(o, sync_mode, tick_rate), ["lobby"], func(e: Dictionary) -> Variant:
-		var l := _enter_lobby(e)
+	o["max_players"] = cap
+	if room_opts.has("late_join"):
+		o["late_join"] = room_opts["late_join"] != "refuse"
+	var setup := _host_setup(options, room_opts, pw, players)
+	var finish := func(e: Dictionary) -> Variant:
+		var l := _enter_lobby(e, setup)
 		l.rate_limit = rl
-		return l)
+		return l
+	var result: Variant = await _run("", OneLobbySignaling.create(o, sync_mode, tick_rate), ["lobby"], finish)
 	if result == null:
 		_clear_direct()
 	return result
@@ -258,7 +306,7 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 
 ## Direct mode, joiner: joins the lobby a host_direct() host published. `join_code` is the code the host shows
 ## ("D1PB-1X9S-FPV"; case, dashes and look-alike letters do not matter). Needs no lobby server. `options`: password,
-## relays (wss URLs), timeout_ms (30000), ice_servers (as in host_direct; added to the host's list).
+## role and data (as in join()), relays (wss URLs), timeout_ms (30000), ice_servers (as in host_direct; added to the host's list).
 ##
 ##     var lobby := await client.join_direct("D1PB-1X9S-FPV")
 func join_direct(join_code: String, options: Dictionary = {}) -> OneLobbyLobby:
@@ -307,7 +355,9 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 		var relays: Array = options.get("relays", [])
 		_direct_code = OneLobbyJoinCode.group(norm)
 		_socket_factory = func() -> OneLobbyTransport.OLSocket: return OneLobbyNostrSocket.new(norm, relays)
-	var result: Variant = await _run(resume, request, ["lobby"], _enter_lobby, int(options.get("timeout_ms", DIRECT_TIMEOUT_MS)))
+	var setup := _join_setup(options) if resume == "" else {"pid": player_id(), "bans": bans()}
+	var finish := func(e: Dictionary) -> Variant: return _enter_lobby(e, setup)
+	var result: Variant = await _run(resume, request, ["lobby"], finish, int(options.get("timeout_ms", DIRECT_TIMEOUT_MS)))
 	if result == null:
 		_clear_direct()
 	return result
@@ -369,7 +419,7 @@ func pump() -> void:
 		sock.poll() # a no-op for WebSockets (the transport polls them); Direct-mode sockets poll themselves
 		if sock.state == OneLobbyTransport.OLSocket.OPEN and not _hello_sent and (not _op.is_empty() or lobby != null):
 			_hello_sent = true
-			sock.send_text(OneLobbySignaling.hello(game_id, net_version, display_name, _hello_resume))
+			sock.send_text(OneLobbySignaling.hello(game_id, net_version, display_name, _hello_resume, player_id()))
 		for text in sock.receive():
 			_dispatch(text)
 		if sock.state == OneLobbyTransport.OLSocket.CLOSED:
@@ -391,6 +441,63 @@ func pump() -> void:
 func send_signaling(json: String) -> void:
 	if _socket != null and _socket.state == OneLobbyTransport.OLSocket.OPEN:
 		_socket.send_text(json)
+
+
+## This install's player id for the game (32 hex characters, made once and kept in `store`; spec/room.md 1). It goes out in
+## `hello` so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
+func player_id() -> String:
+	if _pid == "":
+		_pid = OneLobbyStore.load_player_id(_store(), game_id)
+	return _pid
+
+
+## The host-side ban list for this game (also `lobby.room.bans`): persistent in `store`.
+func bans() -> OneLobbyBanList:
+	if _bans == null:
+		_bans = OneLobbyBanList.new(_store(), game_id)
+	return _bans
+
+
+func _store() -> OneLobbyStore:
+	if store == null:
+		store = OneLobbyStore.file()
+	return store
+
+
+## The room options of a host call: the blueprint's `room` section under the explicit ones (their `data` declarations merge).
+func _room_options(explicit: Variant) -> Dictionary:
+	var out: Dictionary = config.room_options() if config != null and config.ok else {}
+	if explicit is Dictionary:
+		for k: Variant in explicit:
+			if str(k) == "data" and explicit[k] is Dictionary:
+				var merged: Dictionary = (out.get("data", {}) as Dictionary).duplicate(true)
+				for dk: Variant in explicit[k]:
+					merged[dk] = explicit[k][dk]
+				out["data"] = merged
+			elif explicit[k] != null:
+				out[str(k)] = explicit[k]
+	return out
+
+
+## False (after failing) when the room options or the password break a rule: password_required, a password over 64 characters.
+func _room_host_ok(room_opts: Dictionary, pw: String) -> bool:
+	if bool(room_opts.get("password_required", false)) and pw == "":
+		_fail("password_required", "this game requires a lobby password (room.passwordRequired); pass `password`")
+		return false
+	if pw.length() > 64:
+		_fail("bad_request", "password must be at most 64 characters")
+		return false
+	return true
+
+
+func _host_setup(options: Dictionary, room_opts: Dictionary, pw: String, players: int) -> Dictionary:
+	return {"options": room_opts, "password": pw, "max_players": players, "pid": player_id(), "bans": bans(),
+		"join": {"role": "player", "data": options.get("data", {}), "password": ""}}
+
+
+func _join_setup(options: Dictionary) -> Dictionary:
+	return {"pid": player_id(), "bans": bans(),
+		"join": {"role": str(options.get("role", "player")), "data": options.get("data", {}), "password": str(options.get("password", ""))}}
 
 
 ## False (after failing with the config's own error) when `config` is invalid or refuses this client; true without a config.
@@ -421,8 +528,8 @@ func raise_error(code: String, message: String) -> void:
 	error.emit(code, message)
 
 
-func _enter_lobby(e: Dictionary) -> OneLobbyLobby:
-	var l := OneLobbyLobby.new(self, e)
+func _enter_lobby(e: Dictionary, room_setup: Dictionary = {}) -> OneLobbyLobby:
+	var l := OneLobbyLobby.new(self, e, room_setup)
 	if _direct_code != "":
 		l._direct = true
 		l.code = _direct_code
@@ -469,14 +576,14 @@ func _clear_direct() -> void:
 	_stashed_lobby = {}
 
 
-func _run(resume: String, request: String, expect: Array, finish: Callable, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Variant:
+func _run(resume: String, request: String, expect: Array, finish: Callable, timeout_ms: int = REQUEST_TIMEOUT_MS, build: Callable = Callable()) -> Variant:
 	if not _op.is_empty():
 		_fail("busy", "another request is in flight")
 		return null
 	if lobby != null and expect[0] == "lobby":
 		_fail("in_lobby", "already in a lobby; leave it first")
 		return null
-	_op = {"request": request, "expect": expect, "sent": false, "deadline": transport.now_ms() + timeout_ms, "finish": finish}
+	_op = {"request": "<built>" if build.is_valid() else request, "build": build, "expect": expect, "sent": false, "deadline": transport.now_ms() + timeout_ms, "finish": finish}
 	# A resume needs a fresh hello: if this connection already said hello, drop it and start a new one.
 	if _socket != null and resume != "" and _welcomed:
 		_socket.close()
@@ -494,7 +601,8 @@ func _run(resume: String, request: String, expect: Array, finish: Callable, time
 func _send_op() -> void:
 	_op["sent"] = true
 	if _op["request"] != "":
-		_socket.send_text(_op["request"])
+		var build: Callable = _op.get("build", Callable())
+		_socket.send_text(str(build.call()) if build.is_valid() else _op["request"])
 	elif not _stashed_lobby.is_empty():
 		var s := _stashed_lobby
 		_stashed_lobby = {}
@@ -559,7 +667,7 @@ func _dispatch(text: String) -> void:
 			else:
 				raise_error(code, msg)
 			if lobby != null:
-				lobby._on_server_error(code, disconnected)
+				lobby._on_server_error(code, disconnected, data if data is Dictionary else {})
 			return
 	if not _op.is_empty() and _op["sent"] and (_op["expect"] as Array).has(t):
 		_finish_op(e)
