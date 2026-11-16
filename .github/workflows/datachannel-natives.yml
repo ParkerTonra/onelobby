@@ -49,6 +49,11 @@ jobs:
       - name: Live WebRTC test
         env: { ONELOBBY_LIVE_REPEAT: "${{ inputs.live_repeat || 1 }}", ONELOBBY_TEST_ANY_INTERFACE: "1" }
         run: dotnet test clients/dotnet/OneLobby.DataChannel.Tests --logger "console;verbosity=detailed"
+      - name: Loopback run holds no socket off 127.0.0.1 (Direct host + joiner, --loopback)
+        run: |
+          dotnet build clients/dotnet/OneLobby.DataChannel.Smoke -c Release
+          bash tools/loopback-check/selftest.sh
+          bash tools/loopback-check/loopback-sockets.sh dotnet-direct -- bash tools/loopback-check/direct-pair.sh dotnet
       - uses: actions/upload-artifact@v4
         with: { name: native-linux-x64, path: clients/dotnet/OneLobby.DataChannel/runtimes/linux-x64/native/ }
 

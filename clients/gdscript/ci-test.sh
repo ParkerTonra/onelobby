@@ -39,7 +39,10 @@ step net_player_node "${G[@]}" -s res://tests/net_player_node.gd
 step net_player_late_layer "${G[@]}" -s res://tests/net_player_late_layer.gd
 step net_sim "${G[@]}" -s res://tests/net_sim.gd
 step net_player_sample "${G[@]}" -s res://tests/net_player_sample.gd
-step net_player_two_process bash "$HERE/net-player-test.sh"
+# the two loopback runs go through tools/loopback-check: it fails on a socket off 127.0.0.1 / ::1, except the known gap of Godot's webrtc-native
+GAP="Godot's webrtc-native 1.2.2 opens its ICE sockets on every interface and reads no bindAddress (WebRTCLibPeerConnection::_initialize), so a Godot loopback run cannot be loopback-only; see docs/recipes/direct-ip.md, Automated tests"
+LB="$ROOT/tools/loopback-check/loopback-sockets.sh"
+step net_player_two_process bash "$LB" --known-gap "$GAP" gdscript-net-player -- bash "$HERE/net-player-test.sh"
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
 step room "${G[@]}" -s res://tests/room.gd
 step menu "${G[@]}" -s res://tests/menu.gd
@@ -51,7 +54,7 @@ step relay_retry "${G[@]}" -s res://tests/relay_retry.gd
 step port_range "${G[@]}" -s res://tests/port_range.gd
 step ip_loopback "${G[@]}" -s res://tests/ip_loopback.gd
 step sign_bench "${G[@]}" -s res://tests/sign_bench.gd
-step direct-test bash "$HERE/direct-test.sh"
+step direct-test bash "$LB" --known-gap "$GAP" gdscript-direct -- bash "$HERE/direct-test.sh"
 step conformance env GODOT="$GODOT" node "$ROOT/conformance/peer/run.mjs" --adapter="$ROOT/clients/gdscript/conformance-adapter.mjs"
 step nostr-interop env GODOT="$GODOT" node "$ROOT/integration/nostr-interop-gdscript.mjs"
 # create-onelobby's godot-gdscript template: every unit test file of the package (cli, vendor, godot, update, verify; no network), then scaffold a project and run its own two-peer test

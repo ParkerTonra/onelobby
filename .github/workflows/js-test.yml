@@ -30,6 +30,10 @@ jobs:
       - name: Typecheck, build, test (prepublishOnly)
         working-directory: clients/js/packages/client
         run: npm run prepublishOnly
+      - name: Loopback run holds no socket off 127.0.0.1 (Direct host + joiner, plain node-datachannel)
+        run: |
+          bash tools/loopback-check/selftest.sh
+          bash tools/loopback-check/loopback-sockets.sh js-direct -- bash tools/loopback-check/direct-pair.sh js
       - name: Test create-onelobby (scaffolder, update, verify, recommend)
         working-directory: clients/js/packages/create-onelobby
         run: npm test

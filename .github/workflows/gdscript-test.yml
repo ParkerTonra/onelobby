@@ -73,6 +73,8 @@ jobs:
           (cd clients/js && npm ci && npm run build)
       - name: Build lobby server
         run: dotnet build server/OneLobby.Server -c Release
+      - name: Loopback check works (selftest)
+        run: bash tools/loopback-check/selftest.sh
       - name: GDScript tests
         run: GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" bash clients/gdscript/ci-test.sh
       - name: Cache Godot (.NET build)
