@@ -25,7 +25,7 @@ build dist/onelobby.global.min.js (window.OneLobby).
 
 ## Recipes
 
-- [Blueprint flow](.claude/skills/onelobby/SKILL.md): survey a game, write onelobby.json (schema [spec/blueprint.schema.json](spec/blueprint.schema.json), design [docs/design/blueprint.md](docs/design/blueprint.md)), build with OneLobby.fromConfig / Blueprint.Load, verify two players
+- [Blueprint flow](.claude/skills/onelobby/SKILL.md): survey a game, get a recommendation (`create-onelobby --recommend --json`), write onelobby.json (schema [spec/blueprint.schema.json](spec/blueprint.schema.json), design [docs/design/blueprint.md](docs/design/blueprint.md)), build with the scaffolder and the drop-in menu, `create-onelobby verify`
 - [Telling the player why](docs/recipes/diagnostics.md): a plain cause and next step on every connect failure (`err.diagnosis`, `describeError`), the host's `peerDiagnosis` line, `kit.netLog` (Copy logs, masked), `kit.checkConnection()`; spec/diagnostics.md; nothing is sent anywhere but to the host the player dialed (JS, C# and GDScript; `Diagnosis` / `peer_diagnosis` / `NetLog` / `CheckConnectionAsync` / `check_connection`)
 - [Room layer](docs/recipes/room.md): names, per-player data, ready, countdown, spectators, kick and ban with reasons, passwords (JS, C# and GDScript)
 - [Godot 4 C#](docs/recipes/godot-csharp.md): add the menu scene (`OneLobbyMenu.tscn`) to a Godot project, or build your own Host / Join / Browse buttons; `npx create-onelobby my-game --template godot-csharp --yes` (or `--into <project>`) sets it up: NuGet references, pinned menu, WebRTC natives, direct hosting, headless two-peer test; `verify` proves it on 127.0.0.1, `update` moves the menu and the package versions

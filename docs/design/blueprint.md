@@ -340,8 +340,8 @@ section of AGENTS.md ("Integrate a game: the blueprint flow"), and llms.txt link
 | 2 Propose | Writes `onelobby.json` with a `$comment` per non-default key. Defaults come from the schema; deviations come from the survey with one-line reasons. | The proposal table (s.3a) |
 | 3 Plan | Names where Host / Join / Browse / Settings go in the game's UI, what files change, which recipe it follows, what the "Done when" checks will be. | The plan list |
 | 4 Approve | Stops. The developer edits the file or the plan, or says go. (Taste call 1 asks whether an all-defaults proposal may skip this stop.) | |
-| 5 Build | Follows the engine's recipe. Reads runtime keys through `fromConfig`, never copies values into code. Generates only what structural keys demand: the UI entry, the Node host script when `hosting.direct`, snapshot/restore stubs when `lockstep` + `lateJoin` or `migrate`, the pause hook when `session.pause` is not `off`. | Files, each listed |
-| 6 Verify | Runs the recipe's "Done when": two headless players (testing recipe, playwright-core for web; batchmode for Unity; the .NET smoke for direct), a message each way, and the offline check (server stopped: the game still plays and shows "Multiplayer unavailable"). | Pass/fail per check |
+| 5 Build | Runs `create-onelobby` (the template and the drop-in menu; the engine's recipe by hand only for a planned template). Reads runtime keys through `fromConfig`, never copies values into code. Generates only what structural keys demand: the UI entry, the Node host script when `hosting.direct`, snapshot/restore stubs when `lockstep` + `lateJoin` or `migrate`, the pause hook when `session.pause` is not `off`. | Files, each listed |
+| 6 Verify | Runs `create-onelobby verify` (one verdict line), and the recipe's "Done when" where it has no template: two headless players (testing recipe, playwright-core for web; batchmode for Unity; the .NET smoke for direct), a message each way, and the offline check (server stopped: the game still plays and shows "Multiplayer unavailable"). | Pass/fail per check |
 | 7 Report | The report below. | |
 
 ### The report the developer sees

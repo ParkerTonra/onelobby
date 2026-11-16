@@ -294,8 +294,9 @@ with `chat.voice` false), `chat_disabled` (`lobby.chat.send` with `chat.text` fa
 `lobbyServer` override) makes `host()` / `join()` fail with `no_server`. Browser wiring with the player's server
 setting: `docs/recipes/js-web.md` "With onelobby.json"; two players with no server: `docs/recipes/testing.md` section 3. To integrate an existing game,
 follow `.claude/skills/onelobby/SKILL.md` (Claude Code skill `onelobby`; other agents read it as plain steps): survey
-the game, propose the file with a `$comment` reason per non-default key, plan the menu entry, build with the engine's
-recipe, verify two players headless, report. Design and the reasons behind each key: `docs/design/blueprint.md`.
+the game, ask `npx create-onelobby --recommend "<one line>" --json` for a proposal, propose the file with a `$comment` reason
+per non-default key, build with the scaffolder's template and the drop-in menu (the engine's recipe only where it says
+`template_planned`), prove it with `npx create-onelobby verify`, report. Design and the reasons behind each key: `docs/design/blueprint.md`.
 
 ## Rules
 
