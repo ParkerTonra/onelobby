@@ -110,6 +110,7 @@ export interface DirectHostOptions {
 /**
  * The one startup line for a direct host, character for character as C#'s `DirectLobby.FormatHostLog`, e.g.
  * `OneLobby: direct host listening on TCP+UDP :47811 (47810 busy); code 0A00-0BSE-P3S (SameNetwork); port mapping off`.
+ * `requested` 0 (any free port) never prints a busy range: the port is the one the system gave.
  */
 export function formatHostLog(
   requested: number,
@@ -121,7 +122,7 @@ export function formatHostLog(
   nostr?: { directCode: string; directCodeKind: IpCodeKind; relays: string },
 ): string {
   let line = `OneLobby: direct host listening on TCP+UDP :${bound}`;
-  if (bound !== requested) line += ` (${bound - requested === 1 ? requested : `${requested}-${bound - 1}`} busy)`;
+  if (requested !== 0 && bound !== requested) line += ` (${bound - requested === 1 ? requested : `${requested}-${bound - 1}`} busy)`;
   const name = joinCodeKindName;
   line += code ? `; code ${code} (${name(kind)})` : "; no join code (no IPv4 address)";
   if (nostr) line += nostr.directCode ? `; ip code ${nostr.directCode} (${name(nostr.directCodeKind)})` : "; no ip code (no IPv4 address)";

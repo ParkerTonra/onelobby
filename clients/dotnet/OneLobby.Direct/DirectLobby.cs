@@ -312,7 +312,7 @@ namespace OneLobby.Direct
         internal static string FormatHostLog(int requested, int bound, string code, JoinCodeKind kind, string mapping, NostrLogInfo? nostr = null)
         {
             var line = "OneLobby: direct host listening on TCP+UDP :" + bound;
-            if (bound != requested) line += " (" + (bound - requested == 1 ? requested.ToString() : requested + "-" + (bound - 1)) + " busy)";
+            if (requested != 0 && bound != requested) line += " (" + (bound - requested == 1 ? requested.ToString() : requested + "-" + (bound - 1)) + " busy)";
             line += string.IsNullOrEmpty(code) ? "; no join code (no IPv4 address)" : "; code " + code + " (" + kind + ")";
             if (nostr != null) line += string.IsNullOrEmpty(nostr.DirectCode) ? "; no ip code (no IPv4 address)" : "; ip code " + nostr.DirectCode + " (" + nostr.DirectCodeKind + ")";
             line += "; port mapping " + (string.IsNullOrEmpty(mapping) ? "off" : mapping);
