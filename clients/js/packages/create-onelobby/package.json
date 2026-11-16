@@ -1,7 +1,7 @@
 {
   "name": "create-onelobby",
   "version": "0.1.4",
-  "description": "Scaffold a multiplayer game with OneLobby (a browser game or a Godot 4 GDScript project): writes onelobby.json (the blueprint), the glue or add-on and a two-player test; `update` re-vendors the add-on and `verify` proves multiplayer on 127.0.0.1. Zero runtime dependencies.",
+  "description": "Scaffold a multiplayer game with OneLobby (a browser game, or a Godot 4 project in GDScript or C#): writes onelobby.json (the blueprint), the glue, add-on or menu and a two-player test; `update` re-vendors it and `verify` proves multiplayer on 127.0.0.1. Zero runtime dependencies.",
   "keywords": [
     "onelobby",
     "create",

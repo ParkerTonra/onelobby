@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { validate } from "../blueprint.js";
-import { selectCsproj } from "../csharp.js";
+import { buildCommand, selectCsproj } from "../csharp.js";
 import { MENU_DIR, NATIVES_MARKER, verifyPin } from "../vendor.js";
 import { resolveGodot } from "./godot.js";
 import { run } from "./procs.js";
@@ -109,10 +109,10 @@ export function csharpChecks() {
         const registry = /NU1101|NU1102|NU1301/.test(b.out) && /OneLobby\./.test(b.out);
         return {
           status: "fail",
-          detail: `dotnet build ${csproj} failed: ${b.timedOut ? "it did not finish in time" : lastError(b.out)}.`,
+          detail: `${buildCommand(csproj)} failed: ${b.timedOut ? "it did not finish in time" : lastError(b.out)}.`,
           next: registry
             ? "The OneLobby packages are not on the public registry yet: point the game at a folder of .nupkg files with: npx create-onelobby update --packages-from <folder>."
-            : `Run: dotnet build ${csproj} and read its output.`,
+            : `Run: ${buildCommand(csproj)} and read its output.`,
         };
       },
     },

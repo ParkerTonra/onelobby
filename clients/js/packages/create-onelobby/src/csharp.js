@@ -32,8 +32,13 @@ export const CSHARP_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/m
 /** The Godot.NET.Sdk version a new project gets when no .NET Godot is found: what the OneLobby packages were built and tested against. */
 export const DEFAULT_SDK = "4.5.1";
 export const MENU_PIN_PATH = `${MENU_DIR}/PIN.json`;
-/** The build command for a project file: the .csproj is named because Godot also writes a .sln beside it, and a bare `dotnet build` refuses to pick one. */
-export const buildCommand = (csproj) => `dotnet build ${csproj}`;
+/** A file name as one shell word: double quotes (read the same by PowerShell and bash) around anything but letters, digits, dot, dash and underscore. */
+const shellWord = (name) => (/^[\w.-]+$/.test(name) ? name : `"${name}"`);
+/**
+ * The build command for a project file: the .csproj is named because Godot also writes a .sln beside it, and a bare `dotnet build` refuses to pick one.
+ * Godot names the file after the project, spaces included (`My Game.csproj`), so the name is quoted when it needs it.
+ */
+export const buildCommand = (csproj) => `dotnet build ${shellWord(csproj)}`;
 export const IMPORT_COMMAND = "godot --headless --import --path .";
 export const TEST_COMMAND = "godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn";
 

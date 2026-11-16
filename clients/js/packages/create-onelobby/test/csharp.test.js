@@ -189,6 +189,17 @@ function emptyCsharpGame(name = "Into") {
 const INTO = ["--into", "into", ...FROM, ...GODOT_FLAG];
 
 describe("godot-csharp: --into an existing project", () => {
+  it("quotes a project file name with a space in every build command (Godot names the file after the project)", async () => {
+    emptyCsharpGame("My Game");
+    const r = await j(INTO);
+    expect(r.code).toBe(0);
+    expect(r.json.csproj.file).toBe("My Game.csproj");
+    expect(r.json.next.join("\n")).toContain('dotnet build "My Game.csproj"   #');
+    const entries = JSON.parse(text("into/.olc/into.json")).entries;
+    expect(entries.find((e) => e.shell === "bash").command).toMatch(/^dotnet build "My Game\.csproj" -nologo -v q \|\| exit 1; /);
+    expect(entries.find((e) => e.shell === "powershell").command).toMatch(/^dotnet build "My Game\.csproj" -nologo -v q; if \(\$LASTEXITCODE -ne 0\) \{ exit 1 \}; /);
+  });
+
   it("adds the pieces, edits the .csproj in place, leaves the scenes alone and prints the wiring lines", async () => {
     emptyCsharpGame();
     const before = text("into/project.godot");
