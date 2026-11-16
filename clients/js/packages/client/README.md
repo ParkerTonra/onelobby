@@ -73,7 +73,7 @@ Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelo
 | Import | What |
 |---|---|
 | `onelobby` | the public API: `OneLobby`, `Lobby`, `Lockstep`, `Chat`, `Voice`, `OneLobbyError`, `normalizeCode`, `formatCode`, `describeError`, `shareUrl`, `codeFromUrl` |
-| `onelobby/ui` | the `<one-lobby>` drop-in element (host, join, invite link, players, start); also in the `<script>` build |
+| `onelobby/ui` | the `<one-lobby>` drop-in element (host, join, invite link, roster, ready, start with a countdown, kick and ban, chat, settings, browse); also in the `<script>` build |
 | `onelobby/testing` | in-memory server, peer network and clock for your own tests |
 | `onelobby/internals` | low-level pieces (codec, chunking, migration, jitter buffer, ...); no stability promise |
 | `dist/onelobby.global.min.js` | the `<script>` build; sets `window.OneLobby` |

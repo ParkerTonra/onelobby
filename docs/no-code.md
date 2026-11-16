@@ -82,6 +82,9 @@ block, where it says so:
 | `max-players` | How many people fit in one game (2 or more). | `max-players="6"` |
 | `name` | Optional. Sets the player's name and hides the name box. | `name="Guest"` |
 | `theme` | `light`, `dark`, or `auto` (follows the visitor's device). | `theme="dark"` |
+| `countdown` | Optional. Seconds between pressing Start and the game starting (the host can change it in the lobby). Default 0: the game starts at once. | `countdown="3"` |
+| `approve-joins` | Optional. The host lets each player in or refuses them. | `approve-joins` |
+| `invite-base` | Optional. The page address that "Copy invite" adds to the invite sentence (default: this page). | `invite-base="https://my.site/play"` |
 | `version` | Optional. Change it (for example to `2`) when you change your game, so old and new copies don't mix. | `version="2"` |
 
 ### Making the game react

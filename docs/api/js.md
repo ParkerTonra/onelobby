@@ -2859,12 +2859,17 @@ export type { OneLobbyElement } from "./element.js";
 export { LobbyController, SharedState } from "./controller.js";
 export { lobbyServerUrl } from "./server-url.js";
 export type { Player, UiState, ControllerEvents, ControllerOptions, KitLike } from "./controller.js";
+export type { UiScreen, MenuError, RosterRow, ChatLine, JoinRequest, BanRow, LobbySettingsView } from "./controller.js";
+export { CHAT_KEEP } from "./controller.js";
+export { MENU_TEXT, MENU_TEXT_SHARED, MENU_TEXT_WEB, MenuTexts } from "./menu-text.js";
+export { parseJoin, cleanJoinText } from "./menu-join.js";
+export type { MenuJoinKind, MenuJoinParse } from "./menu-join.js";
 ```
 
 ## ui/element
 
 ```ts
-import { type Player, type SharedState, type UiState } from "./controller.js";
+import { type Player, type SharedState, type UiScreen, type UiState } from "./controller.js";
 export declare const LOBBY_TAG = "one-lobby";
 /** The element's public surface (for TypeScript users). */
 export interface OneLobbyElement extends HTMLElement {
@@ -2872,12 +2877,20 @@ export interface OneLobbyElement extends HTMLElement {
     readonly players: Player[];
     readonly code: string | null;
     readonly state: UiState;
+    /** The screen showing: `state`, or "settings" / "browse" on top of the start screen. */
+    readonly screen: UiScreen;
     readonly shared: SharedState;
+    /** Reword the menu: a table of text keys (see docs/recipes/menu.md); `null` puts the defaults back. */
+    texts: Record<string, string> | null;
+    /** The game's onelobby.json (parsed): it switches chat, join approval, names, the connection check and the title in the invite. */
+    blueprint: unknown;
     send(data: unknown): void;
     host(): Promise<void>;
     join(code: string): Promise<void>;
     start(): Promise<void>;
     leave(): Promise<void>;
+    /** One screen back (what Escape does); false when there is nothing to go back from. */
+    back(): boolean;
 }
 /** The saved name; a name kept by an older version under its own key moves into the settings once. */
 /** @internal */
@@ -2894,24 +2907,103 @@ declare global {
 ## ui/controller
 
 ```ts
+/**
+ * The DOM-free brain of `<one-lobby>`: a small state machine over OneLobby + Lobby (raw mode) that the element
+ * renders, plus the JSON message envelope and the host-authoritative shared state. Unit-tested without a browser.
+ *
+ * It also holds what the Godot menu's `MenuModel` has (docs/recipes/menu.md): the roster with ready and kick/ban, the start
+ * countdown, host settings, join requests, chat, the removed/error screen with logs, the settings screen and the lobby
+ * browser. Everything past the first version is additive: the old members behave as they did.
+ */
+import { type LobbySummary } from "../signaling.js";
 import type { Lobby } from "../lobby.js";
-import type { HostOptions } from "../onelobby.js";
+import type { HostOptions, JoinOptions, JoinDirectOptions } from "../onelobby.js";
 import { type FriendlyError } from "../friendly.js";
+import type { Blueprint } from "../blueprint.js";
+import type { PlayerSettings } from "../settings.js";
+import type { NetLog } from "../netlog.js";
+import type { CheckOptions, CheckResult } from "../connection-check.js";
+import type { RemovalInfo } from "../room.js";
+import { MenuTexts } from "./menu-text.js";
 export type UiState = "idle" | "connecting" | "lobby" | "playing" | "error";
+/** The screens of the drop-in menu: `state` plus the two screens that sit on top of the start screen (`state` stays "idle" there). */
+export type UiScreen = "start" | "connecting" | "lobby" | "playing" | "error" | "settings" | "browse";
 export interface Player {
     id: number;
     name: string;
     isHost: boolean;
     isMe: boolean;
 }
-/** What the controller needs from `OneLobby` (so tests can pass the in-memory rig). */
+/** What the controller needs from `OneLobby` (so tests can pass the in-memory rig). Everything after `rememberedCode` is optional. */
 export interface KitLike {
     host(h: HostOptions): Promise<Lobby>;
-    join(code: string): Promise<Lobby>;
+    join(code: string, o?: JoinOptions): Promise<Lobby>;
     /** Take back the seat this tab held before a reload (OneLobby `rememberSeat`); null when there is none. */
     resume?(): Promise<Lobby | null>;
     readonly rememberedCode?: string | null;
+    /** The saved name, relay line, last code and lobby server (the settings screen reads and writes it). */
+    readonly settings?: PlayerSettings;
+    /** The net log behind "Copy logs" and "Save logs". */
+    readonly netLog?: NetLog;
+    /** The onelobby.json this kit was built from, when it has one: it switches chat, join approval, names and the connection check. */
+    readonly blueprint?: Blueprint;
+    /** The lobby browser. */
+    list?(): Promise<LobbySummary[]>;
+    /** A direct join code or address in the Join box. */
+    joinDirect?(codeOrAddress: string, o?: JoinDirectOptions): Promise<Lobby>;
+    /** The connection check button. */
+    checkConnection?(o?: CheckOptions): Promise<CheckResult>;
 }
+/** What the removed / error screen shows. `reason` is the host's own words for a kick or ban (or the default sentence of the code). */
+export interface MenuError {
+    title: string;
+    message: string;
+    hint: string;
+    /** The stable code (`bad_code`, `kicked`, ...). */
+    code: string;
+    removed: boolean;
+    ban: boolean;
+    reason: string;
+}
+/** One row of the roster. */
+export interface RosterRow {
+    id: number;
+    name: string;
+    me: boolean;
+    host: boolean;
+    ready: boolean;
+    spectator: boolean;
+    reconnecting: boolean;
+    /** Round trip in ms where this client measures one (a joiner's own link to the host), else 0. */
+    pingMs: number;
+    /** The host can remove this row. */
+    canKick: boolean;
+}
+/** A line of the lobby's chat. */
+export interface ChatLine {
+    peerId: number;
+    name: string;
+    text: string;
+}
+/** A player asking to join a lobby that approves joins. */
+export interface JoinRequest {
+    peerId: number;
+    name: string;
+}
+/** One line of the ban list; `key` is what `unban` takes. */
+export interface BanRow {
+    key: string;
+    text: string;
+}
+/** What the room layer lets the host change. */
+export interface LobbySettingsView {
+    autoStart: "off" | "all_ready" | "players";
+    minPlayers: number;
+    countdownSeconds: number;
+    lateJoin: boolean;
+}
+/** The chat keeps this many lines. */
+export declare const CHAT_KEEP = 100;
 export interface ControllerEvents {
     message: {
         from: Player | null;
@@ -2931,13 +3023,45 @@ export interface ControllerEvents {
         value: unknown;
         from: Player | null;
     };
+    /** A chat line arrived (text chat is on). */
+    chat: {
+        from: Player | null;
+        text: string;
+    };
+    /** The host removed this player (kick or ban); `error` follows. */
+    removed: {
+        code: string;
+        reason: string;
+        ban: boolean;
+    };
+    /** The host sent everyone back to the lobby after a game. */
+    "lobby-return": Record<string, never>;
 }
 export interface ControllerOptions {
-    makeKit: (name: string) => KitLike;
+    /** `intent` is "direct" when the Join box held a direct code or an address (no lobby server needed), else "server". */
+    makeKit: (name: string, intent?: "server" | "direct") => KitLike;
     /** A number, or a function read each time a game is hosted. */
     maxPlayers: number | (() => number);
     /** Lobby name shown to the server (not to players). */
     lobbyName?: string;
+    /** The saved settings, for the start and settings screens when no kit exists yet. Default: the newest kit's. */
+    settings?: () => PlayerSettings | null;
+    /** The onelobby.json of the page, when it has one. Default: the newest kit's. */
+    blueprint?: () => Blueprint | undefined;
+    /** True when a lobby server address is known (the page's own or a saved one): the lobby browser needs it. Default: true. */
+    serverKnown?: () => boolean;
+    /** The lobby server the page sets for itself, shown on the settings screen. Default: "". */
+    pageServer?: () => string;
+    /** True when each join needs the host's approval (a private lobby). A blueprint's `lobby.approveJoins` does the same. */
+    approveJoins?: () => boolean;
+    /** Base address of an invite link. With it, the copied invite sentence ends with the link. Default: none. */
+    inviteBase?: () => string | undefined;
+    /** The query key of an invite link. Default "join". */
+    inviteParam?: () => string;
+    /** Puts text on the clipboard; true when it worked. Default: nothing is copied. */
+    clipboard?: (text: string) => Promise<boolean> | boolean;
+    /** Runs the connection check. Default: the kit's `checkConnection`. */
+    checkRunner?: (o: CheckOptions) => Promise<CheckResult>;
 }
 /** Wire envelope inside raw frames. Kept tiny and versioned by key names only. */
 type Wire = {
@@ -2982,6 +3106,37 @@ export declare class LobbyController {
     linking: boolean;
     name: string;
     readonly shared: SharedState;
+    /** Every string the menu shows; reword with `texts.override({...})`. */
+    readonly texts: MenuTexts;
+    /** The error screen (title, plain sentence, hint, stable code); null when there is none. `error` keeps the plain `FriendlyError`. */
+    menuError: MenuError | null;
+    /** Why the host removed this player, once it has. */
+    removal: RemovalInfo | null;
+    /** What the Join box holds (kept tidy as typed). */
+    joinText: string;
+    /** The password typed for hosting or joining; never stored, never in an event. */
+    password: string;
+    /** One line under the lobby: why the last click did nothing (not enough players, chat off, ...). */
+    note: string;
+    /** The start screen's one-liner: "You're invited!". */
+    startNote: string;
+    chatLines: ChatLine[];
+    requests: JoinRequest[];
+    browseItems: LobbySummary[];
+    browseStatus: string;
+    settingsNote: string;
+    relayNote: string;
+    /** The lobby server in use: the page's own when it sets one, else the saved one. */
+    serverText: string;
+    /** One line, "" before a check. */
+    checkVerdict: string;
+    /** Three lines (UDP, network type, relay), empty before a check. */
+    checkFacts: string[];
+    checkRunning: boolean;
+    /** What the last Copy / Save logs did. */
+    logNote: string;
+    /** What the last Copy code / invite did ("Copied!"). */
+    copyNote: string;
     onChange: () => void;
     onEvent: <K extends keyof ControllerEvents>(type: K, detail: ControllerEvents[K]) => void;
     /** Host: changes made so far. Joiner: the newest change applied (older queued ones are skipped). */
@@ -2989,10 +3144,38 @@ export declare class LobbyController {
     get isHost(): boolean;
     get code(): string | null;
     get players(): Player[];
+    /** The screen to draw: `state`, or "settings" / "browse" on top of the start screen. */
+    get screen(): UiScreen;
     /** One line of plain language for the status area. */
     get statusText(): string;
+    /** The onelobby.json in force: the page's, else the newest kit's. */
+    get blueprint(): Blueprint | undefined;
+    /** False for a blueprint with `players.identity` "anonymous": no name field. */
+    get namesAllowed(): boolean;
+    get maxNameLength(): number;
+    /** The lobby browser needs a lobby server address (and a blueprint that uses one). */
+    get canBrowse(): boolean;
+    get connectionCheckShown(): boolean;
+    /** Text chat shows while a lobby is open and the blueprint has it on. */
+    get chatShown(): boolean;
+    get approveJoinsOn(): boolean;
+    /** True when the host answered with the room layer (ready, countdown, kick and ban work). False for an old host or before its answer. */
+    get roomActive(): boolean;
+    /** True when the host's game is older than the room layer: the roster is a plain list. */
+    get plainList(): boolean;
+    /** The saved name and last code, as the start screen's defaults. */
+    defaults(): {
+        name: string;
+        lastCode: string;
+    };
+    /** Keeps what is typed in the Join box tidy; returns the cleaned text. */
+    setJoinText(text: string): string;
+    setPassword(text: string): void;
+    noteInvited(withName: boolean): void;
     host(name: string): Promise<void>;
     join(code: string, name: string): Promise<void>;
+    /** Join what the Join box holds (see `setJoinText`). */
+    joinTyped(name: string): Promise<void>;
     /**
      * Take back this tab's seat after a page reload, if the kit remembers one (host or joiner). Quietly stays on the
      * start screen when there is nothing to resume or the seat is gone. Resolves true when back in a game.
@@ -3000,12 +3183,86 @@ export declare class LobbyController {
     resume(name: string): Promise<boolean>;
     /** Repeat whatever failed last (host or join). */
     retry(): Promise<void>;
+    /** Start the game at once (the host). The element's Start button uses `startGame`, which honours the countdown. */
     start(): Promise<void>;
     leave(): Promise<void>;
     /** Back to the start screen (after an error, or to cancel). */
     reset(): void;
     /** Send any JSON-able value to everyone else. */
     send(data: unknown): void;
+    /**
+     * ui_cancel and the Back buttons: one screen back. Returns false when there was nothing to go back from (the start screen,
+     * a game running).
+     */
+    back(): boolean;
+    /** Roster rows (a plain peer list against a host with no room layer). */
+    roster(): RosterRow[];
+    /** "Players 2/4", or "Players 2" when the lobby has no cap or the host is old. */
+    playersHeader(): string;
+    /** The marks of a row as one line ("Host, Ready"). */
+    rowMarks(row: RosterRow): string;
+    /** The code the lobby screen shows: a direct host's grouped code, else the lobby-server code as "7HQ 4K2". */
+    codeText(): string;
+    /** `Join my game in <title>: code 7HQ 4K2` (no title: `Join my game: code 7HQ 4K2`), then the invite link when the page has a base. */
+    inviteText(): string;
+    /** The link that opens the page into this lobby, or "" (a direct lobby, or no usable base). */
+    inviteLink(): string;
+    get counting(): boolean;
+    /** "Starting in 3...", or "". */
+    countdownText(): string;
+    get meReady(): boolean;
+    get meIsPlayer(): boolean;
+    /** The host's Start is offered: the lobby is up, no game running, no countdown, and at least one other player is here. */
+    get canStart(): boolean;
+    toggleReady(): void;
+    /** Host: start. With the room layer: the countdown, then everyone's phase changes. An old host (no room layer) starts at once. */
+    startGame(): void;
+    cancelCountdown(): void;
+    /** Host: everyone back to the lobby after a game. */
+    backToLobby(): void;
+    kick(peerId: number, reason?: string): void;
+    ban(peerId: number, reason?: string): void;
+    unban(key: string): void;
+    /** The ban list (the host's); the key is what `unban` takes. */
+    banRows(): BanRow[];
+    /** The settings the room layer lets the host change; null without the room layer. */
+    lobbySettings(): LobbySettingsView | null;
+    /** Host: changes `auto_start` ("off", "all_ready", "players"), `min_players`, `countdown_seconds` or `late_join` (boolean). */
+    setLobbySetting(key: string, value: unknown): void;
+    /** Host: let a player in (or refuse them). */
+    approve(peerId: number, ok: boolean): void;
+    sendChat(text: string): void;
+    copyCode(): Promise<boolean>;
+    /** Copies the invite sentence (with the link when the page has a base). */
+    copyInvite(): Promise<boolean>;
+    /** Copies only the invite link (the element's old "Copy invite link"). */
+    copyLink(): Promise<boolean>;
+    copyLogs(): Promise<void>;
+    /** Save logs: a file download in a browser. */
+    saveLogs(): void;
+    openSettings(): void;
+    /** The lobby server in use: the page's own when it sets one, else the saved one. */
+    effectiveServer(): string;
+    /** True when the page sets its own lobby server (a saved one is then only a fallback). */
+    get pageSetsServer(): boolean;
+    /** "Relay in use: turn:host:3478 <hidden> <hidden>", or the plain sentence when there is none or it does not parse. */
+    relayStatusText(): string;
+    /** Saves a pasted relay line. The line is never shown again, only its masked form. */
+    saveRelay(line: string): boolean;
+    clearRelay(): void;
+    saveServer(text: string): boolean;
+    /** Runs the connection check and keeps its one-line verdict and three facts. */
+    runCheck(): Promise<void>;
+    openBrowse(): Promise<void>;
+    refreshBrowse(): Promise<void>;
+    /** The text of a browse row: "Name (Host) 2/4". */
+    browseRowText(s: LobbySummary): string;
+    /** Joins a listed lobby. */
+    joinListed(code: string, name: string): Promise<void>;
+    /** The newest kit, or one made now for the settings and logs screens (null when the page cannot make one). */
+    /** Runs a room call; a refusal becomes the plain sentence under the lobby. */
+    /** `ended`: a lobby that was up has ended (sessionEnded), as opposed to a Host or Join that failed. */
+    /** The screen's title, sentence, hint and code: a kick or ban shows the host's reason (or the default sentence of the code). */
     /** @internal from SharedState */
     _sharedOp(op: Extract<Wire, {
         k: "set";

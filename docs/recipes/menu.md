@@ -217,3 +217,71 @@ quick chat, and a scoreboard overlay.
 Tests: `clients/gdscript/tests/menu.gd` (the model, with real peers on 127.0.0.1) and `tests/menu_scene.gd` (the scene at 1280x720 and
 640x360, and the demo with `--host` / `--join`). For C#: `MenuModelTests` and `MenuSceneTests` in `clients/dotnet/OneLobby.Core.Tests` (the model on an
 in-memory network; the two scenes' node trees) and the local `--menu-selfcheck` run (see "Godot C#").
+
+## Web: the `<one-lobby>` element
+
+The same menu for a web page. One tag, the `onelobby/ui` import (or the `<script>` build), no code:
+
+```html
+<one-lobby server="https://your-name.onrender.com" game="my-game" max-players="4" countdown="3"></one-lobby>
+```
+
+It draws the same screens as the Godot menu. `docs/no-code.md` is the guide for people who paste HTML; this section is the reference.
+
+| Screen | What it has |
+|---|---|
+| Start | Name (saved; hidden by `name="..."` or a blueprint with anonymous players), Host, a Join box that takes a bare code, a direct code, an `ip:port`, an invite link or a pasted invite sentence (`Join my game in <Game>: code 7HQ 4K2`; it finds the code, never the game title), the last code as its default, an optional password, Browse (only when a lobby server is known and the blueprint uses one), Settings. |
+| Connecting | What is being tried, and Cancel (a late answer is ignored; a lobby that still arrives is left). |
+| Lobby | The code with Copy code, Copy invite (the sentence, then the invite link) and Copy invite link; the roster with marks (Host, Ready, Watching, Reconnecting, ping where measured, "(you)"); a Ready toggle; for the host Start (everyone sees the countdown; Cancel start), Kick and Ban on every row with an optional reason, the ban list with Unban, the lobby settings the room layer offers (start by itself, players needed, countdown seconds, late join), Let in / Refuse when joins need approval, Back to lobby while a game runs; text chat (last 100 lines) unless the blueprint turns it off; a plain-list note against a host with no room layer. |
+| Removed / error | A title, the plain sentence (a kick or ban shows the host's reason, or the default sentence of the code), the hint, the stable code, Try again (not after a removal), Back, Copy logs and Save logs (a file download; addresses are hidden). |
+| Settings | The relay line (saved, then shown only masked: `turn:host:3478 <hidden> <hidden>`; the typed line is cleared on save and never read back), the lobby server (a page that sets `server=` keeps its own; the saved one is the fallback), the connection check (a verdict line and three facts; it runs only when the button is pressed), Copy logs. |
+| Browse | Listed lobbies from the lobby server with Join, Refresh, and the empty and failure texts. |
+
+Escape goes back one screen (`ui_cancel`): settings and browse to start, an error or a connecting screen to start, a lobby leaves it.
+Enter submits the Join box, the chat line, the relay line and the server line. Focus moves to a sensible control when a screen
+opens (the name box or Host, Cancel, Ready, Try again, the relay box, the first Join).
+
+**Attributes** (existing ones unchanged): `server`, `game`, `version`, `max-players`, `name`, `theme`; new and optional: `countdown`
+(seconds between Start and the game; default 0, which starts at once as before; the host can change it in the lobby settings),
+`approve-joins` (a private lobby: the host answers each join), `invite-base` (the address the invite sentence's link opens, default the
+current page), `invite-param` (the query key, default `join`).
+
+**Properties and methods** (existing ones unchanged): `isHost`, `players`, `code`, `state`, `shared`, `send()`, `host()`, `join(code)`,
+`start()`, `leave()`; new: `screen` (`start`, `connecting`, `lobby`, `playing`, `error`, `settings`, `browse`; `state` keeps its five
+values and stays `idle` under settings and browse), `back()` (what Escape does), `texts` (reword, below), `blueprint` (a parsed
+`onelobby.json`: it switches chat, join approval, names, the connection check and adds the game title to the invite sentence).
+
+**Events** (all bubble; `event.detail` carries the data): `message`, `player-joined`, `player-left`, `start`, `error`, `shared-change` as
+before; new: `chat` (`{ from, text }`), `removed` (`{ code, reason, ban }`, then `error`), `lobby-return` (the host sent everyone back
+to the lobby).
+
+**CSS parts** (`::part(...)`; `card` is the old one): `title`, `status`, `hint`, `name-label`, `name-input`, `host-button`, `join-form`,
+`join-input`, `password-label`, `password-input`, `join-button`, `browse-button`, `settings-button`, `cancel-button`, `codebox`, `code`,
+`copy-code-button`, `copy-invite-button`, `copy-link-button`, `countdown`, `players-title`, `roster`, `roster-row`, `roster-name`,
+`mark` (and `mark-host`, `mark-ready`, `mark-spectator`, `mark-reconnecting`, `mark-you`), `ping`, `kick-button`, `ban-button`,
+`reason-label`, `reason-input`, `requests`, `request-row`, `let-in-button`, `refuse-button`, `plain-note`, `note`, `ready-button`,
+`start-button`, `cancel-start-button`, `back-to-lobby-button`, `leave-button`, `lobby-settings`, `setting-input`, `bans`, `ban-row`,
+`unban-button`, `chat`, `chat-log`, `chat-line`, `chat-form`, `chat-input`, `chat-send-button`, `error-code`, `retry-button`,
+`back-button`, `copy-logs-button`, `save-logs-button`, `log-note`, `relay-form`, `relay-input`, `relay-status`, `save-relay-button`,
+`clear-relay-button`, `relay-note`, `server-form`, `server-input`, `save-server-button`, `server-note`, `check`, `check-button`,
+`check-verdict`, `check-facts`, `check-fact`, `browse-status`, `browse-list`, `browse-row`, `browse-join-button`, `refresh-button`.
+
+**Rewording.** Every string comes from one table with the same keys and English as the Godot menu (`menu_text.gd`; a test fails when the
+two differ) plus a few web-only keys (`status_*`, `copy_link`, `back_to_lobby`, `retry`, ...; `MENU_TEXT_WEB` in `onelobby/ui`). Set
+`texts` to a table of your own keys:
+
+```html
+<script type="module">
+  await customElements.whenDefined("one-lobby");
+  document.querySelector("one-lobby").texts = { host: "Create game", join: "Enter game", status_idle: "Pick a way in." };
+</script>
+```
+
+A value may hold `%s` and `%d` (filled in order; `%%` is a percent sign). A reworded invite sentence must keep the code as its last word
+or right after its "code" marker, so the Join box can read it back. Error and removal sentences come from `describeError` and the room
+layer, not from this table.
+
+In code, `LobbyController` (also exported from `onelobby/ui`) is the element's model with no DOM: `roster()`, `toggleReady()`,
+`startGame()`, `kick(id, reason)`, `ban()`, `unban(key)`, `setLobbySetting(key, value)`, `approve(id, ok)`, `sendChat(text)`,
+`openSettings()`, `saveRelay(line)`, `runCheck()`, `openBrowse()`, `inviteText()`, `back()`, and `parseJoin(text)` for the Join box.
+Tests: `test/ui-menu.test.ts` (the model on the in-memory network) and `test/ui-element.test.ts` (the element in a DOM emulation).
