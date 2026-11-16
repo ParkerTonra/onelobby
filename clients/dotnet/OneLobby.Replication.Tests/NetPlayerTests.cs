@@ -12,28 +12,49 @@ namespace OneLobby.Replication.Tests
     /// way, 20 ms jitter, 3% loss on the fast channel, a fixed seed, 16 ms frames, once for each authority. The measured numbers are
     /// written with ITestOutputHelper: <c>dotnet test ... --logger "console;verbosity=detailed"</c> shows them.
     /// </summary>
-    // D1MaxErrorM is 0.65 for the owner path, not the JS and GDScript 0.5. The worst error of the owner path under 3% loss is a heavy tail in all
-    // implementations: JS over seeds 1 to 8 gives 0.205 to 0.522 m (its seed 1234 happens to give 0.195), C# with the JS-like rig (PreciseArrival) over
-    // seeds 1 to 8 gives 0.209 to 0.546 m, and C# seed 1234 gives 0.609 m. The mean bound (0.15) is the same as theirs.
+    // D1 holds, over the seeds below: per seed the mean and the 99th percentile of the per-frame error, over all seeds the worst frame. The
+    // three clients hold the same numbers. Measured here (PreciseArrival, loss 3%, jitter 20 ms): see the lines the test writes.
     public class NetPlayerTests
     {
         private readonly ITestOutputHelper _out;
         public NetPlayerTests(ITestOutputHelper output) { _out = output; }
 
-        private const double D1MaxErrorM = 0.65, D1MeanErrorM = 0.15, CarryOnCapMs = 250, D3OnTimeTicks = 2;
+        private const double D1bMaxErrorM = 0.25, D1MaxErrorM = 0.45, D1MeanErrorM = 0.15, D1P99ErrorM = 0.4, CarryOnCapMs = 250, D3OnTimeTicks = 2;
+        private static readonly int[] D1Seeds = { 1, 2, 7, 8 };
 
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]
         public void D1_WatchedPathStaysWithinAnErrorOfTheOwnersPath(PlayerAuthority mode)
         {
-            var s = Scene.Make(mode, precise: true);
+            double worst = 0;
+            foreach (var seed in D1Seeds)
+            {
+                var s = Scene.Make(mode, seed: seed, precise: true);
+                s.Drive();
+                s.Rig.Run(3);
+                var (owner, watched) = s.Record(20);
+                var r = Scene.ComparePaths(owner, watched);
+                _out.WriteLine($"D1 {mode} seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, p99 {r.P99:F3} m, worst {r.Max:F3} m, delay {s.Bl.Session.InterpolationDelayMs:F1} ms jitter {s.Bl.Session.JitterMs:F1} ms");
+                Assert.True(watched.Count > 1000);
+                Assert.True(r.Mean < D1MeanErrorM, $"seed {seed} mean " + r.Mean);
+                Assert.True(r.P99 < D1P99ErrorM, $"seed {seed} p99 " + r.P99);
+                worst = Math.Max(worst, r.Max);
+            }
+            _out.WriteLine($"D1 {mode}: worst frame over all seeds {worst:F3} m");
+            Assert.True(worst < D1MaxErrorM, "worst " + worst);
+        }
+
+        // A lost or late input leaves a tick on which the host has nothing new from the owner. Owner mode must not keep that tick as
+        // extra delay for the rest of the run (loss 3%, no jitter, these seeds).
+        [Theory, InlineData(4), InlineData(10), InlineData(13)]
+        public void D1b_AStalledTickDoesNotStayAsDelay(int seed)
+        {
+            var s = Scene.Make(PlayerAuthority.Owner, jitterMs: 0, seed: seed, precise: true);
             s.Drive();
             s.Rig.Run(3);
             var (owner, watched) = s.Record(20);
             var r = Scene.ComparePaths(owner, watched);
-            _out.WriteLine($"D1 {mode}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, delay {s.Bl.Session.InterpolationDelayMs:F1} ms jitter {s.Bl.Session.JitterMs:F1} ms");
-            Assert.True(watched.Count > 1000);
-            Assert.True(r.Max < D1MaxErrorM, "worst " + r.Max);
-            Assert.True(r.Mean < D1MeanErrorM, "mean " + r.Mean);
+            _out.WriteLine($"D1b seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m");
+            Assert.True(r.Max < D1bMaxErrorM, "worst " + r.Max);
         }
 
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]

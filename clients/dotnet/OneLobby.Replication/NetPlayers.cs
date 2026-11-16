@@ -117,6 +117,10 @@ namespace OneLobby.Replication
             public bool Awaiting;
             public long LastAcceptTick, LastTeleportMs, LastShotTick, LastMeleeTick;
             public uint RelaySeq;
+            /// <summary>Owner mode: ticks on which no new state came; the next ticks take a second one to make them up.</summary>
+            public int Stalled;
+            /// <summary>Owner mode, while stalled: the last state that really came; <c>State</c> is carried on from it.</summary>
+            public PlayerState? Carried;
             public void Write(NetWriter w) => Codec.WriteState(w, State);
         }
 
@@ -364,6 +368,7 @@ namespace OneLobby.Replication
             RequireHost();
             if (!_hostPlayers.TryGetValue(peerId, out var p)) return;
             to.Teleport = (p.State.Teleport + NetPlayer.HostTeleportStep) % PlayerWire.TeleportModulo;
+            p.Carried = null;
             p.State = Codec.QuantizeState(to);
             if (peerId == LocalPeerId) { _localState = p.State; _haveLocal = true; }
             else if (Authority == PlayerAuthority.Owner) p.Awaiting = true;
@@ -616,14 +621,54 @@ namespace OneLobby.Replication
             {
                 var p = kv.Value;
                 if (kv.Key == LocalPeerId) HostLocal(p);
-                else if (Session.TryGetInput(kv.Key, out var f) && !f.Repeated)
-                {
-                    if (Authority == PlayerAuthority.Owner) AcceptOwnerState(p, f.Bytes.Span, tick, now);
-                    else StepRemote(p, f.Bytes.Span);
-                }
+                else HostRemote(kv.Key, p, tick, now);
                 if (p.Spawned) _history.Record(tick, new NetId((uint)kv.Key), p.State);
             }
             Session.SendSnapshot();
+        }
+
+        // One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
+        // (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
+        // on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
+        // until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most MaxInputBuffer
+        // stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+        private void HostRemote(int peer, HostPlayer p, uint tick, long now)
+        {
+            if (Authority != PlayerAuthority.Owner)
+            {
+                if (Session.TryGetInput(peer, out var f0) && !f0.Repeated) StepRemote(p, f0.Bytes.Span);
+                return;
+            }
+            if (p.Carried.HasValue) { p.State = p.Carried.Value; p.Carried = null; }
+            if (Session.TryGetInput(peer, out var f))
+            {
+                if (!f.Repeated)
+                {
+                    AcceptOwnerState(p, f.Bytes.Span, tick, now);
+                    while (p.Stalled > 0)
+                    {
+                        if (!Session.TryGetInput(peer, out var g) || g.Repeated) break;
+                        p.Stalled--;
+                        AcceptOwnerState(p, g.Bytes.Span, tick, now);
+                    }
+                }
+                else p.Stalled = Math.Min(p.Stalled + 1, Math.Max(1, Session.Config.MaxInputBuffer));
+            }
+            if (p.Stalled > 0 && p.Spawned && !p.Awaiting)
+            {
+                p.Carried = p.State;
+                var s = p.State;
+                for (var i = 0; i < p.Stalled; i++) s = Coast(s);
+                p.State = s;
+            }
+        }
+
+        private PlayerState Coast(PlayerState st)
+        {
+            var R = Codec.Config.Range;
+            st.X = Clamp(st.X + st.Vx * Dt, R); st.Y = Clamp(st.Y + st.Vy * Dt, R);
+            if (Codec.Is3D) st.Z = Clamp(st.Z + st.Vz * Dt, R);
+            return Codec.QuantizeState(st);
         }
 
         private void HostLocal(HostPlayer p)

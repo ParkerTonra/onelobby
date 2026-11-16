@@ -116,6 +116,10 @@ class OLHostPlayer:
 	var last_melee_tick := -1000000000
 	var relay_seq := 0
 	var last_input: Dictionary
+	## Owner mode: ticks on which no new state came; the next ticks take a second one to make them up.
+	var stalled := 0
+	## Owner mode, while stalled: the last state that really came; `state` is carried on from it.
+	var carried: Dictionary = {}
 
 
 class OLDedupe:
@@ -350,6 +354,7 @@ func teleport_player(peer_id: int, patch: Dictionary) -> void:
 	var s := p.state.duplicate()
 	s.merge(patch, true)
 	s["teleport"] = (int(p.state["teleport"]) + HOST_TELEPORT_STEP) % W.TELEPORT_MODULO
+	p.carried = {}
 	p.state = codec.quantize(s)
 	if peer_id == local_peer_id:
 		_local_state = p.state
@@ -574,15 +579,53 @@ func _host_tick(t: int) -> void:
 		if peer == local_peer_id:
 			_host_local(p)
 		else:
-			var f := session.try_get_input(peer)
-			if not f.is_empty() and not bool(f["repeated"]):
-				if authority == "owner":
-					_accept_owner_state(p, f["bytes"], t, now)
-				else:
-					_step_remote(p, f["bytes"])
+			_host_remote(p, t, now)
 		if p.spawned:
 			_history.record(t, peer, p.state)
 	session.send_snapshot()
+
+
+## One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
+## (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
+## on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
+## until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most `max_input_buffer`
+## stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+func _host_remote(p: OLHostPlayer, t: int, now: int) -> void:
+	if authority != "owner":
+		var f0 := session.try_get_input(p.peer)
+		if not f0.is_empty() and not bool(f0["repeated"]):
+			_step_remote(p, f0["bytes"])
+		return
+	if not p.carried.is_empty():
+		p.state = p.carried
+		p.carried = {}
+	var f := session.try_get_input(p.peer)
+	if not f.is_empty() and not bool(f["repeated"]):
+		_accept_owner_state(p, f["bytes"], t, now)
+		while p.stalled > 0:
+			var g := session.try_get_input(p.peer)
+			if g.is_empty() or bool(g["repeated"]):
+				break
+			p.stalled -= 1
+			_accept_owner_state(p, g["bytes"], t, now)
+	elif not f.is_empty():
+		p.stalled = mini(p.stalled + 1, maxi(1, int(session.config["max_input_buffer"])))
+	if p.stalled > 0 and p.spawned and not p.awaiting:
+		p.carried = p.state
+		var s: Dictionary = p.state
+		for i in p.stalled:
+			s = _coast(s)
+		p.state = s
+
+
+func _coast(st: Dictionary) -> Dictionary:
+	var rg := codec.range_value
+	var o := st.duplicate()
+	var dt := _dt()
+	o["x"] = clampf(float(st["x"]) + float(st["vx"]) * dt, -rg, rg)
+	o["y"] = clampf(float(st["y"]) + float(st["vy"]) * dt, -rg, rg)
+	o["z"] = clampf(float(st["z"]) + float(st["vz"]) * dt, -rg, rg) if codec.is_3d() else st["z"]
+	return codec.quantize(o)
 
 
 func _host_local(p: OLHostPlayer) -> void:

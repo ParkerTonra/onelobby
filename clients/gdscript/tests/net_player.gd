@@ -14,8 +14,13 @@ const FAST := OneLobbyWire.FAST
 const MODES := ["owner", "host"]
 
 # Numbers stated in spec/net-player.md "Tests": the bounds these tests hold the layer to.
-const D1_MAX_ERROR_M := 0.5
+# D1: per seed the mean and the 99th percentile of the per-frame error, over all seeds the worst frame. The three clients hold the
+# same numbers. Measured (loss 3%, jitter 20 ms, seeds 1 to 8, both authorities): see the printed D1 lines.
+const D1_SEEDS := [1, 2, 7, 8]
 const D1_MEAN_ERROR_M := 0.15
+const D1_P99_ERROR_M := 0.4
+const D1_MAX_ERROR_M := 0.45
+const D1B_MAX_ERROR_M := 0.25
 const CARRY_ON_CAP_MS := 250.0
 const D3_ON_TIME_TICKS := 2.0
 const D4_HOST_TO_CLIENT := 1500.0
@@ -43,7 +48,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
-		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -142,11 +147,12 @@ func _at(path: Path, tt: float) -> Array:
 ## Two paths that are a render delay apart: find the one constant lag (0 to 600 ms, 8 ms steps) at which the watched path is
 ## closest to the owner's path on average, then report the mean and worst distance at that lag.
 func _compare_paths(owner: Path, watched: Path) -> Dictionary:
-	var best := {"lag_ms": 0, "mean": INF, "max": INF}
+	var best := {"lag_ms": 0, "mean": INF, "max": INF, "p99": INF}
 	for lag in range(0, 601, 8):
 		var sum := 0.0
 		var mx := 0.0
 		var n := 0
+		var errs := PackedFloat64Array()
 		for i in watched.size():
 			var o := _at(owner, watched.t[i] - float(lag))
 			if o.is_empty():
@@ -154,9 +160,11 @@ func _compare_paths(owner: Path, watched: Path) -> Dictionary:
 			var d := sqrt((watched.x[i] - float(o[0])) ** 2 + (watched.y[i] - float(o[1])) ** 2 + (watched.z[i] - float(o[2])) ** 2)
 			sum += d
 			mx = maxf(mx, d)
+			errs.append(d)
 			n += 1
 		if n > 20 and sum / float(n) < float(best["mean"]):
-			best = {"lag_ms": lag, "mean": sum / float(n), "max": mx}
+			errs.sort()
+			best = {"lag_ms": lag, "mean": sum / float(n), "max": mx, "p99": errs[mini(n - 1, int(0.99 * float(n)))]}
 	return best
 
 
@@ -526,17 +534,36 @@ func _test_host_authority_spawn() -> void:
 
 func _test_d1() -> void:
 	for mode: String in MODES:
-		var s := _scene(mode)
+		var worst := 0.0
+		for seed_value: int in D1_SEEDS:
+			var s := _scene(mode, {"seed": seed_value})
+			_drive(s)
+			var rig: Rig = s["rig"]
+			rig.run(3.0)
+			var rec := _record(s, 20.0)
+			var r := _compare_paths(rec["owner"], rec["watched"])
+			var bl: OneLobbyNetPlayers = s["bl"]
+			print("D1 %s seed %d: lag %d ms, mean %.3f m, p99 %.3f m, worst %.3f m, delay %.1f ms jitter %.1f ms" % [mode, seed_value, r["lag_ms"], r["mean"], r["p99"], r["max"], bl.session.interpolation_delay_ms, bl.session.jitter_ms])
+			_check((rec["watched"] as Path).size() > 1000, "D1 %s seed %d: watched frames" % [mode, seed_value])
+			_check(float(r["mean"]) < D1_MEAN_ERROR_M, "D1 %s seed %d: mean error under %.2f m" % [mode, seed_value, D1_MEAN_ERROR_M])
+			_check(float(r["p99"]) < D1_P99_ERROR_M, "D1 %s seed %d: 99th percentile under %.2f m" % [mode, seed_value, D1_P99_ERROR_M])
+			worst = maxf(worst, float(r["max"]))
+		print("D1 %s: worst frame over all seeds %.3f m" % [mode, worst])
+		_check(worst < D1_MAX_ERROR_M, "D1 %s: worst frame over all seeds under %.2f m" % [mode, D1_MAX_ERROR_M])
+
+
+## A lost or late input leaves a tick on which the host has nothing new from the owner. Owner mode must not keep that tick as
+## extra delay for the rest of the run (loss 3%, no jitter, these seeds).
+func _test_d1b() -> void:
+	for seed_value: int in [4, 10, 13]:
+		var s := _scene("owner", {"seed": seed_value, "jitter_ms": 0.0})
 		_drive(s)
 		var rig: Rig = s["rig"]
 		rig.run(3.0)
 		var rec := _record(s, 20.0)
 		var r := _compare_paths(rec["owner"], rec["watched"])
-		var bl: OneLobbyNetPlayers = s["bl"]
-		print("D1 %s: lag %d ms, mean %.3f m, worst %.3f m, delay %.1f ms jitter %.1f ms" % [mode, r["lag_ms"], r["mean"], r["max"], bl.session.interpolation_delay_ms, bl.session.jitter_ms])
-		_check((rec["watched"] as Path).size() > 1000, "D1 %s: watched frames" % mode)
-		_check(float(r["max"]) < D1_MAX_ERROR_M, "D1 %s: worst error under %.2f m" % [mode, D1_MAX_ERROR_M])
-		_check(float(r["mean"]) < D1_MEAN_ERROR_M, "D1 %s: mean error under %.2f m" % [mode, D1_MEAN_ERROR_M])
+		print("D1b seed %d: lag %d ms, mean %.3f m, worst %.3f m" % [seed_value, r["lag_ms"], r["mean"], r["max"]])
+		_check(float(r["max"]) < D1B_MAX_ERROR_M, "D1b seed %d: a stalled tick does not stay as delay, worst error under %.2f m" % [seed_value, D1B_MAX_ERROR_M])
 
 
 func _test_d2() -> void:

@@ -88,13 +88,14 @@ export class RepPlayer {
 export class RepRig {
   readonly base = baseRig();
   readonly players: RepPlayer[] = [];
-  readonly random = rng(1234);
+  readonly random: () => number;
   host!: RepPlayer;
   /** Host sim step, run once per host tick before the snapshot. */
   hostTick: ((tick: number) => void) | null = null;
   frameMs = 16;
 
-  constructor(private config?: Partial<ReplicationConfig>, opts: { latencyMs?: number; lossRate?: number; jitterMs?: number } = {}) {
+  constructor(private config?: Partial<ReplicationConfig>, opts: { latencyMs?: number; lossRate?: number; jitterMs?: number; seed?: number } = {}) {
+    this.random = rng(opts.seed ?? 1234);
     const net = this.base.net;
     net.clock = this.base.clock;
     net.latencyMs = opts.latencyMs ?? 30;

@@ -81,20 +81,20 @@ namespace OneLobby.Replication.Tests
             return true;
         }
 
-        /// <summary>The one constant lag (0 to 600 ms, 8 ms steps) at which the watched path is closest to the owner's on average, with the mean and worst distance there.</summary>
-        public static (int LagMs, double Mean, double Max) ComparePaths(List<Pt> owner, List<Pt> watched)
+        /// <summary>The one constant lag (0 to 600 ms, 8 ms steps) at which the watched path is closest to the owner's on average, with the mean, the 99th percentile and the worst distance there.</summary>
+        public static (int LagMs, double Mean, double Max, double P99) ComparePaths(List<Pt> owner, List<Pt> watched)
         {
-            var best = (LagMs: 0, Mean: double.PositiveInfinity, Max: double.PositiveInfinity);
+            var best = (LagMs: 0, Mean: double.PositiveInfinity, Max: double.PositiveInfinity, P99: double.PositiveInfinity);
             for (var lag = 0; lag <= 600; lag += 8)
             {
-                double sum = 0, max = 0; var n = 0;
+                double sum = 0, max = 0; var n = 0; var errs = new List<double>();
                 foreach (var w in watched)
                 {
                     if (!At(owner, w.T - lag, out var o)) continue;
                     var d = Dist(w, o);
-                    sum += d; if (d > max) max = d; n++;
+                    sum += d; if (d > max) max = d; n++; errs.Add(d);
                 }
-                if (n > 20 && sum / n < best.Mean) best = (lag, sum / n, max);
+                if (n > 20 && sum / n < best.Mean) { errs.Sort(); best = (lag, sum / n, max, errs[Math.Min(n - 1, (int)(0.99 * n))]); }
             }
             return best;
         }

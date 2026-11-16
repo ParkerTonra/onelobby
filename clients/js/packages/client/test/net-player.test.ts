@@ -6,25 +6,54 @@ import { comparePaths, dist, drive, record, scene, walkStep, type Mode, type Sam
 const MODES: Mode[] = ["owner", "host"];
 const PEER = (s: { a: { peerId: number } }) => s.a.peerId;
 
-// Numbers stated in spec/net-player.md "Tests": the bounds these tests hold the layer to.
-const D1_MAX_ERROR_M = 0.5;
+// Numbers stated in spec/net-player.md "Tests": the bounds these tests hold the layer to. The three clients hold the same ones.
+// D1: per seed the mean and the 99th percentile of the per-frame error, over all seeds the worst frame. Measured (loss 3%, jitter 20 ms,
+// seeds 1 to 8, both authorities, this rig): mean 0.034 to 0.114 m, 99th percentile 0.094 to 0.318 m, worst frame 0.358 m.
+const D1_SEEDS = [1, 2, 7, 8];
 const D1_MEAN_ERROR_M = 0.15;
+const D1_P99_ERROR_M = 0.4;
+const D1_MAX_ERROR_M = 0.45;
+const D1B_MAX_ERROR_M = 0.25;
 const CARRY_ON_CAP_MS = 250;
 const D3_ON_TIME_TICKS = 2;
 const D4_BUDGET = { hostToClient: 1500, clientToHost: 3500 };
 
-describe("D1 the watched player's path stays within an error of the owner's path", () => {
+describe("D1 the watched player's path stays within an error of the owner's path, over several seeds of loss and jitter", () => {
   for (const mode of MODES) {
     it(mode, async () => {
-      const s = await scene(mode);
+      let worst = 0;
+      const rows: string[] = [];
+      for (const seed of D1_SEEDS) {
+        const s = await scene(mode, { seed });
+        drive(s);
+        await s.rig.run(3);
+        const { owner, watched } = await record(s, 20);
+        const r = comparePaths(owner, watched);
+        rows.push(`seed ${seed}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, p99 ${r.p99.toFixed(3)} m, worst ${r.max.toFixed(3)} m, delay ${s.bl.session.interpolationDelayMs.toFixed(1)} ms`);
+        expect(watched.length, `seed ${seed}`).toBeGreaterThan(1000);
+        expect(r.mean, `seed ${seed} mean`).toBeLessThan(D1_MEAN_ERROR_M);
+        expect(r.p99, `seed ${seed} p99`).toBeLessThan(D1_P99_ERROR_M);
+        worst = Math.max(worst, r.max);
+      }
+      console.log(`D1 ${mode}: ` + rows.join(" | ") + ` | worst frame over all seeds ${worst.toFixed(3)} m`);
+      expect(worst).toBeLessThan(D1_MAX_ERROR_M);
+    });
+  }
+});
+
+// A lost or late input leaves a tick on which the host has nothing new from the owner. Owner mode must not keep that tick as
+// extra delay for the rest of the run: with no jitter, 3% loss, these seeds made the watched path jump by a whole tick
+// (0.44 to 0.49 m worst, 0.16 m with no loss) before the host carried the owner on and made the stall up.
+describe("D1b a stalled tick does not stay as delay (owner authority, loss 3%, no jitter)", () => {
+  for (const seed of [4, 10, 13]) {
+    it(`seed ${seed}`, async () => {
+      const s = await scene("owner", { seed, jitterMs: 0 });
       drive(s);
       await s.rig.run(3);
       const { owner, watched } = await record(s, 20);
       const r = comparePaths(owner, watched);
-      console.log(`D1 ${mode}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, worst ${r.max.toFixed(3)} m, delay ${s.bl.session.interpolationDelayMs.toFixed(1)} ms jitter ${s.bl.session.jitterMs.toFixed(1)} ms`);
-      expect(watched.length).toBeGreaterThan(1000);
-      expect(r.max).toBeLessThan(D1_MAX_ERROR_M);
-      expect(r.mean).toBeLessThan(D1_MEAN_ERROR_M);
+      console.log(`D1b seed ${seed}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, worst ${r.max.toFixed(3)} m`);
+      expect(r.max).toBeLessThan(D1B_MAX_ERROR_M);
     });
   }
 });

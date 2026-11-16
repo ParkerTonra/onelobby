@@ -144,6 +144,10 @@ interface HostPlayer {
   lastMeleeTick: number;
   relaySeq: number;
   lastInput: PlayerInput;
+  /** Owner mode: ticks on which no new state came; the next ticks take a second one to make them up. */
+  stalled: number;
+  /** Owner mode, while stalled: the last state that really came; `state` is carried on from it. */
+  carried: PlayerState | null;
 }
 
 interface Dedupe {
@@ -367,6 +371,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     this.requireHost();
     const p = this.hostPlayers.get(peerId);
     if (!p) return;
+    p.carried = null;
     p.state = this.codec.quantize({ ...p.state, ...patch, teleport: (p.state.teleport + HOST_TELEPORT_STEP) % TELEPORT_MODULO });
     if (peerId === this.localPeerId) {
       this.localState = p.state;
@@ -513,7 +518,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     const state = this.codec.quantize({ ...defaultPlayerState(), ...this.spawnFn(peer) });
     const p: HostPlayer = {
       peer, entityId: 0, state, spawned: false, awaiting: false, lastAcceptTick: this.session.clock.tick, lastTeleportMs: -1e9,
-      lastShotTick: -1e9, lastMeleeTick: -1e9, relaySeq: 0, lastInput: defaultPlayerInput(),
+      lastShotTick: -1e9, lastMeleeTick: -1e9, relaySeq: 0, lastInput: defaultPlayerInput(), stalled: 0, carried: null,
     };
     this.hostPlayers.set(peer, p);
     // host mode: the host places the player at once; owner mode: it appears with its first state
@@ -552,15 +557,52 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     for (const [peer, p] of this.hostPlayers) {
       if (peer === this.localPeerId) this.hostLocal(p);
       else {
-        const f = this.session.tryGetInput(peer);
-        if (f && !f.repeated) {
-          if (this.authority === "owner") this.acceptOwnerState(p, f.bytes, tick, now);
-          else this.stepRemote(p, f.bytes);
-        }
+        this.hostRemote(p, tick, now);
       }
       if (p.spawned) this.history.record(tick, peer, p.state);
     }
     this.session.sendSnapshot();
+  }
+
+  /**
+   * One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
+   * (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
+   * on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
+   * until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most
+   * `maxInputBuffer` stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+   */
+  private hostRemote(p: HostPlayer, tick: number, now: number): void {
+    if (this.authority !== "owner") {
+      const f = this.session.tryGetInput(p.peer);
+      if (f && !f.repeated) this.stepRemote(p, f.bytes);
+      return;
+    }
+    if (p.carried) {
+      p.state = p.carried;
+      p.carried = null;
+    }
+    const f = this.session.tryGetInput(p.peer);
+    if (f && !f.repeated) {
+      this.acceptOwnerState(p, f.bytes, tick, now);
+      while (p.stalled > 0) {
+        const g = this.session.tryGetInput(p.peer);
+        if (!g || g.repeated) break;
+        p.stalled--;
+        this.acceptOwnerState(p, g.bytes, tick, now);
+      }
+    } else if (f) p.stalled = Math.min(p.stalled + 1, Math.max(1, this.session.config.maxInputBuffer));
+    if (p.stalled > 0 && p.spawned && !p.awaiting) {
+      p.carried = p.state;
+      let s = p.state;
+      for (let i = 0; i < p.stalled; i++) s = this.coast(s);
+      p.state = s;
+    }
+  }
+
+  private coast(st: PlayerState): PlayerState {
+    const R = this.codec.config.range;
+    const c = (v: number) => Math.max(-R, Math.min(R, v));
+    return this.codec.quantize({ ...st, x: c(st.x + st.vx * this.dt), y: c(st.y + st.vy * this.dt), z: this.codec.is3d ? c(st.z + st.vz * this.dt) : st.z });
   }
 
   private hostLocal(p: HostPlayer): void {

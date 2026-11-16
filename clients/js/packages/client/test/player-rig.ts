@@ -7,6 +7,8 @@ export interface PlayerRigOptions {
   latencyMs?: number;
   jitterMs?: number;
   lossRate?: number;
+  /** Seed of the loss and jitter draws (default 1234). */
+  seed?: number;
   /** Options of the layer (one set for every peer, `step` included), or per peer name. */
   layer?: NetPlayersOptions | ((name: string) => NetPlayersOptions);
   session?: Partial<ReplicationConfig>;
@@ -24,7 +26,7 @@ export class PlayerRig extends RepRig {
   private readonly sessionConfig: Partial<ReplicationConfig>;
 
   constructor(opts: PlayerRigOptions = {}) {
-    super({ adaptiveDelay: true, ...(opts.session ?? {}) }, { latencyMs: opts.latencyMs ?? 100, lossRate: opts.lossRate ?? 0.03, jitterMs: opts.jitterMs ?? 20 });
+    super({ adaptiveDelay: true, ...(opts.session ?? {}) }, { latencyMs: opts.latencyMs ?? 100, lossRate: opts.lossRate ?? 0.03, jitterMs: opts.jitterMs ?? 20, seed: opts.seed });
     this.layerOpts = opts.layer;
     this.withRoom = !!opts.room;
     this.sessionConfig = { adaptiveDelay: true, ...(opts.session ?? {}) };

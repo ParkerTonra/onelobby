@@ -172,8 +172,9 @@ var _next_peer := 2
 
 
 ## `loss_rate` drops that share of fast frames; `jitter_ms` adds up to that much random delay to every frame.
-func _init(cfg: Dictionary = {}, latency_ms: float = 30.0, loss_rate: float = 0.0, jitter_ms: float = 0.0) -> void:
+func _init(cfg: Dictionary = {}, latency_ms: float = 30.0, loss_rate: float = 0.0, jitter_ms: float = 0.0, seed_value: int = 1234) -> void:
 	config = cfg
+	random = Rng.new(seed_value)
 	net.latency_ms = latency_ms
 	if loss_rate > 0.0:
 		net.drop_fast = func() -> bool: return random.next() < loss_rate
@@ -295,7 +296,7 @@ var layer_opts: Variant = {}
 static func player_rig(opts: Dictionary = {}) -> RefCounted:
 	var sc := {"adaptive_delay": true}
 	sc.merge(opts.get("session", {}), true)
-	var rig = (load("res://tests/replication_rig.gd") as GDScript).new(sc, float(opts.get("latency_ms", 100.0)), float(opts.get("loss_rate", 0.03)), float(opts.get("jitter_ms", 20.0)))
+	var rig = (load("res://tests/replication_rig.gd") as GDScript).new(sc, float(opts.get("latency_ms", 100.0)), float(opts.get("loss_rate", 0.03)), float(opts.get("jitter_ms", 20.0)), int(opts.get("seed", 1234)))
 	rig.layer_opts = opts.get("layer", {})
 	return rig
 

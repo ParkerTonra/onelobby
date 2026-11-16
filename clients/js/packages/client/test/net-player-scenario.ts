@@ -70,23 +70,27 @@ export function at(path: Sample[], t: number): Sample | undefined {
 
 /**
  * Two paths that are a render delay apart: find the one constant lag (0 to 600 ms, 8 ms steps) at which the watched path
- * is closest to the owner's path on average, then report the mean and worst distance at that lag.
+ * is closest to the owner's path on average, then report the mean, the 99th percentile and the worst distance at that lag.
  */
-export function comparePaths(owner: Sample[], watched: Sample[]): { lagMs: number; mean: number; max: number } {
-  let best = { lagMs: 0, mean: Infinity, max: Infinity };
+export function comparePaths(owner: Sample[], watched: Sample[]): { lagMs: number; mean: number; max: number; p99: number } {
+  let best = { lagMs: 0, mean: Infinity, max: Infinity, p99: Infinity };
   for (let lag = 0; lag <= 600; lag += 8) {
     let sum = 0;
     let max = 0;
-    let n = 0;
+    const errs: number[] = [];
     for (const w of watched) {
       const o = at(owner, w.t - lag);
       if (!o) continue;
       const d = dist(w, o);
       sum += d;
       if (d > max) max = d;
-      n++;
+      errs.push(d);
     }
-    if (n > 20 && sum / n < best.mean) best = { lagMs: lag, mean: sum / n, max };
+    const n = errs.length;
+    if (n > 20 && sum / n < best.mean) {
+      errs.sort((a, b) => a - b);
+      best = { lagMs: lag, mean: sum / n, max, p99: errs[Math.min(n - 1, Math.floor(0.99 * n))] };
+    }
   }
   return best;
 }
