@@ -170,7 +170,8 @@ func _on_joined(peer: int) -> void:
 		elif inst is Node2D and at is Vector2:
 			(inst as Node2D).position = at
 	holder.add_child(inst)
-	np.step_function = step_function
+	if step_function.is_valid(): # never overwrite a step the character set in its own _ready
+		np.step_function = step_function
 	np.bind(players)
 	characters[peer] = inst
 	inst.set_meta("onelobby_local", np.is_local)

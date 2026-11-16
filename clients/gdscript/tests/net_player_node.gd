@@ -27,7 +27,7 @@ func _check(ok: bool, what: String) -> void:
 
 
 func _run() -> void:
-	for t: Callable in [_test_owner_3d, _test_host_authority, _test_host_authority_spawn_point, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_late_spectator, _test_teleport_and_corrections, _test_body_and_missing_step]:
+	for t: Callable in [_test_owner_3d, _test_host_authority, _test_host_authority_spawn_point, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_late_spectator, _test_teleport_and_corrections, _test_body_and_missing_step, _test_character_sets_its_own_step, _test_spectator_becomes_player]:
 		_tests += 1
 		t.call()
 	print("net_player_node: %d passed, %d failed (%d test cases)" % [_pass, _fail, _tests])
@@ -59,6 +59,29 @@ func _character_scene(kind: String) -> PackedScene:
 	ap.add_animation_library("", lib)
 	root.add_child(ap)
 	ap.owner = root
+	var ps := PackedScene.new()
+	ps.pack(root)
+	root.free()
+	return ps
+
+
+## A character whose own script sets the node's `step_function` in its `_ready` (what the recipe's host example does).
+func _character_scene_with_own_step() -> PackedScene:
+	var root := Node3D.new()
+	root.name = "Player"
+	var src := GDScript.new()
+	src.source_code = "extends Node3D
+func _ready() -> void:
+	$NetPlayer.step_function = Callable(self, \"own_step\")
+func own_step(state: Dictionary, _input: Dictionary, _dt: float) -> Dictionary:
+	return state
+"
+	src.reload()
+	root.set_script(src)
+	var np := OneLobbyNetPlayer.new()
+	np.name = "NetPlayer"
+	root.add_child(np)
+	np.owner = root
 	var ps := PackedScene.new()
 	ps.pack(root)
 	root.free()
@@ -487,3 +510,51 @@ func _test_body_and_missing_step() -> void:
 	np._physics_process(0.016)
 	_check(np.is_bound() and np._warned, "host authority without a step function: the node reports it once and goes on")
 	world.free()
+
+
+func _test_character_sets_its_own_step() -> void:
+	# host authority, the spawner has no step function: a step the character sets in its own _ready must survive the spawner
+	var rig: Rig = Rig.player_rig({"layer": {"authority": "host"}})
+	rig.host_players()
+	rig.join_players("a")
+	var scene := _character_scene_with_own_step()
+	var h := _machine(rig, "host", scene)
+	var a := _machine(rig, "a", scene)
+	var apeer: int = rig.layers["a"].local_peer_id
+	_check(_np(_char(a, apeer)).step_function.is_valid(), "own step: the node keeps the step its character set in _ready (the spawner has none)")
+	_check(rig.layers["a"].step.is_valid(), "own step: and the layer got it")
+	_check(_np(_char(h, 1)).step_function.is_valid() and rig.layers["host"].step.is_valid(), "own step: the same on the host")
+	_cleanup([h, a])
+	# a spawner that has a step: it still wins over the character's
+	var rig2: Rig = Rig.player_rig({"layer": {"authority": "host"}})
+	rig2.host_players()
+	var mine := Callable(self, "_walk_step")
+	var h2 := _machine(rig2, "host", scene, {"step": mine})
+	_check(_np(_char(h2, 1)).step_function == mine and rig2.layers["host"].step == mine, "own step: a spawner with a step gives it to the node")
+	_cleanup([h2])
+
+
+func _test_spectator_becomes_player() -> void:
+	# a spectator from the start has no character; when the roster says player (the host promoted it) the spawner makes it, and the others see it
+	var rig: Rig = Rig.player_rig({"layer": {"authority": "owner"}})
+	rig.host_players()
+	rig.join_players("a")
+	rig.join_players("c", true)
+	var scene := _character_scene("node3d")
+	var h := _machine(rig, "host", scene)
+	var a := _machine(rig, "a", scene)
+	var c := _machine(rig, "c", scene)
+	var ms := [h, a, c]
+	var cpeer: int = rig.layers["c"].local_peer_id
+	for i in 60:
+		_frame(rig, ms)
+	_check(_char(c, cpeer) == null and _char(h, cpeer) == null, "spectator to player: no character while it is a spectator")
+	rig.net.spectators.erase(cpeer)
+	for i in 120:
+		var cc := _char(c, cpeer) as Node3D
+		if cc != null:
+			cc.position = Vector3(4.0, 0.0, 2.0)
+		_frame(rig, ms)
+	_check(_char(c, cpeer) != null and (_spawned["c"] as Array).any(func(e: Dictionary) -> bool: return e["peer"] == cpeer and e["is_local"]), "spectator to player: its own character is made, marked local")
+	_check(_char(h, cpeer) != null and _char(a, cpeer) != null, "spectator to player: the host and the other player get a copy")
+	_cleanup(ms)
