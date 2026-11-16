@@ -74,6 +74,16 @@
       "expect": { "engine": "godot-gdscript", "hosting.direct": true, "hosting.server": false, "lobby.joinLink": false, "ui.kind": "drop-in" }
     },
     {
+      "name": "godot_csharp_defaults",
+      "input": { "game": { "id": "com.example.ants" }, "engine": "godot-csharp" },
+      "expect": { "engine": "godot-csharp", "hosting.direct": true, "hosting.server": false, "lobby.joinLink": false, "ui.kind": "drop-in" }
+    },
+    {
+      "name": "godot_csharp_ui_can_be_overridden",
+      "input": { "game": { "id": "a" }, "engine": "godot-csharp", "ui": { "kind": "generated" } },
+      "expect": { "ui.kind": "generated" }
+    },
+    {
       "name": "diagnostics_switches",
       "input": { "game": { "id": "a" }, "diagnostics": { "reportToHost": false, "logSize": 50, "relayProbe": false, "showConnectionCheck": false } },
       "expect": { "diagnostics.reportToHost": false, "diagnostics.logSize": 50, "diagnostics.relayProbe": false, "diagnostics.showConnectionCheck": false }

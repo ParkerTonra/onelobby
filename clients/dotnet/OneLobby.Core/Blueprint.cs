@@ -604,7 +604,7 @@ namespace OneLobby
                 new SessionSection(S(session, "hostLeaves", "end"), S(session, "pause", "off"), I(session, "readyTimeoutMs", 15000),
                     I(session, "peerTimeoutMs", 0), rate, B(session, "runInBackground", true)),
                 new PlatformsSection(steam, epic, B(platforms, "discord", false)),
-                new UiSection(S(ui, "kind", web || engine == "godot-gdscript" ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
+                new UiSection(S(ui, "kind", web || engine == "godot-gdscript" || engine == "godot-csharp" ? "drop-in" : "generated"), SN(ui, "entry"), S(ui, "theme", "auto")))
             {
                 Room = BuildRoom(roomJson, lobby),
                 Diagnostics = new DiagnosticsSection(B(diag, "reportToHost", true), I(diag, "logSize", NetLog.DefaultCapacity), B(diag, "relayProbe", true), B(diag, "showConnectionCheck", true)),

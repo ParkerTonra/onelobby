@@ -515,7 +515,7 @@ static func _fill(input: Dictionary) -> Dictionary:
 	if session_in.has("rateLimit"):
 		out["session"]["rateLimit"] = session_in["rateLimit"]
 	out["platforms"] = {"steam": platforms_in.get("steam", false), "epic": platforms_in.get("epic", false), "discord": platforms_in.get("discord", false)}
-	out["ui"] = {"kind": ui_in.get("kind", "drop-in" if (web or engine_v == "godot-gdscript") else "generated"), "theme": ui_in.get("theme", "auto")}
+	out["ui"] = {"kind": ui_in.get("kind", "drop-in" if (web or engine_v == "godot-gdscript" or engine_v == "godot-csharp") else "generated"), "theme": ui_in.get("theme", "auto")}
 	if ui_in.has("entry"):
 		out["ui"]["entry"] = ui_in["entry"]
 	out["diagnostics"] = {

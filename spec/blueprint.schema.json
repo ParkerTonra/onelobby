@@ -233,7 +233,7 @@
       "properties": {
         "$comment": { "type": "string" },
         "kind": {
-          "description": "drop-in: the <one-lobby> element (web). generated: menus written into the game. none: you build it. Default: drop-in for engine web and godot-gdscript (the menu scene), generated otherwise.",
+          "description": "drop-in: the <one-lobby> element (web). generated: menus written into the game. none: you build it. Default: drop-in for engine web, godot-gdscript and godot-csharp (the menu scene), generated otherwise.",
           "enum": ["drop-in", "generated", "none"]
         },
         "entry": { "description": "Where multiplayer lives in the game's menus, e.g. \"Main menu: Play together\".", "type": "string" },

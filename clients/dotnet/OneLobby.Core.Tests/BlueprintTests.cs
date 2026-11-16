@@ -182,6 +182,8 @@ namespace OneLobby.Tests
             Assert.False(cfg.Diagnostics.RelayProbe);
             Assert.False(o.Diagnostics.ShowConnectionCheck);
             Assert.Equal("drop-in", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-gdscript""}").Ui.Kind);
+            Assert.Equal("drop-in", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-csharp""}").Ui.Kind);
+            Assert.Equal("generated", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""unity""}").Ui.Kind);
         }
 
         // ---- enforcement -------------------------------------------------------------------------------------------

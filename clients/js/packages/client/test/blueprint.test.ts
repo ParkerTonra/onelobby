@@ -170,6 +170,14 @@ describe("OneLobby.fromConfig", () => {
     expect(OneLobby.fromConfig({ game: { id: "a" }, engine: "web", sync: { mode: "replication", tickRate: 30 } }).options.mode).toBe("raw");
   });
 
+  it("ui.kind defaults to drop-in for web, godot-gdscript and godot-csharp, generated elsewhere", () => {
+    for (const engine of ["web", "godot-gdscript", "godot-csharp"] as const)
+      expect(parseBlueprint({ game: { id: "a" }, engine }).ui.kind, engine).toBe("drop-in");
+    for (const engine of ["node-browser", "unity", "dotnet"] as const)
+      expect(parseBlueprint({ game: { id: "a" }, engine }).ui.kind, engine).toBe("generated");
+    expect(parseBlueprint({ game: { id: "a" }, engine: "godot-csharp", ui: { kind: "none" } }).ui.kind).toBe("none");
+  });
+
   it("kits built with new OneLobby have no blueprint", () => {
     expect(new OneLobby({ gameId: "a", netVersion: "1", lobbyServer: "" }).blueprint).toBeUndefined();
   });

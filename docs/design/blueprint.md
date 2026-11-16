@@ -272,7 +272,7 @@ what makes the hand-edit path real: the file wins even over code that still call
 
 | Key | Type | Default | R/S | Today | Prior art |
 |---|---|---|---|---|---|
-| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `web` and `godot-gdscript`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element on the web, the `menu.tscn` scene in GDScript); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4; docs/recipes/menu.md |
+| `ui.kind` | `"drop-in"` \| `"generated"` \| `"none"` | `drop-in` for `web`, `godot-gdscript` and `godot-csharp`; `generated` elsewhere | S | `drop-in` exists (`<one-lobby>` element on the web, the `menu.tscn` scene in GDScript, the `OneLobbyMenu.tscn` scene in Godot C#); `generated` is what the recipes hand-write today | no-code.md; js-web recipe s.4; docs/recipes/menu.md |
 | `ui.entry` | free text, e.g. `"Settings > Multiplayer tab"`, `"Main menu: Play together"` | surveyed | S | new | the agent's plan; Mirror offline/online scene slots are the engine-side analogue |
 | `ui.theme` | `"light"` \| `"dark"` \| `"auto"` | `auto` | R (drop-in only) | exists (`theme` attribute); does not apply to Godot, whose menu uses the engine theme | |
 

@@ -426,7 +426,7 @@ function fill(input: Record<string, unknown>): Blueprint {
     },
     platforms: { steam: platforms.steam ?? false, epic: platforms.epic ?? false, discord: platforms.discord ?? false },
     ui: {
-      kind: ui.kind ?? (web || engine === "godot-gdscript" ? "drop-in" : "generated"),
+      kind: ui.kind ?? (web || engine === "godot-gdscript" || engine === "godot-csharp" ? "drop-in" : "generated"),
       ...(ui.entry !== undefined ? { entry: ui.entry } : {}),
       theme: ui.theme ?? "auto",
     },

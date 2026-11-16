@@ -98,6 +98,12 @@ func _room_section() -> void:
 
 func _extras() -> void:
 	_room_section()
+	for eng: String in ["web", "godot-gdscript", "godot-csharp"]:
+		var d := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": eng})
+		_check(d.ok and d.value_at("ui.kind") == "drop-in", "ui.kind defaults to drop-in for engine %s" % eng)
+	for eng: String in ["node-browser", "unity", "dotnet"]:
+		var g := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": eng})
+		_check(g.ok and g.value_at("ui.kind") == "generated", "ui.kind defaults to generated for engine %s" % eng)
 	# text and files
 	var bad := OneLobbyConfig.parse("{ not json")
 	_check(not bad.ok and bad.error["rule"] == "json" and bad.error["code"] == "bad_config", "invalid JSON text: json rule")
