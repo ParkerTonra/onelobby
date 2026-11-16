@@ -264,7 +264,7 @@ stripping control and bidi characters). An empty reason becomes the default sent
 `defaultReasons`). The removed player sees `removed { code, reason, ban }` (the `room` event `removed`; also
 `lobby.removal`) before its `sessionEnded`. A host's declined join request has code `denied` ("The host did not let you in."). The reason is plain text for the player, never a stack or an address. When a `deny` frame and the signaling kick notice both reach
 the joiner, the `deny`'s code and reason are the removal (an old hub drops the kick's `code`), so a joiner reads the frames its
-host already sent before it ends the session on the kick notice.
+host already sent before it ends the session on the kick notice. When the notice arrives first and the host has not answered the joiner yet (no `snap`, no `deny`), the joiner was refused, not banned: its removal is the notice's `code` and its sentence with `ban` false, and the client reports the same error the `deny` would (the code and its sentence). With an old hub that drops the code the joiner can only show `disconnected`.
 
 ### 5.2 How it travels
 

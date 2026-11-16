@@ -1308,7 +1308,12 @@ export class Lobby extends Emitter<LobbyEvents> {
           if (typeof d.closeCode === "number") close.code = d.closeCode;
           if (typeof d.closeReason === "string") close.reason = d.closeReason;
           const rc = typeof d.code === "string" && CODE_PATTERN.test(d.code) ? d.code : d.reason === "denied" ? "denied" : d.ban === false ? "disconnected" : "kicked";
-          this.removal ??= { code: rc, reason: removalReason(rc, close.reason), ban: (d.ban !== false || rc === "banned") && d.reason !== "denied" };
+          // a joiner the host has not answered yet was refused, never banned (spec/room.md 5.1): its `deny` frame says so, but
+          // it races this notice, so a notice that wins must not read as the ban itself, and it names the refusal as the `deny` would
+          const refused = !this.isHost && this.room.supported === undefined;
+          const fresh = this.removal === null;
+          this.removal ??= { code: rc, reason: removalReason(rc, close.reason), ban: (d.ban !== false || rc === "banned") && d.reason !== "denied" && !refused };
+          if (fresh && refused && rc === d.code) this.reportError(new OneLobbyError(rc, this.removal.reason));
           this.room.onRemoved(this.removal);
           this.teardown(d.ban === false ? "disconnected" : "kicked", close.code !== undefined || close.reason !== undefined ? close : undefined);
         }

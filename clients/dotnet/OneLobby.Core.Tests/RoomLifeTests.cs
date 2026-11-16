@@ -166,6 +166,44 @@ namespace OneLobby.Tests
             Assert.Equal(new[] { "Host" }, host.Room.Entries.Select(e => e.Name));
         }
 
+        private static System.Text.Json.JsonElement Notice(string code, bool? ban) =>
+            System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(
+                ban == null ? new Dictionary<string, object> { ["code"] = code, ["closeReason"] = RoomRules.RemovalReason(code, "") }
+                            : new Dictionary<string, object> { ["code"] = code, ["closeReason"] = RoomRules.RemovalReason(code, ""), ["ban"] = ban.Value })).RootElement.Clone();
+
+        [Theory]
+        [InlineData("bad_password")]
+        [InlineData("banned")]
+        public void AJoinerTheHostHasNotAnsweredYetIsRefusedWhenTheHubsNoticeBeatsTheDeny(string code)
+        {
+            var r = new RoomRig();
+            var (_, host) = r.Host();
+            var (ka, a) = r.Join(host, "Ann");
+            var errors = new List<string>();
+            ka.Client.Error += e => errors.Add(e.Code);
+            var ended = new List<string>();
+            a.SessionEnded += w => ended.Add(w);
+            var removed = 0;
+            a.Room.Removed += _ => removed++;
+            typeof(Room).GetProperty("Supported")!.SetValue(a.Room, null); // the host's answer has not arrived
+            a.OnServerError(new LobbyError("kicked", "kicked"), true, Notice(code, false));
+            Assert.Equal(new RemovalInfo(code, RoomRules.RemovalReason(code, ""), false), a.Removal);
+            Assert.Contains(code, errors);
+            Assert.Single(ended);
+            Assert.Equal(1, removed);
+        }
+
+        [Fact]
+        public void AJoinerAlreadyInTheRoomThatIsKickedWithBanTrueStillReadsBanTrue()
+        {
+            var r = new RoomRig();
+            var (_, host) = r.Host();
+            var (_, a) = r.Join(host, "Ann");
+            Assert.True(a.Room.Supported);
+            a.OnServerError(new LobbyError("kicked", "kicked"), false, Notice("banned", null));
+            Assert.Equal(new RemovalInfo("banned", RoomRules.RemovalReason("banned", ""), true), a.Removal);
+        }
+
         [Fact]
         public void ABanByAddressAloneCatchesAClientByItsLinkAddress()
         {

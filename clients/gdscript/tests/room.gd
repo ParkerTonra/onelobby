@@ -162,6 +162,8 @@ func _run() -> void:
 		await _old_host_and_old_joiner()
 	if only == "" or only == "options":
 		await _options_and_blueprint()
+	if only == "" or only == "notice":
+		await _notice_before_deny()
 	print("room: %d passed, %d failed" % [_pass, _fail])
 	for p: P in _everyone:
 		if p.lobby != null and not p.lobby.is_closed():
@@ -325,6 +327,38 @@ func _main_flow() -> void:
 		if p.lobby != null and not p.lobby.is_closed():
 			p.lobby.leave()
 	await _frames(10)
+
+
+# ---- the hub's kick notice beats the host's deny frame (forced order) -----------------------------------------------------
+
+func _notice(code: String, extra: Dictionary) -> String:
+	var data := {"code": code, "closeReason": OneLobbyRoomRules.removal_reason(code)}
+	data.merge(extra, true)
+	return JSON.stringify({"t": "error", "code": "kicked", "msg": "kicked", "data": data})
+
+
+## A joiner the host has not answered yet gets the signaling `error{kicked}` before any `deny`: it was refused (ban false, the
+## code of the notice, the client's last_error names it) and the session ends once. A joiner already in the room that gets the
+## same notice with ban true still reads ban true.
+func _notice_before_deny() -> void:
+	var h := await _host("Sam", {"max_players": 5, "room": {"countdown_seconds": 0}})
+	if h == null:
+		return
+	for code: String in ["bad_password", "banned"]:
+		var j := await _join(h, "Ann")
+		_check(j.lobby != null and await _until(func() -> bool: return _in(j)), "notice first (%s): a joiner is in" % code)
+		j.lobby.room.supported = null # the host's answer has not arrived
+		j.client._dispatch(_notice(code, {"ban": false}))
+		var rem := j.lobby.removal
+		_check(rem.get("code") == code and rem.get("reason") == OneLobbyRoomRules.removal_reason(code) and rem.get("ban") == false, "notice first (%s): refused, ban false: %s" % [code, JSON.stringify(rem)])
+		_check(j.client.last_error.get("code") == code, "notice first (%s): last_error names the refusal: %s" % [code, JSON.stringify(j.client.last_error)])
+		_check(j.ended.size() == 1 and j.count("removed") == 1, "notice first (%s): the session ends once (%d, %d)" % [code, j.ended.size(), j.count("removed")])
+	var k := await _join(h, "Cy")
+	_check(k.lobby != null and await _until(func() -> bool: return _in(k)), "a joiner is in for the mirror case")
+	k.client._dispatch(_notice("banned", {}))
+	_check(k.lobby.removal == {"code": "banned", "reason": OneLobbyRoomRules.removal_reason("banned"), "ban": true} and k.ended.size() == 1, "a joiner already in the room, kicked with ban true, still reads ban true: %s" % JSON.stringify(k.lobby.removal))
+	h.lobby.leave()
+	await _frames(5)
 
 
 # ---- passwords, kick, ban, unban, removal ----------------------------------------------------------------------------

@@ -1479,7 +1479,12 @@ namespace OneLobby
             var rawCode = Signaling.Str(data, "code");
             var denied = Signaling.Str(data, "reason") == "denied";
             var rc = RoomRules.IsCode(rawCode) ? rawCode : denied ? "denied" : disconnected ? "disconnected" : "kicked";
-            Removal ??= new RemovalInfo(rc, RoomRules.RemovalReason(rc, Signaling.Str(data, "closeReason")), (!disconnected || rc == "banned") && !denied);
+            // a joiner the host has not answered yet was refused, never banned (spec/room.md 5.1): its `deny` frame says so, but it
+            // races this notice, so a notice that wins must not read as the ban itself, and it names the refusal as the `deny` would
+            var refused = !IsHost && Room.Supported == null;
+            var fresh = Removal == null;
+            Removal ??= new RemovalInfo(rc, RoomRules.RemovalReason(rc, Signaling.Str(data, "closeReason")), (!disconnected || rc == "banned") && !denied && !refused);
+            if (fresh && refused && rawCode == rc) RoomReportError(rc, Removal.Reason);
             Room.OnRemoved(Removal);
             End(disconnected ? "disconnected" : "kicked");
         }
