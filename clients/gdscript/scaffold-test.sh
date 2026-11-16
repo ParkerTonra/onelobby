@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end check of create-onelobby's godot-gdscript template, in the GDScript CI job (and by hand). Loopback only.
 #   1. scaffold a new project, import it, run its own tests/multiplayer.gd, expect MULTIPLAYER_OK
-#   2. scaffold --into an empty Godot project, the same; then a second --into run must change nothing
+#   2. play it the way AGENTS.md and the .olc entry say: two headless processes (-- --host --local --name=Host and
+#      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
+#   3. scaffold --into an empty Godot project, the same as 1; then a second --into run must change nothing
 # The add-on comes from this checkout (--addon-from) and the natives from the folder fetch-webrtc.sh already unpacked
 # (--webrtc-dir), so nothing is downloaded twice.
 #   usage: GODOT=/path/to/godot clients/gdscript/scaffold-test.sh      (SCAFFOLD_TMP=<folder> to choose where projects are made)
@@ -30,9 +32,44 @@ check() { # check <name> <project dir>
   if ! grep -a -q '^MULTIPLAYER_OK' "$WORK/$name.out"; then echo "FAIL $name"; tail -n 30 "$WORK/$name.out"; FAILS=$((FAILS + 1)); fi
 }
 
+# two_process <name> <project dir>: the two windows of the play entry, headless. The command lines come from the scaffolded
+# .olc/<slug>.json (both shells, matched against AGENTS.md by scaffold-play-args.mjs). test/helpers/scaffold_probe.gd, an autoload added to
+# this scratch copy only, watches the real menu and prints PROBE_OK / PROBE_FAIL <the menu's own error text>.
+PROBE="$ROOT/clients/js/packages/create-onelobby/test/helpers/scaffold_probe.gd"
+two_process() {
+  local name="$1" dir="$2" lines host_args join_args
+  lines="$(node "$HERE/scaffold-play-args.mjs" "$dir" 2>&1)" || { echo "FAIL $name: $lines"; FAILS=$((FAILS + 1)); return; }
+  host_args="$(echo "$lines" | sed -n 1p | tr -d '\r')"; join_args="$(echo "$lines" | sed -n 2p | tr -d '\r')"
+  echo "play entry: host: -- $host_args | joiner: -- $join_args"
+  # the play entry's direct port: say plainly when another program holds it instead of timing out
+  if ! node -e 'const s = require("net").createServer(); s.once("error", (e) => { console.error(e.code); process.exit(3); }); s.listen(47810, "127.0.0.1", () => s.close(() => process.exit(0)));' 2> "$WORK/$name.port"; then
+    echo "FAIL $name: port 47810 (the play entry's direct port) is already in use on this machine ($(tr -d '\r\n' < "$WORK/$name.port")); stop what holds it and rerun"; FAILS=$((FAILS + 1)); return
+  fi
+  cp "$PROBE" "$dir/scaffold_probe.gd"
+  sed -i 's#^Net="\*res://net.gd"#&\nScaffoldProbe="*res://scaffold_probe.gd"#' "$dir/project.godot"
+  grep -q ScaffoldProbe "$dir/project.godot" || { echo "FAIL $name: could not register the probe autoload"; FAILS=$((FAILS + 1)); return; }
+  # shellcheck disable=SC2086
+  "${G[@]}" --path "$dir" -- $host_args > "$WORK/$name.host.out" 2>&1 &
+  local hpid=$! ok=1
+  for _ in $(seq 1 400); do grep -a -q -E 'PROBE_HOST_LISTENING|PROBE_FAIL' "$WORK/$name.host.out" && break; kill -0 $hpid 2>/dev/null || break; sleep 0.1; done
+  if grep -a -q PROBE_HOST_LISTENING "$WORK/$name.host.out"; then
+    # shellcheck disable=SC2086
+    timeout 70 "${G[@]}" --path "$dir" -- $join_args > "$WORK/$name.join.out" 2>&1
+    grep -a -q "^PROBE_OK joiner" "$WORK/$name.join.out" && ok=0
+    for _ in $(seq 1 100); do grep -a -q "^PROBE_OK host" "$WORK/$name.host.out" && break; sleep 0.1; done
+    grep -a -q "^PROBE_OK host" "$WORK/$name.host.out" || ok=1
+  fi
+  kill $hpid 2>/dev/null; wait $hpid 2>/dev/null
+  grep -a -h -E '^PROBE_' "$WORK/$name.host.out" "$WORK/$name.join.out" 2>/dev/null
+  if [ $ok -ne 0 ]; then
+    echo "FAIL $name: the two play-entry processes did not reach a two-player lobby"; tail -n 15 "$WORK/$name.host.out"; tail -n 15 "$WORK/$name.join.out" 2>/dev/null; FAILS=$((FAILS + 1))
+  fi
+}
+
 echo "::group::new project (--template godot-gdscript)"
 node "$CLI" "$WORK/new" --template godot-gdscript --yes --no-git --addon-from "$ROOT" --webrtc-dir "$NATIVES" || FAILS=$((FAILS + 1))
 check new "$WORK/new"
+two_process new "$WORK/new"
 echo "::endgroup::"
 
 echo "::group::--into an empty Godot project"
