@@ -385,7 +385,7 @@ func _kick_ban_password() -> void:
 	_check(hr.bans.size() == 1 and hr.bans.list()[0]["id"] == cy_pid and hr.bans.list()[0]["reason"] == "no spoilers" and h.count("bans") == 1, "the ban list holds its player id and reason, and bans_changed fired")
 	var cy2 := await _join(h, "Cy", {"password": "pw"}, cy_store)
 	_check(cy2.lobby != null and await _until(func() -> bool: return cy2.count("removed") == 1), "joining again with the same install is refused")
-	_check(cy2.lobby.removal == {"code": "banned", "reason": "You are banned from this game.", "ban": false} and await _until(func() -> bool: return cy2.ended.size() == 1), "with banned and the default sentence (a refused join is not the ban itself: ban false)")
+	_check(cy2.lobby.removal == {"code": "banned", "reason": "You are banned from this game.", "ban": false} and await _until(func() -> bool: return cy2.ended.size() == 1), "with banned and the default sentence (a refused join is not the ban itself: ban false): %s" % JSON.stringify(cy2.lobby.removal))
 	_check(hr.entries().size() == 3 or hr.entries().size() == 2, "(it never got an entry)")
 	var other := await _join(h, "Dee", {"password": "pw"})
 	_check(other.lobby != null and await _until(func() -> bool: return _in(other)), "another install is not affected")

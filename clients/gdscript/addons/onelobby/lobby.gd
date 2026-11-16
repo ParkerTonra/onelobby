@@ -967,8 +967,11 @@ func _on_server_error(error_code: String, disconnected: bool, data: Dictionary =
 	var denied := OneLobbySignaling.s(data, "reason") == "denied"
 	var rc := raw_code if OneLobbyRoomRules.is_code(raw_code) else ("denied" if denied else ("disconnected" if disconnected else "kicked"))
 	if removal.is_empty():
+		# a joiner the host has not answered yet was refused, never banned (spec/room.md 4.8): the host's `deny` frame says so
+		# (ban false), but it races this signaling notice, so a notice that wins must not read as the ban itself
+		var refused := not is_host and room.supported == null
 		removal = {"code": rc, "reason": OneLobbyRoomRules.removal_reason(rc, OneLobbySignaling.s(data, "closeReason")),
-			"ban": (not disconnected or rc == "banned") and not denied}
+			"ban": (not disconnected or rc == "banned") and not denied and not refused}
 	room._on_removed(removal)
 	_end("disconnected" if disconnected else "kicked")
 
