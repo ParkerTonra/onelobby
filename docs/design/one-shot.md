@@ -29,7 +29,7 @@ Missing or half there:
 | UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
 | Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. No drop-in menu draws it yet. |
 | Ban | Per lobby, by IP, forgotten when the lobby ends. No game shows kick/ban in its UI. |
-| Settings | Nothing persists name, relay line or last code outside the browser. |
+| Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. No drop-in menu draws the fields yet. |
 | Errors | Plain-language `describeError` exists in JS only. Players never see *why* a connection failed. |
 | Verify | No one-command two-peer test for a game; Unity is not in engine-smoke. |
 | Recommendation | The skill has sync-mode rules; the scaffolder asks instead of recommending. |

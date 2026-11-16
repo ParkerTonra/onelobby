@@ -327,6 +327,8 @@ recipe, verify two players headless, report. Design and the reasons behind each 
   adapter): `docs/recipes/browser-game.md`
 - Dev console a local tool can reach (`ogc1`: loopback HTTP, token file, off by default): `docs/recipes/game-console.md`
 - TURN relay for Direct mode (strict NATs, `ice_failed`; bring your own, coturn or hosted, expiring logins): `docs/recipes/turn.md`
+- The player's saved name, relay line (masked), last code and lobby server, with an environment override: `docs/recipes/settings.md`
+  (`kit.settings` / `client.Settings` / `client.settings`; applied as defaults, an explicit argument wins; the relay line is never logged)
 - Run your own server: `docs/recipes/self-host.md` (the hosted backend; parked behind direct IP for now)
 
 Example target for practice: `examples/tictactoe/` (single player, no networking).

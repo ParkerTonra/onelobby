@@ -63,6 +63,9 @@ Without a bundler: `import { OneLobby } from "https://cdn.jsdelivr.net/npm/onelo
 - A page **reload keeps the seat** (`rememberSeat`, on by default): `kit.join(sameCode)` or `kit.resume()` takes it back;
   `kit.rememberedCode` says which lobby.
 - `OneLobby.describeError(err)` turns any error into `{ message, hint }` you can show as-is.
+- The player's own name, TURN relay line, last code and lobby server are saved on their machine (`localStorage`; Node: `settingsFile`)
+  and used as defaults: `kit.settings.save({ name, relay })`, `kit.settings.maskedRelay()`; `ONELOBBY_NAME`, `ONELOBBY_RELAY`,
+  `ONELOBBY_LAST_CODE` and `ONELOBBY_LOBBY_SERVER` override them in Node. See `docs/recipes/settings.md`.
 - Test seams go under `advanced: { socketFactory, linkFactory, clock, storage, ... }`.
 
 ## Files

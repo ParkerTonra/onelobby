@@ -201,8 +201,14 @@ in `welcome.ice` for every joiner and the host uses them too. So a player who se
 relay has both; a player who hosts shares theirs with everyone who joins. If a player only wants to protect themselves,
 set it as a joiner entry and leave host entries to the game.
 
-**Where to keep it.** In the game's per-player settings file (or a settings field), never in the project and never
-committed. The credential is the player's own; do not log it or send it anywhere but into the ICE list.
+**Where to keep it.** In the player's saved settings, never in the project and never committed. The kit keeps it for you:
+`kit.settings.save({ relay: text })` (JS), `client.Settings.Save(relay: text)` (C#) and `client.settings.save({"relay": text})`
+(GDScript) check the line with the parser above, store it on the player's machine, and add it to this player's ICE list on every
+host and join, as described in "How it combines". `maskedRelay()` / `MaskedRelay()` / `masked_relay()` gives the text for the
+settings field (`turn:relay.example.com:3478 <hidden> <hidden>`), and the environment variable `ONELOBBY_RELAY` overrides it for
+one run. Where it lives per platform, the other three settings, and how to switch the default off: `docs/recipes/settings.md`.
+The credential is the player's own; the kit never logs it, and nor should you. The snippet below is the by-hand route, for a
+game that keeps the line itself.
 
 ```ts compile file=player-turn.ts
 import { parseTurnLine, type IceServer } from "onelobby";

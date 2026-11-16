@@ -27,18 +27,14 @@ public sealed record OneLobbyConfig(string GameId, string NetVersion, Uri LobbyS
     public string? BanFile { get; init; }
     /// The room layer's defaults for every lobby this client hosts (the blueprint's room fills the same); LobbyOptions.Room wins.
     public RoomOptions? Room { get; init; }
-    /// The net log, the report to the host and the relay probe (spec/diagnostics.md). Every switch has a working default.
-    public DiagnosticsOptions Diagnostics { get; init; }
-/// Diagnostics switches (spec/diagnostics.md): all have working defaults.
-public sealed record DiagnosticsOptions
-    /// Net log ring size: default 500, clamped to 50..5000.
-    public int LogSize { get; init; }
-    /// Where the log is saved: on NetLog.Save with no path, when the process exits, and when it dies from an unhandled exception. Null: memory only.
-    public string? LogPath { get; init; }
-    /// A joiner that gives up tells the host why, over the signaling path it already uses (default true). Hubs without the diag feature get nothing either way.
-    public bool ReportToHost { get; init; }
-    /// After a failed connect with a relay set, ask the TURN server with a raw UDP probe whether it refused the login or never answered (default true).
-    public bool RelayProbe { get; init; }
+    /// Where the player's saved settings (name, relay line, last code, lobby server: spec/settings.md) are kept. Default: SettingsFile when given, else memory. The Unity runner uses PlayerPrefs, OneLobby.Godot a file under user://.
+    public IKeyValueStore? SettingsStore { get; init; }
+    /// A JSON file path that keeps the player's settings across runs (the key/value file of PlayerIdFile).
+    public string? SettingsFile { get; init; }
+    /// Which saved settings are applied as defaults (all on); SettingsOptions.None switches them all off. An explicit value in this config always wins.
+    public SettingsOptions? Settings { get; init; }
+    /// Reads the environment variables that override the saved settings (default: the process environment; PlayerSettings.NoEnvironment: none).
+    public Func<string, string?>? SettingsEnv { get; init; }
 /// At most Messages raw messages per peer in any PerMs window (a fixed window, reset every PerMs).
 public sealed record RateLimit(int Messages, int PerMs);
 public sealed record LobbyOptions(string Name, int MaxPlayers = 4, Visibility Visibility = Visibility.Unlisted, bool LateJoin = true, IReadOnlyDictionary<string, string>? Meta = null)
@@ -52,16 +48,12 @@ public sealed record LobbySummary(string Code, string Name, string HostName, int
 public sealed record Peer(int PeerId, string Name, int PingMs, bool Relayed);
 public readonly record struct Frame(long Tick, IReadOnlyList<(int PeerId, ReadOnlyMemory<byte> Command)> Commands);
 public sealed record DesyncInfo(long Tick, ulong HostHash, ulong LocalHash, int ResyncCount);
-public sealed record LobbyError(string Code, string Message)
-    /// When the error is a connection failure, why (spec/diagnostics.md s.9). The Code is unchanged.
-    public Diagnosis? Diagnosis { get; init; }
+public sealed record LobbyError(string Code, string Message);
 public sealed record ChatLine(int PeerId, uint Id, long Ts, string Text);
 public enum VoiceMode { PushToTalk, VoiceActivity }
 /// Thrown by the async lobby calls when the server answers with an error.
 public class OneLobbyException : Exception
     public string Code { get; }
-    /// When the failure was a connection problem, why (spec/diagnostics.md s.9): the cause, one sentence and one next step. The Code is unchanged.
-    public Diagnosis? Diagnosis { get; set; }
     public OneLobbyException(string code, string message) : base(code + ": " + message);
 ```
 
@@ -141,53 +133,6 @@ public sealed class ChunkAssembler
     public void Clear();
 ```
 
-## OneLobby.Core/ConnectionCheck.cs
-
-```csharp
-/// What ConnectionCheck.CheckAsync measures with.
-public sealed class CheckOptions
-    /// STUN URLs to ask; default the two the clients connect with.
-    public IReadOnlyList<string>? Stun { get; init; }
-    /// The player's TURN entry (or entries); the first turn: one is tested. Default none.
-    public IReadOnlyList<IceServer>? IceServers { get; init; }
-    /// Give up on the whole check after this long (default 8000 ms).
-    public int TimeoutMs { get; init; }
-    /// How long each STUN or TURN server gets to answer, with one retransmit at a third of it (default 1500 ms).
-    public int ServerTimeoutMs { get; init; }
-    /// Bind the probe socket here (default: all interfaces, or 127.0.0.1 when every target is loopback).
-    public string? BindAddress { get; init; }
-/// STUN and TURN messages, hand-rolled (RFC 5389 / RFC 5766): what the check and the relay probe speak, and what test servers answer with.
-public static class StunMessages
-    /// An RFC 5389 Binding Request with transaction id tid (12 bytes).
-    public static byte[] BindingRequest(byte[] tid);
-    /// The mapped address in a Binding success response for tid (XOR-MAPPED-ADDRESS, else MAPPED-ADDRESS); null when there is none.
-    public static (string Ip, int Port)? ParseBindingResponse(byte[] bytes, byte[] tid);
-    /// A Binding success response carrying XOR-MAPPED-ADDRESS ip:port (what test STUN servers answer).
-    public static byte[] BindingResponse(byte[] tid, string ip, int port);
-    /// A TURN Allocate request for UDP. Without auth it is the bare first request; with it, the long-term credential form.
-    public static byte[] TurnAllocateRequest(byte[] tid, (string Username, string Realm, byte[] Nonce, string Password)? auth = null);
-    /// What a TURN server answered: success, or an error code with the realm and nonce it wants (for the 401 round); null when it is not an answer for tid.
-    public static (bool Ok, int Code, string? Realm, byte[]? Nonce)? ParseTurnResponse(byte[] bytes, byte[] tid);
-    /// The transaction id of a STUN message (bytes 8..20), or null when it is too short.
-    public static byte[]? TransactionId(byte[] bytes);
-    /// The message type (first two bytes).
-    public static int TypeOf(byte[] bytes);
-/// The connection check (spec/diagnostics.md s.8): UDP, NAT type and relay login, measured with raw UDP from one socket against the STUN servers the client already uses and the player's own TURN entry, and nothing else.
-public static class ConnectionCheck
-    public const int ServerMs;
-    public const int RetransmitMs;
-    public const int WholeMs;
-    public static readonly IReadOnlyList<string> DefaultStun;
-    /// host and port of a stun: / turn: URL (UDP only: stuns:, turns: and a tcp transport give null).
-    public static (string Host, int Port)? IceUrlTarget(string url);
-    /// True when every target is a loopback address: such a check binds 127.0.0.1, not all interfaces (spec/diagnostics.md s.8).
-    public static bool AllLoopback(IEnumerable<(string Host, int Port)> targets);
-    /// Probes a relay entry on its own (a fresh UDP socket): ok, refused (the server answered and turned the login down), unreachable (no answer) or unknown. A lobby uses it to tell relay_refused from relay_unreachable after a failed connect.
-    public static async Task<string> ProbeRelayAsync(IceServer s, int ms = ServerMs);
-    /// Checks what this network allows: whether UDP gets out, the NAT's behaviour, and whether a configured relay takes the login. Nothing is contacted but the STUN servers (default: the ones the client connects with) and the player's own TURN entry. Run it from a menu; the library never runs it by itself.
-    public static async Task<CheckResult> CheckAsync(CheckOptions? options = null);
-```
-
 ## OneLobby.Core/Crockford.cs
 
 ```csharp
@@ -205,99 +150,11 @@ public static class Crockford
     public static string FromValue(uint value);
 ```
 
-## OneLobby.Core/Diagnose.cs
-
-```csharp
-/// The causes of a failed connection (spec/diagnostics.md s.3). A newer peer may report a code this client does not list: it reads as TimeoutUnknown.
-public static class Causes
-    public const string NatBlocked;
-    public const string RelayRefused;
-    public const string RelayUnreachable;
-    public const string UdpBlocked;
-    public const string Firewall;
-    public const string VersionMismatch;
-    public const string HostUnreachable;
-    public const string SignalingUnreachable;
-    public const string TimeoutUnknown;
-/// How far a connection attempt got (the last step it completed).
-public enum Reached { None, Signaling, Joined, Offer, Ice, Channels }
-/// What a TURN allocation did on a link (None: no TURN entry; Failed: gathering ended with no relay, reason unknown).
-public enum RelayState { None, Pending, Ok, Refused, Unreachable, Failed }
-/// Everything a client can observe about one connection attempt (spec/diagnostics.md s.2). Candidate types are host, srflx, relay (sorted, unique).
-public sealed record DiagnoseFacts
-    /// joiner or host.
-    public string Side { get; init; }
-    /// server, ip or nostr.
-    public string Route { get; init; }
-    /// The error code that ended the attempt, or null.
-    public string? Error { get; init; }
-    public Reached Reached { get; init; }
-    public long ElapsedMs { get; init; }
-    public (string Mine, string Theirs)? Versions;
-    /// Route nostr: at least one relay connected; null otherwise or unknown.
-    public bool? RelaysUp { get; init; }
-    /// A stun: server was in the link's ICE list.
-    public bool Stun { get; init; }
-    public RelayState Relay { get; init; }
-    public IReadOnlyList<string> Local { get; init; }
-    public IReadOnlyList<string> Remote { get; init; }
-    public bool Retried { get; init; }
-    /// unknown, open, cone, symmetric or blocked.
-    public string Nat { get; init; }
-    /// Host side: any ICE traffic from this joiner reached the listener; null when the platform cannot tell.
-    public bool? Heard { get; init; }
-/// What Diagnose.Run says: the cause and the sentences a player reads.
-public sealed record Diagnosis(string Cause, string Message, string Hint, string Stage);
-/// The text of one cause (spec/diagnostics.md s.4).
-public sealed record CauseExplanation(string Cause, string Message, string Hint, string HostHint, string Short);
-/// What a joiner tells the host it dialed: fixed, typed fields, never an address, name, free text or credential (s.7.1).
-public sealed record DiagnosisReport(string Cause, string Stage, long ElapsedMs, bool RelaySet, string? NatType, IReadOnlyList<string> LocalTypes, IReadOnlyList<string> RemoteTypes, string ClientVersion)
-    /// The report as the JSON object the wire carries (key order as the spec's).
-    public string ToJson();
-/// What a host learns when a joiner it dialed could not connect (Lobby.PeerDiagnosis, spec/diagnostics.md s.7.3).
-public sealed record PeerDiagnosisInfo(Peer Peer, string Name, DiagnosisReport Report, string Message, string Hint, string Line);
-/// The connection check's findings (what Diagnose.CheckVerdict reads).
-public sealed record CheckFindings(string Udp, string NatType, string Relay);
-/// What LobbyClient.CheckConnectionAsync returns.
-public sealed record CheckResult(string Udp, string NatType, string Relay, string Verdict, string Message);
-/// The pure part of diagnostics (spec/diagnostics.md, vectors in spec/vectors/diagnostics.json): the cause table, Run, the host line, the report cleaner and the check verdict. No network, no clock.
-public static class Diagnose
-    /// The stage a failed attempt stopped at, from how far it got.
-    public static string StageOf(Reached reached);
-    /// The Reached a vector names (none, signaling, ...).
-    public static Reached ParseReached(string s);
-    /// The RelayState a vector names.
-    public static RelayState ParseRelay(string s);
-    /// under 1 s below a second, else whole seconds rounded to nearest (halves up) and s.
-    public static string ElapsedText(long ms);
-    /// How a stage reads in a sentence (an unknown stage reads as ice).
-    public static string StageText(string stage);
-    /// The sentence, next step and host-side step for a cause code (an unknown code reads as timeout_unknown).
-    public static CauseExplanation Explain(string cause, string stage = "ice", long elapsedMs = 0, string? mine = null, string? theirs = null);
-    /// The cause of a failed connection, from what the client observed. Pure: every client gives the same answer for the same facts.
-    public static Diagnosis Run(DiagnoseFacts facts);
-    /// The line a host shows for a joiner's failure: Sam: strict NAT, no relay set, stopped at the connection check after 15 s.
-    public static string HostLine(string name, string cause, string stage, long elapsedMs);
-    public const int ReportMaxBytes;
-    public const int ReportsPerWindow;
-    public const int ReportWindowMs;
-    /// The host keeps at most one report per peer in this long.
-    public const int ReportHostGapMs;
-    /// The report rebuilt from the known fields (anything else is dropped), or null when it is not a valid report.
-    public static DiagnosisReport? CleanReport(JsonElement r);
-    /// The one line a menu shows for a check (first match wins, spec/diagnostics.md s.8).
-    public static (string Verdict, string Message) CheckVerdict(CheckFindings r);
-    /// udp and natType from what the STUN servers saw: asked servers were queried from one socket, answers are the mapped addresses that came back, local the socket's own address when known (it decides open).
-    public static (string Udp, string NatType) ClassifyNat(int asked, IReadOnlyList<(string Ip, int Port)> answers, (string Ip, int Port)? local);
-    /// The nat fact a Run call takes from a check result.
-    public static string NatFact(CheckResult? r);
-```
-
 ## OneLobby.Core/Friendly.cs
 
 ```csharp
 /// A player-facing error: a stable code, one short sentence and, when there is one, what the player can do.
-public sealed record FriendlyError(string Code, string Message, string? Hint = null, string? Cause = null, string? Stage = null);
+public sealed record FriendlyError(string Code, string Message, string? Hint = null);
 /// Plain-language error text for players. The wording is the JS client's describeError word for word (spec/vectors/describe-error.json is the shared test); nothing here touches the network.
 public static class Friendly
     /// Text for a caught exception: a OneLobbyException by its OneLobbyException.Code; timeouts and socket / HTTP failures as timeout / connect_failed; anything else (a stack trace or a raw technical message is never shown) as unknown.
@@ -348,13 +205,6 @@ public interface IRemoteAddressPeerLink
 /// Optional on an IPeerLink: how many bytes of PeerChannel.Reliable frames are queued and not yet handed to the network stack (WebRTC bufferedAmount). Lobby.FlushAsync waits for 0; a link without it counts as always flushed.
 public interface IBufferedPeerLink
     long ReliableBufferedBytes { get; }
-/// What a link knows for a diagnosis (spec/diagnostics.md s.2).
-public sealed record LinkFacts(bool IceConnected, RelayState Relay);
-/// Optional on an IPeerLink: what the link tells a diagnosis (ICE steps for the net log, and the facts above). A link without it gets a diagnosis from the signaling traffic alone.
-public interface IDiagnosticPeerLink
-    /// Called with a net log kind (ice, chan, route) and a text with no address or credential.
-    Action<string, string>? OnTrace { get; set; }
-    LinkFacts Facts();
 /// What a transport needs to build one peer link.
 public sealed record PeerLinkOptions(int RemotePeerId, bool Initiator, IReadOnlyList<IceServer> IceServers, bool RelayOnly, int PortRangeBegin = 0, int PortRangeEnd = 0, IReadOnlyList<string>? ExtraRemoteCandidates = null, bool NoIceServers = false);
 /// Engine-specific plumbing. OneLobby.Godot and InMemoryNetwork implement it.
@@ -523,8 +373,6 @@ public sealed class Lobby : IAsyncDisposable
     public event Action<Peer, string>? PeerLeft;
     /// Host only: a joiner never got its link to the host open ("a friend could not connect"). The reason is "timeout" when it is not ready OneLobbyConfig.ReadyTimeout after joining (it keeps its seat and may still connect: PeerReady then fires as usual), else the PeerLeft reason when it leaves before it was ready (a joiner's own ice_failed ends that way). Fires at most once per peer, just before that PeerLeft; not for peers the host kicks or disconnects. Zero ReadyTimeout turns the timeout off.
     public event Action<Peer, string>? PeerFailed;
-    /// Host: a joiner that could not connect told you why (spec/diagnostics.md s.7.3): its roster name, the cause, the same sentence it saw, what you can do, and one line for a host screen (Sam: strict NAT, no relay set, stopped at the connection check after 15 s.). Needs a hub that lists the diag feature and a joiner with DiagnosticsOptions.ReportToHost on; at most one per joiner every 10 s.
-    public event Action<PeerDiagnosisInfo>? PeerDiagnosis;
     public event Action<Peer>? JoinRequested;
     public event Action<int>? HostChanged;
     /// A member (you included) changed its display name mid-session: the peer with its new name, and the old name.
@@ -563,14 +411,12 @@ public sealed class Lobby : IAsyncDisposable
 ```csharp
 /// Entry point: talks to onelobby-server over the transport's signaling socket and hands out Lobbys. Requests complete (and their continuations are signalled) from inside Pump, never from another thread.
 public sealed class LobbyClient : IAsyncDisposable
+    /// The player's saved settings (name, relay line, last code, lobby server; spec/settings.md): Load(), Effective(), Save(name: ...), MaskedRelay(). The client applies them as defaults; an explicit config value always wins.
+    public PlayerSettings Settings { get; }
+    /// A plain sentence for the player: a saved relay line was skipped because it is not valid. Fires once, never holds the line.
+    public event Action<string>? Warning;
     public event Action<LobbyError>? Error;
-    /// The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. NetLog.Export() is the text a player copies; addresses are masked unless asked for, credentials never print. It stays on this machine.
-    public NetLog NetLog { get; }
-    /// The last CheckConnectionAsync result: its NAT reading joins a later failure's diagnosis and the report to the host.
-    public CheckResult? LastCheck { get; private set; }
     public LobbyClient(OneLobbyConfig config, ITransport transport);
-    /// Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from one socket) and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the client connects with) and the TURN entry in options.IceServers (default: the ICE servers of the last lobby server welcome). A menu runs it on demand; the library never does.
-    public async Task<CheckResult> CheckConnectionAsync(CheckOptions? options = null);
     /// This install's player id for the game (32 hex characters, made once and kept: spec/room.md s.1). It is sent in the hello so hubs can refuse banned ids and hosts can keep a player's seat. Not an account or a hardware id.
     public string PlayerId;
     /// The host-side ban list (also lobby.Room.Bans): persistent per game, see OneLobbyConfig.BanFile.
@@ -705,46 +551,6 @@ public sealed class LockstepSession
     public void ReportHash(long tick, ulong hash);
 ```
 
-## OneLobby.Core/NetLog.cs
-
-```csharp
-/// One step in the net log (spec/diagnostics.md s.5).
-public sealed record NetLogEntry(long Seq, long T, string Kind, string Text, string? Addr = null, string? Code = null);
-/// Client, protocol and platform lines of the export header.
-public sealed record NetLogMeta(string Client, string Protocol, string Platform);
-/// The net log (spec/diagnostics.md s.5-6): a ring buffer of connection steps with timings, a text export with a stable line format, and the masking rule. The log stays on the player's machine; nothing here sends anything.
-public sealed class NetLog : IDisposable
-    public const int DefaultCapacity;
-    public const int MinCapacity;
-    public const int MaxCapacity;
-    public const int TextMax;
-    /// Masks one line of log text. Credentials and ICE secrets are always hidden; IPv4, IPv6 and mDNS names are replaced by &lt;ip4&gt;, &lt;ip6&gt; and &lt;mdns&gt; unless includeAddresses (spec/diagnostics.md s.6).
-    public static string Mask(string text, bool includeAddresses = false);
-    /// Where Save writes when given no path, and where the log is flushed on exit; null: nowhere.
-    public string? Path { get; set; }
-    /// Ring size capacity (default 500, clamped to 50..5000; raw skips the clamp: tests); clock is monotonic milliseconds (the transport's clock, default a stopwatch).
-    public NetLog(int capacity = DefaultCapacity, Func<long>? clock = null, NetLogMeta? meta = null, string? path = null, bool raw = false);
-    /// Adds a step. text is cut to 200 characters; keep addresses in addr, never in the text.
-    public void Add(string kind, string text, string? addr = null, string? code = null);
-    /// The entries kept, oldest first (a copy).
-    public IReadOnlyList<NetLogEntry> Entries { get; }
-    /// How many entries the ring dropped.
-    public long Dropped { get; }
-    /// Sets the header facts (client, protocol, platform).
-    public void SetMeta(NetLogMeta meta);
-    public void Clear();
-    /// The log as text (spec/diagnostics.md s.5): a header, then one line per entry, oldest first. Addresses are masked unless includeAddresses; credentials never print either way.
-    public string Export(bool includeAddresses = false);
-    /// Writes the export to a file and returns the path: path, else Path. Throws when there is none.
-    public string Save(string? path = null, bool includeAddresses = false);
-    /// Writes the masked log to Path now, swallowing errors (the exit and crash flush).
-    public void Flush();
-    /// Flush to path when the process exits and when it dies from an unhandled exception. The crash hook only observes (the process still crashes as it would have).
-    public void FlushOnExit(string? path = null);
-    /// Removes the exit and crash hooks.
-    public void Dispose();
-```
-
 ## OneLobby.Core/NetSimTransport.cs
 
 ```csharp
@@ -760,6 +566,72 @@ public sealed class NetSimTransport : ITransport
     public ISignalingSocket ConnectSignaling(Uri url);
     public IPeerLink CreatePeerLink(PeerLinkOptions options);
     public void Poll();
+```
+
+## OneLobby.Core/PlayerSettings.cs
+
+```csharp
+/// The four player settings (spec/settings.md); an empty string is "none".
+public sealed record SettingsValues(string Name, string Relay, string LastCode, string Server)
+    public static readonly SettingsValues Empty;
+/// Which saved settings the client applies as defaults (spec/settings.md s.5). All on; each can be switched off.
+public sealed record SettingsOptions
+    /// Use the saved name when the game gives none (empty or the default "Player").
+    public bool Name { get; init; }
+    /// Add the saved relay line to this player's ICE list.
+    public bool Relay { get; init; }
+    /// Use the saved lobby server when neither the call nor onelobby.json gives one.
+    public bool Server { get; init; }
+    /// Save the code after a successful host or join.
+    public bool LastCode { get; init; }
+    /// Every default off.
+    public static SettingsOptions None;
+/// The result of PlayerSettings.Save: the fields that did not clean were not written (never their text).
+public sealed record SaveResult(bool Ok, IReadOnlyList<string> Rejected);
+/// The cleaning, validation and masking rules of the player settings (spec/settings.md s.1 and s.4). Pure functions.
+public static class SettingsRules
+    /// The environment variable that overrides each setting for one run (spec/settings.md s.3).
+    public static readonly IReadOnlyDictionary<string, string> EnvNames;
+    /// What a masked relay shows in place of the user name and the credential (spec/diagnostics.md s.6).
+    public const string Hidden;
+    /// The fixed warning for a saved relay line that does not parse. It never holds the line.
+    public const string RelaySkippedWarning;
+    public static readonly string[] Fields;
+    /// Name rules steps 1-3 (spec/room.md s.4.1); exactly Player counts as no name.
+    public static string CleanName(string? input, int maxLength = 24);
+    /// The relay line trimmed, or null when it is not empty and TurnLogin.TryParse rejects it.
+    public static string? CleanRelay(string? input);
+    /// A lobby code (6 characters) or direct join code (11) the way a pasted code is cleaned, or null.
+    public static string? CleanLastCode(string? input);
+    /// The lobby server address as a ws(s) URL (the &lt;one-lobby server&gt; rule plus a port check), "" for none, or null.
+    public static string? CleanServer(string? input);
+    /// The cleaner of a field by name; null = invalid.
+    public static string? Clean(string field, string? input);
+    /// The relay line for showing in a settings field: the URLs stay readable, the user name and the credential are &lt;hidden&gt;. Empty stays empty; a line that does not parse is &lt;hidden&gt; whole.
+    public static string MaskRelay(string? line);
+    /// The ICE entry for a relay line, or null when it is empty or invalid.
+    public static IceServer? RelayEntry(string? line);
+    /// user:pass@ dropped from an address before it goes in a log.
+    public static string RedactUrl(string url);
+/// The player's own multiplayer settings (spec/settings.md): name, relay line, last join code and lobby server, kept in an IKeyValueStore under onelobby.settings.&lt;gameId&gt; with the environment on top (ONELOBBY_NAME, ONELOBBY_RELAY, ONELOBBY_LAST_CODE, ONELOBBY_LOBBY_SERVER). A LobbyClient applies them as defaults; client.Settings is the object a settings menu edits. client.Settings.Save(name: "Sam", relay: field.Text); // Rejected lists a field that did not clean field.Text = client.Settings.MaskedRelay(); // turn:relay.example.com:3478 &lt;hidden&gt; &lt;hidden&gt;
+public sealed class PlayerSettings
+    /// An environment reader that finds nothing (settings from the store only).
+    public static readonly Func<string, string?> NoEnvironment;
+    /// The store key of a game's settings (same as JS).
+    public static string Key(string gameId);
+    public PlayerSettings(IKeyValueStore? store, string gameId, Func<string, string?>? env = null);
+    /// The stored values, cleaned; a missing, corrupt or odd value reads as empty. Never throws.
+    public SettingsValues Load();
+    /// The values this run uses: a clean, non-empty environment variable over the stored value (never written back).
+    public SettingsValues Effective();
+    /// Writes the fields given (null = leave alone, "" = remove); every unknown field already stored is kept. A field that does not clean is not written and is listed in SaveResult.Rejected. Never throws; a store that cannot write keeps the values for the session.
+    public SaveResult Save(string? name = null, string? relay = null, string? lastCode = null, string? server = null);
+    /// Forgets every saved setting (unknown fields too).
+    public void Clear();
+    /// The relay line this run uses, masked for a settings field (see SettingsRules.MaskRelay).
+    public string MaskedRelay();
+    /// The ICE entry of the effective relay line (null when none), and whether a relay line is set that does not parse (stored or environment: skipped, so the caller warns once).
+    public (IceServer? Entry, bool Invalid) RelayStatus();
 ```
 
 ## OneLobby.Core/Room.cs
@@ -1177,15 +1049,17 @@ public static class Wire
     public static string SanitizeChat(string text);
 ```
 
-## OneLobby.Godot/GodotDiagnostics.cs
+## OneLobby.Godot/GodotSettings.cs
 
 ```csharp
-/// Connection diagnostics on Godot (spec/diagnostics.md): LobbyClient.NetLog, LobbyClient.CheckConnectionAsync and Lobby.PeerDiagnosis are the same as in OneLobby.Core; this only picks the default log file under the project's user:// folder.
-public static class GodotDiagnostics
-    /// The log file inside the project's user folder (user://onelobby-netlog.txt) as a real path.
-    public static string DefaultLogPath;
-    /// The config with the log saved at path (default DefaultLogPath) on exit, on a crash and on NetLog.Save().
-    public static OneLobbyConfig WithNetLog(this OneLobbyConfig config, string? path = null);
+/// Where a Godot C# game keeps the player's saved multiplayer settings (name, relay line, last code, lobby server; spec/settings.md): a JSON file under user://, the same user://onelobby.json the GDScript client uses by default, so a project that mixes both shares one settings entry per game id. var config = new OneLobbyConfig("com.you.game", "1", new Uri("wss://lobby.example.org/ws")).WithUserSettings(); var client = new LobbyClient(config, new GodotTransport());
+public static class GodotSettings
+    /// The default settings file.
+    public const string DefaultFile;
+    /// A key/value store over a JSON file under user:// (or any Godot path).
+    public static IKeyValueStore UserStore(string path = DefaultFile);
+    /// The config with UserStore as its settings store, unless it already names a store or a file.
+    public static OneLobbyConfig WithUserSettings(this OneLobbyConfig config);
 ```
 
 ## OneLobby.Godot/GodotTransport.cs

@@ -178,6 +178,15 @@ Tests, no lobby server: `GODOT=... clients/gdscript/direct-test.sh` (two instanc
 pass `public` to use the real relays) and `GODOT=... node integration/nostr-interop-gdscript.mjs` (against the JS client,
 both directions).
 
+## Saved player settings
+
+`client.settings` (`OneLobbySettings`) keeps the player's name, TURN relay line, last join code and lobby server in `client.store`
+(by default `user://onelobby.json`) and applies them as defaults: an empty `display_name` (or "Player") and an empty `lobby_server`
+take the saved ones, the saved relay entry joins `client.ice`, `last_code` is written after a host or join. `client.settings.save({"relay": text})`
+returns `{ok, rejected}`, `client.settings.masked_relay()` is the text for a settings field, `client.settings_use["relay"] = false` switches a
+default off, and `ONELOBBY_NAME`, `ONELOBBY_RELAY`, `ONELOBBY_LAST_CODE` and `ONELOBBY_LOBBY_SERVER` (`OS.get_environment`) override for a run.
+Recipe: `docs/recipes/settings.md`; contract: `spec/settings.md`; test: `tests/settings.gd`.
+
 ## Tips
 
 - `OneLobbyJoinCode.display()` has a space ("7HQ 4K2") for lobby codes and hyphens for Direct codes; `join()` and

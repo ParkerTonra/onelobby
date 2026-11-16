@@ -87,8 +87,8 @@ the fixed text `The saved relay line is not valid, so it is not used.` The lobby
 Each default can be switched off (`settings` option; one switch per setting, `name`, `relay`, `server`, `lastCode`, or
 all at once), and an explicit argument always wins over a saved or environment value.
 
-1. **Name.** When the game gives no name (empty), the effective `name` is the name for host and join. The game's name,
-   when it gives one, wins. A blueprint with `players.identity: "anonymous"` gets no saved name; `players.maxNameLength`
+1. **Name.** When the game gives no name (empty; **(decision)** in C# and GDScript the default `Player` counts as empty too, as in
+   room name rule 5), the effective `name` is the name for host and join. The game's name, when it gives one, wins. A blueprint with `players.identity: "anonymous"` gets no saved name; `players.maxNameLength`
    clamps it.
 2. **Relay.** When the effective `relay` is valid, its entry is appended to this player's ICE list exactly as
    `docs/recipes/turn.md` s.5 "How it combines" says: after the host's `welcome` list on a join, and after any entries
@@ -96,8 +96,9 @@ all at once), and an explicit argument always wins over a saved or environment v
    every route (lobby server, direct IP, Nostr, rejoin). An invalid relay line (stored or environment) is skipped, and the
    client warns once per client object with the fixed text of section 4 (JS: `warning` event, plus the net log
    as an `info` line; C#: `Warning` event; GDScript: `warning` signal and `push_warning`).
-3. **Server.** When neither the call nor `onelobby.json` (`hosting.lobbyServer`) gives a lobby server address, the
-   effective `server` is used. Anything the call or the file gives wins, so `no_server` is only raised when all three
+3. **Server.** When neither the call nor `onelobby.json` (`hosting.lobbyServer`) gives a lobby server address (JS: an empty
+   `lobbyServer`; C#: the blueprint's `Blueprint.NoServer` stand-in, and the Unity runner's empty `LobbyServer` field;
+   GDScript: an empty `lobby_server`), the effective `server` is used. Anything the call or the file gives wins, so `no_server` is only raised when all three
    are empty.
 4. **Last code.** After a successful host or join (server lobby, direct IP or Nostr; a rejoin does not count), the
    client saves the code (`lobby.code`, or the direct lobby's join code) as `lastCode`. A code that does not clean is not
@@ -108,14 +109,16 @@ all at once), and an explicit argument always wins over a saved or environment v
 | | JS | C# | GDScript |
 |---|---|---|---|
 | object | `kit.settings` (`PlayerSettings`) | `client.Settings` (`PlayerSettings`) | `client.settings` (`OneLobbySettings`) |
-| stored values | `load()` | `Load()` | `load_values()` |
+| stored values | `load()` | `Load()` | `load_values()` (keys `name`, `relay`, `last_code`, `server`) |
 | with environment | `effective()` | `Effective()` | `effective()` |
-| save a patch | `save({ name, relay, lastCode, server })` -> `{ ok, rejected: string[] }` | `Save(patch)` -> `SaveResult` | `save({...})` -> `{ok, rejected}` |
+| save a patch | `save({ name, relay, lastCode, server })` -> `{ ok, rejected: string[] }` | `Save(name:, relay:, lastCode:, server:)` -> `SaveResult` (null = leave alone) | `save({name, relay, last_code, server})` -> `{ok, rejected}` |
 | forget | `clear()` | `Clear()` | `clear()` |
-| masked relay | `maskedRelay()` | `MaskedRelay()` | `masked_relay()` |
+| masked relay (of the effective line) | `maskedRelay()` | `MaskedRelay()` | `masked_relay()` |
+| warning | `kit.on("warning", fn)` | `client.Warning` | `client.warning` signal |
 | pure helpers | `cleanName` `cleanRelay` `cleanLastCode` `cleanServer` `maskRelay` | `SettingsRules.CleanName` ... | `OneLobbySettings.clean_name` ... |
-| switch a default off | `new OneLobby({ settings: { name: false } })`, `settings: false` | `config with { Settings = new SettingsOptions { Name = false } }` | `client.settings_use["name"] = false` |
+| switch a default off | `new OneLobby({ settings: { name: false } })`, `settings: false` | `config with { Settings = new SettingsOptions { Name = false } }`, `SettingsOptions.None` | `client.settings_use["name"] = false` |
 | store | `settingsFile`, `advanced.settingsStore` | `SettingsFile`, `SettingsStore` | the client's `store` |
+| fixed environment (tests) | `advanced.env` (`null`: none) | `SettingsEnv` (`PlayerSettings.NoEnvironment`) | `client.settings_env` (`{}`: none) |
 
 ## 7. Vectors
 

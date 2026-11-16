@@ -31,6 +31,8 @@ export type { RoomOptions, RoomJoinOptions, RoomEvents, RoomEntry, RoomSettings,
 export { BanList } from "./bans.js";
 export type { BanEntry } from "./room-rules.js";
 export type { KeyValueStore } from "./storage.js";
+export { PlayerSettings, SETTINGS_ENV, maskRelay } from "./settings.js";
+export type { SettingsField, SettingsValues, SettingsUse, SaveResult, EnvSource } from "./settings.js";
 export type { PauseState, PauseEvents, PauseMode, PauseRefusal } from "./pause.js";
 export type { ChatMessage, ChatEvents } from "./chat.js";
 export { Voice } from "./voice.js";
@@ -78,6 +80,7 @@ import { type Blueprint } from "./blueprint.js";
 import { type BrowserHostOptions } from "./direct/browser-host.js";
 import { NetLog } from "./netlog.js";
 import { type CheckOptions, type CheckResult } from "./connection-check.js";
+import { PlayerSettings, type EnvSource, type SettingsUse } from "./settings.js";
 export declare const LIB_NAME = "onelobby";
 export declare const LIB_VERSION = "0.7.2";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
@@ -108,6 +111,13 @@ export interface AdvancedOptions {
     playerIdStore?: KeyValueStore | null;
     /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
     banStore?: KeyValueStore | null;
+    /**
+     * Where the player's settings are kept (spec/settings.md s.2). Default: `settingsFile` when given, else `localStorage`
+     * where the page has one, else memory.
+     */
+    settingsStore?: KeyValueStore | null;
+    /** The environment variables that override the saved settings (default: the Node process environment, none in a browser; null: none). */
+    env?: EnvSource | null;
 }
 /** Diagnostics switches (spec/diagnostics.md): the net log, the report to the host, the relay probe. All have working defaults. */
 export interface DiagnosticsOptions {
@@ -163,6 +173,18 @@ export interface OneLobbyOptions {
     playerIdFile?: string;
     /** Node: a JSON file path that keeps the host's ban list across lobbies and runs (spec/room.md s.5.3). */
     banFile?: string;
+    /**
+     * The player's saved settings (name, relay line, last code, lobby server: spec/settings.md) are applied as defaults and
+     * `lobbyServer` / `displayName` here win over them. `false` switches all of it off; `{ relay: false }` one default.
+     */
+    settings?: false | SettingsUse;
+    /** Node: a JSON file path that keeps the player's settings across runs (the key/value file of `playerIdFile`). */
+    settingsFile?: string;
+    /** @internal `fromConfig`: the blueprint's rules for a saved name. */
+    nameRules?: {
+        max: number;
+        allowed: boolean;
+    };
     /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
     room?: RoomOptions;
     /** The net log, the report to the host and the relay probe (see DiagnosticsOptions). */
@@ -251,13 +273,17 @@ export interface DirectLobbyHooks {
     /** Wraps the kit's own link factory (port pin, no ICE servers). */
     wrapLinks: (inner: LinkFactory) => LinkFactory;
 }
+/** `warning`: a plain sentence for the player (a saved relay line that is skipped); it never holds a credential. */
 export type OneLobbyEvents = {
     error: [Error];
+    warning: [string];
 };
 export declare const DEFAULT_READY_TIMEOUT_MS = 15000;
 /** Entry point (DESIGN s.11.2). */
 export declare class OneLobby extends Emitter<OneLobbyEvents> {
     readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs" | "peerTimeoutMs">>;
+    /** The player's saved settings (spec/settings.md): `load()`, `effective()`, `save({...})`, `maskedRelay()`. */
+    readonly settings: PlayerSettings;
     /**
      * The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. `kit.netLog.export()` is the
      * text to show under "Copy logs" (addresses masked; `export({ includeAddresses: true })` unmasks addresses only),
@@ -284,6 +310,9 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     /** The host-side ban list (also `lobby.room.bans`): persistent per game, see `banFile` and `advanced.banStore`. */
     get bans(): BanList;
     constructor(o: OneLobbyOptions);
+    /** This player's ICE list: `ice` (the host's `welcome` list) then the saved relay entry, unless it is already there. */
+    /** @internal Saves the code of a lobby this player hosted or joined as `lastCode` (a code that does not clean is not saved). */
+    rememberCode(code: string): void;
     /**
      * Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
      * one socket), and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the
@@ -1718,6 +1747,97 @@ export declare const bansKey: (gameId: string) => string;
 export declare function loadPlayerId(store: KeyValueStore | null, gameId: string): string;
 ```
 
+## settings
+
+```ts
+import { type KeyValueStore } from "./storage.js";
+import type { IceServer } from "./transport.js";
+export type SettingsField = "name" | "relay" | "lastCode" | "server";
+export declare const SETTINGS_FIELDS: readonly SettingsField[];
+/** The four settings; an empty string is "none". */
+export interface SettingsValues {
+    name: string;
+    relay: string;
+    lastCode: string;
+    server: string;
+}
+/** The environment variable that overrides each setting for one run (Node only; a browser has no environment). */
+export declare const SETTINGS_ENV: Readonly<Record<SettingsField, string>>;
+/** Which defaults the kit applies (all on). `false` for the whole option switches them all off. */
+export interface SettingsUse {
+    /** Use the saved name when the game gives none. */
+    name?: boolean;
+    /** Add the saved relay line to this player's ICE list. */
+    relay?: boolean;
+    /** Use the saved lobby server when neither the call nor onelobby.json gives one. */
+    server?: boolean;
+    /** Save the code after a successful host or join. */
+    lastCode?: boolean;
+}
+export type EnvSource = Record<string, string | undefined>;
+/** The store key of a game's settings. */
+export declare const settingsKey: (gameId: string) => string;
+/** The fixed warning for a saved relay line that does not parse. It never holds the line. */
+export declare const RELAY_SKIPPED_WARNING = "The saved relay line is not valid, so it is not used.";
+/** What a masked relay shows in place of the user name and the credential (spec/diagnostics.md s.6). */
+export declare const HIDDEN = "<hidden>";
+/** Name rules steps 1-3 (spec/room.md s.4.1); a result of exactly `Player` counts as no name. */
+export declare function cleanName(input: unknown, maxLength?: number): string;
+/** The relay line trimmed, or null when it is not empty and the relay line parser rejects it. */
+export declare function cleanRelay(input: unknown): string | null;
+/** A lobby code (6 characters) or direct join code (11) the way a pasted code is cleaned, or null. */
+export declare function cleanLastCode(input: unknown): string | null;
+/** The lobby server address as a ws(s) URL (the `<one-lobby server>` rule plus a port check), "" for none, or null. */
+export declare function cleanServer(input: unknown): string | null;
+/** `cleanName` / `cleanRelay` / `cleanLastCode` / `cleanServer` by field name; null = invalid. */
+export declare function cleanSetting(field: SettingsField, input: unknown): string | null;
+/**
+ * The relay line for showing in a settings field: the URLs stay readable, the user name and the credential are
+ * `<hidden>` (spec/settings.md s.4). Empty stays empty; a line that does not parse is `<hidden>` whole.
+ */
+export declare function maskRelay(line: string): string;
+/** The ICE entry for a relay line, or null when it is empty or invalid. */
+export declare function relayEntry(line: string): IceServer | null;
+/** `user:pass@` dropped from an address before it goes in a log (spec/settings.md s.4). */
+export declare function redactUrl(url: string): string;
+export interface SaveResult {
+    /** True when every field in the patch was written. */
+    ok: boolean;
+    /** The fields that did not clean (never their text). */
+    rejected: SettingsField[];
+}
+/** One game's settings in a key/value store, with the environment on top. */
+export declare class PlayerSettings {
+    readonly gameId: string;
+    /**
+     * @param env The variables that override (default: the Node process environment, none in a browser). null: never read one.
+     */
+    constructor(store: KeyValueStore | null, gameId: string, env?: EnvSource | null);
+    /** The stored object, or {} for nothing, unreadable text or anything that is not an object. */
+    /** The stored values, cleaned; a missing, corrupt or odd value reads as empty. Never throws. */
+    load(): SettingsValues;
+    /** The values this run uses: a clean, non-empty environment variable over the stored value (never written back). */
+    effective(): SettingsValues;
+    /**
+     * Writes the fields in `patch` (an empty value removes one); every unknown field already stored is kept. A field that does
+     * not clean is not written and is listed in `rejected`. Never throws; a store that cannot write keeps the values for the session.
+     */
+    save(patch: Partial<SettingsValues>): SaveResult;
+    /** Forgets every saved setting (unknown fields too). */
+    clear(): void;
+    /** The relay line this run uses, masked for a settings field (see `maskRelay`). */
+    maskedRelay(): string;
+    /**
+     * The ICE entry of the effective relay line (null when none), and whether a relay line is set that does not parse
+     * (stored or environment: skipped, so the caller warns once).
+     */
+    relayStatus(): {
+        entry: IceServer | null;
+        invalid: boolean;
+    };
+}
+```
+
 ## voice
 
 ```ts
@@ -2740,6 +2860,9 @@ export interface OneLobbyElement extends HTMLElement {
     start(): Promise<void>;
     leave(): Promise<void>;
 }
+/** The saved name; a name kept by an older version under its own key moves into the settings once. */
+/** @internal */
+export declare function readStored(game: string): string;
 /** Register `<one-lobby>` (safe to call more than once; a no-op outside a browser). */
 export declare function defineLobbyElement(tag?: string): void;
 declare global {

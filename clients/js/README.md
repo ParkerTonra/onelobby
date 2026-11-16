@@ -62,6 +62,13 @@ it in `welcome.ice`) or to `kit.joinDirect(code, { iceServers })` (added to the 
 secret, `turnLogin(secret, id, ttlSeconds)` mints a short-lived login (spec/turn-rest.md). `relayOnly` sends and accepts only
 relay candidates. Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
+## Saved player settings
+
+`kit.settings` keeps the player's name, TURN relay line, last join code and lobby server in `localStorage` (Node: pass
+`settingsFile`) and applies them as defaults; an explicit option always wins. `kit.settings.save({ relay })` rejects a line the
+relay parser does not accept, `kit.settings.maskedRelay()` is the text for a settings field, and the relay line is never logged.
+Recipe: `docs/recipes/settings.md`; contract: `spec/settings.md`.
+
 ## Seams
 
 `new OneLobby({ socketFactory, linkFactory, clock, wallClock, voiceCodec, createMic, createSink })` replace the browser pieces.

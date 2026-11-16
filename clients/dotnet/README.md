@@ -70,6 +70,15 @@ Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TUR
 login (spec/turn-rest.md). `RelayOnly` sends and accepts only relay candidates in `OneLobby.DataChannel`; `OneLobby.Godot`
 still relies on Godot's `iceTransportPolicy`, which webrtc-native ignores. Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
+## Saved player settings
+
+`client.Settings` (`PlayerSettings`) keeps the player's name, TURN relay line, last join code and lobby server in an
+`IKeyValueStore` (`OneLobbyConfig.SettingsStore` / `SettingsFile`, else memory; the Unity runner uses `PlayerPrefs`;
+`OneLobby.Godot`'s `config.WithUserSettings()` a file under `user://`) and applies them as defaults; an explicit config value
+wins. `Settings.Save(relay: text)` rejects a line `TurnLogin.TryParse` does not accept, `Settings.MaskedRelay()` is the text for
+a settings field. `ONELOBBY_NAME`, `ONELOBBY_RELAY`, `ONELOBBY_LAST_CODE` and `ONELOBBY_LOBBY_SERVER` override them for a run.
+Recipe: `docs/recipes/settings.md`; contract: `spec/settings.md`.
+
 ## Deviations and notes
 
 - A joiner treats 8 s of total silence from the host (no frames and no pongs) as host loss; 3 s without frames while a game runs sends `snapshot_req` (spec). Channel close migrates at once.
