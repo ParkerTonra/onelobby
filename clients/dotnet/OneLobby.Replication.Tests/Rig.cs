@@ -62,6 +62,9 @@ namespace OneLobby.Replication.Tests
         /// <summary>Client: called once per local input tick; returns the input bytes (null = send nothing).</summary>
         public Func<uint, byte[]?>? MakeInput;
         public readonly List<uint> SubmittedSeqs = new();
+        /// <summary>The networked player layer, when this peer has one (the rig then calls its Pump, which runs the session).</summary>
+        public NetPlayers? Layer;
+        public int PeerId => Lobby.LocalPeerId;
 
         public void Attach(ReplicationConfig? cfg)
         {
@@ -76,15 +79,20 @@ namespace OneLobby.Replication.Tests
     {
         public readonly InMemoryNetwork Net = new();
         public readonly List<Player> Players = new();
-        public readonly Random Rng = new(1234);
+        public readonly Random Rng;
         public Player Host = null!;
         public ReplicationConfig? Config;
         /// <summary>Host sim step, run once per host tick before the snapshot.</summary>
         public Action<uint>? HostTick;
         public int FrameMs = 16;
+        /// <summary>Peers whose frames are skipped (a host that stopped sending, a client that went away).</summary>
+        public readonly HashSet<Player> Frozen = new();
+        /// <summary>Virtual time in ms.</summary>
+        public long NowMs => Net.NowMs;
 
-        public Rig(ReplicationConfig? config = null, double latencyMs = 30, double lossRate = 0, double jitterMs = 0)
+        public Rig(ReplicationConfig? config = null, double latencyMs = 30, double lossRate = 0, double jitterMs = 0, int seed = 1234)
         {
+            Rng = new Random(seed);
             Config = config;
             Net.LatencyMs = latencyMs;
             if (lossRate > 0) Net.DropUnreliable = () => Rng.NextDouble() < lossRate;
@@ -118,6 +126,36 @@ namespace OneLobby.Replication.Tests
             return p;
         }
 
+        /// <summary>A host with a player layer (and room for spectators).</summary>
+        public Player StartHostLayer(NetPlayersOptions options, int spectators = 0)
+        {
+            var p = NewPlayer("host");
+            p.Lobby = Await(p.Client.HostAsync(new LobbyOptions("room", 8) { Room = spectators > 0 ? new RoomOptions { Spectators = spectators } : null }));
+            p.Attach(Config);
+            p.Layer = new NetPlayers(p.Session, options);
+            Host = p;
+            return p;
+        }
+
+        /// <summary>A joiner with a player layer, as a player or a spectator.</summary>
+        public Player JoinLayer(string name, NetPlayersOptions options, bool spectator = false)
+        {
+            var p = NewPlayer(name);
+            p.Lobby = Await(p.Client.JoinAsync(Host.Lobby.Code, new RoomJoinOptions { Role = spectator ? RoomRole.Spectator : RoomRole.Player }));
+            p.Attach(Config);
+            p.Layer = new NetPlayers(p.Session, options);
+            Until(() => p.Lobby.IsReady, 400);
+            return p;
+        }
+
+        /// <summary>The peer leaves the lobby and its frames stop.</summary>
+        public void Leave(Player p)
+        {
+            var t = p.Lobby.LeaveAsync();
+            for (var i = 0; i < 600 && !t.IsCompleted; i++) Step();
+            Frozen.Add(p);
+        }
+
         public Player Join(string name)
         {
             var p = NewPlayer(name);
@@ -134,6 +172,8 @@ namespace OneLobby.Replication.Tests
             foreach (var p in Players.ToList())
             {
                 if (p.Session == null) { p.Client.Pump(); continue; }
+                if (Frozen.Contains(p)) continue;
+                if (p.Layer != null) { p.Layer.Pump(); continue; }
                 p.Session.Pump();
                 if (p.Session.IsHost)
                 {
