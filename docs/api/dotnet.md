@@ -931,6 +931,10 @@ public sealed class MenuModel
     public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
     /// The clock for "nothing found after 3 seconds" (default: a stopwatch).
     public Func<long>? NowMs { get; set; }
+    /// A game that hosts from its running world, or has its own room screen after the menu: after a successful Host the model presses Start itself, once (the room's countdown still runs, then GameStarted fires). Off by default: the host sees the room and presses Start. A joiner is unaffected. The same as the GDScript menu's start_on_host.
+    public bool StartOnHost { get; set; }
+    /// Asked before every Host (the Host button, --host, HostAsync): return false to cancel, nothing is hosted and the Start screen stays. A game shows its own "end the run in progress?" dialog here and completes the task with the answer; a game with nothing to ask leaves it null. A second Host press while it waits is ignored; a throw counts as cancel.
+    public Func<Task<bool>>? BeforeHost { get; set; }
     public CheckOptions? CheckOptions { get; set; }
     public MenuScreen Screen { get; private set; }
     public Lobby? Lobby { get; private set; }

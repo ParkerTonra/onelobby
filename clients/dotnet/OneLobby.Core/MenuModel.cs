@@ -67,6 +67,7 @@ namespace OneLobby
         private int _ticket;
         private bool _gameStarted;
         private bool _direct;
+        private bool _asking;
         private LobbyError? _lastError;
         private LanFinder? _finder;
         private long _lanEmptySince = -1;
@@ -139,6 +140,20 @@ namespace OneLobby
 
         /// <summary>The clock for "nothing found after 3 seconds" (default: a stopwatch).</summary>
         public Func<long>? NowMs { get; set; }
+
+        /// <summary>
+        /// A game that hosts from its running world, or has its own room screen after the menu: after a successful Host the model presses
+        /// Start itself, once (the room's countdown still runs, then <see cref="GameStarted"/> fires). Off by default: the host sees the
+        /// room and presses Start. A joiner is unaffected. The same as the GDScript menu's <c>start_on_host</c>.
+        /// </summary>
+        public bool StartOnHost { get; set; }
+
+        /// <summary>
+        /// Asked before every Host (the Host button, <c>--host</c>, <see cref="HostAsync"/>): return <c>false</c> to cancel, nothing
+        /// is hosted and the Start screen stays. A game shows its own "end the run in progress?" dialog here and completes the task with the
+        /// answer; a game with nothing to ask leaves it null. A second Host press while it waits is ignored; a throw counts as cancel.
+        /// </summary>
+        public Func<Task<bool>>? BeforeHost { get; set; }
 
         public CheckOptions? CheckOptions { get; set; }
 
@@ -449,7 +464,16 @@ namespace OneLobby
 
         public async Task HostAsync()
         {
-            if (Screen != MenuScreen.Start) return;
+            if (Screen != MenuScreen.Start || _asking) return;
+            if (BeforeHost != null)
+            {
+                bool go;
+                _asking = true;
+                try { go = await BeforeHost().ConfigureAwait(true); }
+                catch (Exception) { go = false; }
+                finally { _asking = false; }
+                if (!go || Screen != MenuScreen.Start) return;
+            }
             CommitName();
             var t = Begin(MenuText.T("connecting_host"));
             Lobby? l = null;
@@ -538,6 +562,7 @@ namespace OneLobby
             LobbyNote = "";
             SetScreen(MenuScreen.Lobby);
             if (l.Phase == LobbyPhase.InGame) StartPlaying();
+            else if (StartOnHost && l.IsHost) StartGame();
         }
 
         private static async Task Safe(Task t)

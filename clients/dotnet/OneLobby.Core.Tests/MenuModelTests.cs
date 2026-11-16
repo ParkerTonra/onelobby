@@ -585,6 +585,72 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void StartOnHostPressesStartOnceAfterHostAndLeavesAJoinerAlone()
+        {
+            var w = new World();
+            // off (the default): the host waits in the room, nothing starts
+            var wait = w.Hosting("Sam");
+            Assert.False(wait.M.StartOnHost);
+            w.Wait(3000);
+            Assert.Equal((MenuScreen.Lobby, 0), (wait.M.Screen, wait.Started));
+            w.Run(wait.M.LeaveAsync());
+            // on: Start is pressed by the model, the countdown runs, GameStarted fires once
+            var auto = w.New("auto");
+            auto.M.StartOnHost = true;
+            auto.M.SetName("Sam");
+            w.Run(auto.M.HostAsync());
+            Assert.True(w.Until(() => auto.Started == 1), "GameStarted fired after Host with no Start click");
+            w.Wait(3000);
+            Assert.Equal((MenuScreen.Playing, 1), (auto.M.Screen, auto.Started));
+            // a joiner never starts anything, even with the switch on
+            var host = w.Hosting("Ann");
+            var guest = w.New("g");
+            guest.M.StartOnHost = true;
+            guest.M.SetName("Zed");
+            guest.M.SetJoinText(host.M.CodeText());
+            w.Run(guest.M.JoinAsync());
+            w.Wait(3000);
+            Assert.Equal((MenuScreen.Lobby, 0, 0), (guest.M.Screen, guest.Started, host.Started));
+            w.Run(guest.M.LeaveAsync());
+            w.Run(host.M.LeaveAsync());
+            w.Run(auto.M.LeaveAsync());
+        }
+
+        [Fact]
+        public void BeforeHostCanCancelHostingAndIsAskedOnce()
+        {
+            var w = new World();
+            var asked = 0;
+            var answer = new TaskCompletionSource<bool>();
+            var p = w.New("p");
+            p.M.SetName("Sam");
+            p.M.BeforeHost = () => { asked++; return answer.Task; };
+            var first = p.M.HostAsync();
+            var second = p.M.HostAsync(); // a second press while the question is open is ignored
+            Assert.False(first.IsCompleted);
+            Assert.True(second.IsCompleted);
+            Assert.Equal(1, asked);
+            answer.SetResult(false); // "no": nothing is hosted, the start screen stays
+            w.Run(first);
+            w.Wait(1000);
+            Assert.Equal((MenuScreen.Start, true), (p.M.Screen, p.M.Lobby == null));
+            // "yes": it hosts; a throwing hook counts as "no"
+            p.M.BeforeHost = () => Task.FromResult(true);
+            w.Run(p.M.HostAsync());
+            Assert.Equal(MenuScreen.Lobby, p.M.Screen);
+            w.Run(p.M.LeaveAsync());
+            Assert.True(w.Until(() => p.M.Screen == MenuScreen.Start), "left");
+            p.M.BeforeHost = () => throw new InvalidOperationException("dialog broke");
+            w.Run(p.M.HostAsync());
+            Assert.Equal(MenuScreen.Start, p.M.Screen);
+            // --host goes through the same question
+            p.M.BeforeHost = () => Task.FromResult(false);
+            Assert.Equal("host", p.M.ApplyBootFlags(new[] { "--host" }));
+            w.Wait(1000);
+            Assert.Equal(MenuScreen.Start, p.M.Screen);
+        }
+
+        [Fact]
         public void BrowseListsPublicLobbiesAndJoinsOne()
         {
             var w = new World();

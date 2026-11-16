@@ -561,6 +561,24 @@ namespace OneLobby.Unity.PlayTests
         // ---- boot flags ----------------------------------------------------------------------------------------------------------
 
         [UnityTest]
+        public IEnumerator StartOnHostAndBeforeHostReachTheModel()
+        {
+            var p = NewPlayer("s");
+            var asked = 0;
+            p.Menu.StartOnHost = true; // set before the first frame, like HostDirect
+            p.Menu.BeforeHost = () => { asked++; return Task.FromResult(false); };
+            yield return Frames(4);
+            Check(p.M.StartOnHost && p.M.BeforeHost != null, "the menu hands StartOnHost and BeforeHost to its model");
+            Click(p.Q("HostButton"));
+            yield return Frames(10);
+            Check(asked == 1 && p.M.Screen == MenuScreen.Start && p.M.Lobby == null && p.Started == 0, "BeforeHost answering false: asked once, nothing hosted (asked " + asked + ", screen " + p.M.Screen + ")");
+            p.Menu.BeforeHost = () => Task.FromResult(true); // set after the first frame: reaches the live model
+            Click(p.Q("HostButton"));
+            yield return Until(() => p.Started == 1, "StartOnHost: GameStarted with no Start click", 1200);
+            Check(p.M.Screen == MenuScreen.Playing && p.M.Lobby != null && p.M.Lobby.IsHost, "the host is playing without having pressed Start");
+        }
+
+        [UnityTest]
         public IEnumerator BootFlagsHostAndJoin()
         {
             var host = NewPlayer("x", args: new[] { "--host", "--name=Sam" }, bootFlags: true);

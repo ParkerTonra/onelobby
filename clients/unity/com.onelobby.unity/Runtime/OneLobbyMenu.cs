@@ -89,11 +89,25 @@ namespace OneLobby.Unity
         /// <summary>Makes the LAN finder instead of the client's own (a test passes one on an in-memory network; see <see cref="MenuModel.FinderFactory"/>). Set it before the first frame.</summary>
         public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
 
+        private bool _startOnHost;
+        private Func<Task<bool>>? _beforeHost;
         private LobbyOptions? _hostOptions;
         private RoomJoinOptions? _joinOptions;
         private MenuRoute _route = MenuRoute.Auto;
         private Func<string?, Task<Lobby>>? _hostDirect;
         private Func<string, string?, Task<Lobby>>? _joinDirect;
+
+        /// <summary>
+        /// After a successful Host the menu presses Start itself, once (the room's countdown still runs, then <see cref="GameStarted"/> fires): for a game
+        /// that has its own room screen or hosts from a running world, so the host does not press Start twice. Default false; a joiner is unaffected
+        /// (see <see cref="MenuModel.StartOnHost"/>).
+        /// </summary>
+        public bool StartOnHost { get => _startOnHost; set { _startOnHost = value; if (Model != null) Model.StartOnHost = value; } }
+        /// <summary>
+        /// Asked before every Host (the Host button and <c>--host</c>): return false to cancel, nothing is hosted. Show your own "end the run in progress?"
+        /// dialog and complete the task with the answer (see <see cref="MenuModel.BeforeHost"/>).
+        /// </summary>
+        public Func<Task<bool>>? BeforeHost { get => _beforeHost; set { _beforeHost = value; if (Model != null) Model.BeforeHost = value; } }
 
         /// <summary>Base options for Host (see <see cref="MenuModel.HostOptions"/>).</summary>
         public LobbyOptions? HostOptions { get => _hostOptions; set { _hostOptions = value; if (Model != null) Model.HostOptions = value; } }
@@ -146,7 +160,7 @@ namespace OneLobby.Unity
             Model = new MenuModel(client)
             {
                 HostOptions = _hostOptions, JoinOptions = _joinOptions, Route = _local ? MenuRoute.Direct : _route, InviteBase = InviteBase,
-                HostDirect = _hostDirect, JoinDirect = _joinDirect,
+                HostDirect = _hostDirect, JoinDirect = _joinDirect, StartOnHost = _startOnHost, BeforeHost = _beforeHost,
                 Clipboard = text => GUIUtility.systemCopyBuffer = text,
                 LogsPath = System.IO.Path.Combine(Application.persistentDataPath, "onelobby-menu-log.txt"),
                 CheckRunner = CheckRunner,
