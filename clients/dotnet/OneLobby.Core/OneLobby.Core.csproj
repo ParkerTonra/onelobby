@@ -10,6 +10,8 @@
     <InternalsVisibleTo Include="OneLobby.Core.Tests" />
     <InternalsVisibleTo Include="OneLobby.Conformance" />
     <InternalsVisibleTo Include="OneLobby.Direct" />
+    <InternalsVisibleTo Include="OneLobby.DataChannel" />
+    <InternalsVisibleTo Include="OneLobby.Godot" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\..\spec\blueprint.schema.json" LogicalName="OneLobby.blueprint.schema.json" Link="blueprint.schema.json" />

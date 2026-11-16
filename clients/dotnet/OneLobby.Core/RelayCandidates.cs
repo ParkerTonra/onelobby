@@ -1,9 +1,9 @@
 using System;
 using System.Text;
 
-namespace OneLobby.DataChannel
+namespace OneLobby
 {
-    /// <summary>Relay-only enforcement (spec/nostr-signaling.md s.5): a relay-only link sends and accepts only <c>typ relay</c> candidates.</summary>
+    /// <summary>Relay-only enforcement (spec/nostr-signaling.md s.5): a relay-only link sends and accepts only <c>typ relay</c> candidates. Shared by every C# transport (DataChannel, Godot); webrtc-native ignores <c>iceTransportPolicy</c>, so the filter is what enforces it.</summary>
     internal static class RelayCandidates
     {
         /// <summary>An ICE candidate line (or SDP <c>a=candidate:</c> line) of type relay.</summary>

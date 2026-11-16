@@ -139,7 +139,8 @@ namespace OneLobby.Godot
 
         /// <summary>
         /// Godot's WebRtcPeerConnection does not expose the selected candidate pair, so this reports a relay only when the
-        /// lobby was created relay-only (the server's path telemetry then counts it as relayed).
+        /// lobby was created relay-only. That is true: a relay-only link sends and accepts only relay candidates (see
+        /// <see cref="RelayCandidates"/>), so no other path can be selected. The server's path telemetry counts it as relayed.
         /// </summary>
         public bool Relayed => _opts.RelayOnly;
 
@@ -176,6 +177,7 @@ namespace OneLobby.Godot
             }
             var config = new global::Godot.Collections.Dictionary();
             config["iceServers"] = servers;
+            // webrtc-native ignores iceTransportPolicy; the filters in the signal paths below are what enforce relay-only
             if (options.RelayOnly) config["iceTransportPolicy"] = "relay";
             var err = _pc.Initialize(config);
             if (err != Error.Ok) { IsFailed = true; return; }
@@ -188,12 +190,12 @@ namespace OneLobby.Godot
             _pc.SessionDescriptionCreated += (type, sdp) =>
             {
                 _pc.SetLocalDescription(type, sdp);
-                _out.Enqueue(PeerSignal.Description(type, sdp));
+                _out.Enqueue(PeerSignal.Description(type, RelaySdp(sdp)));
             };
             _pc.IceCandidateCreated += (media, index, name) =>
             {
                 if (name.Contains(" typ relay")) _relaySeen = true;
-                _out.Enqueue(PeerSignal.Ice(name, media, (int)index));
+                if (!_opts.RelayOnly || RelayCandidates.IsRelay(name)) _out.Enqueue(PeerSignal.Ice(name, media, (int)index));
             };
         }
 
@@ -225,13 +227,20 @@ namespace OneLobby.Godot
             _lastState = (long)st;
         }
 
+        /// <summary>Relay-only is enforced here, not left to iceTransportPolicy: an SDP that crosses the wire carries no candidate lines but relay ones.</summary>
+        private string RelaySdp(string sdp) => _opts.RelayOnly ? RelayCandidates.FilterSdp(sdp) : sdp;
+
         public void StartOffer() => _pc.CreateOffer();
 
         public void ApplySignal(PeerSignal s)
         {
             if (Disposed || IsFailed) return;
-            if (s.Sdp != null) _pc.SetRemoteDescription(s.SdpType ?? "", s.Sdp);
-            else if (s.Candidate != null) _pc.AddIceCandidate(s.SdpMid ?? "", s.SdpMLineIndex, s.Candidate);
+            if (s.Sdp != null) _pc.SetRemoteDescription(s.SdpType ?? "", RelaySdp(s.Sdp));
+            else if (s.Candidate != null)
+            {
+                if (_opts.RelayOnly && !RelayCandidates.IsRelay(s.Candidate)) return;
+                _pc.AddIceCandidate(s.SdpMid ?? "", s.SdpMLineIndex, s.Candidate);
+            }
         }
 
         public bool TryTakeSignal(out PeerSignal signal)
