@@ -170,7 +170,7 @@ public class PortMapperTests
         NatPmpEndpoint = n?.Endpoint ?? new IPEndPoint(IPAddress.Loopback, 9),
         TryUpnp = u != null,
         TryNatPmp = n != null,
-        DiscoveryTimeout = TimeSpan.FromMilliseconds(800),
+        DiscoveryTimeout = TimeSpan.FromSeconds(10), // a fake gateway always answers and discovery returns on the first reply: this only bounds a slow runner
         Description = "OneLobby test",
     };
 
