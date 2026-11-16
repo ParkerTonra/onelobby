@@ -76,6 +76,8 @@ var _c: OneLobbyClient
 var _direct := false
 var _host_id := 0
 var _epoch := 0
+## The last tick applied when this peer claimed host: every host_claim of the epoch carries it.
+var _claim_tick := 0
 var _closed := false
 var _awaiting_claim := false
 var _await_deadline_ms := 0
@@ -613,7 +615,7 @@ func _on_link_open(rec: OLPeerRec) -> void:
 	_c.send_signaling(OneLobbySignaling.path(rec.link.relayed))
 	if is_host:
 		if _epoch > 0:
-			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_host_claim(_epoch, local_peer_id, lockstep.last_tick))
+			_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_host_claim(_epoch, local_peer_id, _claim_tick))
 	elif rec.id == _host_id:
 		_send_hi(rec)
 	var queued := rec.pending
@@ -1026,6 +1028,8 @@ func _become_host() -> void:
 	_host_id = local_peer_id
 	_awaiting_claim = false
 	is_ready = true
+	# before lockstep starts emitting: a link that opens a frame later must still carry the claim's own tick
+	_claim_tick = lockstep.last_tick
 	if mode == "lockstep":
 		lockstep._become_host()
 	pause._on_became_host()

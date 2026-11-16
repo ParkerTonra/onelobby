@@ -47,7 +47,7 @@ with the id of the connection the frame arrived on. **(decision)** `cmd`, `hash`
 | 0x20 | `raw` | `rest` | `raw` mode payload. Payloads starting `0x52` are the optional replication layer (`spec/replication.md`); the lobby treats them like any other raw bytes |
 | 0x30 | `ping` | `n:u32, t:u32` | on `fast`. `t` = sender's monotonic ms (mod 2^32) |
 | 0x31 | `pong` | `n:u32, t:u32` | echo of the ping's `n` and `t`, `route 0` **(decision)** |
-| 0x40 | `host_claim` | `epoch:u16, hostId:u16, tick:i64` | on `reliable`, to every reachable peer. `tick` = claimant's last applied tick |
+| 0x40 | `host_claim` | `epoch:u16, hostId:u16, tick:i64` | on `reliable`, to every reachable peer. `tick` = claimant's last applied tick when it claimed (the same value to a peer that links later) |
 | 0x50 | `voice` | `seq:u16, flags:u8, n:u8, n x (len:u16, opus[len])` | on `voice` |
 | 0x60 | `chat` | `id:u32, ts:i64, len:u16, utf8[len]` | on `reliable` |
 | 0x61 | `chat_history` | `n:u16, n x (peerId:u16, id:u32, ts:i64, len:u16, utf8[len])` | host -> joiner |

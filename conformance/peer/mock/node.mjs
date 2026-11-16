@@ -39,7 +39,7 @@ export class MockNode {
   linkOpen(peerId) {
     this.links.add(peerId);
     if (this.role === 'joiner' && peerId === this.hostId) this.tx(peerId, 'reliable', { type: 'hi', route: 0, proto: 1, peerId: this.id, lastTick: this.started ? big(this.game.tick) : -1n });
-    if (this.claiming && this.claimTargets?.has(peerId)) this.tx(peerId, 'reliable', { type: 'host_claim', route: 0, epoch: this.epoch, hostId: this.id, tick: big(this.game.tick) });
+    if (this.claiming && this.claimTargets?.has(peerId)) this.tx(peerId, 'reliable', { type: 'host_claim', route: 0, epoch: this.epoch, hostId: this.id, tick: big(this.claimTick) });
     if (this.followId === peerId) this.tx(peerId, 'reliable', { type: 'hi', route: 0, proto: 1, peerId: this.id, lastTick: big(this.game.tick) });
   }
   linkClose(peerId) {
@@ -130,7 +130,7 @@ export class MockNode {
     const lowest = others[0];
     this.roster.delete(this.hostId);
     if (lowest === this.id) {
-      this.epoch += 1; this.claiming = true; this.claimTargets = new Set(others.filter((p) => p !== this.id));
+      this.epoch += 1; this.claiming = true; this.claimTick = this.game.tick; this.claimTargets = new Set(others.filter((p) => p !== this.id));
       for (const p of this.claimTargets) this.io.emit({ ev: 'dial', peerId: p });
       this.becomeHost();
     }

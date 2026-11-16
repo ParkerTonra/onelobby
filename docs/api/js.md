@@ -701,6 +701,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     notifyJoinCodeChanged(): void;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
+    /** The last tick applied when this peer claimed host: every host_claim of the epoch carries it. */
     /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
     /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */

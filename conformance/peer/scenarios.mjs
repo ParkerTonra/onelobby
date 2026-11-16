@@ -272,6 +272,7 @@ export function buildScenarios() {
     await host.wait('hash', { tick: 20 });
     await s.unlink(1);
     await s.waitEvent('dial', { peerId: 3 }, 6000);
+    await sleep(80); // several ticks: the claim still carries the tick applied when the library claimed, not a later one
     await s.link(3);
     const p3 = s.peer(3);
     const claim = await p3.wait('host_claim', {}, 3000);

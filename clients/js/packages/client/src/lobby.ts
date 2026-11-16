@@ -264,6 +264,8 @@ export class Lobby extends Emitter<LobbyEvents> {
   private connected = new Set<number>(); // host: peers that said hi
   private hiSentTo = new Set<PeerLink>();
   private epoch = 0;
+  /** The last tick applied when this peer claimed host: every host_claim of the epoch carries it. */
+  private claimTick = 0;
   private ended = false;
   private serverUp = true;
   private cancelWatchdog: (() => void) | null = null;
@@ -730,7 +732,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.offeredAt.delete(peerId);
     if (this.isHost) {
       // Joiner speaks first (`hi`). After a migration the new host announces itself so the joiner knows who won.
-      if (this.epoch > 0) this.sendTo(peerId, { type: "host_claim", epoch: this.epoch, hostId: this.localPeerId, tick: this.lockstep.lastTick }, 0);
+      if (this.epoch > 0) this.sendTo(peerId, { type: "host_claim", epoch: this.epoch, hostId: this.localPeerId, tick: this.claimTick }, 0);
       return;
     }
     if (peerId === this.hostPeerId) this.sendHi(link);
@@ -973,6 +975,8 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.connected.clear();
     this.hiSentTo.clear();
     this.lastHeard.clear(); // joiners spoke to the old host; their clocks start when they say hi to us
+    // before lockstep starts emitting: a link that opens a frame later must still carry the claim's own tick
+    this.claimTick = this.lockstep.lastTick;
     this.lockstep.becomeHost();
     this.pause.onBecameHost();
     this.room.onBecameHost();
