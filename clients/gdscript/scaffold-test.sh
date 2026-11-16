@@ -3,7 +3,9 @@
 #   1. scaffold a new project, import it, run its own tests/multiplayer.gd, expect MULTIPLAYER_OK
 #   2. play it the way AGENTS.md and the .olc entry say: two headless processes (-- --host --local --name=Host and
 #      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
-#   3. scaffold --into an empty Godot project, the same as 1; then a second --into run must change nothing
+#   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
+#      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
+#   4. scaffold --into an empty Godot project, the same as 1; then a second --into run must change nothing
 # The add-on comes from this checkout (--addon-from) and the natives from the folder fetch-webrtc.sh already unpacked
 # (--webrtc-dir), so nothing is downloaded twice.
 #   usage: GODOT=/path/to/godot clients/gdscript/scaffold-test.sh      (SCAFFOLD_TMP=<folder> to choose where projects are made)
@@ -70,6 +72,21 @@ echo "::group::new project (--template godot-gdscript)"
 node "$CLI" "$WORK/new" --template godot-gdscript --yes --no-git --addon-from "$ROOT" --webrtc-dir "$NATIVES" || FAILS=$((FAILS + 1))
 check new "$WORK/new"
 two_process new "$WORK/new"
+
+# verify: the one-command proof, on the good project and on a broken copy
+verify_check() {
+  local t0=$SECONDS
+  node "$CLI" verify "$WORK/new" --godot "$GODOT" --fetch-helpers > "$WORK/verify.out" 2>&1; local rc=$?
+  cat "$WORK/verify.out"
+  if [ $rc -ne 0 ] || [ "$(tail -n 1 "$WORK/verify.out")" != "VERIFY_OK" ]; then echo "FAIL verify: expected VERIFY_OK as the last line and exit 0 (exit $rc)"; FAILS=$((FAILS + 1)); fi
+  cp -r "$WORK/new" "$WORK/new-broken"
+  sed -i 's/"maxPlayers": *[0-9]*/"maxPlayers": 1/' "$WORK/new-broken/onelobby.json"
+  node "$CLI" verify "$WORK/new-broken" --godot "$GODOT" > "$WORK/verify-broken.out" 2>&1; rc=$?
+  tail -n 3 "$WORK/verify-broken.out"
+  if [ $rc -ne 1 ] || ! tail -n 1 "$WORK/verify-broken.out" | grep -q '^VERIFY_FAIL blueprint:'; then echo "FAIL verify: expected VERIFY_FAIL blueprint on the broken copy (exit $rc)"; FAILS=$((FAILS + 1)); fi
+  echo "verify took $((SECONDS - t0)) s"
+}
+verify_check
 echo "::endgroup::"
 
 echo "::group::--into an empty Godot project"
