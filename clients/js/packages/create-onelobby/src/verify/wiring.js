@@ -110,7 +110,11 @@ export function blueprintNext(path, fallback) {
 // It is in the list only when the game has the networked player: a scene or script outside addons/ and tests/ names the node, or (godot-csharp)
 // addons/onelobby_net_player/ is there. Then it needs both halves: a character scene with the OneLobbyNetPlayer node, and something that
 // spawns one character per player (the spawner or the layer). It proves nothing about the link: the `direct` check's test does that.
-const NODE_REGEX = { gd: /\bOneLobbyNetPlayer\b|addons\/onelobby\/net_player\.gd/, cs: /\bOneLobbyNetPlayer\b|addons\/onelobby_net_player\/OneLobbyNetPlayer\.cs/ };
+// the node: a scene that has it (its script is a resource of the scene) or code that makes one; a mention in a comment is not the node
+const NODE_REGEX = {
+  gd: /addons\/onelobby\/net_player\.gd|\bOneLobbyNetPlayer\.new\(/,
+  cs: /addons\/onelobby_net_player\/OneLobbyNetPlayer\.cs|\bnew\s+OneLobbyNetPlayer\b(?!Spawner)/,
+};
 const SPAWN_REGEX = { gd: /\bOneLobbyNetPlayerSpawner\b|\bOneLobbyNetPlayers\b/, cs: /\bOneLobbyNetPlayerSpawner\b|\bNetPlayers\b/ };
 
 /** True when this Godot game has the networked player (see above). */

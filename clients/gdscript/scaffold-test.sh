@@ -93,20 +93,6 @@ verify_check() {
 verify_check
 echo "::endgroup::"
 
-echo "::group::new projects with players (sync.player: owner 3d, host 2d)"
-for variant in "owner 3d" "host 2d"; do
-  set -- $variant
-  name="players-$1-$2"
-  node "$CLI" "$WORK/$name" --template godot-gdscript --yes --no-git --addon-from "$ROOT" --webrtc-dir "$NATIVES" --mode replication --set "sync.player.authority=$1" --set "sync.player.space=$2" || FAILS=$((FAILS + 1))
-  for f in player.tscn player.gd game.gd; do test -f "$WORK/$name/$f" || { echo "FAIL $name: $f was not written"; FAILS=$((FAILS + 1)); }; done
-  grep -q '_check_player' "$WORK/$name/tests/multiplayer.gd" || { echo "FAIL $name: the generated test has no player check"; FAILS=$((FAILS + 1)); }
-  check "$name" "$WORK/$name"
-done
-node "$CLI" verify "$WORK/players-owner-3d" --godot "$GODOT" > "$WORK/verify-players.out" 2>&1; rc=$?
-grep -E '^(player|wiring|direct):' "$WORK/verify-players.out"
-if [ $rc -ne 0 ] || [ "$(tail -n 1 "$WORK/verify-players.out" | tr -d '\r')" != "VERIFY_OK" ] || ! grep -q -E '^player: +ok' "$WORK/verify-players.out"; then echo "FAIL verify (players): expected VERIFY_OK and an ok player line (exit $rc)"; tail -n 12 "$WORK/verify-players.out"; FAILS=$((FAILS + 1)); fi
-echo "::endgroup::"
-
 echo "::group::--into an empty Godot project"
 mkdir -p "$WORK/into"
 printf 'config_version=5\n\n[application]\n\nconfig/name="Into"\nconfig/features=PackedStringArray("4.4")\n' > "$WORK/into/project.godot"
@@ -135,6 +121,20 @@ two_process into "$WORK/into"
 echo "-- second run:"
 node "$CLI" --into "$WORK/into" --yes --addon-from "$ROOT" --webrtc-dir "$NATIVES" --json > "$WORK/again.json"; head -c 300 "$WORK/again.json"; echo " ..."
 grep -q '"changed":false' "$WORK/again.json" || { echo "FAIL into: the second run changed something"; FAILS=$((FAILS + 1)); }
+echo "::endgroup::"
+
+echo "::group::new projects with players (sync.player: owner 3d, host 2d)"
+for variant in "owner 3d" "host 2d"; do
+  set -- $variant
+  name="players-$1-$2"
+  node "$CLI" "$WORK/$name" --template godot-gdscript --yes --no-git --addon-from "$ROOT" --webrtc-dir "$NATIVES" --mode replication --set "sync.player.authority=$1" --set "sync.player.space=$2" || FAILS=$((FAILS + 1))
+  for f in player.tscn player.gd game.gd; do test -f "$WORK/$name/$f" || { echo "FAIL $name: $f was not written"; FAILS=$((FAILS + 1)); }; done
+  grep -q '_check_player' "$WORK/$name/tests/multiplayer.gd" || { echo "FAIL $name: the generated test has no player check"; FAILS=$((FAILS + 1)); }
+  check "$name" "$WORK/$name"
+done
+node "$CLI" verify "$WORK/players-owner-3d" --godot "$GODOT" > "$WORK/verify-players.out" 2>&1; rc=$?
+grep -E '^(player|wiring|direct):' "$WORK/verify-players.out"
+if [ $rc -ne 0 ] || [ "$(tail -n 1 "$WORK/verify-players.out" | tr -d '\r')" != "VERIFY_OK" ] || ! grep -q -E '^player: +ok' "$WORK/verify-players.out"; then echo "FAIL verify (players): expected VERIFY_OK and an ok player line (exit $rc)"; tail -n 12 "$WORK/verify-players.out"; FAILS=$((FAILS + 1)); fi
 echo "::endgroup::"
 
 [ $FAILS -eq 0 ] && echo "scaffold e2e: ok" || echo "scaffold e2e: $FAILS failed"
