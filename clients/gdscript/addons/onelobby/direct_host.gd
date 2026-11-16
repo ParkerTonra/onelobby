@@ -46,7 +46,7 @@ var _closed := false
 static func start(options: Dictionary) -> OneLobbyDirectHost:
 	var d := OneLobbyDirectHost.new()
 	var max_players := int(options.get("max_players", 4))
-	var stun: Array = options.get("stun", OneLobbyNostrPool.DEFAULT_STUN)
+	var stun := stun_for(options)
 	d.hub = OneLobbyHub.direct(max_players, str(options.get("password", "")), stun, options.get("ice_servers", []))
 	var use_nostr := bool(options.get("nostr", true))
 	var use_lan := bool(options.get("lan", false))
@@ -81,6 +81,16 @@ static func start(options: Dictionary) -> OneLobbyDirectHost:
 	if port > 0:
 		d._start_upnp(port)
 	return d
+
+
+## The STUN list the host hands to joiners: `stun` when given, else none for a host that listens on loopback only (nothing may
+## leave this PC, so no server-reflexive lookup), else the library default (Google and Cloudflare).
+static func stun_for(options: Dictionary) -> Array:
+	if options.has("stun"):
+		return options["stun"]
+	if is_loopback_address(str(options.get("listen_address", "*"))):
+		return []
+	return OneLobbyNostrPool.DEFAULT_STUN
 
 
 ## True for a `listen_address` that names this PC only: 127.x.x.x, "localhost", "::1".

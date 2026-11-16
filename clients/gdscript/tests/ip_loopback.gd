@@ -45,6 +45,14 @@ func _run() -> void:
 	_check(not OneLobbyDirectHost.is_loopback_address("0.0.0.0") and not OneLobbyDirectHost.is_loopback_address("192.168.1.5") and OneLobbyDirectHost.is_loopback_address("::ffff:127.0.0.1"), "is_loopback_address")
 	_check(OneLobbyLobby.ice_failed_message(false, true).contains("port-forward its UDP port range"), "by-ip message names the next step")
 	_check(OneLobbyLobby.port_range_full_message([47900, 47901]).contains("47900-47901"), "range message")
+	# a loopback run gathers no server-reflexive candidates: no STUN handed out, none added as a default; a non-loopback run keeps the defaults
+	_check(OneLobbyDirectHost.stun_for({"listen_address": "127.0.0.1"}).is_empty(), "loopback host hands out no STUN")
+	_check(OneLobbyDirectHost.stun_for({"listen_address": "localhost"}).is_empty(), "localhost host hands out no STUN")
+	_check(OneLobbyDirectHost.stun_for({"listen_address": "127.0.0.1", "stun": ["stun:x.example:3478"]}) == ["stun:x.example:3478"], "an explicit stun list wins")
+	_check(OneLobbyDirectHost.stun_for({}) == OneLobbyNostrPool.DEFAULT_STUN and OneLobbyDirectHost.stun_for({"listen_address": "0.0.0.0"}) == OneLobbyNostrPool.DEFAULT_STUN, "negative control: a non-loopback host keeps the default STUN")
+	_check(OneLobbyGodotTransport.ice_with_default([], true).is_empty(), "no ICE servers and no default STUN for a loopback link")
+	_check(not OneLobbyGodotTransport.ice_with_default([], false).is_empty(), "negative control: other links keep the default STUN")
+	_check(OneLobbyMenuModel.LOCAL_HOST_OPTIONS.get("stun", null) == [], "--local host options say no STUN")
 
 	var at := OneLobbyGodotTransport.OLRtcLink.is_at_address
 	_check(at.call("candidate:1 1 UDP 2122317823 127.0.0.1 47940 typ host", "127.0.0.1"), "a candidate already at the code's address is not added twice")
@@ -60,6 +68,7 @@ func _run() -> void:
 		quit(1)
 		return
 	_check(lobby_h.ip_code != "" and lobby_h.code == lobby_h.ip_code, "host shows its ip code")
+	_check(host.no_default_stun and host._direct_host.hub.stun_urls.is_empty(), "a loopback host's client uses no ICE servers at all")
 	print("host ip code ", lobby_h.ip_code, " ", OneLobbyJoinCode.decode_dc1(lobby_h.ip_code))
 	# joiner 1 types the plain address a player would ("127.0.0.1:<tcp port>"), the others use the v0 code
 	var typed := "127.0.0.1:%d" % int(OneLobbyJoinCode.decode_dc1(lobby_h.ip_code).get("port", 0))

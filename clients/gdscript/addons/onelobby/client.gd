@@ -105,6 +105,9 @@ var _lan_finder: OneLobbyLanFinder = null
 var port_range: Array = []
 ## Direct mode, joiner by IP: the host's address from a v0 code; its host candidates are also tried there.
 var remote_ip := ""
+## Direct mode, loopback only (a host that listens on 127.0.0.1 only, or a joiner of a 127.x address): no ICE servers at all, not even
+## the default STUN, so nothing leaves this PC.
+var no_default_stun := false
 ## A direct joiner's socket after its lobby ended: kept polled until its last message (the leave) is out.
 var _retiring: OneLobbyTransport.OLSocket = null
 var _retire_deadline := 0
@@ -382,6 +385,7 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 			_fail("bad_code", "could not make a join code")
 		return null
 	port_range = range
+	no_default_stun = OneLobbyDirectHost.is_loopback_address(str(hub_options.get("listen_address", "*")))
 	_direct_host = d
 	d.lan_max_players = players
 	d.lan_password = pw != ""
@@ -462,6 +466,7 @@ func _direct_join(join_code: String, options: Dictionary, resume: String, reques
 		# join by IP: the host's TCP port carries signaling, no Nostr
 		var url := "ws://%s:%d/" % [dec["ip"], dec["port"]]
 		remote_ip = str(dec["ip"])
+		no_default_stun = OneLobbyDirectHost.is_loopback_address(remote_ip)
 		_direct_code = OneLobbyJoinCode.encode_ip(remote_ip, int(dec["port"]))
 		_route = "ip"
 		_socket_factory = func() -> OneLobbyTransport.OLSocket: return transport.connect_signaling(url)
@@ -747,6 +752,7 @@ func _clear_direct() -> void:
 	_extra_ice = []
 	port_range = []
 	remote_ip = ""
+	no_default_stun = false
 	_socket_factory = Callable()
 	if _direct_host != null:
 		_direct_host.close()

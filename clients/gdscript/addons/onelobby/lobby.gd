@@ -480,7 +480,7 @@ func _connect_peer(rec: OLPeerRec, initiator: bool, relay_only := false) -> void
 	rec.hi_sent = false
 	rec.link = _c.transport.create_link({
 		"remote_id": rec.id, "initiator": initiator, "ice_servers": _c.ice, "relay_only": relay_only or _c.relay_only,
-		"port_range": _c.port_range, "remote_ip": _c.remote_ip,
+		"port_range": _c.port_range, "remote_ip": _c.remote_ip, "no_default_stun": _c.no_default_stun,
 	})
 	_diag_link(rec)
 	if rec.link is OneLobbyGodotTransport.OLRtcLink and rec.link.fail_reason == "port_range_full":

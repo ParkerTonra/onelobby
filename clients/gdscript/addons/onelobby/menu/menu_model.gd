@@ -1063,7 +1063,7 @@ func join_lan(index: int) -> void:
 # ---- boot -----------------------------------------------------------------------------------------------------------
 
 ## What `--local` puts over the host options: loopback only, no Nostr relays, no public address.
-const LOCAL_HOST_OPTIONS := {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1"}
+const LOCAL_HOST_OPTIONS := {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1", "stun": []}
 
 
 ## Makes this menu local (what `--local` means): hosts and joins by the direct route, the host listens on 127.0.0.1 only with

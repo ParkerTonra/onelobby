@@ -169,7 +169,7 @@ namespace OneLobby.Godot
                 if (s.Credential != null) d["credential"] = s.Credential;
                 servers.Add(d);
             }
-            if (servers.Count == 0)
+            if (servers.Count == 0 && !options.NoIceServers)
             {
                 var d = new global::Godot.Collections.Dictionary();
                 d["urls"] = new global::Godot.Collections.Array<string> { "stun:stun.l.google.com:19302" };

@@ -89,6 +89,14 @@ class OLWsSocket:
 		state = CLOSED
 
 
+## The ICE servers a link uses: `ice`, or Google's STUN when there are none, except for a loopback-only run (`no_default_stun`):
+## nothing may leave this PC then, so a link with no ICE servers gathers host candidates only.
+static func ice_with_default(ice: Array, no_default_stun: bool) -> Array:
+	if ice.is_empty() and not no_default_stun:
+		return [{"urls": [DEFAULT_STUN]}]
+	return ice
+
+
 class OLRtcLink:
 	extends OneLobbyTransport.OLLink
 	var closed := false
@@ -115,8 +123,7 @@ class OLRtcLink:
 		relayed = bool(opts.get("relay_only", false))
 		var ice: Array = opts.get("ice_servers", [])
 		_turn_set = OneLobbyLobby.has_relay(ice)
-		if ice.is_empty():
-			ice = [{"urls": [DEFAULT_STUN]}]
+		ice = OneLobbyGodotTransport.ice_with_default(ice, bool(opts.get("no_default_stun", false)))
 		var config := {"iceServers": ice}
 		if relayed:
 			config["iceTransportPolicy"] = "relay"

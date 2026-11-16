@@ -30,4 +30,12 @@ describe("loopback ICE bind address", () => {
     expect(seen[0]!.bindAddress).toBe("127.0.0.1");
     expect("bindAddress" in seen[1]!).toBe(false);
   });
+
+  it("a local run has no ICE servers at all: an empty list stays empty (no default STUN is added), a given one is kept", () => {
+    const seen: Record<string, unknown>[] = [];
+    new WebRtcLink({ remoteId: 2, iceServers: [], relayOnly: false, bindAddress: "127.0.0.1" }, recordingRtc(seen));
+    new WebRtcLink({ remoteId: 2, iceServers: [{ urls: ["stun:stun.example:3478"] }], relayOnly: false }, recordingRtc(seen));
+    expect(seen[0]!.iceServers).toEqual([]);
+    expect(seen[1]!.iceServers).toEqual([{ urls: ["stun:stun.example:3478"] }]);
+  });
 });
