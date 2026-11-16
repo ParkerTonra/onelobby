@@ -6,7 +6,8 @@ extends SceneTree
 ##       --role=host|join --route=... [--server=ws://..] [--relay=ws://..] [--port=N] [--code=..] [--turn="turn:.. user pass"]
 ## `--scenario=room` runs the room layer instead of the ping rounds (a joiner with `--wrongpw` must be refused with bad_password);
 ## the protocol is the one in tools/engine-smoke/js-peer.mjs `roomScenario()`. `--scenario=replication` runs the binary replication
-## scenario (js-peer.mjs `replicationScenario()`): it prints the same `REPL ...` line as the JS and C# peers.
+## scenario (js-peer.mjs `replicationScenario()`): it prints the same `REPL ...` line as the JS and C# peers. `--scenario=players [--authority=owner|host]`
+## runs the networked player layer over fake lag (js-peer.mjs `playersScenario()`): it prints the same `PLAYERS ...` line.
 
 var _a := {}
 var _client: OneLobbyClient
@@ -59,11 +60,17 @@ func _run() -> void:
 		_client.relay_only = true
 	_client.lobby_server = str(_a.get("server", "ws://localhost:8080"))
 	_client.store = OneLobbyStore.memory() # peers on one machine must not share a player id through user://
+	# --scenario=players: fake lag on every link of this peer (the C# NetSimTransport's twin): --lag (one-way ms, both ends wrapped), --jitter, --loss (percent, fast channel), --seed
+	if _a.get("scenario") == "players":
+		_client.transport = OneLobbyNetSimTransport.new(_client.transport, {"latency_ms": float(_a.get("lag", "50")), "jitter_ms": float(_a.get("jitter", "10")),
+			"loss_percent": float(_a.get("loss", "2")), "seed": int(_a.get("seed", "1"))})
 	root.add_child(_client)
 	if _a.get("scenario") == "room":
 		await _room(ice)
 	elif _a.get("scenario") == "replication":
 		await _replication(ice)
+	elif _a.get("scenario") == "players":
+		await _players(ice)
 	elif _a.get("role") == "host":
 		await _host(ice)
 	else:
@@ -563,3 +570,276 @@ func _replication(ice: Array) -> void:
 	await jl.leave_and_flush()
 	var jok: bool = jrep.stats.malformed == 0 and jrep.entities().size() == 1 and absf(float(latest["state"]["x"]) - float(_e1_at(60)["x"])) < 0.01
 	_finish(jok, "replication joiner" if jok else "malformed=%d entities=%d x=%s" % [jrep.stats.malformed, jrep.entities().size(), latest["state"]["x"]])
+
+
+# ---- players scenario (--scenario=players): the networked player layer between engines over a lagging link; the same flow in the JS, GDScript and C# peers ----
+# THE RULE (README, "The players scenario"; every peer writes it once in its own language):
+#   walk (t seconds from the walk start): heading h = 0.75 * t rad, speed 6 m/s: x = 8 (1 - cos h), z = 8 sin h, v = 6 (sin h, cos h), yaw = h in degrees [0, 360);
+#   jump at t = 2 s: y = 5 s - 7.5 s^2 for s = t - 2 in [0, 2/3), on the ground otherwise; mode 4 in the air, 1 walking, 0 standing; stand at t >= 6.
+#   authority "owner": the joiner gives that state as its own every loop. authority "host": the joiner gives the input moveY 1 (0 from t = 6), yaw = h in
+#   degrees, jump pressed for t in [2, 2.1), and both ends run the same step (below). One jump action event at t = 2 in both.
+
+const P_SPEED := 6.0
+const P_W := 0.75
+const P_JUMP_AT := 2.0
+const P_JUMP_V := 5.0
+const P_GRAV := 15.0
+const P_WALK_S := 6.0
+const P_SETTLE_MS := 1500
+const P_HOLD_MS := 1000
+const P_CHUNK := 20
+const P_MSG := 0x54
+
+
+func _path_state(t: float) -> Dictionary:
+	var tt := clampf(t, 0.0, P_WALK_S)
+	var h := P_W * tt
+	var r := P_SPEED / P_W
+	var s := tt - P_JUMP_AT
+	var air := s >= 0.0 and s < 2.0 * P_JUMP_V / P_GRAV
+	var walking := t >= 0.0 and t < P_WALK_S
+	return {
+		"x": r * (1.0 - cos(h)), "z": r * sin(h), "y": (P_JUMP_V * s - 0.5 * P_GRAV * s * s) if air else 0.0,
+		"vx": P_SPEED * sin(h) if walking else 0.0, "vz": P_SPEED * cos(h) if walking else 0.0, "vy": (P_JUMP_V - P_GRAV * s) if air else 0.0,
+		"yaw": fposmod(rad_to_deg(h), 360.0), "on_ground": not air, "mode": 4 if air else (1 if walking else 0),
+	}
+
+
+func _path_input(t: float) -> Dictionary:
+	return {
+		"move_x": 0.0, "move_y": 1.0 if (t >= 0.0 and t < P_WALK_S) else 0.0,
+		"yaw": fposmod(rad_to_deg(P_W * clampf(t, 0.0, P_WALK_S)), 360.0),
+		"buttons": {"jump": t >= P_JUMP_AT and t < P_JUMP_AT + 0.1},
+	}
+
+
+func _player_step(s: Dictionary, i: Dictionary, dt: float) -> Dictionary:
+	var yaw := deg_to_rad(float(i["yaw"]))
+	var vx := P_SPEED * (float(i["move_y"]) * sin(yaw) + float(i["move_x"]) * cos(yaw))
+	var vz := P_SPEED * (float(i["move_y"]) * cos(yaw) - float(i["move_x"]) * sin(yaw))
+	var y := float(s["y"])
+	var vy := float(s["vy"])
+	var on_ground: bool = s["on_ground"]
+	if on_ground and i["buttons"]["jump"]:
+		vy = P_JUMP_V
+		on_ground = false
+	if not on_ground:
+		vy -= P_GRAV * dt
+		y += vy * dt
+		if y <= 0.0:
+			y = 0.0
+			vy = 0.0
+			on_ground = true
+	var o := s.duplicate()
+	o["x"] = float(s["x"]) + vx * dt
+	o["z"] = float(s["z"]) + vz * dt
+	o["y"] = y
+	o["vx"] = vx
+	o["vz"] = vz
+	o["vy"] = vy
+	o["yaw"] = i["yaw"]
+	o["on_ground"] = on_ground
+	o["mode"] = (1 if (float(i["move_x"]) != 0.0 or float(i["move_y"]) != 0.0) else 0) if on_ground else 4
+	return o
+
+
+## The owner's position at time t (ms) by linear interpolation of a trace [[unix ms, x, y, z], ...]; null outside the trace.
+func _trace_at(path: Array, t: float) -> Variant:
+	var n := path.size()
+	if n == 0 or t < float(path[0][0]) or t > float(path[n - 1][0]):
+		return null
+	var lo := 0
+	var hi := n - 1
+	while hi - lo > 1:
+		var m := (lo + hi) >> 1
+		if float(path[m][0]) <= t:
+			lo = m
+		else:
+			hi = m
+	var p: Array = path[lo]
+	var q: Array = path[hi]
+	var k := 0.0 if float(q[0]) == float(p[0]) else (t - float(p[0])) / (float(q[0]) - float(p[0]))
+	return [float(p[1]) + (float(q[1]) - float(p[1])) * k, float(p[2]) + (float(q[2]) - float(p[2])) * k, float(p[3]) + (float(q[3]) - float(p[3])) * k]
+
+
+## The one constant lag (0 to 600 ms, 8 ms steps) at which the watched path is closest to the owner's on average; then the mean and worst distance there.
+func _compare_paths(owner: Array, watched: Array) -> Dictionary:
+	var best := {"lag": 0, "mean": INF, "max": INF, "n": 0}
+	for lag in range(0, 601, 8):
+		var sum := 0.0
+		var mx := 0.0
+		var n := 0
+		for w: Array in watched:
+			var o: Variant = _trace_at(owner, float(w[0]) - float(lag))
+			if o == null:
+				continue
+			var d := sqrt((float(w[1]) - float(o[0])) ** 2 + (float(w[2]) - float(o[1])) ** 2 + (float(w[3]) - float(o[2])) ** 2)
+			sum += d
+			mx = maxf(mx, d)
+			n += 1
+		if n > 20 and sum / float(n) < float(best["mean"]):
+			best = {"lag": lag, "mean": sum / float(n), "max": mx, "n": n}
+	return best
+
+
+func _tmsg(text: String) -> PackedByteArray:
+	var b := PackedByteArray([P_MSG])
+	b.append_array(text.to_utf8_buffer())
+	return b
+
+
+func _unix_ms() -> int:
+	return int(Time.get_unix_time_from_system() * 1000.0)
+
+
+func _players(ice: Array) -> void:
+	var route := str(_a.get("route"))
+	var host_auth := str(_a.get("authority", "owner")) == "host"
+	var opts := {"authority": "host" if host_auth else "owner"}
+	if host_auth:
+		opts["step"] = Callable(self, "_player_step")
+	Engine.max_fps = 100
+	var limit_ms := int(_a.get("timeout", "60")) * 1000
+	var t00 := Time.get_ticks_msec()
+	if _a.get("role") == "host":
+		var lobby: OneLobbyLobby
+		var typed := ""
+		if route == "server":
+			lobby = await _client.host({"name": "smoke", "max_players": 4})
+		else:
+			var port := int(_a.get("port"))
+			var o := {"name": "smoke", "max_players": 4, "tcp_port": port, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1",
+				"udp_port_range": [port, port + 3], "ice_servers": ice, "stun": [], "nostr": false, "relays": [str(_a.get("relay", ""))] if _a.has("relay") else []}
+			lobby = await _client.host_direct(o)
+			typed = "127.0.0.1:%d" % port
+		if lobby == null:
+			_finish(false, "host failed: %s" % _client.last_error)
+			return
+		print("HOST_READY code=%s typed=%s ipcode=" % [lobby.code if route == "server" else typed, typed])
+		var joiner := [0]
+		lobby.peer_ready.connect(func(p: Dictionary) -> void: joiner[0] = int(p["peer_id"]))
+		if not await _until(func() -> bool: return joiner[0] != 0, "a linked joiner", 40.0):
+			return
+		var players := OneLobbyNetPlayers.new(lobby, opts)
+		if not host_auth:
+			players.set_local_state({})
+		var st := {"copy_jumps": 0, "remote_jumps": -1, "ended": false}
+		var own: Array = []
+		var copy: Array = []
+		players.on_action("jump", func(e: Dictionary) -> void:
+			if int(e["player"]) == joiner[0]:
+				st["copy_jumps"] += 1)
+		players.session.other_message.connect(func(_from: int, bytes: PackedByteArray, _ch: int) -> void:
+			if bytes.size() < 2 or bytes[0] != P_MSG:
+				return
+			var f := bytes.slice(1).get_string_from_utf8().split("|") # "S|t,x,y,z;t,x,y,z" a part of the trace, "E|<jumps>" the end
+			if f[0] == "S":
+				for row in f[1].split(";"):
+					var c := row.split(",")
+					if c.size() == 4:
+						own.append([float(c[0]), float(c[1]), float(c[2]), float(c[3])])
+			elif f[0] == "E":
+				st["remote_jumps"] = int(f[1])
+				st["ended"] = true)
+		var last_copy := 0
+		while not st["ended"]:
+			players.pump()
+			var now := _unix_ms()
+			if now - last_copy >= 20:
+				last_copy = now
+				var s: Variant = players.get_state(joiner[0])
+				if s != null:
+					copy.append([float(now), float(s["x"]), float(s["y"]), float(s["z"])])
+			if Time.get_ticks_msec() - t00 > limit_ms - 3000:
+				_finish(false, "timed out: the joiner's trace (%d samples so far, %d copies)" % [own.size(), copy.size()])
+				return
+			await process_frame
+		var r := _compare_paths(own, copy)
+		print("PLAYERS lag=%d mean=%.3f worst=%.3f samples=%d jumps=%d/%d" % [r["lag"], r["mean"], r["max"], r["n"], st["remote_jumps"], st["copy_jumps"]])
+		lobby.send(joiner[0], _tmsg("D"), OneLobbyWire.RELIABLE)
+		var t1 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t1 < 600:
+			players.pump()
+			await process_frame
+		await lobby.leave_and_flush()
+		var ok: bool = is_finite(float(r["mean"])) and players.session.stats.malformed == 0
+		_finish(ok, "players host (%s)" % ("host" if host_auth else "owner") if ok else "players: no comparison or malformed=%d" % players.session.stats.malformed)
+		return
+	var code := str(_a.get("code", ""))
+	var jl: OneLobbyLobby
+	if route == "server":
+		jl = await _client.join(code)
+	else:
+		jl = await _client.join_direct(code, {"ice_servers": ice, "timeout_ms": 40000, "relays": [str(_a.get("relay", ""))] if _a.has("relay") else []})
+	if jl == null:
+		_finish(false, "join failed: %s" % _client.last_error)
+		return
+	if not jl.is_ready:
+		await jl.ready
+	var jp := OneLobbyNetPlayers.new(jl, opts)
+	var js := {"jumps": 0, "done": false}
+	jp.on_action("jump", func(e: Dictionary) -> void:
+		if e["local"]:
+			js["jumps"] += 1)
+	jp.session.other_message.connect(func(_from: int, bytes: PackedByteArray, _ch: int) -> void:
+		if bytes.size() == 2 and bytes[0] == P_MSG and bytes[1] == 0x44:
+			js["done"] = true)
+	_players_drive(jp, host_auth, -1.0)
+	var rows: Array = []
+	var phase := "wait"
+	var mark := 0
+	var jumped := false
+	var last_tick := -1
+	var t_start := _unix_ms()
+	while phase != "sent":
+		var now := _unix_ms()
+		if phase == "wait":
+			var ready_world: bool = (not jp.local_state().is_empty()) if host_auth else jp.player_ids().has(jl.local_peer_id)
+			if ready_world:
+				phase = "settle"
+				mark = now
+		if phase == "settle" and now - mark >= P_SETTLE_MS:
+			phase = "walk"
+			mark = now
+		var t := float(now - mark) / 1000.0 if (phase == "walk" or phase == "hold") else -1.0
+		_players_drive(jp, host_auth, t)
+		if t >= P_JUMP_AT and not jumped:
+			jumped = true
+			jp.send_action("jump")
+		jp.pump()
+		if phase == "walk" and jp.session.clock.tick != last_tick:
+			last_tick = jp.session.clock.tick
+			var l := jp.local_state()
+			if not l.is_empty():
+				rows.append([now, float(l["x"]), float(l["y"]), float(l["z"])])
+		if phase == "walk" and t >= P_WALK_S:
+			phase = "hold"
+		if phase == "hold" and t >= P_WALK_S + float(P_HOLD_MS) / 1000.0:
+			var i := 0
+			while i < rows.size():
+				var part: Array = []
+				for s: Array in rows.slice(i, i + P_CHUNK):
+					part.append("%d,%.3f,%.3f,%.3f" % [int(s[0]), float(s[1]), float(s[2]), float(s[3])])
+				jl.send(jl.host_peer_id, _tmsg("S|" + ";".join(part)), OneLobbyWire.RELIABLE)
+				i += P_CHUNK
+			jl.send(jl.host_peer_id, _tmsg("E|%d" % js["jumps"]), OneLobbyWire.RELIABLE)
+			print("PLAYERS_JOINER samples=%d jumps=%d" % [rows.size(), js["jumps"]])
+			phase = "sent"
+		if phase == "wait" and now - t_start > 60000:
+			_finish(false, "the player never came into the world")
+			return
+		await process_frame
+	var t2 := Time.get_ticks_msec()
+	while not js["done"] and Time.get_ticks_msec() - t2 < 20000:
+		jp.pump()
+		await process_frame
+	await jl.leave_and_flush()
+	var jok: bool = js["done"] and js["jumps"] == 1 and jp.session.stats.malformed == 0
+	_finish(jok, "players joiner (%s)" % ("host" if host_auth else "owner") if jok else "players joiner: done=%s jumps=%d malformed=%d" % [js["done"], js["jumps"], jp.session.stats.malformed])
+
+
+func _players_drive(players: OneLobbyNetPlayers, host_auth: bool, t: float) -> void:
+	if host_auth:
+		players.set_local_input(_path_input(t))
+	else:
+		players.set_local_state(_path_state(t))

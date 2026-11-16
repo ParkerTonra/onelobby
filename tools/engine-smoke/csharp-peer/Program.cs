@@ -66,12 +66,21 @@ internal static class Program
         var cfg = new OneLobbyConfig("com.onelobby.enginesmoke", "1", new Uri(A.GetValueOrDefault("server", "ws://unused.invalid/")), A.GetValueOrDefault("sync", "raw") == "lockstep" ? SyncMode.Lockstep : SyncMode.Raw,
             TickRate: 20, HashEveryTicks: 10, DisplayName: Name, RelayOnly: turn != null) { ReadyTimeout = TimeSpan.FromSeconds(40) };
         // --loopback: bind every ICE socket to 127.0.0.1 (no Windows firewall prompt; the host then offers a 127.0.0.1 host candidate)
-        var client = new LobbyClient(cfg, new DataChannelTransport { BindAddress = A.ContainsKey("loopback") ? "127.0.0.1" : null });
+        ITransport transport = new DataChannelTransport { BindAddress = A.ContainsKey("loopback") ? "127.0.0.1" : null };
+        // --scenario=players: fake lag on every link of this peer: --lag (one-way ms, both ends wrapped), --jitter, --loss (percent, fast channel), --seed
+        if (A.GetValueOrDefault("scenario") == "players")
+            transport = new NetSimTransport(transport, new NetSimOptions(LatencyMs: double.Parse(A.GetValueOrDefault("lag", "50"), Inv), JitterMs: double.Parse(A.GetValueOrDefault("jitter", "10"), Inv), LossPercent: double.Parse(A.GetValueOrDefault("loss", "2"), Inv), Seed: int.Parse(A.GetValueOrDefault("seed", "1"))));
+        var client = new LobbyClient(cfg, transport);
         var nostr = new NostrOptions { Enabled = route != "typed" && route != "ipcode", Stun = new string[0] };
         if (A.TryGetValue("relay", out var relay)) nostr.Relays = new[] { relay };
         if (A.GetValueOrDefault("scenario") == "room")
         {
             try { return role == "host" ? RoomHost(client, route, limitMs) : RoomJoin(client, route, nostr, limitMs); }
+            finally { client.DisposeAsync().AsTask().Wait(1000); }
+        }
+        if (A.GetValueOrDefault("scenario") == "players")
+        {
+            try { return role == "host" ? PlayersHost(client, route, limitMs) : PlayersJoin(client, route, nostr, limitMs); }
             finally { client.DisposeAsync().AsTask().Wait(1000); }
         }
         if (A.GetValueOrDefault("scenario") == "replication")
@@ -184,6 +193,209 @@ internal static class Program
         var h = 0x811c9dc5u;
         foreach (var b in new byte[] { 1, 1, (byte)owner }.Concat(w.ToArray())) h = unchecked((h ^ b) * 16777619u);
         return h;
+    }
+
+    // ---- players scenario (--scenario=players): the networked player layer between engines over a lagging link; the same flow in the JS, GDScript and C# peers ----
+    // THE RULE (README, "The players scenario"; every peer writes it once in its own language):
+    //   walk (t seconds from the walk start): heading h = 0.75 * t rad, speed 6 m/s: x = 8 (1 - cos h), z = 8 sin h, v = 6 (sin h, cos h), yaw = h in degrees [0, 360);
+    //   jump at t = 2 s: y = 5 s - 7.5 s^2 for s = t - 2 in [0, 2/3), on the ground otherwise; mode 4 in the air, 1 walking, 0 standing; stand at t >= 6.
+    //   authority "owner": the joiner gives that state as its own every loop. authority "host": the joiner gives the input moveY 1 (0 from t = 6), yaw = h in
+    //   degrees, jump pressed for t in [2, 2.1), and both ends run the same step (below). One jump action event at t = 2 in both.
+    private const double PSpeed = 6, PW = 0.75, PJumpAt = 2, PJumpV = 5, PGrav = 15, PWalkS = 6;
+    private const int PSettleMs = 1500, PHoldMs = 1000, PChunk = 20;
+    private const byte PMsg = 0x54;
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static PlayerState PathState(double t)
+    {
+        var tt = Math.Min(Math.Max(t, 0), PWalkS);
+        var h = PW * tt;
+        var R = PSpeed / PW;
+        var s = tt - PJumpAt;
+        var air = s >= 0 && s < 2 * PJumpV / PGrav;
+        var walking = t >= 0 && t < PWalkS;
+        return new PlayerState
+        {
+            X = R * (1 - Math.Cos(h)), Z = R * Math.Sin(h), Y = air ? PJumpV * s - 0.5 * PGrav * s * s : 0,
+            Vx = walking ? PSpeed * Math.Sin(h) : 0, Vz = walking ? PSpeed * Math.Cos(h) : 0, Vy = air ? PJumpV - PGrav * s : 0,
+            Yaw = h * 180 / Math.PI % 360, OnGround = !air, Mode = air ? 4 : walking ? 1 : 0,
+        };
+    }
+
+    private static NetPlayerInput PathInput(double t) => new()
+    {
+        MoveX = 0, MoveY = t >= 0 && t < PWalkS ? 1 : 0, Yaw = PW * Math.Min(Math.Max(t, 0), PWalkS) * 180 / Math.PI % 360,
+        Buttons = t >= PJumpAt && t < PJumpAt + 0.1 ? PlayerButtons.Jump : PlayerButtons.None,
+    };
+
+    private static PlayerState PlayerStep(PlayerState s, NetPlayerInput i, double dt)
+    {
+        var yaw = i.Yaw * Math.PI / 180;
+        var vx = PSpeed * (i.MoveY * Math.Sin(yaw) + i.MoveX * Math.Cos(yaw));
+        var vz = PSpeed * (i.MoveY * Math.Cos(yaw) - i.MoveX * Math.Sin(yaw));
+        double y = s.Y, vy = s.Vy;
+        var onGround = s.OnGround;
+        if (onGround && (i.Buttons & PlayerButtons.Jump) != 0) { vy = PJumpV; onGround = false; }
+        if (!onGround) { vy -= PGrav * dt; y += vy * dt; if (y <= 0) { y = 0; vy = 0; onGround = true; } }
+        s.X += vx * dt; s.Z += vz * dt; s.Y = y; s.Vx = vx; s.Vz = vz; s.Vy = vy; s.Yaw = i.Yaw; s.OnGround = onGround;
+        s.Mode = onGround ? (i.MoveX != 0 || i.MoveY != 0 ? 1 : 0) : 4;
+        return s;
+    }
+
+    // the owner's position at time t by linear interpolation of a trace [[unix ms, x, y, z], ...]; null outside the trace
+    private static double[]? TraceAt(List<double[]> path, double t)
+    {
+        var n = path.Count;
+        if (n == 0 || t < path[0][0] || t > path[n - 1][0]) return null;
+        int lo = 0, hi = n - 1;
+        while (hi - lo > 1) { var m = (lo + hi) >> 1; if (path[m][0] <= t) lo = m; else hi = m; }
+        var p = path[lo]; var q = path[hi];
+        var k = q[0] == p[0] ? 0 : (t - p[0]) / (q[0] - p[0]);
+        return new[] { p[1] + (q[1] - p[1]) * k, p[2] + (q[2] - p[2]) * k, p[3] + (q[3] - p[3]) * k };
+    }
+
+    // the one constant lag (0 to 600 ms, 8 ms steps) at which the watched path is closest to the owner's on average; then the mean and worst distance there
+    private static (int Lag, double Mean, double Max, int N) ComparePaths(List<double[]> owner, List<double[]> watched)
+    {
+        var best = (Lag: 0, Mean: double.PositiveInfinity, Max: double.PositiveInfinity, N: 0);
+        for (var lag = 0; lag <= 600; lag += 8)
+        {
+            double sum = 0, mx = 0; var n = 0;
+            foreach (var w in watched)
+            {
+                var o = TraceAt(owner, w[0] - lag);
+                if (o == null) continue;
+                var d = Math.Sqrt((w[1] - o[0]) * (w[1] - o[0]) + (w[2] - o[1]) * (w[2] - o[1]) + (w[3] - o[2]) * (w[3] - o[2]));
+                sum += d; mx = Math.Max(mx, d); n++;
+            }
+            if (n > 20 && sum / n < best.Mean) best = (lag, sum / n, mx, n);
+        }
+        return best;
+    }
+
+    private static byte[] TMsg(string text) => new[] { PMsg }.Concat(Encoding.UTF8.GetBytes(text)).ToArray();
+    private static long UnixMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private static NetPlayers MakePlayers(Lobby lobby, bool hostAuth) =>
+        new(lobby, new NetPlayersOptions { Authority = hostAuth ? PlayerAuthority.Host : PlayerAuthority.Owner, Step = hostAuth ? PlayerStep : null });
+
+    private static int PlayersHost(LobbyClient client, string route, int limitMs)
+    {
+        var hostAuth = A.GetValueOrDefault("authority") == "host";
+        Lobby lobby;
+        string typed = "";
+        if (route == "server")
+        {
+            var t = client.HostAsync(new LobbyOptions("smoke", 4));
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+        }
+        else
+        {
+            var port = int.Parse(A["port"]);
+            var t = client.HostDirectAsync(new DirectHostOptions
+            {
+                Port = port, FallbackPorts = 0, BindAddress = System.Net.IPAddress.Loopback, PublicAddress = "127.0.0.1", OpenPort = false,
+                MaxPlayers = 4, Nostr = new NostrOptions { Enabled = false },
+            });
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+            typed = "127.0.0.1:" + port;
+        }
+        Say($"HOST_READY code={(route == "server" ? lobby.Code : typed)} typed={typed} ipcode=");
+        var ready = new HashSet<int>();
+        lobby.PeerReady += p => ready.Add(p.PeerId);
+        if (!Wait(() => ready.Count >= 1, lobby.Pump, limitMs)) return Finish(false, "no linked joiner");
+        var joiner = ready.First();
+        var players = MakePlayers(lobby, hostAuth);
+        if (!hostAuth) players.SetLocalState(new PlayerState());
+        int jumpsCopy = 0, remoteJumps = -1;
+        var ended = false;
+        var own = new List<double[]>(); var copy = new List<double[]>();
+        players.OnAction += e => { if (e.Name == PlayerAction.Jump && e.Player == joiner) jumpsCopy++; };
+        players.Session.OtherMessage += (_, p, _) =>
+        {
+            var span = p.Span;
+            if (span.Length < 2 || span[0] != PMsg) return;
+            var f = Encoding.UTF8.GetString(span.Slice(1)).Split('|'); // "S|t,x,y,z;t,x,y,z" a part of the trace, "E|<jumps>" the end
+            if (f[0] == "S") { foreach (var row in f[1].Split(';')) { var c = row.Split(',').Select(v => double.Parse(v, Inv)).ToArray(); if (c.Length == 4) own.Add(c); } }
+            else if (f[0] == "E") { remoteJumps = int.Parse(f[1], Inv); ended = true; }
+        };
+        long lastCopy = 0;
+        while (!ended)
+        {
+            players.Pump();
+            var now = UnixMs();
+            if (now - lastCopy >= 20) { lastCopy = now; if (players.TryGet(joiner, out var s)) copy.Add(new[] { (double)now, s.X, s.Y, s.Z }); }
+            if (Sw.ElapsedMilliseconds > limitMs - 3000) return Finish(false, $"timed out: the joiner's trace ({own.Count} samples so far, {copy.Count} copies)");
+            Thread.Sleep(2);
+        }
+        var r = ComparePaths(own, copy);
+        Say($"PLAYERS lag={r.Lag} mean={r.Mean.ToString("F3", Inv)} worst={r.Max.ToString("F3", Inv)} samples={r.N} jumps={remoteJumps}/{jumpsCopy}");
+        lobby.Send(joiner, TMsg("D"));
+        var until = Sw.ElapsedMilliseconds + 600;
+        Wait(() => Sw.ElapsedMilliseconds > until, players.Pump, limitMs);
+        var flush = lobby.FlushAsync(TimeSpan.FromSeconds(1));
+        Wait(() => flush.IsCompleted, lobby.Pump, limitMs);
+        var leave = lobby.LeaveAsync();
+        Wait(() => leave.IsCompleted, lobby.Pump, limitMs);
+        var ok = double.IsFinite(r.Mean) && players.Session.Stats.Malformed == 0;
+        return Finish(ok, ok ? $"players host ({(hostAuth ? "host" : "owner")})" : $"players: no comparison or malformed={players.Session.Stats.Malformed}");
+    }
+
+    private static int PlayersJoin(LobbyClient client, string route, NostrOptions nostr, int limitMs)
+    {
+        var hostAuth = A.GetValueOrDefault("authority") == "host";
+        var code = A["code"];
+        Task<Lobby> t = route == "server" ? client.JoinAsync(code) : client.JoinDirectAsync(code, new JoinDirectOptions { Nostr = nostr });
+        if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "join timeout");
+        var lobby = t.GetAwaiter().GetResult();
+        if (!Wait(() => lobby.ReadyAsync.IsCompleted, lobby.Pump, limitMs) || !lobby.ReadyAsync.IsCompletedSuccessfully) return Finish(false, "link to host not open");
+        var players = MakePlayers(lobby, hostAuth);
+        int jumpsOwn = 0;
+        var done = false;
+        players.OnAction += e => { if (e.Name == PlayerAction.Jump && e.Local) jumpsOwn++; };
+        players.Session.OtherMessage += (_, p, _) => { var span = p.Span; if (span.Length == 2 && span[0] == PMsg && span[1] == (byte)'D') done = true; };
+        void Drive(double tt) { if (!hostAuth) players.SetLocalState(PathState(tt)); else players.SetLocalInput(PathInput(tt)); }
+        Drive(-1);
+        var rows = new List<(long At, PlayerState S)>();
+        var phase = "wait";
+        long mark = 0, t00 = UnixMs();
+        var jumped = false;
+        long lastTick = -1;
+        while (phase != "sent")
+        {
+            var now = UnixMs();
+            if (phase == "wait" && (hostAuth ? players.Local != null : players.Players.Contains(lobby.LocalPeerId))) { phase = "settle"; mark = now; }
+            if (phase == "settle" && now - mark >= PSettleMs) { phase = "walk"; mark = now; }
+            var tt = phase == "walk" || phase == "hold" ? (now - mark) / 1000.0 : -1;
+            Drive(tt);
+            if (tt >= PJumpAt && !jumped) { jumped = true; players.Action(PlayerAction.Jump); }
+            players.Pump();
+            if (phase == "walk" && (long)players.Session.Clock.Tick != lastTick)
+            {
+                lastTick = (long)players.Session.Clock.Tick;
+                if (players.Local is { } l) rows.Add((now, l));
+            }
+            if (phase == "walk" && tt >= PWalkS) phase = "hold";
+            if (phase == "hold" && tt >= PWalkS + PHoldMs / 1000.0)
+            {
+                for (var i = 0; i < rows.Count; i += PChunk)
+                    lobby.Send(lobby.HostPeerId, TMsg("S|" + string.Join(";", rows.Skip(i).Take(PChunk).Select(r => string.Join(",", r.At.ToString(Inv), r.S.X.ToString("F3", Inv), r.S.Y.ToString("F3", Inv), r.S.Z.ToString("F3", Inv))))));
+                lobby.Send(lobby.HostPeerId, TMsg($"E|{jumpsOwn}"));
+                Say($"PLAYERS_JOINER samples={rows.Count} jumps={jumpsOwn}");
+                phase = "sent";
+            }
+            if (phase == "wait" && now - t00 > 60000) return Finish(false, "the player never came into the world");
+            Thread.Sleep(2);
+        }
+        var until = Sw.ElapsedMilliseconds + 20000;
+        Wait(() => done || Sw.ElapsedMilliseconds > until, players.Pump, limitMs);
+        var flush = lobby.FlushAsync(TimeSpan.FromSeconds(1));
+        Wait(() => flush.IsCompleted, lobby.Pump, limitMs);
+        var leave = lobby.LeaveAsync();
+        Wait(() => leave.IsCompleted, lobby.Pump, limitMs);
+        var ok = done && jumpsOwn == 1 && players.Session.Stats.Malformed == 0;
+        return Finish(ok, ok ? $"players joiner ({(hostAuth ? "host" : "owner")})" : $"players joiner: done={done} jumps={jumpsOwn} malformed={players.Session.Stats.Malformed}");
     }
 
     private static int ReplHost(LobbyClient client, string route, int limitMs)

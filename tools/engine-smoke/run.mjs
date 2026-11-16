@@ -1,6 +1,7 @@
 // engine-smoke: a simulated game per engine client (JS, GDScript, C#) over every route that client supports.
 //   node tools/engine-smoke/run.mjs [--engines=js,gd,cs] [--routes=server,nostr,typed,ipcode,turn] [--cases=js,js+gd] [--verbose]
 //        [--godot=<path to godot>] [--no-build] [--rounds=3] [--timeout=60] [--sync=raw|lockstep|both] [--lsroutes=server,typed]
+//        [--players[=owner|host] [--lag=50] [--jitter=10] [--loss=2] [--seed=1000]]
 // One host + two joiners per case exchange a few rounds of game messages (reliable and fast) on one route. Prints one
 // line per case and finally ENGINE_SMOKE_OK or ENGINE_SMOKE_FAIL <list>. Everything binds 127.0.0.1; see README.md.
 import { spawn, execFileSync } from "node:child_process";
@@ -24,14 +25,20 @@ for (const x of process.argv.slice(2)) {
 const ROOM = !!flags.room;
 // --replication: the binary replication scenario (spawn, move, input, event, despawn; both sides print the same world hash) between the JS, GDScript and C# peers
 const REPL = !!flags.replication;
+// --players[=owner|host]: the networked player layer (owner or host authority) between the JS, GDScript and C# peers over fake lag, jitter and loss:
+// the joiner walks a scripted path, the host compares its copy of it (README, "The players scenario")
+const PLAYERS = !!flags.players;
+const PLAYERS_AUTH = flags.players === "host" ? "host" : "owner";
+const LAG = Number(flags.lag ?? 50), JITTER = Number(flags.jitter ?? 10), LOSS = Number(flags.loss ?? 2), SEED = Number(flags.seed ?? 1000); // host seed SEED, joiner seed SEED + 1
+const PLAYERS_MEAN = 0.15, PLAYERS_WORST = 0.45, PLAYERS_SAMPLES = 100; // spec/net-player.md section 11, D1
 const ENGINES = (flags.engines ?? "js,gd,cs").split(",");
-const ROUTES = (flags.routes ?? (ROOM || REPL ? "server,typed" : "server,nostr,typed,ipcode,turn")).split(",");
+const ROUTES = (flags.routes ?? (ROOM || REPL || PLAYERS ? "server,typed" : "server,nostr,typed,ipcode,turn")).split(",");
 const ROUNDS = Number(flags.rounds ?? 3);
-const CASE_TIMEOUT = Number(flags.timeout ?? 60);
+const CASE_TIMEOUT = Number(flags.timeout ?? (PLAYERS ? 90 : 60));
 const REPEAT = Number(flags.repeat ?? 1); // run every case this many times (flake hunting)
 // raw: ping/pong rounds on every route. lockstep: chat, a shared pause and 60 lockstep ticks (the same hash and the same
 // commands on every peer) on LS_ROUTES. both (default): the raw cases, then the lockstep ones.
-const SYNCS = ROOM || REPL || flags.sync === "raw" ? ["raw"] : flags.sync === "lockstep" ? ["lockstep"] : ["raw", "lockstep"]; // the room scenario runs once
+const SYNCS = ROOM || REPL || PLAYERS || flags.sync === "raw" ? ["raw"] : flags.sync === "lockstep" ? ["lockstep"] : ["raw", "lockstep"]; // the room scenario runs once
 const LS_ROUTES = (flags.lsroutes ?? "server,typed").split(",");
 const verbose = !!flags.verbose;
 const ENGINE_NAME = { js: "JS", gd: "GDScript", cs: "C#" };
@@ -41,7 +48,7 @@ const SUPPORTS = { js: ROUTES, gd: ROUTES, cs: ROUTES };
 // Cases: every engine alone (host + 2 joiners of that engine), then each host with the two OTHER engines as its joiners.
 // "js+gd" style cases from --cases are host + joiner engines, e.g. --cases=js,js+gd+cs (host js, joiners gd and cs).
 function cases() {
-  if (REPL) return ENGINES.flatMap((h) => ENGINES.map((j) => ({ host: h, joiners: [j] })));
+  if (REPL || PLAYERS) return ENGINES.flatMap((h) => ENGINES.map((j) => ({ host: h, joiners: [j] })));
   if (ROOM) return ENGINES.flatMap((h) => ENGINES.map((j) => ({ host: h, joiners: [j, j] }))); // joiner 1 is a good one, joiner 2 uses a wrong password
   if (flags.cases) return flags.cases.split(",").map((c) => { const [h, ...j] = c.split("+"); return { host: h, joiners: j.length === 1 ? [j[0], j[0]] : j.length ? j : [h, h] }; });
   const out = [];
@@ -176,17 +183,17 @@ function peer(engine, args, tag) {
 }
 
 async function runCase(c, route, idx, sync = "raw") {
-  const label = `${ENGINE_NAME[c.host]} host + ${c.joiners.map((j) => ENGINE_NAME[j]).join(" + ")} joiners${ROOM ? " (room)" : REPL ? " (replication)" : ""}${sync === "lockstep" ? " (lockstep)" : ""}`;
+  const label = `${ENGINE_NAME[c.host]} host + ${c.joiners.map((j) => ENGINE_NAME[j]).join(" + ")} joiners${ROOM ? " (room)" : REPL ? " (replication)" : PLAYERS ? ` (players ${PLAYERS_AUTH})` : ""}${sync === "lockstep" ? " (lockstep)" : ""}`;
   const t0 = Date.now();
   const port = await hostPort(idx);
-  const common = [`--route=${route}`, `--rounds=${ROUNDS}`, `--timeout=${CASE_TIMEOUT}`, ...(flags.loopback ? ["--loopback"] : []), ...(ROOM ? ["--scenario=room"] : REPL ? ["--scenario=replication"] : []),
+  const common = [`--route=${route}`, `--rounds=${ROUNDS}`, `--timeout=${CASE_TIMEOUT}`, ...(flags.loopback ? ["--loopback"] : []), ...(ROOM ? ["--scenario=room"] : REPL ? ["--scenario=replication"] : PLAYERS ? ["--scenario=players", `--authority=${PLAYERS_AUTH}`, `--lag=${LAG}`, `--jitter=${JITTER}`, `--loss=${LOSS}`] : []),
     ...(sync === "lockstep" ? ["--sync=lockstep", `--peers=${c.joiners.length + 1}`] : [])];
   if (route === "server") common.push(`--server=${serverUrl}`);
   else common.push(`--relay=${relay.url}`);
   if (route === "turn") common.push(`--turn=${turn.line}`);
   const allocBefore = turn?.stats.allocations ?? 0, relayedBefore = turn?.stats.relayed ?? 0;
   const ps = [];
-  const host = peer(c.host, ["--role=host", "--name=host-" + c.host, `--port=${port}`, "--joiners=" + (ROOM || REPL ? 1 : c.joiners.length), ...common], "host");
+  const host = peer(c.host, ["--role=host", "--name=host-" + c.host, `--port=${port}`, "--joiners=" + (ROOM || REPL || PLAYERS ? 1 : c.joiners.length), ...common, ...(PLAYERS ? [`--seed=${SEED}`] : [])], "host");
   ps.push(host);
   let detail = "";
   let warn = "", note = "";
@@ -195,7 +202,7 @@ async function runCase(c, route, idx, sync = "raw") {
     const m = await waitFor(() => /HOST_READY code=(\S*) typed=(\S*) ipcode=(\S*)/.exec(host.getOut()) ?? (host.exited ? { fail: true } : null), CASE_TIMEOUT * 1000, "host code");
     if (m.fail) throw new Error("host exited before it was ready");
     const code = m[1];
-    const joiners = c.joiners.map((j, i) => peer(j, ["--role=join", `--name=join${i + 1}-${j}`, `--code=${code}`, ...(ROOM && i === 1 ? ["--wrongpw"] : []), ...common], "join"));
+    const joiners = c.joiners.map((j, i) => peer(j, ["--role=join", `--name=join${i + 1}-${j}`, `--code=${code}`, ...(ROOM && i === 1 ? ["--wrongpw"] : []), ...common, ...(PLAYERS ? [`--seed=${SEED + 1}`] : [])], "join"));
     ps.push(...joiners);
     await waitFor(() => ps.every((p) => p.exited), CASE_TIMEOUT * 1000 + 5000, "all peers to finish");
     // the verdict is each peer's own RESULT line; a non-zero exit AFTER a PASS (a native crash at shutdown) is reported, not hidden
@@ -207,6 +214,21 @@ async function runCase(c, route, idx, sync = "raw") {
       // both sides must have seen the same world: counts and the hash of the final state
       const lines = ps.map((p) => /REPL (spawned=\d+ despawned=\d+ entities=\d+ events=\d+ hash=\d+)/.exec(p.getOut())?.[1]);
       if (lines.some((l) => !l) || lines[0] !== lines[1]) { ok = false; detail += ` | replication worlds differ: ${lines.join(" ; ")}`; } else note = "replication: " + lines[0];
+    }
+    if (PLAYERS) {
+      // the host's own comparison of the joiner's walk with its copy of it at the best constant lag: D1 bounds, enough samples, one jump on each side
+      const m = /PLAYERS lag=(\d+) mean=([\d.]+|inf|nan) worst=([\d.]+|inf|nan) samples=(\d+) jumps=(-?\d+)\/(\d+)/i.exec(ps[0].getOut());
+      if (!m) { ok = false; detail += " | no PLAYERS line from the host"; }
+      else {
+        const [lag, mean, worst, samples, own, copy] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])];
+        const line = m[0];
+        const why = [];
+        if (!(mean < PLAYERS_MEAN)) why.push(`mean ${mean} m is not under ${PLAYERS_MEAN} m`);
+        if (!(worst < PLAYERS_WORST)) why.push(`worst ${worst} m is not under ${PLAYERS_WORST} m`);
+        if (samples < PLAYERS_SAMPLES) why.push(`${samples} samples, want at least ${PLAYERS_SAMPLES}`);
+        if (own !== 1 || copy !== 1) why.push(`jumps ${own}/${copy}, want 1/1`);
+        if (why.length) { ok = false; detail += ` | ${line} | ${why.join("; ")}`; } else note = line + (lag === 0 ? " (lag 0: suspicious)" : "");
+      }
     }
     if (ok && sync === "lockstep") {
       // every peer must have applied the same 60 frames: one hash, one command count (each peer submits 5)
