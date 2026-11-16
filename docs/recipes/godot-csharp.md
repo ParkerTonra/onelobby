@@ -78,6 +78,9 @@ and acts on `--host`, `--join=<code>` and `--name=<name>` after `--`. Its proper
 `menu.md` ("Godot C#"); it is the same scene and the same text table as the GDScript menu. `MenuDemo.tscn` in the demo project
 is a runnable example (`godot --path clients/dotnet/demo-godot res://MenuDemo.tscn -- --host --name=Sam`).
 
+Players in the world: the add-on folder `addons/onelobby_net_player/` (`OneLobbyNetPlayer` under the character, `OneLobbyNetPlayerSpawner`)
+and a reference to `OneLobby.Replication`; see `net-player.md` section 10b and the sample `NetPlayerDemo.tscn`.
+
 The scene is generated from the GDScript menu's (`node tools/make-menu-scene.mjs`), and a test fails when the two differ, so a
 layout fix lands in both at once.
 

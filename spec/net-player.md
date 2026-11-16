@@ -6,7 +6,7 @@ too (`clients/gdscript/addons/onelobby/`: `net_player_wire.gd`, `net_player_code
 `prediction_smoother.gd`, `history_ring.gd`, and the Godot node `net_player.gd` with its spawner `net_player_spawner.gd`), built from
 this document and `spec/vectors/net-player.json`, which it passes in full. The C# client has it too (`clients/dotnet/OneLobby.Replication/`: `PlayerWire.cs`,
 `PlayerCodec.cs`, `NetPlayers.cs`, with `Helpers.cs` for `Reconciler`, `PredictionSmoother` and `HistoryRing`), also built from this document and the vectors,
-which it passes in full (`NetPlayerVectorTests`). The Unity `NetPlayer` component and a Godot C# node come after.
+which it passes in full (`NetPlayerVectorTests`). The Godot C# node and spawner (`clients/dotnet/demo-godot/addons/onelobby_net_player/`) are built on that layer; the Unity `NetPlayer` component comes after.
 
 **Proven only on an in-memory network with a virtual clock** (`RepRig` in JS, `tests/replication_rig.gd` in GDScript, `Rig` in C#: latency, jitter and
 loss on a fake link) and, for the GDScript sample, by two headless processes on one PC (CI). No real link and no real game engine window

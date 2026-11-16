@@ -329,7 +329,7 @@ per non-default key, build with the scaffolder's template and the drop-in menu (
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Replicated state (host-authoritative real-time: shooters, physics, AI), C#, JS and GDScript: `docs/recipes/replication.md`
-- Networked players (position, facing, jump, shoot, melee; the player's own PC or the host places them), JS, C# (the layer only) and GDScript (the Godot node, a spawner, a sample), not yet a Unity or Godot C# component: `docs/recipes/net-player.md`
+- Networked players (position, facing, jump, shoot, melee; the player's own PC or the host places them), JS, C# (the layer), GDScript and Godot C# (the node, a spawner, a sample; the C# node is the add-on folder `clients/dotnet/demo-godot/addons/onelobby_net_player/`), not yet a Unity component: `docs/recipes/net-player.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

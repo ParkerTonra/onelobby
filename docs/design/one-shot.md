@@ -156,7 +156,12 @@ Each is one lane unless noted; order matters for the first three.
     arguments are structs; no engine type), the session additions (`AdaptiveDelay`, `InterpolationDelayMs`, `JitterMs`, `RegisterKind` / `SendExtension`, per-peer
     `TrafficWith`, state schemas for `TrySampleAt` / `TryGetLatest`), every case of `spec/vectors/net-player.json` in both directions, and D1 to D9 on the C# `Rig`
     (`NetPlayerTests`, `NetPlayerHostTests`). In-memory only: no two processes and no real link have carried it, no game engine has run it, nobody has seen it
-    on a screen. Not built (part 3b): the Unity `NetPlayer` component, a spawner, a sample, a Godot C# node, and the JS-to-C# trace test.
+    on a screen. Not built (part 3b): the Unity `NetPlayer` component, a spawner, a sample, and the JS-to-C# trace test.
+    Landed (the Godot C# lane, part 3c): `OneLobbyNetPlayer` and `OneLobbyNetPlayerSpawner` as an add-on folder of the demo project (`addons/onelobby_net_player/`, `[GlobalClass]`;
+    a node class in a referenced assembly cannot be attached to a scene), with the same exports, properties, methods and signals as the GDScript node in PascalCase, and a sample
+    that moves (`NetPlayerDemo.tscn`). Proven in one headless Godot process on an in-memory network (`--netplayer-selfcheck`, run by `scaffold-test.sh` in CI); the
+    two-process script (`net-player-test.sh`) has never run (no CI step fetches the natives for the demo project). Nobody has seen it in a window, the smoothing numbers are the
+    plan's, no real link has carried it. Not built: the scaffolder's `godot-csharp` template does not offer the node yet.
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.
