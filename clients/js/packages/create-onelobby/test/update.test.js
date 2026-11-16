@@ -293,7 +293,7 @@ describe("update: other folders", () => {
 
   it("a web --into game uses multiplayer/session.js", async () => {
     mkdirSync(at("into"));
-    await cli(["--into", "into", "--yes"]);
+    await cli(["--into", "into", "--template", "web", "--yes"]);
     const r = await j(["update", "into"]);
     expect(r.json.glue).toEqual({ path: "multiplayer/session.js", state: "identical" });
   });

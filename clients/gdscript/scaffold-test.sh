@@ -5,7 +5,8 @@
 #      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
 #   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
 #      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
-#   4. scaffold --into an empty Godot project, the same as 1; then a second --into run must change nothing
+#   4. scaffold --into an empty Godot project, the same as 1 and 2 (a main scene that only instances the menu; --local is the menu's own
+#      flag); then a second --into run must change nothing
 # The add-on comes from this checkout (--addon-from) and the natives from the folder fetch-webrtc.sh already unpacked
 # (--webrtc-dir), so nothing is downloaded twice.
 #   usage: GODOT=/path/to/godot clients/gdscript/scaffold-test.sh      (SCAFFOLD_TMP=<folder> to choose where projects are made)
@@ -95,6 +96,25 @@ printf 'config_version=5\n\n[application]\n\nconfig/name="Into"\nconfig/features
 node "$CLI" --into "$WORK/into" --yes --addon-from "$ROOT" --webrtc-dir "$NATIVES" || FAILS=$((FAILS + 1))
 grep -q 'Net="\*res://net.gd"' "$WORK/into/project.godot" || { echo "FAIL into: autoload not registered"; FAILS=$((FAILS + 1)); }
 check into "$WORK/into"
+# the --into game is wired by hand: a main scene that only instances the menu (no game code, no --local logic of its own), then the
+# same two-process play as the new project, from the written .olc entry: --local must be enough
+cat > "$WORK/into/main.tscn" <<'TSCN'
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://addons/onelobby/menu/menu.tscn" id="1_menu"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Menu" parent="." instance=ExtResource("1_menu")]
+layout_mode = 1
+TSCN
+sed -i 's#^config/name="Into"#&\nrun/main_scene="res://main.tscn"#' "$WORK/into/project.godot"
+grep -q 'run/main_scene' "$WORK/into/project.godot" || { echo "FAIL into: could not set the main scene"; FAILS=$((FAILS + 1)); }
+two_process into "$WORK/into"
 echo "-- second run:"
 node "$CLI" --into "$WORK/into" --yes --addon-from "$ROOT" --webrtc-dir "$NATIVES" --json > "$WORK/again.json"; head -c 300 "$WORK/again.json"; echo " ..."
 grep -q '"changed":false' "$WORK/again.json" || { echo "FAIL into: the second run changed something"; FAILS=$((FAILS + 1)); }

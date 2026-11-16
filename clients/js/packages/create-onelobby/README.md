@@ -42,6 +42,18 @@ What it installs (the same for both, except the main scene):
 - New project only: `project.godot`, `main.tscn` + `main.gd` (the drop-in menu, and a label that shows the roster on
   `game_started`), `AGENTS.md`.
 
+`--into` with no `--template` reads the folder: `project.godot` is Godot (C# when a `.csproj` / `.sln` sits beside it), `ProjectSettings/`
+(with `ProjectVersion.txt`, or beside `Assets/`) is `unity` and a `.csproj` / `.sln` without `project.godot` is `dotnet` (both stop as
+`template_planned`), a folder with `.html`, `.js` / `.ts` or a `package.json` is `web`, and anything else stops as `engine_unknown`
+(pass `--template`; on a terminal it asks). A description that names the engine still picks it; `--template` always wins;
+`engine.from` says `files` for what the folder told. The GDScript menu reads `--local` itself (the direct route, 127.0.0.1 only, no
+Nostr), so `--host --local` is safe in any game that instances it with `boot_flags` on, with no game code.
+A second `--into` run keeps a hand-edited `onelobby.json`: with `--recommend` it says `kept your onelobby.json; the recommendation was
+not applied` (JSON: `recommendation.applied: []` and `recommendation.notApplied`); a web `--into` that stops with `exists` says the same.
+
+A web `--into` also writes a minimal `package.json` (private, `"type": "module"`, the `onelobby` dependency) when the folder has none; an
+existing one is never edited, and the "Next:" lines say what to add.
+
 `--into` never touches your main scene: it prints the three lines that add the menu scene. Files that already exist are
 skipped and listed (`--force` overwrites them); a second run changes nothing and says so. A folder with a `.csproj` or `.sln`
 beside `project.godot` is a Godot C# project: see the next section (`--template godot-gdscript` on it is `wrong_template`).
@@ -160,6 +172,7 @@ A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `bl
 | `addon-pin` | `addons/onelobby/` matches `PIN.json`; edited files are a warning on the line, not a failure |
 | `natives` | the WebRTC natives are there and registered (it runs the headless import itself when `.godot/extension_list.cfg` is missing) |
 | `blueprint` | `onelobby.json` loads through the JS loader and through the game's GDScript loader |
+| `wiring` | a static look: some scene or script outside `addons/` and `tests/` uses the drop-in menu (`ui.kind` `none` / `generated`: the client). A bare `--into` fails it until the game is wired; every project the scaffolder writes passes it |
 | `direct` | two peers on 127.0.0.1, host and join by code, a message each way (the game's `tests/multiplayer.gd`, else a bundled probe) |
 | `nostr` | the same through a LOCAL Nostr relay on 127.0.0.1 (built in), when `hosting.nostr` is on |
 | `turn` | relay-only through a LOCAL TURN server on 127.0.0.1 with a random login given as one pasted line; fails unless the TURN server saw allocations and relayed packets |
@@ -172,6 +185,7 @@ A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `bl
 | `menu-pin` | `addons/onelobby_menu/` matches `PIN.json`; edited files are a warning, not a failure | locally, CI |
 | `natives` | the WebRTC natives are there and registered (it runs the headless import when `.godot/extension_list.cfg` is missing; Godot may then rewrite the `Godot.NET.Sdk` version in the `.csproj` to its own) | locally, CI |
 | `blueprint` | `onelobby.json` loads through the JS loader and through the game's C# loader (`Blueprint.Parse`, run by `tests/MultiplayerTest`) | locally, CI |
+| `wiring` | as for GDScript, for `OneLobbyMenu` / `OneLobbyMenu.tscn` (not `OneLobbyNet.cs`) | locally, CI |
 | `direct` | two peers on 127.0.0.1, host and join by address, a message each way (the game's `tests/MultiplayerTest`) | locally, CI |
 | `nostr` | the same through a LOCAL Nostr relay, when `hosting.nostr` is on | locally, CI |
 | `turn` | relay-only through a LOCAL TURN server: the peers connect and the TURN server counts allocations and relayed packets above 0. Connected with 0 relayed packets is a `FAIL` (the links are not relay-only) | locally, CI |
@@ -187,6 +201,7 @@ makes (`bin/`, `obj/`, `.godot/mono/`), all in the managed `.gitignore` block.
 | Check (web) | What it proves |
 |---|---|
 | `blueprint` | `onelobby.json` loads through the real loader |
+| `wiring` | some file outside `test/` and `node_modules/` imports the glue (`session.js`) or `onelobby`; a bare `--into` fails it until the page is wired |
 | `project-test` | the game's own `test/multiplayer.mjs` passes (in memory; needs `npm install` first) |
 | `nostr`, `turn` | `skipped` by design: two JS clients over real WebRTC in Node need node-datachannel, which a web game does not depend on (tools/engine-smoke covers it) |
 

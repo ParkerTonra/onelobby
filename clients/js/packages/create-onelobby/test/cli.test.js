@@ -222,7 +222,7 @@ describe("invalid combinations exit 1 with the loader's path and rule", () => {
     expect(e).toMatchObject({ code: "unsupported", path: "sync.mode" });
     expect(e.message).toContain('"lockstep" or "raw"');
     mkdirSync(join(cwd, "into-game"));
-    const r = await json(["--into", "into-game", "--yes", "--mode", "replication"]);
+    const r = await json(["--into", "into-game", "--template", "web", "--yes", "--mode", "replication"]);
     expect(r.json.error).toMatchObject({ code: "unsupported", path: "sync.mode" });
     expect(readdirSync(join(cwd, "into-game"))).toEqual([]);
   });
@@ -243,7 +243,7 @@ describe("--into", () => {
     writeFileSync(join(cwd, "game", "package.json"), "{}");
     const r = await cli(["--into", "game", "--yes", "--json"]);
     const j = JSON.parse(r.out);
-    expect(j.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]);
+    expect(j.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]); // an existing package.json is never edited
     expect(readFileSync(join(cwd, "game/package.json"), "utf8")).toBe("{}");
     expect(existsSync(join(cwd, "game/index.html"))).toBe(false);
     expect(readFileSync(join(cwd, "game/test/multiplayer.mjs"), "utf8")).toContain("../multiplayer/session.js");
@@ -253,13 +253,13 @@ describe("--into", () => {
   it("never overwrites an existing file unless --force", async () => {
     mkdirSync(join(cwd, "game"));
     writeFileSync(join(cwd, "game", "onelobby.json"), "mine");
-    const r = await json(["--into", "game", "--yes"]);
+    const r = await json(["--into", "game", "--template", "web", "--yes"]);
     expect(r.code).toBe(1);
     expect(r.json.error).toMatchObject({ code: "exists" });
     expect(r.json.error.message).toContain("onelobby.json");
     expect(readFileSync(join(cwd, "game/onelobby.json"), "utf8")).toBe("mine");
     expect(existsSync(join(cwd, "game/multiplayer"))).toBe(false); // nothing partial
-    const forced = await cli(["--into", "game", "--yes", "--force"]);
+    const forced = await cli(["--into", "game", "--template", "web", "--yes", "--force"]);
     expect(forced.code).toBe(0);
     expect(JSON.parse(readFileSync(join(cwd, "game/onelobby.json"), "utf8")).version).toBe(1);
   });

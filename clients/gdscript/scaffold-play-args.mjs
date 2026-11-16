@@ -1,7 +1,7 @@
 // Used by scaffold-test.sh: read the host and joiner arguments of a scaffolded project's play entry (.olc/<slug>.json, both
-// shells) and check that AGENTS.md shows the same command lines. Prints two lines: the host's arguments, the joiner's.
+// shells) and (when the project has an AGENTS.md) check that it shows the same command lines. Prints two lines: the host's arguments, the joiner's.
 //   node scaffold-play-args.mjs <project dir>
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const dir = resolve(process.argv[2]);
@@ -17,8 +17,9 @@ const join = /-- (--join=\S+[^;&]*)$/.exec(bash)?.[1];
 if (!host || !join) fail(`cannot read the host and joiner arguments from .olc/${basename(dir)}.json`);
 const quoted = (a) => a.split(" ").map((x) => `'${x}'`).join(",");
 if (!ps.includes(quoted(host)) || !ps.includes(`-- ${join}`)) fail("the powershell task has other arguments than the bash task");
-const agents = readFileSync(`${dir}/AGENTS.md`, "utf8");
-for (const a of [host, join]) {
+// a game the scaffolder was added to (--into) has no AGENTS.md of the scaffolder's: only a new project is matched against it
+const agents = existsSync(`${dir}/AGENTS.md`) ? readFileSync(`${dir}/AGENTS.md`, "utf8") : null;
+for (const a of agents === null ? [] : [host, join]) {
   const flags = a.replace(/--name=\S+/, "").trim();
   if (!agents.includes(`-- ${flags}`)) fail(`AGENTS.md does not show "-- ${flags}"`);
 }

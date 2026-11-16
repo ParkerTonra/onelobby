@@ -84,7 +84,8 @@ describe("godot-gdscript: a new project", () => {
     expect(text("game/tests/multiplayer.gd")).toContain("MULTIPLAYER_OK");
     expect(text("game/AGENTS.md")).toContain("-s res://tests/multiplayer.gd");
     expect(text("game/AGENTS.md")).not.toContain("{{");
-    expect(text("game/main.tscn")).toContain("boot_flags = false");
+    expect(text("game/main.tscn")).not.toContain("boot_flags"); // --local is the menu's own boot flag now
+    expect(text("game/main.gd")).not.toContain("--local in args");
     expect(verifyPin(at("game"))).toMatchObject({ ok: true });
     expect(JSON.parse(text("game/addons/onelobby/PIN.json")).files).toHaveProperty("menu/menu.tscn");
   });
@@ -316,8 +317,8 @@ describe("godot-gdscript: --into", () => {
 
   it("the web --into still works in a folder without project.godot", async () => {
     mkdirSync(at("web"));
-    const r = await j(["--into", "web", "--yes"]);
-    expect(r.json.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]);
+    const r = await j(["--into", "web", "--template", "web", "--yes"]);
+    expect(r.json.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs", "package.json"]);
   });
 });
 

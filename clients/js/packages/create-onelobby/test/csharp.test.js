@@ -418,7 +418,7 @@ describe("godot-csharp: verify", () => {
   });
 
   it("runs the checks in the documented order, with the same names as GDScript where they apply", () => {
-    expect(csharpChecks().map((c) => c.name)).toEqual(["godot", "dotnet", "menu-pin", "natives", "blueprint", "direct", "nostr", "turn", "server"]);
+    expect(csharpChecks().map((c) => c.name)).toEqual(["godot", "dotnet", "menu-pin", "natives", "blueprint", "wiring", "direct", "nostr", "turn", "server"]);
     expect(csharpChecks().filter((c) => c.blocking).map((c) => c.name)).toEqual(["godot", "dotnet", "menu-pin", "natives", "blueprint"]);
   });
 

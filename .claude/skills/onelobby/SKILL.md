@@ -48,8 +48,8 @@ Note each finding with the file and line that told you:
 
 Preview, writing and downloading nothing: `npx create-onelobby --into . --template <engine> --recommend "<sentence>" --yes
 --dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). `--recommend` fills in its `answers` by
-itself; add a flag only to override one (section 2), not to repeat them. **Always pass `--template`**: without it
-`--into` knows only a Godot folder (`project.godot`) and treats every other folder, a Unity one too, as `web`. `--yes` invents the game id `com.example.<folder>`; give the real one with
+itself; add a flag only to override one (section 2), not to repeat them. Pass `--template` when you know the engine; without it
+`--into` reads the folder (Godot, Unity, .NET or web files) and stops with `engine_unknown` when the folder tells nothing. `--yes` invents the game id `com.example.<folder>`; give the real one with
 `--game-id`. The result holds `blueprint` (the file to be written), `files` (added or updated) and `recommendation`.
 
 Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
@@ -72,17 +72,12 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    instance it in code (`Net` is the autoload the scaffolder registered). Connect `game_started(lobby)` (start the match),
    `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword: `docs/recipes/menu.md`.
    **Test on this PC only.** The menu acts on `-- --host` and `-- --join=<code>` by itself, and a plain `--host` opens a port and
-   reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by a new project's `main.gd`, not by the menu, so in a
-   GDScript `--into` game it does nothing (the `.olc` entry the scaffolder wrote passes it all the same) until you add what that
-   `main.gd` does: set `boot_flags = false` on the menu beside `client`, then after the menu's `_ready` (the parent's `_ready`,
-   or after `add_child`): `var args := OS.get_cmdline_user_args()`, and `if "--local" in args:` set `menu.route = "direct"` and
-   `menu.host_options = {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1"}`, then
-   `menu.model.apply_boot_flags(args)`. C#: the "Next:" line's `OneLobbyNet.Wire(menu, args)` reads `--local`. Never run
-   `-- --host` before that is in, and never without `--local`.
+   reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by the GDScript menu itself, with no game code, as long as `boot_flags`
+   is on; C#: the "Next:" line's `OneLobbyNet.Wire(menu, args)` reads it (the menu's `BootFlags` off). Never run `-- --host`
+   without `--local`.
 3. **Web** `--into` writes `onelobby.json`, `multiplayer/session.js` and `test/multiplayer.mjs` only: no menu (`ui.kind` stays
-   `generated`, you draw the buttons; `--ui drop-in` is refused) and no `AGENTS.md` (the "AGENTS.md rule" its comments cite is the
-   Rules list in the OneLobby repo's `AGENTS.md`: rule 1, the game owns the command bytes; rule 5, the lobby server URL is a
-   setting). With no `package.json`: `npm init -y`, `npm pkg set type=module`, `npm install onelobby`. Put the game behind
+   `generated`, you draw the buttons; `--ui drop-in` is refused) and no `AGENTS.md`, and a minimal `package.json` only when the folder has
+   none (an existing one is never edited: add `onelobby` and `"type": "module"` as the "Next:" lines say, then `npm install`). Put the game behind
    `step(tick, commands) -> hash`, `snapshot()`, `restore(tick, bytes)`, `hash()` and swap it into the test's stand-in `Game`.
    In the page go through `multiplayer/session.js`: `loadBlueprint()`, `makeKit(bp, { displayName })`, `kit.host()` or
    `kit.join(code)`, then `const s = bindSession(lobby, kit.blueprint, game)` before `lobby.start()`; call
@@ -111,8 +106,8 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
 Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that step and run again until `VERIFY_OK`, or until you can
 name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
 runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
-`nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, not your
-wiring, so also boot the game (`godot --headless --audio-driver Dummy --path . --quit-after 90`, no flags; web: `node test/multiplayer.mjs`)
+`nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, and in `wiring` that some scene or page uses
+the menu or the glue (a bare `--into` fails it until you wire the game); it does not run your game, so also boot it (`godot --headless --audio-driver Dummy --path . --quit-after 90`, no flags; web: `node test/multiplayer.mjs`)
 and read it for errors, and check **offline**: with no lobby server the game still plays and the menu says multiplayer is unavailable.
 `verify` refuses engines the scaffolder does not build (no verdict line); then use the recipe's "Done when" and say which checks you could not run.
 

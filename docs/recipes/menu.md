@@ -61,14 +61,20 @@ The lobby is `menu.client.lobby` (the signal gives it to you too). Nothing else 
 
 ## Boot flags
 
-With `boot_flags` on (default), `--host`, `--join=<code>` and `--name=<name>` after `--` act at once:
+With `boot_flags` on (default), `--host`, `--join=<code>`, `--name=<name>` and `--local` after `--` act at once:
 
 ```
-godot --path . -- --host --name=Sam
-godot --path . -- --join=D1PB-1X9S-FPV --name=Ann
+godot --path . -- --host --local --name=Sam                 # this PC only
+godot --path . -- --join=127.0.0.1:47810 --local --name=Ann
+godot --path . -- --join=D1PB-1X9S-FPV --name=Ann           # a real code: the internet
 ```
 
-One switch (`boot_flags = false`) turns all three off. Tests give the flags to a menu with `boot_args` instead of the process command line.
+`--local` makes the menu local (`OneLobbyMenuModel.apply_local()`): the direct route, the host listens on 127.0.0.1 only with Nostr off
+and no public address (these keys win over `host_options` the game set; its other keys stay), and the connection check never runs by
+itself. Without `--local` a game's own `route` and `host_options` are not touched. Never test a game with `--host` and no `--local`: it
+opens a real port and reaches public relays. The GDScript menu needs no game code for it; the C# menu takes it from `OneLobbyNet.Wire`.
+
+One switch (`boot_flags = false`) turns all four off. Tests give the flags to a menu with `boot_args` instead of the process command line.
 
 ## Restyling
 
@@ -134,8 +140,8 @@ or does not answer). While it runs, and when all is well, the start screen says 
 - Switch it off for a game: `"diagnostics": { "checkOnOpen": false }` in `onelobby.json` (the button stays). `showConnectionCheck: false`
   hides the button and the automatic run both.
 - Not again when the player comes back from a lobby or from Settings; the button runs it on demand.
-- A menu started with `--local` (the templates' flag: 127.0.0.1 only) never runs it by itself. The menu reads `--local` from the
-  command line itself, so the order of your own start-up code does not matter.
+- A menu started with `--local` (127.0.0.1 only, see Boot flags) never runs it by itself. The menu reads `--local` from the
+  command line itself (`OneLobbyMenuModel.args_say_local`, also when `boot_flags` is off), so the order of your own start-up code does not matter.
 - Tests: give the menu a fake runner (`check_runner` / `CheckRunner` / the controller's `checkRunner`); a test that opens a real menu
   without one, and without `checkOnOpen: false`, would contact the public STUN servers.
 - Your own controller: call the model's `start_shown()` / `StartShown()` / `startShown()` whenever you draw the start screen and show

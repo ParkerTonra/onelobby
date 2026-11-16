@@ -261,8 +261,9 @@ Usage: create-onelobby [dir] [options]
        create-onelobby verify [dir] [options]   prove the game's multiplayer on 127.0.0.1: one line, VERIFY_OK or VERIFY_FAIL ... (see "verify" below)
 
   --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   ${builtList()} exist; the rest are planned for v2
-  --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ only; a Godot GDScript
-                               folder (project.godot, no .csproj) gets the add-on, the natives, the autoload and a test (the template is implied)
+  --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ (and a minimal package.json when
+                               there is none); a Godot folder (project.godot) gets the add-on, the natives, the autoload and a test. With no
+                               --template the folder is read (Godot, Unity, .NET, web files); a folder that tells nothing needs --template
   --from <onelobby.json>       take every answer from this file (flags still override it)
   --recommend "<one line>"     describe the game in a sentence: alone (no folder, nothing written) it prints the proposed multiplayer setup
                                (sync mode, tick rate, players, pause, hosting) with a reason per choice and the questions that would change it;

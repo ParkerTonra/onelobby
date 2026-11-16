@@ -398,6 +398,19 @@ func _extras() -> void:
 	_check(bj.model.apply_boot_flags(PackedStringArray(["--join=" + bh.model.lobby.ip_code, "--name=Ann"])) == "join", "--join joins at once")
 	_check(await _until(func() -> bool: return bj.model.screen == Screen.LOBBY), "the boot joiner reaches the lobby")
 	_check(_rig().model.apply_boot_flags(PackedStringArray(["--something"])) == "", "no flag, nothing started")
+	# --local: a boot flag of the menu itself (direct route, loopback host options, no Nostr, no automatic check)
+	var lm := _rig().model
+	lm.route = "auto"
+	lm.host_options = {"max_players": 2, "nostr": true, "listen_address": "0.0.0.0"}
+	_check(lm.apply_boot_flags(PackedStringArray(["--local"])) == "" and lm.local_only and lm.route == "direct", "--local alone starts nothing and makes the menu local, direct route")
+	_check(lm.host_options["nostr"] == false and lm.host_options["listen_address"] == "127.0.0.1" and lm.host_options["public_ip"] == "127.0.0.1", "--local: loopback listen address and public IP, Nostr off")
+	_check(lm.host_options["max_players"] == 2 and not lm.check_on_open_enabled(), "--local keeps the game's other host options and turns the automatic check off")
+	_check(OneLobbyMenuModel.parse_boot_flags(PackedStringArray(["--host", "--local"]))["local"] == true and OneLobbyMenuModel.parse_boot_flags(PackedStringArray(["--host"]))["local"] == false, "parse_boot_flags reads --local")
+	var nl := _rig().model
+	nl.route = "server"
+	nl.host_options = {"nostr": true, "listen_address": "0.0.0.0"}
+	nl.apply_boot_flags(PackedStringArray(["--name=Sam"]))
+	_check(nl.route == "server" and nl.host_options == {"nostr": true, "listen_address": "0.0.0.0"} and not nl.local_only, "without --local a game's own route and host_options are not touched")
 	await bj.model.leave()
 	await bh.model.leave()
 
