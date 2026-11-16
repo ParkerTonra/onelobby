@@ -13,6 +13,9 @@
 set -uo pipefail
 PACKAGE_TGZ="${PACKAGE_TGZ:?set PACKAGE_TGZ to a com.onelobby.unity tarball that has the native libraries}"
 UNITY="${UNITY:?set UNITY to the Unity 6 editor (Unity.exe)}"
+if ! tar --force-local -tzf "$PACKAGE_TGZ" 2>/dev/null | grep -q 'Runtime/Plugins/x86_64/datachannel\.dll$'; then
+  echo "SCAFFOLD_FAIL no Windows WebRTC library (datachannel.dll) in $PACKAGE_TGZ: build the package with its natives or take the unity-dev-package CI artifact"; exit 1
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 CLI="$ROOT/clients/js/packages/create-onelobby/bin/create-onelobby.js"

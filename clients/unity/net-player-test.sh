@@ -15,6 +15,10 @@ WORK="$ROOT/.tmp-unity/np"
 VERSION="$(sed -n 's/^m_EditorVersion: //p' "$ROOT/.tmp-unity/proj/ProjectSettings/ProjectVersion.txt" 2>/dev/null | tr -d '\r')"
 VERSION="${UNITY_VERSION:-${VERSION:-6000.2.7f2}}"
 [ "${SKIP_PACKAGE_BUILD:-0}" = 1 ] || bash "$HERE/build-unity-package.sh" > "$ROOT/.tmp-unity/package-build.log" 2>&1 || { echo "NETPLAYER_FAIL package build failed (see .tmp-unity/package-build.log)"; exit 1; }
+# no Windows WebRTC library in the package: the two players would only time out after 90 s, so say so at once
+if grep -a -q 'native win-x64: not built (skipped)' "$ROOT/.tmp-unity/package-build.log" 2>/dev/null || [ ! -f "$PKG/Runtime/Plugins/x86_64/datachannel.dll" ]; then
+  echo "NETPLAYER_FAIL no Windows WebRTC library (datachannel.dll) in the package: build it (OneLobby.DataChannel natives) or copy it from the unity-dev-package CI artifact"; exit 1
+fi
 if tasklist //FI "IMAGENAME eq Unity.exe" 2>/dev/null | grep -qi unity.exe; then echo "NETPLAYER_FAIL another Unity editor is running; one at a time"; exit 1; fi
 if ! node -e 'const s = require("net").createServer(); s.once("error", (e) => { console.error(e.code); process.exit(3); }); s.listen(47810, "127.0.0.1", () => s.close(() => process.exit(0)));' 2> "$ROOT/.tmp-unity/port"; then
   echo "NETPLAYER_FAIL port 47810 is already in use on this machine"; exit 1
