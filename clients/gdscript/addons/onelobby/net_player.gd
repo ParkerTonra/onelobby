@@ -144,7 +144,8 @@ func _exit_tree() -> void:
 # ---- the game's side ---------------------------------------------------------------------------------------------------
 
 ## Host authority, local player: this physics frame's input (`move_x`, `move_y`, `yaw`, `pitch`, `buttons`: a Dictionary of
-## `jump crouch sprint aim block fire use reload`). A partial patch is merged; call it every physics frame.
+## `jump crouch sprint aim block fire use reload`). A partial patch is merged; call it every physics frame. Until the host's first
+## state of this player has arrived there is nothing to step and nothing is sent (the call is harmless; the character is not moved).
 func set_input(patch: Dictionary) -> void:
 	for k: String in patch:
 		if k == "buttons":
@@ -264,8 +265,7 @@ func _process(_delta: float) -> void:
 	var s: Variant = _players.get_state(peer_id)
 	if is_local:
 		if _players.authority == "host" and s != null:
-			if not _have_state and _players.latest_state(peer_id) == null:
-				return # the host has not told us where we start yet: nothing to draw (no flash at the origin)
+			# s is null until the host's first state of this player has arrived: nothing to write into the parent before that
 			var off := _players.smoother.offset
 			_apply_state(s, off) # predicted state plus the smoothed correction
 		elif _players.authority == "owner":

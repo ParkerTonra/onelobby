@@ -274,11 +274,15 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     this.localInput = { ...this.localInput, ...patch, buttons: { ...this.localInput.buttons, ...(patch.buttons ?? {}) } };
   }
 
-  /** The local player's state: yours in owner mode, the predicted one in host mode (draw it at `local` + `smoother.offset`). */
-  get local(): PlayerState {
+  /**
+   * The local player's state: yours in owner mode, the predicted one in host mode (draw it at `local` + `smoother.offset`).
+   * Authority `"host"` on a client: `undefined` until the host's first state of this player has arrived (the player starts
+   * where the host spawned it, never at the origin); inputs before that are neither sent nor stepped.
+   */
+  get local(): PlayerState | undefined {
     if (this.authority === "owner") return this.localState;
-    if (this.isHost) return this.hostPlayers.get(this.localPeerId)?.state ?? this.localState;
-    return this.predictor ? this.predictor.current : this.localState;
+    if (this.isHost) return this.hostPlayers.get(this.localPeerId)?.state;
+    return this.predictor ? this.predictor.current : undefined;
   }
 
   /**
@@ -649,15 +653,20 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       this.sentTeleport.delete(seq - 256);
       return;
     }
-    // host mode: send the input, predict the step at once
-    const input = this.codec.quantizeInput(this.localInput);
-    const seq = this.session.submitInput(this.codec.encodeInput(input));
+    // host mode: start from the host's first state of this player (where it spawned it), send the input, predict the step at once
     if (!this.predictor) {
-      const r = new Reconciler<PlayerInput, PlayerState>(this.localState, (s, i) => this.runStep(s, i));
+      const id = this.known.get(this.localPeerId);
+      const first = id === undefined ? undefined : this.session.tryGetLatest(id, this.schema);
+      if (!first) return; // no state yet: this input is neither sent nor stepped
+      const r = new Reconciler<PlayerInput, PlayerState>(first.state, (s, i) => this.runStep(s, i));
       const eq = (a: PlayerState, b: PlayerState): boolean => this.distance(a, b) <= 0.05;
       r.equal = eq;
       this.predictor = r;
+      this.lastCorrectTick = first.tick; // the predictor already is this state: no correction, no snap
+      this.smoother.correct(0, 0, 0, first.state.teleport); // only records the counter
     }
+    const input = this.codec.quantizeInput(this.localInput);
+    const seq = this.session.submitInput(this.codec.encodeInput(input));
     this.predictor.predict(seq, input);
   }
 

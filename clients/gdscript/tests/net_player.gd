@@ -43,7 +43,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients,
-		_test_host_draws_others, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -464,6 +464,45 @@ func _test_host_draws_others() -> void:
 		guard += 1
 	_check(hl2.get_state(apeer2) != null and absf(float((hl2.get_state(apeer2) as Dictionary)["x"]) - (50.0 + float(apeer2))) < 0.1, "host draws others: a single record is held at the spawn point")
 	_check(hl2.get_state(apeer2 + 100) == null, "host draws others: an unknown peer is null")
+
+
+## Authority "host": the owner starts where the host spawned it (JS twin: "host authority: the owner starts where the host spawned it").
+func _test_host_authority_spawn() -> void:
+	var spawn_x := 50.0
+	var rig: Rig = Rig.player_rig({"layer": {"authority": "host", "step": Callable(self, "_walk_step"), "spawn": func(_peer: int) -> Dictionary: return {"x": spawn_x, "y": 1.0}}})
+	var hl: OneLobbyNetPlayers = rig.host_players()["layer"]
+	var a := rig.join_players("a")
+	var al: OneLobbyNetPlayers = a["layer"]
+	var corrected := [0]
+	al.corrected.connect(func(_s: Dictionary) -> void: corrected[0] += 1)
+	# the owner holds "walk right" from its very first tick, including the ticks before the host's first state arrives
+	al.tick.connect(func(_n: int) -> void: al.set_local_input({"move_x": 1.0, "move_y": 0.0, "yaw": 90.0}))
+	var first_x := -1.0
+	var min_x := INF
+	var frames := 0
+	var without_state := 0
+	var inputs_before := -1
+	for i in 300:
+		rig.step()
+		var l := al.local_state()
+		if l.is_empty():
+			without_state += 1
+			inputs_before = int(al.session.stats.inputs_sent)
+			_check(al.get_state(al.local_peer_id) == null, "host authority spawn: get_state of the local player is null before its first state")
+			continue
+		frames += 1
+		if first_x < 0.0:
+			first_x = float(l["x"])
+		min_x = minf(min_x, float(l["x"]))
+	print("host authority spawn x=%d: %d frames without a local state, first local x %.3f, lowest local x %.3f, snaps %d, corrections %d, corrected events %d, inputs sent before the first state %d" % [int(spawn_x), without_state, first_x, min_x, al.smoother.snap_count, al.stats["corrections"], corrected[0], inputs_before])
+	_check(frames > 200, "host authority spawn: the owner gets a local state (%d frames)" % frames)
+	_check(without_state > 0, "host authority spawn: and has none before the host's first state")
+	_check(min_x > spawn_x - 1.0, "host authority spawn: the owner never reads a local position near the origin (%.3f)" % min_x)
+	_check(absf(first_x - spawn_x) < 6.0 / 30.0 + 0.01, "host authority spawn: the first local state is within one tick's travel of the spawn point (%.3f)" % first_x)
+	_check(al.smoother.snap_count == 0, "host authority spawn: no snap")
+	_check(int(al.stats["corrections"]) == 0 and corrected[0] == 0, "host authority spawn: no correction")
+	_check(inputs_before == 0, "host authority spawn: no input is sent before the first state")
+	_check(float((hl.latest_state(al.local_peer_id) as Dictionary)["x"]) > spawn_x, "host authority spawn: the host stepped the player from the spawn point")
 
 
 # ====================================================================== D1 to D9 ========================================

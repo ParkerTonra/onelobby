@@ -184,12 +184,12 @@ describe("D5 host mode: prediction", () => {
     for (let i = 0; i < 400; i++) {
       await rig.step();
       const host = hl.latest(a.peerId);
-      if (host && i > 100) maxErr = Math.max(maxErr, Math.hypot(al.local.x - host.x, al.local.z - host.z));
+      if (host && i > 100) maxErr = Math.max(maxErr, Math.hypot(al.local!.x - host.x, al.local!.z - host.z));
     }
     moving = false;
     await rig.run(1.5);
     const host = hl.latest(a.peerId)!;
-    const err = Math.hypot(al.local.x - host.x, al.local.y - host.y, al.local.z - host.z);
+    const err = Math.hypot(al.local!.x - host.x, al.local!.y - host.y, al.local!.z - host.z);
     console.log(`D5: max |predicted - host| while moving ${maxErr.toFixed(2)} m (the host is behind by the round trip); at rest ${err.toFixed(4)} m`);
     expect(err).toBeLessThan(0.05);
 
@@ -269,4 +269,44 @@ describe("D6 a teleport and a respawn snap on the other screens", () => {
       expect(seenRespawn).toEqual([PEER(s)]);
     });
   }
+});
+
+describe("host authority: the owner starts where the host spawned it", () => {
+  it("the owner never reads a local position near the origin, the first local state is the spawn point, nothing snaps", async () => {
+    const SPAWN_X = 50;
+    const rig = new PlayerRig({ layer: { authority: "host", step: walkStep, spawn: () => ({ x: SPAWN_X, y: 1 }) } });
+    const { layer: hl } = await rig.hostPlayers();
+    const { layer: al } = await rig.joinPlayers("a");
+    const corrected: unknown[] = [];
+    al.on("corrected", (s) => corrected.push(s));
+    // the owner holds "walk right" from its very first tick, including the ticks before the host's first state arrives
+    al.on("tick", () => al.setLocalInput({ moveX: 1, moveY: 0, yaw: 90 }));
+    let firstX: number | undefined;
+    let minX = Infinity;
+    let frames = 0;
+    let withoutState = 0;
+    let inputsBeforeState = -1;
+    for (let i = 0; i < 300; i++) {
+      await rig.step();
+      const l = al.local;
+      if (!l) {
+        withoutState++;
+        inputsBeforeState = al.session.stats.inputsSent;
+        continue;
+      }
+      frames++;
+      firstX ??= l.x;
+      minX = Math.min(minX, l.x);
+    }
+    console.log(`host authority spawn x=${SPAWN_X}: ${withoutState} frames without a local state, first local x ${firstX?.toFixed(3)}, lowest local x ${minX.toFixed(3)}, snaps ${al.smoother.snapCount}, corrections ${al.stats.corrections}, corrected events ${corrected.length}, inputs sent before the first state ${inputsBeforeState}`);
+    expect(frames).toBeGreaterThan(200);
+    expect(minX).toBeGreaterThan(SPAWN_X - 1);
+    expect(Math.abs(firstX! - SPAWN_X)).toBeLessThan(6 / 30 + 0.01); // within one tick's travel (6 m/s at 30 Hz) and a position step (1 cm)
+    expect(al.smoother.snapCount).toBe(0);
+    expect(al.stats.corrections).toBe(0);
+    expect(corrected.length).toBe(0);
+    expect(withoutState).toBeGreaterThan(0);
+    expect(inputsBeforeState).toBe(0);
+    expect(hl.latest(al.localPeerId)!.x).toBeGreaterThan(SPAWN_X);
+  });
 });

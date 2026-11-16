@@ -227,13 +227,15 @@ func set_local_input(patch: Dictionary) -> void:
 
 
 ## The local player's state: yours in owner mode, the predicted one in host mode (draw it at `local_state()` + `smoother.offset`).
+## Authority "host" on a client: an EMPTY Dictionary until the host's first state of this player has arrived (the player starts
+## where the host spawned it, never at the origin); inputs before that are neither sent nor stepped. (JS `local` is `undefined`.)
 func local_state() -> Dictionary:
 	if authority == "owner":
 		return _local_state
 	if is_host:
 		var hp: Variant = _host_players.get(local_peer_id)
-		return (hp as OLHostPlayer).state if hp != null else _local_state
-	return _predictor.current if _predictor != null else _local_state
+		return (hp as OLHostPlayer).state if hp != null else {}
+	return _predictor.current if _predictor != null else {}
 
 
 ## One player's state to draw now, or null while the player is not in the world. The local player: `local_state()`. A remote
@@ -242,7 +244,10 @@ func local_state() -> Dictionary:
 ## the host's own record one tick behind, interpolated, so a host that draws the others sees them move smoothly.
 func get_state(peer_id: int) -> Variant:
 	if peer_id == local_peer_id:
-		return local_state() if (_known.has(peer_id) or _have_local or authority == "host") else null
+		if not (_known.has(peer_id) or _have_local or authority == "host"):
+			return null
+		var mine := local_state()
+		return mine if not mine.is_empty() else null # authority "host": null until the host's first state of this player
 	if is_host:
 		if not _host_players.has(peer_id) or not (_host_players[peer_id] as OLHostPlayer).spawned:
 			return null
@@ -681,12 +686,18 @@ func _client_tick() -> void:
 		_sent_teleport[seq] = int(_local_state["teleport"])
 		_sent_teleport.erase(seq - 256)
 		return
-	# host mode: send the input, predict the step at once
+	# host mode: start from the host's first state of this player (where it spawned it), send the input, predict the step at once
+	if _predictor == null:
+		var first := session.try_get_latest(int(_known[local_peer_id]), codec) if _known.has(local_peer_id) else {}
+		if first.is_empty():
+			return # no state yet: this input is neither sent nor stepped
+		var start: Dictionary = first["state"]
+		_predictor = OneLobbyReconciler.new(start, func(s: Dictionary, i: Dictionary) -> Dictionary: return _run_step(s, i))
+		_predictor.equal = func(a: Dictionary, b: Dictionary) -> bool: return _distance(a, b) <= 0.05
+		_last_correct_tick = int(first["tick"]) # the predictor already is this state: no correction, no snap
+		smoother.correct(0.0, 0.0, 0.0, int(start["teleport"])) # only records the counter
 	var input := codec.quantize_input(_local_input)
 	var hseq := session.submit_input(codec.encode_input(input))
-	if _predictor == null:
-		_predictor = OneLobbyReconciler.new(_local_state, func(s: Dictionary, i: Dictionary) -> Dictionary: return _run_step(s, i))
-		_predictor.equal = func(a: Dictionary, b: Dictionary) -> bool: return _distance(a, b) <= 0.05
 	_predictor.predict(hseq, input)
 
 

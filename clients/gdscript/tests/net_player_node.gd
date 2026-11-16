@@ -27,7 +27,7 @@ func _check(ok: bool, what: String) -> void:
 
 
 func _run() -> void:
-	for t: Callable in [_test_owner_3d, _test_host_authority, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_teleport_and_corrections, _test_body_and_missing_step]:
+	for t: Callable in [_test_owner_3d, _test_host_authority, _test_host_authority_spawn_point, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_teleport_and_corrections, _test_body_and_missing_step]:
 		_tests += 1
 		t.call()
 	print("net_player_node: %d passed, %d failed (%d test cases)" % [_pass, _fail, _tests])
@@ -209,6 +209,45 @@ func _test_host_authority() -> void:
 	_check(worst_owner < 3.5, "host authority: the owner's prediction stays close to the host (%.2f)" % worst_owner)
 	_check(worst < 3.5, "host authority: a watcher's copy is close to the host's (%.2f)" % worst)
 	# without a step function the node logs one clear error (it does not crash): a layer with no step on a machine
+	_cleanup(ms)
+
+
+## Authority "host": until the host's first state of the owner's own player has arrived the node writes nothing into the character
+## (no origin, no flash) and set_input is harmless; then the character is where the host spawned it.
+func _test_host_authority_spawn_point() -> void:
+	var rig: Rig = Rig.player_rig({"layer": {"authority": "host", "step": Callable(self, "_walk_step"), "spawn": func(_peer: int) -> Dictionary: return {"x": 50.0, "y": 1.0}}})
+	rig.host_players()
+	rig.join_players("a")
+	var scene := _character_scene("node3d")
+	var step := Callable(self, "_walk_step")
+	var h := _machine(rig, "host", scene, {"step": step})
+	var a := _machine(rig, "a", scene, {"step": step})
+	var ms := [h, a]
+	var apeer: int = rig.layers["a"].local_peer_id
+	var home := Vector3(7.0, 0.0, 7.0) # where the game put the character before the host says where the player starts
+	var seen_home := 0
+	var near_origin := 0
+	var first_x := -1.0
+	for i in 300:
+		var ac := _char(a, apeer) as Node3D
+		if ac != null:
+			if not ac.has_meta("placed"):
+				ac.set_meta("placed", true)
+				ac.position = home
+			_np(ac).set_input({"move_x": 1.0, "move_y": 0.0, "yaw": 90.0}) # from the very first frame
+		_frame(rig, ms)
+		ac = _char(a, apeer) as Node3D
+		if ac != null:
+			if ac.position.distance_to(home) < 1e-6:
+				seen_home += 1
+			elif ac.position.x < 40.0:
+				near_origin += 1
+			elif first_x < 0.0:
+				first_x = ac.position.x
+	print("node host authority spawn: %d frames the character stayed where the game put it, %d frames anywhere else below x=40, first written x %.3f" % [seen_home, near_origin, first_x])
+	_check(seen_home > 0, "host authority spawn: before the host's first state the node writes nothing into the character")
+	_check(near_origin == 0, "host authority spawn: the character is never moved to the origin or anywhere near it")
+	_check(absf(first_x - 50.0) < 6.0 / 30.0 + 0.01, "host authority spawn: the first written position is the spawn point (%.3f)" % first_x)
 	_cleanup(ms)
 
 
