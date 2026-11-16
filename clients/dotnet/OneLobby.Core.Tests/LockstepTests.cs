@@ -163,6 +163,24 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void ALobbyThatIdlesPastTheSilentWindowThenStartsKeepsItsHostAndGetsNoSnapshot()
+        {
+            // no frames flow in the lobby phase: the joiner's 3 s no-frames clock must start with the game, not at join
+            var (rig, host, a, b) = Trio();
+            var restores = 0;
+            var inner = b.Lobby.Lockstep!.Restore;
+            b.Lobby.Lockstep!.Restore = (t, bytes) => { restores++; inner?.Invoke(t, bytes); };
+            rig.Step(200); // 5 s of simulated lobby time
+            _ = host.Lobby.StartAsync();
+            rig.Step(40); // 1 s of game
+            Assert.True(b.Game.Tick >= 15, "ticks " + b.Game.Tick);
+            Assert.Equal(0, restores);
+            Assert.Empty(b.Left);
+            Assert.Empty(b.HostChanges);
+            Assert.Empty(b.Ended);
+        }
+
+        [Fact]
         public void ThreePeersPlayWithEqualHashes()
         {
             var (rig, host, a, b) = Trio();
