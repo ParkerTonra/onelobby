@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ONELOBBY_VERSION = "0.7.2";
 export const SCHEMA_URL = `https://unpkg.com/onelobby@${ONELOBBY_VERSION}/blueprint.schema.json`;
 export const TEMPLATES = ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"];
-export const IMPLEMENTED_TEMPLATES = ["web"];
+export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript"];
 
 let loader;
 async function loadLoader() {
@@ -68,6 +68,7 @@ const thaw = (o) => JSON.parse(JSON.stringify(o));
  * web: gridpaint is a deterministic lockstep game, and the generated page is the "generated" UI kind.
  */
 export function templateDefaults(template, { title }) {
+  if (template === "godot-gdscript") return { game: { title }, hosting: { direct: true, server: false }, ui: { kind: "drop-in" }, chat: { text: true } };
   if (template !== "web") return {};
   return {
     game: { title },

@@ -52,6 +52,10 @@ const OPTION_FLAGS = {
   hosting: "value",
   set: "value",
   "onelobby-version": "value",
+  "addon-from": "value",
+  "webrtc-zip": "value",
+  "webrtc-dir": "value",
+  "no-natives": "bool",
   yes: "bool",
   y: "bool",
   "no-input": "bool",
@@ -117,6 +121,10 @@ export function parseArgs(argv) {
     help: false,
     version: false,
     onelobbyVersion: undefined,
+    addonFrom: undefined,
+    webrtcZip: undefined,
+    webrtcDir: undefined,
+    noNatives: false,
   };
   const given = [];
   const positional = [];
@@ -155,6 +163,9 @@ export function parseArgs(argv) {
         else if (name === "into") opts.into = v;
         else if (name === "from") opts.from = v;
         else if (name === "onelobby-version") opts.onelobbyVersion = v;
+        else if (name === "addon-from") opts.addonFrom = v;
+        else if (name === "webrtc-zip") opts.webrtcZip = v;
+        else if (name === "webrtc-dir") opts.webrtcDir = v;
         else if (name === "hosting") {
           if (!["direct", "server", "both"].includes(v)) throw bad(name, "must be direct, server or both");
           given.push(["hosting.direct", v !== "server"], ["hosting.server", v !== "direct"]);
@@ -173,6 +184,7 @@ export function parseArgs(argv) {
         else if (name === "json") opts.json = on;
         else if (name === "no-install") opts.noInstall = on;
         else if (name === "no-git") opts.noGit = on;
+        else if (name === "no-natives") opts.noNatives = on;
         else if (name === "force") opts.force = on;
         else if (name === "help" || name === "h") opts.help = on;
         else if (name === "version") opts.version = on;
@@ -225,8 +237,9 @@ export const USAGE = `create-onelobby: scaffold a multiplayer game with OneLobby
 
 Usage: create-onelobby [dir] [options]
 
-  --template <web|node-browser|godot-csharp|godot-gdscript|unity|dotnet>   only "web" in this release; the rest are planned for v2
-  --into <dir>                 add to an existing project: writes onelobby.json, multiplayer/ and test/ only
+  --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   "web" and "godot-gdscript" exist; the rest are planned for v2
+  --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ only; a Godot GDScript
+                               folder (project.godot, no .csproj) gets the add-on, the natives, the autoload and a test (the template is implied)
   --from <onelobby.json>       take every answer from this file (flags still override it)
   --game-id <reverse.dns>  --title <text>  --net-version <text>
   --max-players <n>  --listed  --approve-joins  --password  --no-late-join  --no-rejoin  --no-join-link
@@ -244,6 +257,11 @@ Usage: create-onelobby [dir] [options]
   --json                       print one JSON object { ok, dir, template, blueprint, files, next } and nothing else
   --no-install  --no-git       skip "npm install" / "git init" in a new project
   --force                      overwrite existing files (--into) or write into a non-empty folder
+  godot-gdscript only:
+  --addon-from <folder>        vendor the add-on from a OneLobby checkout instead of the copy bundled in this package
+  --webrtc-zip <file>          install the WebRTC natives from this webrtc-native zip (offline) instead of downloading the pinned release
+  --webrtc-dir <folder>        the same from an unpacked add-on folder (the one holding webrtc_native.gdextension)
+  --no-natives                 do not install the WebRTC natives (the output says how to fetch them later)
   -h, --help  --version
 
 Every --flag has a --no-flag form when it is a yes/no answer. Prompts appear only when stdin is a terminal and neither

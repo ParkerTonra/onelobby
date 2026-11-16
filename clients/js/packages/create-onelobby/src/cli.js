@@ -14,9 +14,12 @@ import {
   withDefaults,
 } from "./blueprint.js";
 import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
+import { isCSharpProject, runGodot } from "./godot.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** The hand recipe for each template that is not built yet. */
+const PLANNED_RECIPES = { "godot-csharp": "godot-csharp.md", unity: "unity.md", dotnet: "dotnet-generic.md", "node-browser": "js-web.md" };
 
 function defaultIo() {
   return {
@@ -83,10 +86,16 @@ export async function run(argv, io) {
   }
 
   const fromFile = opts.from ? readFromFile(opts.from, io.cwd) : undefined;
-  const template = opts.template ?? fromFile?.engine ?? "web";
+  // --into a folder with a project.godot and no --template: a Godot project (C# when a .csproj / .sln sits beside it)
+  const intoDir = opts.into !== undefined ? resolve(io.cwd, opts.into) : undefined;
+  const godotInto = intoDir !== undefined && existsSync(join(intoDir, "project.godot"));
+  const template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(intoDir) ? "godot-csharp" : "godot-gdscript") : "web");
   if (!TEMPLATES.includes(template)) throw new CliError("bad_flag", `--template: unknown template "${template}". Choose one of: ${TEMPLATES.join(", ")}.`);
   if (!IMPLEMENTED_TEMPLATES.includes(template))
-    throw new CliError("template_planned", `template "${template}" is planned for v2; only "web" exists in this release. Use the onelobby agent skill or the engine's recipe in docs/recipes/ for now.`);
+    throw new CliError(
+      "template_planned",
+      `template "${template}" is planned for v2; this release builds ${IMPLEMENTED_TEMPLATES.map((t) => `"${t}"`).join(" and ")}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
+    );
 
   const interactive = io.stdinIsTTY && !opts.yes && !opts.noInput && !isCi(io.env);
   const prompter = interactive ? createPrompter(io.stdin, opts.json ? io.stderr : io.stdout) : null;
@@ -135,11 +144,19 @@ export async function run(argv, io) {
     }
     answers = withDefaults(answers, templateDefaults(template, { title: dirName.slice(0, 64) }));
 
-    if (getPath(answers, "ui.kind") !== "generated")
-      throw new CliError("unsupported", `template web writes the generated UI (ui.kind "generated"); ui.kind "${getPath(answers, "ui.kind")}" is not supported by the scaffolder yet`, "ui.kind");
+    const wantUi = template === "godot-gdscript" ? "drop-in" : "generated";
+    if (getPath(answers, "ui.kind") !== wantUi)
+      throw new CliError("unsupported", `template ${template} writes the ${wantUi} UI (ui.kind "${wantUi}"); ui.kind "${getPath(answers, "ui.kind")}" is not supported by the scaffolder yet`, "ui.kind");
 
     // ---- validate with the real loader ----
     const blueprint = await buildBlueprint(answers);
+
+    if (template === "godot-gdscript") {
+      const gitInit = (dir) => {
+        if (!run_("git", ["init", "-q"], dir, io)) io.stderr.write("create-onelobby: git init failed; continuing without a repository\n");
+      };
+      return await runGodot({ io, opts, blueprint, target, dirName, into: opts.into !== undefined, gitInit });
+    }
 
     // ---- plan ----
     const files = opts.into !== undefined ? intoFiles({ blueprint }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
