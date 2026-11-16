@@ -13,6 +13,32 @@ macOS (universal) and Android arm64 have build scripts and a CI job but have not
 `__Internal` build (not done); **not WebGL** (see "WebGL" below). Unity 6000.0 or newer; tested with 6000.2.7f2. API Compatibility Level: the default
 .NET Standard 2.1 works (.NET Framework too).
 
+## The short way: the drop-in menu
+
+Once the package is added (step 1 below), the multiplayer front end is one component: name, Host with a big code, Join by a pasted code,
+roster with ready and countdown, kick and ban, chat, settings, browse and a plain "why it failed" screen. It needs no scene setup, no prefab and no
+event system, and it hosts and joins direct lobbies (no server) by itself:
+
+```csharp unity
+using OneLobby.Unity;
+using UnityEngine;
+
+public sealed class Boot : MonoBehaviour
+{
+    void Awake()
+    {
+        var menu = new GameObject("Menu").AddComponent<OneLobbyMenu>();
+        menu.GameStarted += lobby => Debug.Log("the game starts with " + lobby.Room.Players.Count + " players");
+    }
+}
+```
+
+`GameStarted` gives you the `Lobby` (`lobby.Send`, `lobby.Room`, `OneLobby.Replication`, ...); the menu hides itself while the game runs and shows
+the lobby again on `ReturnedToLobby`. Put the blueprint at `Assets/Resources/onelobby.json` (or drop it on the component's `Blueprint` field).
+Everything about it (events, options, restyling, rewording, `--host` / `--join=<code>` / `--local`, what is tested) is in
+`docs/recipes/menu.md`, "Unity", and the package sample `Menu` is one script. The rest of this page is the hand-written way: your own `Net.cs`
+and your own buttons.
+
 ## 1. Add the package
 
 From a clone of this repo, build the native library for each platform you ship (Visual Studio C++ workload for Windows,

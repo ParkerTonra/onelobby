@@ -9,6 +9,7 @@ package only adds:
 |---|---|
 | `UnityTransport : ITransport` | `OneLobby.DataChannel.DataChannelTransport` (three negotiated data channels, DESIGN s.8, + `ClientWebSocket` signaling), native log to the console |
 | `UnityVoiceAudio : IVoiceAudio` | `Microphone` capture to 48 kHz mono 20 ms frames, one `AudioSource` per speaker (`OnAudioFilterRead`) |
+| `OneLobbyMenu` | the drop-in multiplayer menu: add it to an empty GameObject (UI Toolkit controls built in code, no asset or event system; `docs/recipes/menu.md`, "Unity"). Blueprint at `Assets/Resources/onelobby.json` or its `Blueprint` field; `GameStarted(lobby)`, `ReturnedToLobby`, `Left`; reword with `Texts`, restyle with `StyleSheets`. Sample: Menu |
 | `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread); `HostDirectAsync` / `JoinDirectAsync` (also with `JoinDirectOptions`: TURN, Nostr) / `RejoinDirectAsync` host by IP with a join code and no server (`OneLobby.Direct`, `docs/recipes/direct-ip.md`) |
 
 Platforms: whatever natives `Runtime/Plugins` holds. Built and tested here: Windows x64 and Linux x64. The CI workflow
@@ -32,6 +33,7 @@ The full walkthrough, with the game loop and the "Done when" checks, is `docs/re
 `Tests/Editor/UnityTransportLoopbackTests.cs` runs two `UnityTransport` peers in one editor through a real server
 (`ONELOBBY_TEST_SERVER`, default `ws://127.0.0.1:8080/ws`; ignored when no server answers).
 `Tests/Editor/DirectLoopbackTests.cs` hosts by IP on loopback port 47832 and joins by address (no server needed); its runner test uses 47834.
+`Tests/Runtime/OneLobbyMenuTests.cs` (Play mode: `-testPlatform PlayMode -testFilter OneLobby.Unity.PlayTests`) drives two menus on an in-memory network: no socket, no server, logs `MENU_OK`.
 `Tests/Editor/GameConsoleServerTests.cs` drives the `ogc1` dev console (`docs/recipes/game-console.md`) on loopback port 47833. Add
 `"testables": ["com.onelobby.unity"]` to the manifest, then run it from the Test Runner window or
 `Unity.exe -batchmode -projectPath <p> -runTests -testPlatform EditMode`.

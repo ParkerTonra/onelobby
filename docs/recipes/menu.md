@@ -1,4 +1,4 @@
-# Recipe: the drop-in menu for Godot (GDScript and C#)
+# Recipe: the drop-in menu for Godot (GDScript and C#), Unity and the web
 
 One scene, `res://addons/onelobby/menu/menu.tscn`, is the whole multiplayer front end: the player types a name, hosts, or joins with a
 code, an `ip:port` or an invite link, waits in a lobby with a roster, readies up, and the host starts the game. When it works the
@@ -235,6 +235,88 @@ godot --headless --path clients/dotnet/demo-godot res://MenuDemo.tscn -- --menu-
 
 CI runs the model tests and the scene-tree test (`MenuModelTests`, `MenuSceneTests` in `OneLobby.Core.Tests`) but not that check, because
 it needs the .NET build of Godot.
+
+## Unity
+
+The same menu for Unity 6, drawn by one component with UI Toolkit controls built in code: no prefab, no scene object, no asset to create,
+no event system to add, and no package besides `com.onelobby.unity` (UI Toolkit is a built-in module). It draws the engine-free
+`MenuModel` and takes every string from `MenuText`, so "What it shows", "Boot flags" and the blueprint table above hold as written.
+
+**One-step install**, in an otherwise empty scene (or add the component in the Inspector):
+
+```csharp unity
+using OneLobby;
+using OneLobby.Unity;
+using UnityEngine;
+
+public sealed class Boot : MonoBehaviour
+{
+    void Awake()
+    {
+        var menu = new GameObject("Menu").AddComponent<OneLobbyMenu>();
+        menu.GameStarted += lobby => Debug.Log("start the match with " + lobby.Room.Players.Count + " players");
+        menu.ReturnedToLobby += _ => Debug.Log("end the match; the menu is showing the lobby again");
+        menu.Left += () => Debug.Log("the player left the lobby");
+    }
+}
+```
+
+The menu finds an `OneLobbyRunner` in the scene or adds one (the runner owns the `LobbyClient` and pumps it; the menu pumps only a lobby the
+runner does not hold, so nothing is pumped twice). **The blueprint** is the `Blueprint` TextAsset field when set, else
+`Assets/Resources/onelobby.json` (found with no Inspector step). With neither, the menu logs one warning and works with direct lobbies only
+(Host gives a join code, no server). Host and Join of a direct lobby are wired to the runner by the menu itself (nothing to write); a lobby-server
+code goes through the blueprint's server. `--local` does the whole job inside the menu: no automatic check, the direct route, and a host that
+listens on 127.0.0.1 only with Nostr and the router request off.
+
+| | |
+|---|---|
+| `GameStarted(lobby)`, `ReturnedToLobby(lobby)`, `Left` | C# events; the menu hides itself on `GameStarted` when `AutoHideOnStart` is true (default) |
+| `Blueprint` (TextAsset), `Pump`, `AutoHideOnStart`, `BootFlags`, `InviteBase` | fields (Inspector or code), as in the Godot C# table; `BootFlags` covers `--host`, `--join=<code>`, `--name=<name>`; `--local` is always read |
+| `Texts` (`Dictionary<string,string>`), `TextOverrides` (Inspector list) | rewording, `MenuText` keys |
+| `StyleSheets`, `PanelSettings`, `SortingOrder` | restyling (below) |
+| `Client`, `Runner`, `Model` | the `LobbyClient` the menu drives (default the runner's; set `Client` before the first frame to use your own, then set `HostDirect` / `JoinDirect` too if you want direct lobbies), the runner, and the `MenuModel` being drawn |
+| `HostOptions`, `JoinOptions`, `Route`, `HostDirect`, `JoinDirect` | as in the Godot C# table (`HostDirect` / `JoinDirect` default to the runner's direct calls) |
+| `BootArgs`, `CheckRunner` | the command line the flags are read from (default the process command line), and the connection check (a test gives a fake) |
+| `ControlNames`, `Root`, `Q(name)`, `Q<T>(name)`, `FocusedControl`, `IsShown`, `LeaveAsync()` | the control tree and its state |
+
+Set `Client`, `CheckRunner`, `BootArgs` and the options before the first frame (the menu builds itself in `Start`). Every control has the name of its
+Godot unique name (`StartPage`, `NameEdit`, `HostButton`, `JoinEdit`, `RosterList`, `ReadyButton`, `ErrorPage`, ...: `OneLobbyMenu.ControlNames`,
+the list at the top of the Godot controller). No Godot name lacks a Unity control; the types differ (`NameEdit` is a `TextField`, `MinPlayersSpin`
+an `IntegerField`, `AutoStartOption` a `DropdownField`, `LateJoinCheck` a `Toggle`, `LobbySettingsToggle` a `Button`, `ChatLog` a `Label` in a scroll
+view), and `Pages` (the container of the six pages) is listed too.
+
+**Keyboard and gamepad.** Tab and the gamepad's navigation move through the controls in the order of the screen; Enter submits the screen's action
+(the Join box joins, the chat line sends, the relay and server lines save); Escape and the gamepad's cancel button go back one screen exactly as
+`MenuModel.Back()` decides; focus lands on a sensible control when a screen opens. The menu reads no `UnityEngine.Input`, so it works with the old
+Input Manager, the new Input System or both: UI Toolkit takes its input from the engine, and the game adds no event system.
+
+**Size.** The stock panel scales with the screen from an 800x450 reference (the same layout at 640x360 and at 4K) and every page scrolls when it is
+taller than the screen. It draws above everything at sorting order 1000.
+
+**Restyling.** The look is Unity's default runtime theme plus one small style sheet (`Resources/OneLobbyMenu.uss`: spacing, a dark backdrop, two
+larger font sizes). Add your own USS to `StyleSheets` (it comes after the stock one, so the same selectors win) and style by control name
+(`#HostButton`) or class (`.onelobby-title`, `.onelobby-code`, `.onelobby-row`), or give the menu your own `PanelSettings` with your own theme.
+The `ui.theme` of the blueprint is for the web element and does not apply here.
+
+**Rewording.** `menu.Texts = new Dictionary<string, string> { ["host"] = "Create game" }` before the first frame (or `TextOverrides` in the
+Inspector), keys as in `MenuText.Table`. The menu undoes its override when it is destroyed, so nothing static stays behind when Unity enters
+Play mode without reloading the domain.
+
+**Sample.** The package sample `Menu` (one script) adds the menu and a label that says "In game" on `GameStarted`; run it with `--host --name=Sam`
+and `--join=<code> --name=Ann`.
+
+**What is checked where.** Unity is not in CI (no licence there), so no pull-request check compiles or runs any of it. The proof is local:
+`OneLobbyMenuTests` (`clients/unity/com.onelobby.unity/Tests/Runtime`), in the editor in batchmode, Play mode, no window:
+
+```
+Unity -batchmode -nographics -projectPath <project> -runTests -testPlatform PlayMode -testFilter OneLobby.Unity.PlayTests -testResults <xml> -logFile <log>
+```
+
+Two menus share one `InMemoryNetwork` (no socket, no firewall prompt; every menu has a counted fake connection check). It covers host, join by
+code, roster marks, ready, countdown, start, back to the lobby, kick with a reason, ban, a refused rejoin, unban, chat, the masked relay line, the
+bad-code error screen, Escape on every screen, boot flags, the connection check on open and `--local`, every named control with a size at 1280x720
+and 640x360 (the panel renders to a RenderTexture of that size), and that no static state or listener is left after the menu is destroyed; the main
+test logs `MENU_OK`. Not checked: how it looks on a screen, a real key or gamepad press, and the Input System setting of the project.
 
 ## Not in the menu yet
 
