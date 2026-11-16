@@ -115,6 +115,12 @@ export function carryComments(file, source) {
  */
 export async function buildBlueprint(answers, { comments } = {}) {
   const filled = thaw(await validate(answers));
+  // sync.mode raw: the game ticks and sends by itself, so a tick rate and a hash interval would be values nothing reads (the loader's defaults
+  // still apply when the keys are absent): the file leaves both out unless the caller gave one (a flag, --set, --from or an answer)
+  if (filled.sync?.mode === "raw" && answers.sync?.tickRate === undefined && answers.sync?.hashEveryTicks === undefined) {
+    delete filled.sync.tickRate;
+    delete filled.sync.hashEveryTicks;
+  }
   const file = { $schema: SCHEMA_URL, ...filled };
   if (comments) carryComments(file, comments);
   // the written file must load again exactly as the loader sees it

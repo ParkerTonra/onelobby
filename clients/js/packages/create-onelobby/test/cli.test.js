@@ -56,6 +56,27 @@ describe("flags -> blueprint", () => {
     expect(b.ui).toMatchObject({ kind: "generated", entry: "Menu" });
   });
 
+  it("--mode raw writes no sync.tickRate and no sync.hashEveryTicks (nothing reads them); every other mode, and a value the caller gave, keeps them", async () => {
+    const raw = await json(["g", "--template", "web", "--yes", "--mode", "raw"]);
+    expect(raw.code).toBe(0);
+    expect(raw.json.blueprint.sync).toEqual({ mode: "raw" });
+    // negative control: the same command in the other modes still writes them (the file is only shorter for raw)
+    const lock = await json(["g", "--template", "web", "--yes", "--mode", "lockstep"]);
+    expect(lock.json.blueprint.sync).toMatchObject({ mode: "lockstep", tickRate: 20 });
+    expect(lock.json.blueprint.sync).toHaveProperty("hashEveryTicks");
+    const rep = await json(["g", "--template", "godot-gdscript", "--yes", "--mode", "replication"]);
+    expect(rep.json.blueprint.sync).toMatchObject({ mode: "replication", tickRate: 20 });
+    // a value the caller gave stays, whichever way it came
+    const flag = await json(["g", "--template", "web", "--yes", "--mode", "raw", "--tick-rate", "30"]);
+    expect(flag.json.blueprint.sync).toMatchObject({ mode: "raw", tickRate: 30, hashEveryTicks: 30 });
+    const set = await json(["g", "--template", "web", "--yes", "--mode", "raw", "--set", "sync.hashEveryTicks=45"]);
+    expect(set.json.blueprint.sync).toMatchObject({ mode: "raw", hashEveryTicks: 45 });
+    // the recommendation for a co-op game (replication, tickRate 15) overridden to raw leaves them out too, and says it dropped them
+    const rec = await json(["g", "--template", "unity", "--yes", "--recommend", "co-op zombie shooter in Unity, the host sends snapshots, 4 players, not deterministic", "--mode", "raw"]);
+    expect(rec.json.blueprint.sync).toEqual({ mode: "raw" });
+    expect(rec.json.recommendation.dropped.map((d) => d.key)).toEqual(expect.arrayContaining(["sync.tickRate"]));
+  });
+
   it("parses --flag=value, --no-flag, --voice no and a bare --steam", () => {
     const { given } = parseArgs(["--max-players=8", "--no-join-link", "--voice", "no", "--steam", "--hosting", "both"]);
     expect(given).toEqual([

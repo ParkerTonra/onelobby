@@ -58,6 +58,12 @@ const UN = ["--template", "unity", "--yes", "--no-git", "--package-from", "com.o
 const PLAYER_OWNER = ["--mode", "replication", "--set", "sync.player.authority=owner"];
 const PLAYER_HOST_2D = ["--mode", "replication", "--set", "sync.player.authority=host", "--set", "sync.player.space=2d"];
 
+// UPDATE_GOLDEN=1 npx vitest run test/net-player.test.js rewrites the fixture files from what the scaffolder writes now (never edit them by hand), and the diff shows which file changed
+function regenerate(file, golden, name, got) {
+  golden[name] = got;
+  writeFileSync(new URL(`./fixtures/${file}`, import.meta.url), `${JSON.stringify(golden, null, 1)}\n`);
+}
+
 describe("a game without sync.player is exactly what it was before", () => {
   // fixtures/no-player-golden.json: the SHA-256 of every file the templates write (not the vendored add-ons) for four scaffolds, made with
   // the scaffolder as it was before the networked player existed (commit ea1e5ed of the dev repo). The same four must still match, byte for byte,
@@ -75,6 +81,7 @@ describe("a game without sync.player is exactly what it was before", () => {
       expect(r.code).toBe(0);
       const root = at(name, "my-game");
       const got = Object.fromEntries(tree(root).filter((p) => !p.startsWith("addons/")).map((p) => [p, createHash("sha256").update(readFileSync(join(root, p))).digest("hex")]));
+      if (process.env.UPDATE_GOLDEN) regenerate("no-player-golden.json", golden, name, got);
       expect(got).toEqual(golden[name]);
       expect(existsSync(join(root, "player.tscn"))).toBe(false);
       expect(existsSync(join(root, NET_PLAYER_DIR))).toBe(false);
@@ -89,6 +96,7 @@ describe("a game without sync.player is exactly what it was before", () => {
       expect(r.code).toBe(0);
       const root = at(name, "my-game");
       const got = Object.fromEntries(tree(root).map((p) => [p, createHash("sha256").update(readFileSync(join(root, p))).digest("hex")]));
+      if (process.env.UPDATE_GOLDEN) regenerate("no-player-golden-unity.json", goldenUnity, name, got);
       expect(got).toEqual(goldenUnity[name]);
       expect(existsSync(join(root, "Assets/Scripts/Game.cs"))).toBe(false);
       expect(existsSync(join(root, "Assets/Scripts/OneLobbyGame.asmdef"))).toBe(false);
