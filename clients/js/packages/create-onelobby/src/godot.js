@@ -67,7 +67,7 @@ export function netPlayerFiles({ authority, space }, read) {
   ];
 }
 
-/** tests/multiplayer.gd with the player check added: the joiner's player appears on the host with a position, and one jump arrives once. */
+/** tests/multiplayer.gd with the player check added, both ways: the joiner's player appears on the host with a position and one jump arrives once, then the same for the host's player on the joiner. */
 export function multiplayerWithPlayer(base, part, settings) {
   if (!base.includes(TEST_LEAVE)) throw new Error("tests/multiplayer.gd: the place for the player check moved");
   return base.replace(TEST_LEAVE, TEST_PLAYER_CALL + TEST_LEAVE) + pickBlocks(part, playerFlags(settings));
@@ -88,7 +88,7 @@ export function agentsWithPlayer(agents, { authority, space }) {
   );
   const tail = "host, join by code, one message each way.\n";
   if (!withBullets.includes(tail)) throw new Error("AGENTS.md: the test bullet moved");
-  return withBullets.replace(tail, "host, join by code, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`player.tscn` is used as it is).\n");
+  return withBullets.replace(tail, "host, join by code, one message each way, then the networked player, both ways: the joiner's player appears on the host, follows the joiner, and one jump arrives once, then the host's player does the same on the joiner (`player.tscn` is used as it is; one `MULTIPLAYER_PLAYER` line each). Two copies run with `--local --autostart` start the match by themselves (no click), walk their player and print a `MULTIPLAYER_PLAYER` line when they see the other's move (`main.gd`, `game.gd`).\n");
 }
 
 function targetState(target) {

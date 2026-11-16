@@ -1,8 +1,9 @@
 
-    // ---- the networked player (sync.player in onelobby.json) ----
-    // On the same two peers: each machine gets a spawner with the game's Player.tscn, the joiner's player appears on the host with a position
-    // that follows the joiner, and the joiner's one jump arrives once. It uses the game's own Player.tscn: if you change that scene a lot,
-    // adjust or drop this check.
+    // ---- the networked player (sync.player in onelobby.json), both ways ----
+    // On the same two peers: each machine gets a spawner with the game's Player.tscn. The joiner's player appears on the host, follows the
+    // joiner, and the joiner's one jump arrives once; then the host's player appears on the joiner, follows the host, and the host's one jump
+    // arrives once. One line per way when it passes (MULTIPLAYER_PLAYER ...); a failure is MULTIPLAYER_FAIL player: <what>.
+    // It uses the game's own Player.tscn: if you change that scene a lot, adjust or drop this check.
     private bool _playerPhase; // true while the spawners' layers pump the two lobbies (a layer pumps its own lobby)
 
     private async Task<bool> CheckPlayer(Blueprint bp)
@@ -30,11 +31,27 @@
             holders.Add(holder);
             spawners.Add(sp);
         }
-        var guestPeer = _guest!.LocalPeerId;
-        var me = (Player)spawners[1].CharacterOf(guestPeer)!; // the joiner's own player, on the joiner
+        var up = await PlayerWay("the joiner's", _guest!.LocalPeerId, spawners[1], spawners[0], "host");
+        if (up == null) return false;
+        GD.Print("MULTIPLAYER_PLAYER " + up);
+        var down = await PlayerWay("the host's", _host!.LocalPeerId, spawners[0], spawners[1], "joiner");
+        if (down == null) return false;
+        GD.Print("MULTIPLAYER_PLAYER " + down);
+        foreach (var h in holders) h.QueueFree();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        _playerPhase = false;
+        return true;
+    }
+
+    // One way: the player of `peer` lives on the machine of `from` (its owner) and is watched on the machine of `to`. The owner moves it and
+    // jumps once; the watcher's copy must appear, follow and see one jump. Returns the line to print, or null (after failing the test).
+    private async Task<string?> PlayerWay(string whose, int peer, OneLobbyNetPlayerSpawner from, OneLobbyNetPlayerSpawner to, string watcher)
+    {
+        var me = from.CharacterOf(peer) as Player; // this player on its own machine
+        if (me == null) return PlayerFail($"{whose} player never got a character of its own");
         me.SetPhysicsProcess(false); // the test places this player itself: the character's own script (keys, gravity, no floor here) stays out of it
-        if (!await Until(() => spawners[0].CharacterOf(guestPeer) is Player { Visible: true })) return PlayerFail("the joiner's player never appeared on the host");
-        var copy = (Player)spawners[0].CharacterOf(guestPeer)!; // the same player as the host sees it
+        if (!await Until(() => to.CharacterOf(peer) is Player { Visible: true })) return PlayerFail($"{whose} player never appeared on the {watcher}");
+        var copy = (Player)to.CharacterOf(peer)!; // the same player as the other machine sees it
         var jumps = 0;
         copy.Net.Jumped += () => jumps++;
         var startX = copy.GlobalPosition.X;
@@ -53,19 +70,16 @@
 //@end
             return copy.GlobalPosition.X > startX + 2f;
         }, 20000);
-        if (!follows) return PlayerFail($"the joiner's player moved but the host's copy stayed at x = {copy.GlobalPosition.X:0.00} (it was at {startX:0.00})");
+        if (!follows) return PlayerFail($"{whose} player moved but its copy on the {watcher} stayed at x = {copy.GlobalPosition.X:0.00} (it was at {startX:0.00})");
         me.Net.Jump();
-        if (!await Until(() => jumps > 0)) return PlayerFail("the joiner's jump never arrived on the host");
-        for (var i = 0; i < 90 && !_done; i++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (jumps != 1) return PlayerFail($"one jump arrived {jumps} times on the host");
-        foreach (var h in holders) h.QueueFree();
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        _playerPhase = false;
-        return true;
+        if (!await Until(() => jumps > 0)) return PlayerFail($"{whose} jump never arrived on the {watcher}");
+        for (var i = 0; i < 90 && !_done; i++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); // a second arrival would show here
+        if (jumps != 1) return PlayerFail($"{whose} jump arrived {jumps} times on the {watcher}");
+        return $"{whose} player (peer {peer}) moved from x = {startX:0.00} to x = {copy.GlobalPosition.X:0.00} on the {watcher}, one jump arrived once";
     }
 
-    private bool PlayerFail(string what)
+    private string? PlayerFail(string what)
     {
         Finish(false, "player: " + what);
-        return false;
+        return null;
     }

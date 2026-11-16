@@ -22,6 +22,10 @@ public sealed class Game : MonoBehaviour
     public Lobby Lobby { get; private set; } = null!;
     public Camera? Camera { get; private set; }
     GamePlayer? _local;
+    /// <summary>--autostart (tests only, see Boot.cs): this copy walks its own player (GamePlayer.ReadKeys) and logs when it sees another player move.</summary>
+    public static readonly bool AutoTest = Array.IndexOf(Environment.GetCommandLineArgs(), "--autostart") >= 0;
+    readonly Dictionary<int, float> _seen = new(); // peer -> x where this copy first saw that player
+    readonly HashSet<int> _reported = new();
     readonly Dictionary<int, GamePlayer> _everyone = new();
 
     /// <summary>
@@ -109,6 +113,22 @@ public sealed class Game : MonoBehaviour
         camera.backgroundColor = new Color(0.55f, 0.7f, 0.9f);
         camera.transform.position = at;
         return camera;
+    }
+
+    void Update()
+    {
+        if (!AutoTest) return;
+        foreach (var (peer, player) in _everyone)
+        {
+            if (player == null || player.Net.IsLocal || !player.Net.HasState || _reported.Contains(peer)) continue;
+            var x = player.transform.position.x;
+            if (!_seen.TryGetValue(peer, out var x0)) _seen[peer] = x;
+            else if (Mathf.Abs(x - x0) > 2f)
+            {
+                _reported.Add(peer);
+                Debug.Log($"MULTIPLAYER_PLAYER {NameOf(Lobby.LocalPeerId)} sees {NameOf(peer)} (peer {peer}) move: from x = {x0:0.00} to x = {x:0.00}");
+            }
+        }
     }
 
     void LateUpdate()

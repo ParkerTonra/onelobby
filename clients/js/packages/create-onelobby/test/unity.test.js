@@ -478,7 +478,7 @@ describe("unity verify: the Windows WebRTC library in the package", () => {
     expect(out.verdict).toContain("has no Runtime/Plugins/x86_64/datachannel.dll (the Windows WebRTC library)");
     expect(out.verdict).toContain("clients/unity/fetch-natives.sh");
     expect(out.verdict).toContain("clients/unity/build-unity-package.sh --pack");
-    expect(out.verdict).toContain(`Packages/${JSON.parse(readFileSync(join(dir, "Packages/manifest.json"), "utf8")).dependencies["com.onelobby.unity"].slice(5)}`);
+    expect(out.verdict).toContain(`${JSON.parse(readFileSync(join(dir, "Packages/manifest.json"), "utf8")).dependencies["com.onelobby.unity"].slice(5)} (the path in Packages/manifest.json`);
     expect(out.results.slice(2).every((r) => r.status === "skipped")).toBe(true); // no peers were started
   });
 

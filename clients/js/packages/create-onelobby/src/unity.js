@@ -231,7 +231,7 @@ const TEST_END = "    }\n}\n";
 const ASMDEF_REFS = '"references": ["OneLobby.Unity", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],';
 const ASMDEF_PRECOMPILED = '"precompiledReferences": ["nunit.framework.dll", "OneLobby.Core.dll", "OneLobby.Direct.dll"],';
 
-/** Assets/OneLobby/Tests/MultiplayerTests.cs with the player check added: the joiner's player appears on the host with a position, and one jump arrives once. */
+/** Assets/OneLobby/Tests/MultiplayerTests.cs with the player check added, both ways: the joiner's player appears on the host with a position and one jump arrives once, then the same for the host's player on the joiner. */
 export function multiplayerWithPlayer(base, part, settings) {
   for (const needle of [TEST_PUMP, TEST_HOLD, TEST_END]) if (!base.includes(needle)) throw new Error("MultiplayerTests.cs: a place for the player check moved");
   const indented = TEST_PUMP.replace(/^/gm, "    ").replace(/ +$/, ""); // the same two lines, one level deeper
@@ -270,7 +270,7 @@ export function agentsWithPlayer(agents, { authority, space }) {
         "",
       ].join("\n"),
     )
-    .replace(testTail, () => "host, join by address, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`GamePlayer` is used as it is).\n");
+    .replace(testTail, () => "host, join by address, one message each way, then the networked player, both ways: the joiner's player appears on the host, follows the joiner, and one jump arrives once, then the host's player does the same on the joiner (`GamePlayer` is used as it is; one `MULTIPLAYER_PLAYER` line each). Two built players run with `--local --autostart` start the match by themselves (no click), walk their player and log a `MULTIPLAYER_PLAYER` line when they see the other's move (`Boot.cs`, `Game.cs`).\n");
 }
 
 /** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes or scripts). `players`: { authority, space }. */

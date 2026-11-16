@@ -132,7 +132,7 @@ const TEST_FINISH = "        await _guest.LeaveAsync();\n        await _host.Lea
 const TEST_PUMP = "            if (lobby != null) lobby.Pump();\n";
 const TEST_END = "\n}\n";
 
-/** tests/MultiplayerTest.cs with the player check added: the joiner's player appears on the host, follows the joiner, and one jump arrives once. */
+/** tests/MultiplayerTest.cs with the player check added, both ways: the joiner's player appears on the host, follows the joiner, and one jump arrives once, then the same for the host's player on the joiner. */
 export function multiplayerWithPlayer(base, part, settings) {
   for (const needle of [TEST_FINISH, TEST_PUMP, TEST_END]) if (!base.includes(needle)) throw new Error("tests/MultiplayerTest.cs: a place for the player check moved");
   const added = pickBlocks(part, playerFlags(settings));
@@ -160,7 +160,7 @@ export function agentsWithPlayer(agents, { authority, space }) {
         "",
       ].join("\n"),
     )
-    .replace(testTail, () => "host, join by address, one message each way, then the networked player: the joiner's player appears on the host, follows the joiner, and one jump arrives once (`Player.tscn` is used as it is).\n");
+    .replace(testTail, () => "host, join by address, one message each way, then the networked player, both ways: the joiner's player appears on the host, follows the joiner, and one jump arrives once, then the host's player does the same on the joiner (`Player.tscn` is used as it is; one `MULTIPLAYER_PLAYER` line each). Two copies run with `--local --autostart` start the match by themselves (no click), walk their player and print a `MULTIPLAYER_PLAYER` line when they see the other's move (`Main.cs`, `Game.cs`).\n");
 }
 
 /** `--into` with players on: the lines that add a spawner (nothing is written into the game's own scenes). `players`: { authority, space }. */

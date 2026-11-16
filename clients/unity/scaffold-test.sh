@@ -8,7 +8,7 @@
 #   3. `create-onelobby verify` must end in VERIFY_OK, and in VERIFY_FAIL blueprint: on a copy with a broken onelobby.json
 #   4. scaffold --into an empty Unity project (ProjectVersion.txt and a manifest only), the test again; a second --into run changes nothing
 #   5. scaffold a new project with players in the world (--mode replication --set sync.player.authority=owner): its test must log MULTIPLAYER_PLAYER
-#      (the joiner's player appeared on the host, followed it, one jump arrived once) and then MULTIPLAYER_OK
+#      (the joiner's player appeared on the host, followed it, one jump arrived once; then the host's player the same way on the joiner) and then MULTIPLAYER_OK
 #   usage: PACKAGE_TGZ=<com.onelobby.unity-*.tgz with the natives> UNITY=<Unity.exe> clients/unity/scaffold-test.sh
 #          (the unity-dev-package CI artifact has the natives; SCAFFOLD_TMP=<folder> chooses where projects are made, default: a temp folder)
 # The editor has been seen to end with exit code 0xC0000005 while it closes after a test run that passed, so the result line decides, not the exit code.
@@ -93,7 +93,7 @@ echo "::group::new project with players (sync.player)"
 node "$CLI" "$WORK/players" --template unity --yes --no-git --unity "$UNITY" --package-from "$PACKAGE_TGZ" --mode replication --set sync.player.authority=owner || FAILS=$((FAILS + 1))
 run_test players "$WORK/players"
 grep -a -q '^MULTIPLAYER_PLAYER ' "$WORK/players.tests.log" || { echo "FAIL players: the play-mode test never logged MULTIPLAYER_PLAYER (the player check)"; FAILS=$((FAILS + 1)); }
-echo "players: $(grep -a -E '^MULTIPLAYER_PLAYER ' "$WORK/players.tests.log" | tail -n 1 | tr -d '\r')"
+grep -a -E '^MULTIPLAYER_PLAYER ' "$WORK/players.tests.log" | tr -d '\r' | sed 's/^/players: /' # one line per way: the joiner's player on the host, the host's on the joiner
 echo "::endgroup::"
 
 echo "total $((SECONDS - T0)) s"

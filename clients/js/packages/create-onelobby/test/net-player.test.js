@@ -531,3 +531,43 @@ describe("unity with sync.player", () => {
     expect(await playerCheck().run({ dir: at("on"), kind: "unity" })).toMatchObject({ status: "ok" });
   });
 });
+
+describe("the generated two-peer tests check the player both ways, and the game has a start switch for tests", () => {
+  const MIX = [
+    ["gd", GD, PLAYER_OWNER, "tests/multiplayer.gd", "main.gd", "game.gd"],
+    ["gd-2d-host", GD, PLAYER_HOST_2D, "tests/multiplayer.gd", "main.gd", "game.gd"],
+    ["cs", CS, PLAYER_OWNER, "tests/MultiplayerTest.cs", "Main.cs", "Game.cs"],
+    ["cs-2d-host", CS, PLAYER_HOST_2D, "tests/MultiplayerTest.cs", "Main.cs", "Game.cs"],
+    ["unity", UN, PLAYER_OWNER, "Assets/OneLobby/Tests/MultiplayerTests.cs", "Assets/Scripts/Boot.cs", "Assets/Scripts/Game.cs"],
+    ["unity-2d-host", UN, PLAYER_HOST_2D, "Assets/OneLobby/Tests/MultiplayerTests.cs", "Assets/Scripts/Boot.cs", "Assets/Scripts/Game.cs"],
+  ];
+  for (const [name, base, player, testFile, mainFile, gameFile] of MIX) {
+    it(`${name}: the test moves the joiner's player on the host and the host's player on the joiner, one MULTIPLAYER_PLAYER line each`, async () => {
+      expect((await cli([`${name}/g`, ...base, ...player])).code).toBe(0);
+      const test = text(name, "g", testFile);
+      expect(test).toContain("the joiner's");
+      expect(test).toContain("the host's");
+      expect(test).toMatch(/moved from x = /);
+      expect(test.match(/MULTIPLAYER_PLAYER/g).length).toBeGreaterThanOrEqual(3); // the header comment, then one line per way
+      expect(test).toMatch(/MULTIPLAYER_PLAYER[" ,+]+up\b/); // the first way prints its line
+      expect(test).toMatch(/MULTIPLAYER_PLAYER[" ,+]+down\b/); // so does the second
+      expect(test).not.toContain("#@");
+      expect(test).not.toContain("//@");
+    });
+    it(`${name}: --autostart starts the match without a click and the game reports players it sees move`, async () => {
+      expect((await cli([`${name}/g`, ...base, ...player])).code).toBe(0);
+      const main = text(name, "g", mainFile);
+      const game = text(name, "g", gameFile);
+      expect(main).toContain("--autostart");
+      expect(main).toMatch(/StartGame|start_game/);
+      expect(game).toContain("--autostart");
+      expect(game).toContain("MULTIPLAYER_PLAYER");
+      expect(game).toContain("move: from x = ");
+    });
+  }
+
+  it("a game with no player layer has no --autostart (nothing to walk)", async () => {
+    expect((await cli(["gd-plain/g", ...GD])).code).toBe(0);
+    expect(text("gd-plain", "g", "main.gd")).not.toContain("--autostart");
+  });
+});

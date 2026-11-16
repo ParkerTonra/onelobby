@@ -11,6 +11,10 @@ using UnityEngine.SceneManagement;
 /// create-onelobby; yours to edit. Flags after the program name (the menu reads them, see docs/recipes/menu.md, "Unity"):
 ///   Game.exe --host --local --name=Sam                      (--local: 127.0.0.1 only, no Nostr, nothing leaves this PC)
 ///   Game.exe --join=127.0.0.1:47810 --local --name=Ann
+/// Add <c>--autostart</c> to BOTH copies for a test with no clicks: the host starts the match as soon as a second player has joined, and every copy
+/// walks its own player and logs one MULTIPLAYER_PLAYER line when it sees another player move (see Game.cs):
+///   Game.exe -batchmode -nographics --host --local --autostart --name=Sam
+///   Game.exe -batchmode -nographics --join=127.0.0.1:47810 --local --autostart --name=Ann
 /// When the game starts (<c>GameStarted</c>) it opens Game.cs, which makes the world and one networked character per player; it ends it again on
 /// <c>ReturnedToLobby</c> and <c>Left</c>. Delete this file when the game has its own start-up and put the lines of <see cref="Awake"/> there.
 /// </summary>
@@ -20,6 +24,7 @@ public sealed class GameBoot : MonoBehaviour
     string _status = "";
     int _players;
     Game? _game;
+    bool _autostart, _autostarted; // --autostart (tests only): the host starts the match by itself, once
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Create()
@@ -33,6 +38,7 @@ public sealed class GameBoot : MonoBehaviour
     void Awake()
     {
         _menu = gameObject.AddComponent<OneLobbyMenu>();
+        _autostart = Game.AutoTest;
         _menu.GameStarted += lobby =>
         {
             // start your game here; the menu hid itself
@@ -58,6 +64,7 @@ public sealed class GameBoot : MonoBehaviour
     {
         var lobby = _menu.Model?.Lobby;
         var count = lobby?.Room.Players.Count ?? 0;
+        if (_autostart && !_autostarted && _game == null && lobby is { IsHost: true } && count >= 2) { _autostarted = true; _menu.Model!.StartGame(); } // what the Start button does
         if (count == _players) return;
         _players = count;
         if (lobby != null) Debug.Log("Lobby: " + count + " players: " + string.Join(", ", lobby.Room.Players.Select(p => p.Name)));

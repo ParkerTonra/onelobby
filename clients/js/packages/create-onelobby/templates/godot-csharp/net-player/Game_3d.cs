@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using OneLobby;
@@ -21,6 +22,9 @@ public partial class Game : Node3D
     public Lobby Lobby { get; private set; } = null!;
     public Camera3D Camera { get; private set; } = null!;
     private Player? _local;
+    private readonly bool _autotest = OS.GetCmdlineUserArgs().Contains("--autostart"); // tests only (see Main.cs): this copy walks its player and reports movers
+    private readonly Dictionary<int, float> _seen = new(); // peer -> x where this copy first saw that player
+    private readonly HashSet<int> _reported = new();
 
     /// <summary><paramref name="lobby"/>: the menu's <c>GameStarted</c> lobby; <paramref name="blueprint"/>: the game's onelobby.json (the menu's <c>Client.Blueprint</c>).</summary>
     public void Start(Lobby lobby, Blueprint blueprint)
@@ -38,6 +42,7 @@ public partial class Game : Node3D
         Spawner.PlayerSpawned += OnSpawned;
         AddChild(Spawner);
         Players = Spawner.Start(lobby, blueprint);
+        if (_autotest) Input.ActionPress("ui_right"); // the arrow key, held by code: the local player walks right with nobody at the keyboard
     }
 
     private int Seat(int peer) => Mathf.Max(0, Lobby.Room.Entries.FirstOrDefault(e => e.Id == peer)?.Seat ?? 0);
@@ -71,9 +76,25 @@ public partial class Game : Node3D
 
     public override void _Process(double delta)
     {
+        if (_autotest) ReportMovers();
         if (_local == null || !IsInstanceValid(_local) || !Camera.IsInsideTree()) return;
         var p = _local.GlobalPosition;
         Camera.GlobalPosition = Camera.GlobalPosition.Lerp(p + new Vector3(0f, 9f, 11f), 0.1f);
         Camera.LookAt(p);
+    }
+
+    // --autostart: print one line per other player this copy has seen move more than two units.
+    private void ReportMovers()
+    {
+        foreach (var e in Lobby.Room.Players)
+        {
+            if (e.Id == Lobby.LocalPeerId || _reported.Contains(e.Id) || Spawner.CharacterOf(e.Id) is not Player { Visible: true } c) continue;
+            if (!_seen.TryGetValue(e.Id, out var x0)) _seen[e.Id] = c.GlobalPosition.X;
+            else if (Mathf.Abs(c.GlobalPosition.X - x0) > 2f)
+            {
+                _reported.Add(e.Id);
+                GD.Print($"MULTIPLAYER_PLAYER {NameOf(Lobby.LocalPeerId)} sees {e.Name} (peer {e.Id}) move: from x = {x0:0.00} to x = {c.GlobalPosition.X:0.00}");
+            }
+        }
     }
 }
