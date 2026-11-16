@@ -49,7 +49,7 @@ Note each finding with the file and line that told you:
 Preview, writing and downloading nothing: `npx create-onelobby --into . --template <engine> --recommend "<sentence>" --yes
 --dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). `--recommend` fills in its `answers` by
 itself; add a flag only to override one (section 2), not to repeat them. **Always pass `--template`**: without it
-`--into` treats any folder, a Unity one too, as `web`. `--yes` invents the game id `com.example.<folder>`; give the real one with
+`--into` knows only a Godot folder (`project.godot`) and treats every other folder, a Unity one too, as `web`. `--yes` invents the game id `com.example.<folder>`; give the real one with
 `--game-id`. The result holds `blueprint` (the file to be written), `files` (added or updated) and `recommendation`.
 
 Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
