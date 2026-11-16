@@ -418,7 +418,7 @@ namespace OneLobby.Direct
                 var nostrUp = bridge != null && settle.Result;
                 var relaysNote = nostrUp ? bridge!.Relays.Connected + "/" + bridge.Relays.Total : "";
                 var retrying = false;
-                lobby.DirectAddresses = DirectAddress.Local(hub.Port);
+                lobby.DirectAddresses = DirectAddress.LocalFor(o.BindAddress, hub.Port);
                 if (o.Lan) StartLan(client, o, lobby, hub);
                 // Sets JoinCode / JoinCodeKind / PortMapping / DirectHostLog and what GET /joininfo answers.
                 void Apply(string? ip, JoinCodeKind kind, string note)
@@ -442,7 +442,7 @@ namespace OneLobby.Direct
                 else if (map is { Mapped: true } && PortMapper.IsPublicIPv4(map.ExternalIPv4)) Apply(map.ExternalIPv4, JoinCodeKind.Internet, map.Detail);
                 else
                 {
-                    Apply(map?.LocalIPv4 ?? DirectAddress.LanIPv4(), JoinCodeKind.SameNetwork, map == null ? "off" : map.Detail);
+                    Apply(o.BindAddress != null && System.Net.IPAddress.IsLoopback(o.BindAddress) ? "127.0.0.1" : map?.LocalIPv4 ?? DirectAddress.LanIPv4(), JoinCodeKind.SameNetwork, map == null ? "off" : map.Detail);
                     if (map is { Mapped: false } && hub.PortMapper is { } mapper && retryMs > 0)
                     {
                         retrying = true;

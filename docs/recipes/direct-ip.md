@@ -324,6 +324,9 @@ itself runs on Node.
   IPAddress.Loopback` (the hub's TCP + UDP listener) plus `DataChannelTransport.BindAddress = "127.0.0.1"` (the WebRTC
   sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both. Never in
   a shipped build: other machines cannot connect.
+  A host bound to loopback puts `127.0.0.1` in its join code, `joinUrl` and address list (never the LAN address, which nothing
+  listens on), so a joiner on the same PC joins by the code: JS `bindHost` 127.0.0.1, C# `BindAddress` loopback, GDScript
+  `listen_address` 127.0.0.1 (an explicit `public_ip` / `PublicAddress` still wins).
   What binds where in a loopback run, per client: **C# (`OneLobby.DataChannel`) and Unity**: the two settings above put every
   socket (hub TCP, hub UDP, LAN discovery, ICE) on 127.0.0.1. **JS in Node**: `hostDirect` with `bindHost: "127.0.0.1"` listens
   on loopback and binds its ICE sockets there too (libdatachannel `bindAddress`, set by the library), and `joinDirect` of a

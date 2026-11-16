@@ -74,6 +74,17 @@ namespace OneLobby.Direct
         }
 
         /// <summary>
+        /// The address a same-network join code carries for a host bound to <paramref name="bindAddress"/>: 127.0.0.1 when it
+        /// listens on loopback only (a LAN address would be one nothing listens on), else <see cref="LanIPv4"/>.
+        /// </summary>
+        public static string? CodeAddress(IPAddress? bindAddress) =>
+            bindAddress != null && IPAddress.IsLoopback(bindAddress) ? "127.0.0.1" : LanIPv4();
+
+        /// <summary>The host screen's addresses for a host bound to <paramref name="bindAddress"/>: only 127.0.0.1 for a loopback host, else <see cref="Local"/>.</summary>
+        public static IReadOnlyList<string> LocalFor(IPAddress? bindAddress, int port) =>
+            bindAddress != null && IPAddress.IsLoopback(bindAddress) ? new[] { "127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) } : Local(port);
+
+        /// <summary>
         /// The IPv4 address a same-network join code carries when the router was not found: the address the OS would
         /// use to reach the internet (a UDP connect sends nothing), else the first private IPv4 of <see cref="Local"/>.
         /// Null when the machine has no IPv4.

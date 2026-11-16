@@ -28,6 +28,27 @@ public sealed class DirectIpTests
 
     private static readonly Random PortRng = new();
 
+    // No sockets: the address a join code carries is a pure function of the bind address.
+    [Fact]
+    public void LoopbackHost_CodeAndAddressesName127001()
+    {
+        var code = OneLobby.JoinCode.Encode(DirectAddress.CodeAddress(IPAddress.Loopback)!, 47810);
+        Assert.True(OneLobby.JoinCode.TryDecode(code, out var ip, out var port, out _));
+        Assert.Equal("127.0.0.1", ip);
+        Assert.Equal(47810, port);
+        Assert.Equal(new[] { "127.0.0.1:47810" }, DirectAddress.LocalFor(IPAddress.Loopback, 47810));
+    }
+
+    [Fact]
+    public void NonLoopbackHost_KeepsTheLanAddress()
+    {
+        // negative control: Any and unset binds still use what LanIPv4 / Local say
+        Assert.Equal(DirectAddress.LanIPv4(), DirectAddress.CodeAddress(IPAddress.Any));
+        Assert.Equal(DirectAddress.LanIPv4(), DirectAddress.CodeAddress(null));
+        Assert.Equal(DirectAddress.Local(47810), DirectAddress.LocalFor(IPAddress.Any, 47810));
+        Assert.Equal(DirectAddress.Local(47810), DirectAddress.LocalFor(null, 47810));
+    }
+
     /// <summary>
     /// A port that is free right now for both TCP and UDP on all IPv4 interfaces, plus the next <paramref name="span"/>-1
     /// ports after it. Candidates come from the OS (bind port 0, TCP-first and UDP-first in turn) and then from a random
