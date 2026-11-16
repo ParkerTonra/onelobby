@@ -244,6 +244,9 @@ interface HostEnt {
   last: Uint8Array;
 }
 
+/** Host: an `input` with `ack` 0 counts as "session started over" only this long after the client's first ack. */
+const ACK0_GRACE_MS = 500;
+
 interface ClientRec {
   peer: number;
   ack: number;
@@ -253,6 +256,12 @@ interface ClientRec {
   bytesSent: number;
   /** `sendFullSnapshot`: acks at or below this tick no longer count as a baseline. */
   ackFloor: number;
+  /** Host tick at which `ack` last went from 0 to a tick (-1 while it is 0): the grace for an `ack` 0 starts here. */
+  ackSince: number;
+  /** Host tick of the last `ack` 0 restart (-Infinity = never): at most one per `historyTicks`. */
+  restartTick: number;
+  /** After an `ack` 0 restart until its first new ack: packets whose ack is 0 < ack <= `ackFloor` come from the old session. */
+  restarted: boolean;
   repeated: number;
   skipped: number;
   lost: number;
@@ -549,6 +558,21 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
   }
 
   /**
+   * An `input` with `ack` 0 from a client that had acked: its session started over (it holds no snapshot). Same effect as
+   * `sendFullSnapshot`, and its input bookkeeping starts over too (its sequence numbers begin at 1 again).
+   */
+  private restartClient(c: ClientRec): void {
+    c.ack = 0;
+    c.ackFloor = this.clock.tick;
+    c.ackSince = -1;
+    c.restartTick = this.clock.tick;
+    c.restarted = true;
+    c.inputs.clear();
+    c.lastConsumed = 0;
+    c.last = null;
+  }
+
+  /**
    * Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when none
    * has arrived the previous one is repeated (`repeated`); null only before the first.
    */
@@ -701,7 +725,7 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     if (this.clientRecs.has(peer)) return;
     // ack 0: the first snapshot it gets is a full one, on the reliable channel (keyframe)
     this.clientRecs.set(peer, {
-      peer, ack: 0, inputs: new Map(), lastConsumed: 0, last: null, bytesSent: 0, ackFloor: 0, repeated: 0, skipped: 0, lost: 0,
+      peer, ack: 0, inputs: new Map(), lastConsumed: 0, last: null, bytesSent: 0, ackFloor: 0, ackSince: -1, restartTick: -Infinity, restarted: false, repeated: 0, skipped: 0, lost: 0,
       keyframeDue: true, nextKeyframeMs: 0,
     });
     this.emit("clientReady", peer);
@@ -711,7 +735,20 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     const c = this.clientRecs.get(from);
     if (!c) return;
     const { ack, inputs } = decodeInput(payload);
-    if (ack <= this.clock.tick && ack > c.ack && ack > c.ackFloor && this.sent.has(ack)) c.ack = ack;
+    const tick = this.clock.tick;
+    if (ack === 0) {
+      // a client that had acked and now says 0 holds no baseline: its session started over. Not a late packet of the old
+      // one (sent before its first snapshot arrived): those can only follow the first ack within the grace; and at most
+      // one restart per history length, so a client alternating 0 and real acks cannot make a tap of full snapshots.
+      const graceTicks = Math.ceil(ACK0_GRACE_MS / this.clock.tickMs);
+      if (c.ack > 0 && tick - c.ackSince >= graceTicks && tick - c.restartTick >= this.config.historyTicks) this.restartClient(c);
+    } else if (c.restarted && ack <= c.ackFloor) {
+      return; // a packet of the old session, still in flight after the restart: its sequence numbers are not the new session's
+    } else if (ack <= tick && ack > c.ack && ack > c.ackFloor && this.sent.has(ack)) {
+      if (c.ack === 0) c.ackSince = tick;
+      c.ack = ack;
+      c.restarted = false;
+    }
     for (const { seq, view256, bytes } of inputs) {
       if (seq === 0 || seq <= c.lastConsumed || c.inputs.has(seq)) continue;
       c.inputs.set(seq, { view256, bytes });

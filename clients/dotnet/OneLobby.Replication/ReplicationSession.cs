@@ -35,6 +35,9 @@ namespace OneLobby.Replication
             public bool HasLast;
             public long BytesSent;
             public uint AckFloor; // SendFullSnapshot: acks at or below this tick no longer count as a baseline
+            public long AckSince = -1;                   // host tick at which Ack last went from 0 to a tick (-1 while it is 0): the grace for an ack 0 starts here
+            public long RestartTick = long.MinValue / 2; // host tick of the last ack 0 restart: at most one per HistoryTicks
+            public bool Restarted;                       // after an ack 0 restart until the first new ack: 0 < ack <= AckFloor comes from the old session
             public long Repeated, Skipped, Lost;
             public bool KeyframeDue;     // the next snapshot is a reliable full one (link just came up, or the interval ran out)
             public long NextKeyframeMs;
@@ -304,6 +307,26 @@ namespace OneLobby.Replication
             c.AckFloor = Clock.Tick;
         }
 
+        /// <summary>Host: an input with ack 0 counts as "session started over" only this long after the client's first ack.</summary>
+        private const double Ack0GraceMs = 500;
+
+        /// <summary>
+        /// An input with ack 0 from a client that had acked: its session started over (it holds no snapshot). Same effect as
+        /// <see cref="SendFullSnapshot"/>, and its input bookkeeping starts over too (its sequence numbers begin at 1 again).
+        /// </summary>
+        private void RestartClient(ClientRec c)
+        {
+            c.Ack = 0;
+            c.AckFloor = Clock.Tick;
+            c.AckSince = -1;
+            c.RestartTick = Clock.Tick;
+            c.Restarted = true;
+            c.Inputs.Clear();
+            c.LastConsumed = 0;
+            c.HasLast = false;
+            c.Last = default;
+        }
+
         /// <summary>
         /// Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when
         /// none has arrived the previous one is repeated (<see cref="InputFrame.Repeated"/>); false only before the first.
@@ -464,7 +487,22 @@ namespace OneLobby.Replication
         {
             if (!_clients.TryGetValue(from, out var c)) return;
             var (ack, _, inputs) = Proto.DecodeInput(payload);
-            if (ack <= Clock.Tick && ack > c.Ack && ack > c.AckFloor && _sent.ContainsKey(ack)) c.Ack = ack;
+            long tick = Clock.Tick;
+            if (ack == 0)
+            {
+                // a client that had acked and now says 0 holds no baseline: its session started over. Not a late packet of the old one
+                // (sent before its first snapshot arrived): those can only follow the first ack within the grace; and at most one
+                // restart per history length, so a client alternating 0 and real acks cannot make a tap of full snapshots.
+                var graceTicks = (long)Math.Ceiling(Ack0GraceMs / Config.TickMs);
+                if (c.Ack > 0 && tick - c.AckSince >= graceTicks && tick - c.RestartTick >= Config.HistoryTicks) RestartClient(c);
+            }
+            else if (c.Restarted && ack <= c.AckFloor) return; // a packet of the old session, still in flight after the restart: its sequence numbers are not the new session's
+            else if (ack <= Clock.Tick && ack > c.Ack && ack > c.AckFloor && _sent.ContainsKey(ack))
+            {
+                if (c.Ack == 0) c.AckSince = tick;
+                c.Ack = ack;
+                c.Restarted = false;
+            }
             foreach (var (seq, view, bytes) in inputs)
             {
                 if (seq == 0 || seq <= c.LastConsumed || c.Inputs.ContainsKey(seq)) continue;

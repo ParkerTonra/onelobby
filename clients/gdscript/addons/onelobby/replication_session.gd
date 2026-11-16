@@ -78,6 +78,9 @@ const DEFAULT_CONFIG := {
 
 const P := preload("res://addons/onelobby/replication_protocol.gd")
 
+## Host: an `input` with `ack` 0 counts as "session started over" only this long after the client's first ack.
+const ACK0_GRACE_MS := 500
+
 # byte-rate buckets: kind + (received ? 3 : 0)
 const _SNAPSHOT := 0
 const _INPUT := 1
@@ -198,6 +201,9 @@ class OLRepClient:
 	var last := {} # the last InputFrame handed out
 	var bytes_sent := 0
 	var ack_floor := 0 ## `send_full_snapshot`: acks at or below this tick no longer count as a baseline
+	var ack_since := -1 ## host tick at which `ack` last went from 0 to a tick (-1 while it is 0): the grace for an `ack` 0 starts here
+	var restart_tick := -1000000000000 ## host tick of the last `ack` 0 restart: at most one per `history_ticks`
+	var restarted := false ## after an `ack` 0 restart until the first new ack: 0 < ack <= `ack_floor` comes from the old session
 	var repeated := 0
 	var skipped := 0
 	var lost := 0
@@ -398,6 +404,19 @@ func send_full_snapshot(peer_id: int) -> void:
 	var c: OLRepClient = _client_recs[peer_id]
 	c.ack = 0
 	c.ack_floor = clock.tick
+
+
+## An `input` with `ack` 0 from a client that had acked: its session started over (it holds no snapshot). Same effect as
+## `send_full_snapshot`, and its input bookkeeping starts over too (its sequence numbers begin at 1 again).
+func _restart_client(c: OLRepClient) -> void:
+	c.ack = 0
+	c.ack_floor = clock.tick
+	c.ack_since = -1
+	c.restart_tick = clock.tick
+	c.restarted = true
+	c.inputs.clear()
+	c.last_consumed = 0
+	c.last = {}
 
 
 ## Host: this tick's input from a client (one call per client per tick): `{seq, view_tick, bytes, repeated}`. The next input
@@ -620,8 +639,21 @@ func _host_receive_input(from: int, payload: PackedByteArray) -> void:
 		stats.malformed += 1
 		return
 	var ack: int = d["ack"]
-	if ack <= clock.tick and ack > c.ack and ack > c.ack_floor and _sent.has(ack):
+	var now_tick: int = clock.tick
+	if ack == 0:
+		# a client that had acked and now says 0 holds no baseline: its session started over. Not a late packet of the old one
+		# (sent before its first snapshot arrived): those can only follow the first ack within the grace; and at most one
+		# restart per history length, so a client alternating 0 and real acks cannot make a tap of full snapshots.
+		var grace_ticks := ceili(ACK0_GRACE_MS / clock.tick_ms())
+		if c.ack > 0 and now_tick - c.ack_since >= grace_ticks and now_tick - c.restart_tick >= int(config["history_ticks"]):
+			_restart_client(c)
+	elif c.restarted and ack <= c.ack_floor:
+		return # a packet of the old session, still in flight after the restart: its sequence numbers are not the new session's
+	elif ack <= now_tick and ack > c.ack and ack > c.ack_floor and _sent.has(ack):
+		if c.ack == 0:
+			c.ack_since = now_tick
 		c.ack = ack
+		c.restarted = false
 	for inp: Dictionary in d["inputs"]:
 		var seq: int = inp["seq"]
 		if seq == 0 or seq <= c.last_consumed or c.inputs.has(seq):
