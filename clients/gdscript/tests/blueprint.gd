@@ -55,7 +55,12 @@ func _run() -> void:
 	var doc := _load("vectors/blueprint.json")
 	var valid: Array = doc.get("valid", [])
 	var invalid: Array = doc.get("invalid", [])
+	var room_valid: Array = doc.get("roomValid", [])
+	var room_invalid: Array = doc.get("roomInvalid", [])
 	_check(valid.size() >= 12 and invalid.size() >= 36, "vectors loaded (%d valid, %d invalid)" % [valid.size(), invalid.size()])
+	_check(room_valid.size() >= 5 and room_invalid.size() >= 17, "room vectors loaded (%d valid, %d invalid)" % [room_valid.size(), room_invalid.size()])
+	valid.append_array(room_valid)
+	invalid.append_array(room_invalid)
 	for v: Dictionary in valid:
 		var cfg := OneLobbyConfig.parse(v["input"])
 		_check(cfg.ok, "valid %s accepted: %s" % [v["name"], cfg.error.get("message", "")])
@@ -78,7 +83,21 @@ func _run() -> void:
 	quit(1 if _fail > 0 else 0)
 
 
+func _room_section() -> void:
+	var cfg := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "godot-gdscript", "lobby": {"maxPlayers": 6}, "players": {"maxNameLength": 12},
+		"room": {"autoStart": "all_ready", "spectators": 2, "countdownSeconds": 0, "lateJoin": "spectate", "data": {"role": {"type": "enum", "values": ["tank", "healer"], "default": "tank"}}}})
+	_check(cfg.ok and cfg.room["auto_start"] == "all_ready" and cfg.room["spectators"] == 2 and cfg.room["countdown_seconds"] == 0 and cfg.room["late_join"] == "spectate", "room section is snake_case in cfg.room")
+	_check(cfg.room["data"]["role"]["values"] == ["tank", "healer"] and cfg.room["rejoin_window_seconds"] == 60 and cfg.room["seat_dropped"] == "window", "room data declarations keep the file's keys; defaults fill in")
+	var o := cfg.room_options()
+	_check(o["max_name_length"] == 12 and o["auto_start"] == "all_ready" and o.has("data"), "room_options carries the players.maxNameLength")
+	var s := OneLobbyRoomRules.resolve_settings(o, 6, true)
+	_check(s["spectators"] == 2 and s["countdownMs"] == 0 and s["lateJoin"] == "spectate" and s["maxNameLength"] == 12 and s["data"].has("role") and s["data"].has("color"), "the room settings a host starts with come out of the file")
+	var plain := OneLobbyConfig.parse({"game": {"id": "a"}, "lobby": {"lateJoin": false}})
+	_check(plain.room["late_join"] == "refuse" and plain.lobby["late_join"] == false, "lobby.lateJoin false makes room.lateJoin refuse")
+
+
 func _extras() -> void:
+	_room_section()
 	# text and files
 	var bad := OneLobbyConfig.parse("{ not json")
 	_check(not bad.ok and bad.error["rule"] == "json" and bad.error["code"] == "bad_config", "invalid JSON text: json rule")
