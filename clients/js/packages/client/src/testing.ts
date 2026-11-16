@@ -4,6 +4,7 @@
  */
 import type { Clock } from "./clock.js";
 import { CROCKFORD_ALPHABET, normalizeCode } from "./crockford.js";
+import { cleanReport } from "./diagnose.js";
 import type {
   ChannelName,
   LinkFactory,
@@ -255,7 +256,7 @@ export class MemoryServer {
   readonly socketFactory: SocketFactory = () => this.connect();
   private n = 0;
   iceServers = [{ urls: ["stun:stun.example:3478"] }];
-  /** What `welcome.features` lists; `[]` plays an older hub that cannot rename, `["set_name", "room"]` one with the room feature (passwords, spectator slots, bans, kick codes). */
+  /** What `welcome.features` lists; `[]` plays an older hub that cannot rename, `["set_name", "room"]` one with the room feature (passwords, spectator slots, bans, kick codes), add `"diag"` for the joiner's diagnosis relay. */
   features: string[] = ["set_name"];
   /** True when the room feature is listed. */
   get roomFeature(): boolean {
@@ -302,13 +303,20 @@ export class MemorySocket implements SocketLike {
   }
 
   // ---- socket API
+  /** A joiner's diagnosis is sent just before it leaves; a real socket delivers it, so it is handled even when `close()` comes first. */
+  private pendingDiag: Json[] = [];
   send(data: string): void {
     if (this.closed) return;
     const m = JSON.parse(data) as Json;
-    queueMicrotask(() => this.handle(m));
+    if (m.t === "diag") this.pendingDiag.push(m);
+    queueMicrotask(() => {
+      if (m.t === "diag") this.pendingDiag.splice(this.pendingDiag.indexOf(m) >>> 0, 1);
+      this.handle(m);
+    });
   }
   close(): void {
     if (this.closed) return;
+    for (const m of this.pendingDiag.splice(0)) this.handle(m);
     this.closed = true;
     this.readyState = 3;
     this.leaveLobby("timeout");
@@ -491,6 +499,14 @@ export class MemorySocket implements SocketLike {
         victim.sock?.push({ t: "error", code: "kicked", msg: "kicked", ...(Object.keys(data).length ? { data } : {}) });
         this.broadcast(l, { t: "peer_left", peerId: victim.peerId, reason: ban ? "kicked" : "disconnected" });
         return;
+      }
+      case "diag": {
+        // a joiner's diagnosis goes to the host only (spec/diagnostics.md s.7); only a hub that lists "diag" handles it
+        const l = this.lobby;
+        if (!l || !this.peer || !this.srv.features.includes("diag") || this.peer.peerId === l.hostId) return;
+        const report = cleanReport(m.report);
+        if (!report) return this.err("bad_request", "report must be a small diagnosis report");
+        return l.peers.get(l.hostId)?.sock?.push({ t: "diag", from: this.peer.peerId, report });
       }
       case "bans": {
         const l = this.lobby;
