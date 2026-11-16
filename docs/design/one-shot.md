@@ -166,7 +166,9 @@ Each is one lane unless noted; order matters for the first three.
     game with a spawner, floor and camera, a main scene that opens it on `game_started` and a player check in its two-peer test (the joiner's player appears on the host, follows it, one jump arrives once);
     `godot-csharp` also vendors `addons/onelobby_net_player/` under a pin of its own (`update` re-vendors it, edited files stop it) and references `OneLobby.Replication`; `--into` adds the vendored parts and
     prints the spawner lines; `verify` has a `player` file check for such a game. A game without `sync.player` is written byte for byte as before (a test pins it). Run by `clients/gdscript/scaffold-test.sh` and
-    `clients/dotnet/scaffold-test.sh` in CI. Not built: the Unity and web templates.
+    `clients/dotnet/scaffold-test.sh` in CI. Landed (the Unity template): the same rule (`sync.mode` `replication` AND `sync.player` in the answers) writes `Assets/Scripts/Game.cs`, `GamePlayer.cs` (a character made in code, 3D or 2d, owner or host
+    authority, the file says which), `OneLobbyGame.asmdef` and a `Boot.cs` that opens the game, and adds the player check to the play-mode test; `--into` prints the spawner lines and writes nothing; `verify` has the `player` line; a game without
+    `sync.player` is written byte for byte as before (a test pins it). Proven by local Unity runs only (Unity is not in CI): `clients/unity/scaffold-test.sh`. Not built: the web template.
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.

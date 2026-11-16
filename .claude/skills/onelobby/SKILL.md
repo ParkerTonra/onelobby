@@ -89,11 +89,11 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    `js-web.md`), replication (`replication.md`), a pause-menu call when `session.pause` is not `off` (`pause.md`), the `by-hand`
    advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check (it runs once when the menu opens; `diagnostics.checkOnOpen: false`
    in `onelobby.json` switches that off, the button stays) and plain-language errors already live in the menu and the library.
-   **Players in the world are not hand work on Godot any more:** when the recommendation has `sync.player.authority` (the `coop-snapshots` and `replication` shapes) or you
-   pass `--mode replication --set sync.player.authority=owner|host`, the same one command writes the networked player: a new GDScript or C# project gets a character
-   (`player.tscn`, `Player.tscn`), a game with the spawner and a player check in its two-peer test (C# also vendors `addons/onelobby_net_player/` and references
-   `OneLobby.Replication`); `--into` adds the vendored parts and prints the spawner lines to put where your game starts (it writes no scene into the game). The `--json` result
-   has `netPlayer`. `verify` then has a `player` line. Unity and web do not write it yet (`docs/recipes/net-player.md` sections 12, and 3 and 4).
+   **Players in the world are not hand work on Godot or Unity any more:** when the recommendation has `sync.player.authority` (the `coop-snapshots` and `replication` shapes) or you
+   pass `--mode replication --set sync.player.authority=owner|host`, the same one command writes the networked player: a new GDScript, C# or Unity project gets a character
+   (`player.tscn`, `Player.tscn`, `Assets/Scripts/GamePlayer.cs`), a game with the spawner and a player check in its two-peer test (C# also vendors `addons/onelobby_net_player/` and references
+   `OneLobby.Replication`; Unity needs neither, the package has the component); `--into` adds the vendored parts and prints the spawner lines to put where your game starts (it writes no scene into the game). The `--json` result
+   has `netPlayer`. `verify` then has a `player` line. Web does not write it yet (`docs/recipes/net-player.md` sections 3 and 4).
 5. **By hand** (`template_planned`, planned engine, `runCommand: null`): ask the tool, do not assume; its `template_planned` refusal
    names what it builds today. Follow the engine's recipe (`dotnet-generic.md`, `browser-game.md`; Unity is built now: `docs/recipes/unity.md` "One command"), write
    `onelobby.json` yourself against the schema, and say in the report that this path was by hand.
