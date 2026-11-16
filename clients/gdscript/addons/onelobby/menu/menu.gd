@@ -1,12 +1,27 @@
 class_name OneLobbyMenu
 extends Control
-## The drop-in multiplayer menu: add menu.tscn to a scene, connect `game_started`, done. It draws OneLobbyMenuModel (all the
+## The drop-in multiplayer menu: add menu.tscn to a scene (or load it and add it from code), connect `game_started`, done. It draws OneLobbyMenuModel (all the
 ## decisions live there) and forwards input to it; it uses stock controls and the engine's default Theme, so a game restyles it
 ## by giving the root (or any parent) a Theme. Every string comes from OneLobbyMenuText. It reads `onelobby.json`
 ## (`config_path`), builds its own OneLobbyClient from it, saves the player's name, relay line and last code through the
 ## client's settings, and calls client.pump() itself (set `pump` to false when your game pumps).
 ##
 ##     $OneLobbyMenu.game_started.connect(func(lobby: OneLobbyLobby) -> void: start_my_game(lobby))
+##
+## Handing over to a game's own session:
+##   - `game_started(lobby)` fires on every copy when the match starts: the host after its Start (and the room's countdown), a joiner when the
+##     host's phase changes to in_game (also for a player who joins a match already running). `lobby` is the OneLobbyLobby of this copy; the
+##     same object is `client.lobby`. Hand it, the peer ids (`lobby.local_peer_id`, `lobby.host_peer_id`, `lobby.is_host`) and the roster
+##     (`lobby.room.players()`) to your session; with `sync.mode` raw you send and receive your own bytes on it (`lobby.send`, `lobby.broadcast`,
+##     `lobby.message_received`) and keep pumping it from the client (`client.pump()`; the menu does it unless `pump` is off).
+##   - The menu has a room step your game may not have had: after Host (or Join) the lobby page shows the roster, Ready and the host's Start button.
+##     Nothing starts until the host presses Start (or `model.start_game()`, or `--autostart`).
+##   - `pump`: on (the default) the menu turns the client's `auto_pump` off and pumps it from its own `_process`, so the pump stops when the menu is freed.
+##     Set it to false when the menu lives in a node your game frees or replaces when the match starts: the client then keeps pumping itself
+##     (the autoload `Net` adds its client to the tree, so `auto_pump` stays on).
+##   - A menu built in code (a runtime CanvasLayer, no scene file): `var m: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate()`,
+##     set `m.client = Net.client` (and the other exports) BEFORE `add_child(m)`, because the menu reads them in its own `_ready`.
+##   - `returned_to_lobby(lobby)` (the host went back to the room: end your session) and `left` (this player left: end it and show your title).
 ##
 ## Nodes a controller (a C# one, or a script of yours) may touch, all with unique names (`%Name`):
 ##   Pages
@@ -39,8 +54,11 @@ signal left
 @export var pump := true
 ## Hide the menu while a game runs, show it again when the lobby comes back.
 @export var auto_hide_on_start := true
-## Act on --host, --join=<code>, --name=<name> and --local (after `--` on the command line) at once. One switch for all four.
+## Act on --host, --join=<code>, --name=<name>, --local and --autostart (after `--` on the command line) at once. One switch for all five:
+## turn it off when your game reads flags of those names itself (it then sees them and the menu does not), and open the menu from code.
 ## `--local`: the direct route, host and join on 127.0.0.1 only, no Nostr (a game that sets route or host_options itself keeps them without it).
+## `--autostart` (tests only, no clicks): the host starts the match as soon as a second player is in the room, so `game_started` fires on both copies.
+## The menu's own `--local` reading (the check on open stays off) is independent of this switch.
 @export var boot_flags := true
 ## Base address of an invite link ("https://game.example/play"); with it the lobby shows Copy invite for a lobby-server code.
 @export var invite_base := ""

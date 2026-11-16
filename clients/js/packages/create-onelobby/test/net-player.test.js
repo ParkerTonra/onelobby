@@ -60,7 +60,8 @@ const PLAYER_HOST_2D = ["--mode", "replication", "--set", "sync.player.authority
 
 describe("a game without sync.player is exactly what it was before", () => {
   // fixtures/no-player-golden.json: the SHA-256 of every file the templates write (not the vendored add-ons) for four scaffolds, made with
-  // the scaffolder as it was before the networked player existed (commit ea1e5ed of the dev repo). The same four must still match, byte for byte.
+  // the scaffolder as it was before the networked player existed (commit ea1e5ed of the dev repo). The same four must still match, byte for byte,
+  // except net.gd of the two GDScript scenarios: it lost its class_name NetService on purpose (a name a game is likely to own), and their hash moved.
   const golden = JSON.parse(readFileSync(new URL("./fixtures/no-player-golden.json", import.meta.url), "utf8"));
   const scenarios = {
     gd: ["--template", "godot-gdscript"],
@@ -559,7 +560,9 @@ describe("the generated two-peer tests check the player both ways, and the game 
       const main = text(name, "g", mainFile);
       const game = text(name, "g", gameFile);
       expect(main).toContain("--autostart");
-      expect(main).toMatch(/StartGame|start_game/);
+      // the GDScript menu has --autostart itself (OneLobbyMenuModel.apply_autostart), so main.gd only names it; C# and Unity start in their own main
+      if (name.startsWith("gd")) expect(main).not.toMatch(/start_game/);
+      else expect(main).toMatch(/StartGame|start_game/);
       expect(game).toContain("--autostart");
       expect(game).toContain("MULTIPLAYER_PLAYER");
       expect(game).toContain("move: from x = ");

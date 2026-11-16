@@ -448,6 +448,20 @@ func _extras() -> void:
 	_check(nl.route == "server" and nl.host_options == {"nostr": true, "listen_address": "0.0.0.0"} and not nl.local_only, "without --local a game's own route and host_options are not touched")
 	await bj.model.leave()
 	await bh.model.leave()
+	# --autostart (tests with no clicks): read next to the other flags; the host starts once a second player is in the room, both copies get game_started
+	_check(OneLobbyMenuModel.parse_boot_flags(PackedStringArray(["--autostart"]))["autostart"] == true and OneLobbyMenuModel.parse_boot_flags(PackedStringArray(["--host"]))["autostart"] == false, "parse_boot_flags reads --autostart")
+	var ah := _rig()
+	_check(ah.model.apply_boot_flags(PackedStringArray(["--host", "--autostart", "--name=Sam"])) == "host" and ah.model.autostart, "--autostart is read beside --host")
+	_check(await _until(func() -> bool: return ah.model.screen == Screen.LOBBY), "the autostart host reaches the lobby")
+	await _frames(30)
+	_check(ah.started == 0, "alone in the room the autostart host starts nothing")
+	var aj := _rig()
+	aj.model.apply_boot_flags(PackedStringArray(["--join=" + ah.model.lobby.ip_code, "--autostart", "--name=Ann"]))
+	_check(await _until(func() -> bool: return ah.started == 1 and aj.started == 1), "a second player joined: both copies got game_started with no Start click")
+	await _frames(60)
+	_check(ah.started == 1 and aj.started == 1, "the match is started once, not again")
+	await aj.model.leave()
+	await ah.model.leave()
 
 
 # ---- the connection check when the menu opens (no network: every runner here is a fake) -------------------------------------
