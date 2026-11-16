@@ -8,7 +8,8 @@
 #   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
 #      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
 #   4. scaffold --into an empty Godot C# project, the same as 1; then a second --into run must change nothing
-#   5. the demo project's menu self-check (MenuDemo.tscn -- --menu-selfcheck, no sockets) prints MENU_OK
+#   5. the demo project's menu self-check (MenuDemo.tscn -- --menu-selfcheck, no sockets) prints MENU_OK, and its networked player
+#      self-check (NetPlayerDemo.tscn -- --netplayer-selfcheck, in-memory network, no sockets) prints NETPLAYER_SELF_OK
 # The menu comes from this checkout (--addon-from) and the natives from the folder fetch-webrtc.sh already unpacked (--webrtc-dir), so
 # nothing is downloaded twice. Packages: only the registry for Godot.NET.Sdk / GodotSharp (anonymous); OneLobby.* from the local folder.
 #   usage: GODOT=/path/to/godot_mono clients/dotnet/scaffold-test.sh   (SCAFFOLD_TMP=<folder> to choose where projects are made,
@@ -132,7 +133,7 @@ grep -q '"changed":false' "$WORK/again.json" || { echo "FAIL into: the second ru
 echo "--into done in $((SECONDS - T2)) s"
 echo "::endgroup::"
 
-echo "::group::the demo project's menu self-check"
+echo "::group::the demo project's menu and networked player self-checks"
 T3=$SECONDS
 DEMO="$ROOT/clients/dotnet/demo-godot"
 # no --import here: the editor would rewrite the SDK version in OneLobbyDemo.csproj (and leave a .old file) in this checkout
@@ -140,6 +141,10 @@ if build "$DEMO"; then
   timeout 240 "${G[@]}" --path "$DEMO" res://MenuDemo.tscn -- --menu-selfcheck > "$WORK/demo.out" 2>&1
   grep -a -E '^(MENU_OK|MENU_FAIL|FAIL:)' "$WORK/demo.out" | head -n 5
   if [ "$(grep -a -E '^MENU_(OK|FAIL)' "$WORK/demo.out" | tail -n 1 | cut -c1-7)" != "MENU_OK" ]; then echo "FAIL menu self-check"; tail -n 30 "$WORK/demo.out"; FAILS=$((FAILS + 1)); fi
+  # the networked player's check (Godot C# node, spawner, the sample's scripted walk): in-memory network, no sockets, about 10 s
+  timeout 240 "${G[@]}" --path "$DEMO" res://NetPlayerDemo.tscn -- --netplayer-selfcheck > "$WORK/netplayer.out" 2>&1
+  grep -a -E '^(NETPLAYER_SELF_OK|NETPLAYER_SELF_FAIL|FAIL:)' "$WORK/netplayer.out" | head -n 5
+  if [ "$(grep -a -E '^NETPLAYER_SELF_(OK|FAIL)' "$WORK/netplayer.out" | tail -n 1 | cut -c1-17)" != "NETPLAYER_SELF_OK" ]; then echo "FAIL netplayer self-check"; tail -n 30 "$WORK/netplayer.out"; FAILS=$((FAILS + 1)); fi
 else
   FAILS=$((FAILS + 1))
 fi

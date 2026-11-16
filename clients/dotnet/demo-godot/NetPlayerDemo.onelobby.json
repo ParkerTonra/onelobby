@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "game": { "id": "com.example.netplayerdemo", "netVersion": "1", "title": "Networked player demo (Godot C#)" },
+  "engine": "godot-csharp",
+  "hosting": { "direct": true, "server": false },
+  "lobby": { "maxPlayers": 4 },
+  "room": { "autoStart": "players", "autoStartPlayers": 2, "countdownSeconds": 1 },
+  "sync": { "mode": "replication", "player": {} },
+  "chat": { "text": true }
+}
