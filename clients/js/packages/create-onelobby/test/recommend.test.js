@@ -239,6 +239,16 @@ describe("engine limits: every shape on every engine loads, and no feature is cl
     }
   }
 
+  it("who places a player: the replication shape proposes host, coop-snapshots owner, the others nothing (and only with sync.mode replication)", () => {
+    const row = (description, engine) => recommend({ description, engine: { id: engine, from: "template" } }).answers.find((r) => r[0] === "sync.player.authority");
+    expect(row("4 player first-person shooter", "godot-csharp")[1]).toBe("host");
+    expect(row("a survival sandbox, free roam, co op", "unity")[1]).toBe("owner");
+    expect(row("deterministic party minigames", "godot-gdscript")).toBeUndefined();
+    expect(row("turn based chess", "dotnet")).toBeUndefined();
+    // the web template cannot write replication, so the nearest mode is raw and there is no player key to propose
+    expect(row("4 player first-person shooter", "web")).toBeUndefined();
+  });
+
   it("prediction and hit rewind are built in only where the client has them; asWebSocket only in JS", () => {
     for (const [engine, e] of Object.entries(ENGINES)) {
       const rec = recommend({ description: "4 player first-person shooter", engine: { id: engine, from: "template" } });
@@ -248,7 +258,7 @@ describe("engine limits: every shape on every engine loads, and no feature is cl
       const own = recommend({ description: "its own server loop", engine: { id: engine, from: "template" } });
       expect(own.advice.find((a) => a.id === "as-websocket").status).toBe(e.features.asWebSocket ? "built-in" : "by-hand");
     }
-    expect(Object.entries(ENGINES).filter(([, e]) => e.features.prediction).map(([k]) => k).sort()).toEqual(["dotnet", "godot-csharp", "unity"]);
+    expect(Object.entries(ENGINES).filter(([, e]) => e.features.prediction).map(([k]) => k).sort()).toEqual(["dotnet", "godot-csharp", "node-browser", "unity", "web"]);
     expect(Object.entries(ENGINES).filter(([, e]) => e.features.asWebSocket).map(([k]) => k).sort()).toEqual(["node-browser", "web"]);
   });
 

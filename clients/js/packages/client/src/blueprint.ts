@@ -51,8 +51,11 @@ export interface Blueprint {
     readonly mode: "raw" | "lockstep" | "replication";
     readonly tickRate: number;
     readonly hashEveryTicks: number;
-    /** The networked player layer (spec/net-player.md). Defaults apply when the key is absent; it costs nothing until a game uses the layer. */
-    readonly player: {
+    /**
+     * The networked player layer (spec/net-player.md), with its defaults filled in. Present only with `sync.mode` "replication"
+     * (the filled file stays valid when written back: `sync.player` with another mode is an error). It costs nothing until a game uses the layer.
+     */
+    readonly player?: {
       readonly authority: "owner" | "host";
       readonly space: "2d" | "3d";
       readonly range: number;
@@ -475,14 +478,18 @@ function fill(input: Record<string, unknown>): Blueprint {
       mode: sync.mode ?? "raw",
       tickRate,
       hashEveryTicks: sync.hashEveryTicks ?? tickRate,
-      player: {
-        authority: player.authority ?? "owner",
-        space: player.space ?? "3d",
-        range: player.range ?? 300,
-        velocityRange: player.velocityRange ?? 32,
-        limits: Object.fromEntries(["maxSpeed", "maxStep", "minShotIntervalMs", "minMeleeIntervalMs"].filter((k) => limits[k] !== undefined).map((k) => [k, limits[k]])),
-        omit: player.omit ?? [],
-      },
+      ...(sync.mode === "replication"
+        ? {
+            player: {
+              authority: player.authority ?? "owner",
+              space: player.space ?? "3d",
+              range: player.range ?? 300,
+              velocityRange: player.velocityRange ?? 32,
+              limits: Object.fromEntries(["maxSpeed", "maxStep", "minShotIntervalMs", "minMeleeIntervalMs"].filter((k) => limits[k] !== undefined).map((k) => [k, limits[k]])),
+              omit: player.omit ?? [],
+            },
+          }
+        : {}),
     },
     players: { identity: players.identity ?? "name", maxNameLength: players.maxNameLength ?? 24 },
     chat: { text: chat.text ?? true, voice: chat.voice ?? false, voiceMode: chat.voiceMode ?? "pushToTalk" },

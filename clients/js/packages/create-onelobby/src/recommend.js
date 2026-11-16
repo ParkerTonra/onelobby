@@ -312,6 +312,7 @@ export function recommend({ description, engine } = {}) {
     rows.push(["sync.tickRate", given ?? shape.tickRate.value, given && shape.tickRate.fromText ? shape.tickRate.fromText : shape.tickRate.why]);
     if (shape.id === "lockstep" && !given) ask("tickRate");
   }
+  if (shape.playerAuthority && mode.row.mode === "replication") rows.push(["sync.player.authority", shape.playerAuthority.value, shape.playerAuthority.why]);
   if (shape.hashEveryTicks && mode.row.mode === "lockstep") rows.push(["sync.hashEveryTicks", shape.hashEveryTicks.value, shape.hashEveryTicks.why]);
 
   const read = readPlayers(text);

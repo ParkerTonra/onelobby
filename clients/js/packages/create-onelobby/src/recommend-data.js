@@ -60,6 +60,7 @@ export const SHAPES = [
       { mode: "raw", why: "the host holds the world and broadcasts its state; joiners send intents (nearest mode the template can write)" },
     ],
     tickRate: { value: 15, why: "snapshots at about 10-20 Hz carry a rich world without outgrowing the link (15 is the middle)" },
+    playerAuthority: { value: "owner", why: "co-op: each player's own PC places its player, so movement answers at once and the host trusts its friends (one-shot.md section 5)" },
     pause: { value: "host", why: "the host's machine runs the world, so the host decides when it stops" },
     players: { value: 4, why: "2-4 players is the default" },
   },
@@ -85,6 +86,7 @@ export const SHAPES = [
       { mode: "raw", why: "the host broadcasts its state and joiners send intents (nearest mode the template can write)" },
     ],
     tickRate: { value: 30, why: "a 30 Hz simulation with snapshots sent at about 20 Hz is fast enough for shooting and light on the link" },
+    playerAuthority: { value: "host", why: "competitive: the host steps every player and each owner predicts the same step, so a player cannot place itself (one-shot.md section 5)" },
     pause: { value: "off", why: "real-time action: a pause would freeze every other player mid-fight" },
     players: { value: 4, why: "2-4 players is the default" },
   },
@@ -194,7 +196,7 @@ export const ENGINES = {
     canListen: false,
     modes: ["lockstep", "raw"],
     modeRefusal: { replication: "the web template writes the lockstep and raw sample game only; a replication game needs a ReplicationSession the template does not write yet (docs/recipes/replication.md section 5)" },
-    features: { prediction: false, hitRewind: false, asWebSocket: true },
+    features: { prediction: true, hitRewind: true, asWebSocket: true },
   },
   "node-browser": {
     label: "node-browser (a Node host serving a browser page)",
@@ -202,7 +204,7 @@ export const ENGINES = {
     recipe: "docs/recipes/browser-game.md",
     canListen: true,
     modes: ["lockstep", "raw", "replication"],
-    features: { prediction: false, hitRewind: false, asWebSocket: true },
+    features: { prediction: true, hitRewind: true, asWebSocket: true },
   },
   "godot-gdscript": {
     label: "Godot 4 GDScript",
@@ -239,8 +241,8 @@ export const ENGINES = {
 
 /** Where each engine feature is proven (shown by the tests and the README; keep it true). */
 export const FEATURE_PROOF = {
-  prediction: "docs/recipes/replication.md section 3 (C# Reconciler, PredictionSmoother); JS and GDScript only expose lastProcessedInput / last_processed_input for prediction you write yourself (same recipe, sections 5 and 6); the Unity package ships the C# assembly (docs/recipes/unity.md section 3)",
-  hitRewind: "docs/recipes/replication.md section 2 (C# HistoryRing, RewindTick); JS and GDScript have trySampleAt / try_sample_at to rewind by hand (sections 5 and 6)",
+  prediction: "docs/recipes/replication.md section 3 (C# and JS Reconciler, PredictionSmoother; docs/recipes/net-player.md for the JS player layer); GDScript only exposes last_processed_input for prediction you write yourself (same recipe, section 6); the Unity package ships the C# assembly (docs/recipes/unity.md section 3)",
+  hitRewind: "docs/recipes/replication.md section 2 (C# and JS HistoryRing, rewindTick); GDScript has try_sample_at to rewind by hand (section 6)",
   asWebSocket: "docs/recipes/browser-game.md (JS lobby.asWebSocket); AGENTS.md; no GDScript or C# equivalent",
   lockstepFastInputs: "docs/recipes/godot-gdscript.md section 4: input redundancy on the fast channel is not in the wire yet (commands travel on the reliable channel); no JS or C# lockstep helper repeats inputs either",
   templates: "docs/design/one-shot.md section 1 (Scaffolder row): web, godot-gdscript and godot-csharp are built, unity is template_planned; src/cli.js refuses sync.mode replication for the web template",
@@ -296,8 +298,8 @@ export const ADVICE = [
     why: "movement answers at once instead of a round trip later",
     status: { feature: "prediction" },
     how: {
-      builtIn: "Reconciler and PredictionSmoother (C#, section 3 of the recipe)",
-      byHand: "the JS and GDScript clients have no Reconciler: step your own copy of the movement with each input and compare it with rep.tryGetLatest(...) and rep.lastProcessedInput (JS) / rep.try_get_latest and rep.last_processed_input (GDScript)",
+      builtIn: "Reconciler and PredictionSmoother (C# and JS, section 3 of the recipe; the JS NetPlayers layer with authority \"host\" does it for a player, docs/recipes/net-player.md)",
+      byHand: "the GDScript client has no Reconciler yet: step your own copy of the movement with each input and compare it with rep.try_get_latest and rep.last_processed_input",
     },
     doc: "docs/recipes/replication.md",
   },
@@ -326,8 +328,8 @@ export const ADVICE = [
     why: "the shooter sees the target where it was on their screen; the cap keeps a laggy player from shooting around corners",
     status: { feature: "hitRewind" },
     how: {
-      builtIn: "HistoryRing and ReplicationSession.RewindTick (C#, section 2 of the recipe)",
-      byHand: "the JS and GDScript clients have no HistoryRing: keep your own history of positions per tick and rewind with trySampleAt (JS) / try_sample_at (GDScript), clamped to 350 ms",
+      builtIn: "HistoryRing and ReplicationSession.RewindTick / rewindTick (C# and JS, section 2 of the recipe)",
+      byHand: "the GDScript client has no HistoryRing yet: keep your own history of positions per tick and rewind with try_sample_at, clamped to 350 ms",
     },
     doc: "docs/recipes/replication.md",
   },

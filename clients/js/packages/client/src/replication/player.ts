@@ -232,8 +232,8 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
   }
 
   /** `new NetPlayers` from a lobby and the blueprint (`kit.blueprint`): `sync.player` and `sync.tickRate`. */
-  static fromBlueprint(lobby: Lobby, blueprint: { sync: { tickRate: number; player: PlayerBlueprint } }, extra: NetPlayersOptions = {}): NetPlayers {
-    const p = blueprint.sync.player;
+  static fromBlueprint(lobby: Lobby, blueprint: { sync: { tickRate: number; player?: PlayerBlueprint } }, extra: NetPlayersOptions = {}): NetPlayers {
+    const p: PlayerBlueprint = blueprint.sync.player ?? { authority: "owner", space: "3d", range: 300, velocityRange: 32, limits: {}, omit: [] };
     return new NetPlayers(lobby, {
       authority: p.authority, space: p.space, range: p.range, velocityRange: p.velocityRange, limits: p.limits, omit: p.omit, ...extra,
       session: { tickRate: blueprint.sync.tickRate, adaptiveDelay: true, ...(extra.session ?? {}) },
