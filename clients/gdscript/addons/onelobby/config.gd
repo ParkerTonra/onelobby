@@ -52,6 +52,9 @@ var lobby := {}
 ## The room layer's section (spec/room.md 10), snake_case: password_required, auto_start, auto_start_players, min_players,
 ## countdown_seconds, spectators, late_join, seat_dropped, rejoin_window_seconds and `data` (the declarations as in the file).
 var room := {}
+## The sync section, snake_case: mode, tick_rate, hash_every_ticks and `player` (the networked player layer, spec/net-player.md:
+## authority, space, range, velocity_range, limits {max_speed, max_step, min_shot_interval_ms, min_melee_interval_ms: only the ones set},
+## omit). `player` holds the defaults when the file has none; it is in `data` only with sync.mode replication.
 var sync := {}
 var players := {}
 var chat := {}
@@ -62,6 +65,10 @@ var ui := {}
 ## (the drop-in menu's Connection check button), check_on_open (the menu runs the check once when it opens; false: only
 ## on the button). `from_config` applies the first three to the client.
 var diagnostics := {}
+
+## Preset fields and events a game may leave out of the networked player (spec/net-player.md); position and the teleport counter cannot go.
+const PLAYER_OMITTABLE := ["velocity", "yaw", "pitch", "onGround", "mode", "item", "aiming", "blocking", "health", "alive", "team",
+	"jump", "land", "shoot", "melee", "reload", "use", "itemSwitch", "throw", "hit", "death", "respawn", "emote"]
 
 static var _root: Dictionary = {}
 
@@ -149,7 +156,6 @@ func direct_options(display_name: String = "") -> Dictionary:
 	o.erase("visibility")
 	o["tcp_port"] = hosting["direct_port"]
 	o["nostr"] = hosting["nostr"]
-	o["lan"] = hosting["lan"]
 	if not (hosting["nostr_relays"] as Array).is_empty():
 		o["relays"] = (hosting["nostr_relays"] as Array).duplicate()
 	return o
@@ -196,6 +202,8 @@ func _publish() -> void:
 	lobby = _snake(data["lobby"], ["meta"])
 	room = _snake(data["room"], ["data"])
 	sync = _snake(data["sync"], [])
+	if not sync.has("player"):
+		sync["player"] = {"authority": "owner", "space": "3d", "range": 300, "velocity_range": 32, "limits": {}, "omit": []}
 	players = _snake(data["players"], [])
 	chat = _snake(data["chat"], [])
 	session = _snake(data["session"], [])
@@ -256,7 +264,7 @@ static func _schema() -> Dictionary:
 		"game": _obj({"id": _str(-1, -1, "^[A-Za-z0-9._-]{1,64}\\z"), "netVersion": _str(1, 32), "title": _str(-1, 64)}, ["id"]),
 		"engine": _enum(["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]),
 		"hosting": _obj({
-			"direct": b, "server": b, "lobbyServer": _str(), "directPort": _int(1024, 65535), "lan": b, "openPort": b, "nostr": b,
+			"direct": b, "server": b, "lobbyServer": _str(), "directPort": _int(1024, 65535), "openPort": b, "nostr": b,
 			"nostrRelays": {"k": "strarr"}, "relayOnly": b, "allowedOrigins": {"k": "strarr"},
 		}),
 		"lobby": _obj({
@@ -269,7 +277,14 @@ static func _schema() -> Dictionary:
 			"lateJoin": _enum(["allow", "spectate", "refuse"]), "seatDropped": _enum(["window", "immediate"]),
 			"rejoinWindowSeconds": _int(0, 600), "data": {"k": "roomdata"},
 		}),
-		"sync": _obj({"mode": _enum(["raw", "lockstep", "replication"]), "tickRate": _int(1, 120), "hashEveryTicks": _int(1, 100000)}),
+		"sync": _obj({
+			"mode": _enum(["raw", "lockstep", "replication"]), "tickRate": _int(1, 120), "hashEveryTicks": _int(1, 100000),
+			"player": _obj({
+				"authority": _enum(["owner", "host"]), "space": _enum(["2d", "3d"]), "range": _int(1, 100000), "velocityRange": _int(1, 1000),
+				"limits": _obj({"maxSpeed": _int(1, 100000), "maxStep": _int(1, 100000), "minShotIntervalMs": _int(1, 60000), "minMeleeIntervalMs": _int(1, 60000)}),
+				"omit": {"k": "omit"},
+			}),
+		}),
 		"players": _obj({"identity": _enum(["name", "anonymous", "platform"]), "maxNameLength": _int(1, 24)}),
 		"chat": _obj({"text": b, "voice": b, "voiceMode": _enum(["pushToTalk", "voiceActivity"])}),
 		"session": _obj({
@@ -390,6 +405,14 @@ static func _check(n: Dictionary, v: Variant, path: String) -> Dictionary:
 			for i in (v as Array).size():
 				if typeof(v[i]) != TYPE_STRING:
 					return _fail(_join(path, i), "type", "must be a string")
+		"omit":
+			if not v is Array:
+				return _fail(path, "type", "must be an array of names")
+			for i in (v as Array).size():
+				if typeof(v[i]) != TYPE_STRING:
+					return _fail(_join(path, i), "type", "must be a string")
+				if not PLAYER_OMITTABLE.has(v[i]):
+					return _fail(_join(path, i), "enum", "must be one of " + ", ".join(PLAYER_OMITTABLE))
 		"meta":
 			if not v is Dictionary:
 				return _fail(path, "type", "must be an object of strings")
@@ -476,7 +499,6 @@ static func _fill(input: Dictionary) -> Dictionary:
 		"server": hosting_in.get("server", web),
 		"lobbyServer": hosting_in.get("lobbyServer", ""),
 		"directPort": hosting_in.get("directPort", 47810),
-		"lan": hosting_in.get("lan", false),
 		"openPort": hosting_in.get("openPort", true),
 		"nostr": hosting_in.get("nostr", true),
 		"nostrRelays": hosting_in.get("nostrRelays", DEFAULT_NOSTR_RELAYS.duplicate()),
@@ -506,6 +528,17 @@ static func _fill(input: Dictionary) -> Dictionary:
 		"data": room_in.get("data", {}),
 	}
 	out["sync"] = {"mode": sync_in.get("mode", "raw"), "tickRate": tick_rate, "hashEveryTicks": sync_in.get("hashEveryTicks", tick_rate)}
+	if out["sync"]["mode"] == "replication":
+		var player_in := _sect(sync_in.get("player"))
+		var limits_in := _sect(player_in.get("limits"))
+		var limits := {}
+		for k: String in ["maxSpeed", "maxStep", "minShotIntervalMs", "minMeleeIntervalMs"]:
+			if limits_in.has(k):
+				limits[k] = limits_in[k]
+		out["sync"]["player"] = {
+			"authority": player_in.get("authority", "owner"), "space": player_in.get("space", "3d"), "range": player_in.get("range", 300),
+			"velocityRange": player_in.get("velocityRange", 32), "limits": limits, "omit": player_in.get("omit", []),
+		}
 	out["players"] = {"identity": players_in.get("identity", "name"), "maxNameLength": players_in.get("maxNameLength", 24)}
 	out["chat"] = {"text": chat_in.get("text", true), "voice": chat_in.get("voice", false), "voiceMode": chat_in.get("voiceMode", "pushToTalk")}
 	out["session"] = {
@@ -545,8 +578,8 @@ static func _cross_rules(d: Dictionary, input: Dictionary) -> Dictionary:
 		return _fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true")
 	if eng == "web" and h["direct"]:
 		return _fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)")
-	if h["lan"] and not h["direct"]:
-		return _fail("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)")
+	if _sect(input.get("sync")).has("player") and s["mode"] != "replication":
+		return _fail("sync.player", "player_needs_replication", "sync.player needs sync.mode replication")
 	if s["mode"] == "replication" and ses["hostLeaves"] == "migrate":
 		return _fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end")
 	var late_given := _sect(input.get("lobby")).has("lateJoin")

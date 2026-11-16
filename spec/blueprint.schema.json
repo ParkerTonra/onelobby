@@ -139,12 +139,49 @@
       "properties": {
         "$comment": { "type": "string" },
         "mode": {
-          "description": "lockstep: deterministic sim, host orders commands. raw: you send bytes. replication: host-authoritative snapshots (C# only).",
+          "description": "lockstep: deterministic sim, host orders commands. raw: you send bytes. replication: host-authoritative snapshots (all three clients; sync.player needs it).",
           "enum": ["raw", "lockstep", "replication"],
           "default": "raw"
         },
         "tickRate": { "description": "Simulation ticks per second.", "type": "integer", "minimum": 1, "maximum": 120, "default": 20 },
-        "hashEveryTicks": { "description": "Lockstep: compare state hashes this often. Default: tickRate (once a second).", "type": "integer", "minimum": 1, "maximum": 100000 }
+        "hashEveryTicks": { "description": "Lockstep: compare state hashes this often. Default: tickRate (once a second).", "type": "integer", "minimum": 1, "maximum": 100000 },
+        "player": {
+          "description": "The networked player layer (spec/net-player.md): players in the world with no player sync of your own. Needs sync.mode replication (rule player_needs_replication). Absent means the defaults; the layer costs nothing until a game uses it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "$comment": { "type": "string" },
+            "authority": {
+              "description": "Who places a player. owner: the player's own PC (co-op; the default). host: the host steps every player with the game's own step function and the owner predicts it (competitive).",
+              "enum": ["owner", "host"],
+              "default": "owner"
+            },
+            "space": { "description": "3d: x, y, z (y up) with aim pitch. 2d: x, y, no pitch.", "enum": ["2d", "3d"], "default": "3d" },
+            "range": {
+              "description": "Positions are quantised to -range..range on every axis. About 1 cm a step: 300 costs 16 bits an axis, 1000 costs 18, 100000 costs 24 (the most).",
+              "type": "integer", "minimum": 1, "maximum": 100000, "default": 300
+            },
+            "velocityRange": { "description": "Velocities are quantised to -velocityRange..velocityRange per axis, 10 bits each (same unit as range per second).", "type": "integer", "minimum": 1, "maximum": 1000, "default": 32 },
+            "limits": {
+              "description": "The host's limits (basic protection from glitches and cheats, not an anti-cheat). A limit that is not set is not checked.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "$comment": { "type": "string" },
+                "maxSpeed": { "description": "Owner authority: top speed in units per second; a claimed move over it (25% tolerance) is refused and the owner is put back.", "type": "integer", "minimum": 1, "maximum": 100000 },
+                "maxStep": { "description": "Owner authority: furthest one accepted update may move a player, in units.", "type": "integer", "minimum": 1, "maximum": 100000 },
+                "minShotIntervalMs": { "description": "Shortest time between two shoot events of one player; faster ones are dropped and counted.", "type": "integer", "minimum": 1, "maximum": 60000 },
+                "minMeleeIntervalMs": { "description": "Shortest time between two melee events of one player.", "type": "integer", "minimum": 1, "maximum": 60000 }
+              }
+            },
+            "omit": {
+              "description": "Preset fields and events this game does not need; they leave the wire. Position and the teleport counter cannot be left out. A game's own extra fields and events are not in the file yet.",
+              "type": "array",
+              "items": { "enum": ["velocity", "yaw", "pitch", "onGround", "mode", "item", "aiming", "blocking", "health", "alive", "team", "jump", "land", "shoot", "melee", "reload", "use", "itemSwitch", "throw", "hit", "death", "respawn", "emote"] },
+              "default": []
+            }
+          }
+        }
       }
     },
     "players": {
@@ -256,6 +293,11 @@
   },
   "allOf": [
     {
+      "$comment": "rule player_needs_replication (path sync.player): sync.player needs sync.mode replication",
+      "if": { "required": ["sync"], "properties": { "sync": { "required": ["player"] } } },
+      "then": { "properties": { "sync": { "required": ["mode"], "properties": { "mode": { "const": "replication" } } } } }
+    },
+    {
       "$comment": "rule hosting_none (path hosting): at least one of direct, server",
       "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct", "server"], "properties": { "direct": { "const": false }, "server": { "const": false } } } } }
     },
@@ -286,6 +328,7 @@
   ],
   "x-rules": {
     "$comment": "Rules that depend on engine-dependent defaults cannot be written in plain JSON Schema; the loaders apply them after filling defaults.",
+    "player_needs_replication": { "path": "sync.player", "message": "sync.player needs sync.mode replication" },
     "hosting_none": { "path": "hosting", "message": "at least one of direct, server must be true" },
     "listed_and_approve": { "path": "lobby", "message": "listed and approveJoins cannot both be true" },
     "direct_needs_listener": { "path": "hosting.direct", "message": "engine web cannot host direct (a browser cannot listen on a port)" },

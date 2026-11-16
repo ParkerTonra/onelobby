@@ -155,6 +155,16 @@ func _extras() -> void:
 	_check(gd_rep.ok and gd_rep.check_gdscript().is_empty(), "replication on godot-gdscript is valid")
 	var no_eng := OneLobbyConfig.parse({"game": {"id": "a"}, "sync": {"mode": "replication"}})
 	_check(no_eng.ok and no_eng.check_gdscript().is_empty() and m.check_gdscript().is_empty(), "replication with no engine is valid and GDScript runs it")
+	# sync.player (spec/net-player.md): defaults, every key, the cross-key rule
+	var pd := OneLobbyConfig.parse({"game": {"id": "a"}})
+	var pdp: Dictionary = pd.sync["player"]
+	_check(pd.ok and pdp["authority"] == "owner" and pdp["space"] == "3d" and pdp["range"] == 300 and pdp["velocity_range"] == 32 and pdp["limits"].is_empty() and pdp["omit"].is_empty(), "sync.player defaults (owner, 3d, 300, 32, no limits, nothing left out)")
+	var pf := OneLobbyConfig.parse({"game": {"id": "a"}, "sync": {"mode": "replication", "player": {"authority": "host", "space": "2d", "range": 2000, "velocityRange": 600, "limits": {"maxSpeed": 9, "maxStep": 4, "minShotIntervalMs": 120, "minMeleeIntervalMs": 400}, "omit": ["velocity", "emote"]}}})
+	var pfp: Dictionary = pf.sync["player"]
+	_check(pf.ok and pfp["authority"] == "host" and pfp["space"] == "2d" and pfp["range"] == 2000 and pfp["velocity_range"] == 600 and pfp["limits"]["max_speed"] == 9 and pfp["limits"]["min_melee_interval_ms"] == 400 and pfp["omit"] == ["velocity", "emote"], "sync.player reads every key (snake_case in the object)")
+	_check(OneLobbyConfig.parse(pf.data).ok, "a file with sync.player round-trips")
+	var pn := OneLobbyConfig.parse({"game": {"id": "a"}, "sync": {"player": {}}})
+	_check(not pn.ok and pn.error["path"] == "sync.player" and pn.error["rule"] == "player_needs_replication", "sync.player needs sync.mode replication")
 	# every engine value of the schema loads
 	for eng: String in ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]:
 		var ok_cfg := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": eng, "hosting": {"direct": eng != "web", "server": true}})

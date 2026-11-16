@@ -204,6 +204,46 @@
       "name": "edge_ranges",
       "input": { "game": { "id": "a" }, "lobby": { "maxPlayers": 64 }, "sync": { "tickRate": 120 }, "hosting": { "directPort": 1024 }, "session": { "peerTimeoutMs": 600000 } },
       "expect": { "lobby.maxPlayers": 64, "sync.tickRate": 120, "hosting.directPort": 1024, "session.peerTimeoutMs": 600000 }
+    },
+    {
+      "name": "player_defaults_with_replication",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": {} } },
+      "expect": { "sync.player.authority": "owner", "sync.player.space": "3d", "sync.player.range": 300, "sync.player.velocityRange": 32, "sync.player.limits.maxSpeed": null, "sync.player.omit": [] }
+    },
+    {
+      "name": "player_absent_means_defaults",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "replication" } },
+      "expect": { "sync.player.authority": "owner", "sync.player.space": "3d", "sync.player.range": 300, "sync.player.velocityRange": 32, "sync.player.omit": [] }
+    },
+    {
+      "name": "player_host_authority_2d",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "authority": "host", "space": "2d", "range": 2000, "velocityRange": 600 } } },
+      "expect": { "sync.player.authority": "host", "sync.player.space": "2d", "sync.player.range": 2000, "sync.player.velocityRange": 600, "sync.player.limits.maxSpeed": null }
+    },
+    {
+      "name": "player_limits_and_omit",
+      "input": {
+        "game": { "id": "a" },
+        "sync": { "mode": "replication", "player": { "$comment": "a shooter", "limits": { "maxSpeed": 9, "maxStep": 4, "minShotIntervalMs": 120, "minMeleeIntervalMs": 400 }, "omit": ["velocity", "emote", "team"] } }
+      },
+      "expect": {
+        "sync.player.authority": "owner",
+        "sync.player.limits.maxSpeed": 9,
+        "sync.player.limits.maxStep": 4,
+        "sync.player.limits.minShotIntervalMs": 120,
+        "sync.player.limits.minMeleeIntervalMs": 400,
+        "sync.player.omit": ["velocity", "emote", "team"]
+      }
+    },
+    {
+      "name": "player_one_limit_only",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "limits": { "minShotIntervalMs": 60000 } } } },
+      "expect": { "sync.player.limits.minShotIntervalMs": 60000, "sync.player.limits.maxSpeed": null, "sync.player.limits.minMeleeIntervalMs": null }
+    },
+    {
+      "name": "player_range_extremes",
+      "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "range": 100000, "velocityRange": 1000, "limits": { "maxSpeed": 100000, "maxStep": 1, "minShotIntervalMs": 1 } } } },
+      "expect": { "sync.player.range": 100000, "sync.player.velocityRange": 1000, "sync.player.limits.maxSpeed": 100000, "sync.player.limits.maxStep": 1, "sync.player.limits.minShotIntervalMs": 1 }
     }
   ],
   "invalid": [
@@ -250,7 +290,25 @@
     { "name": "web_lan", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "lan": true } }, "error": { "path": "hosting.lan", "rule": "lan_needs_direct" } },
     { "name": "lan_not_bool", "input": { "game": { "id": "a" }, "hosting": { "lan": "yes" } }, "error": { "path": "hosting.lan", "rule": "type" } },
     { "name": "migrate_with_replication", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "server": true }, "sync": { "mode": "replication" }, "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_with_replication" } },
-    { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } }
+    { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } },
+    { "name": "player_needs_replication_default_mode", "input": { "game": { "id": "a" }, "sync": { "player": {} } }, "error": { "path": "sync.player", "rule": "player_needs_replication" } },
+    { "name": "player_needs_replication_lockstep", "input": { "game": { "id": "a" }, "sync": { "mode": "lockstep", "player": { "authority": "host" } } }, "error": { "path": "sync.player", "rule": "player_needs_replication" } },
+    { "name": "player_needs_replication_raw", "input": { "game": { "id": "a" }, "sync": { "mode": "raw", "player": { "range": 500 } } }, "error": { "path": "sync.player", "rule": "player_needs_replication" } },
+    { "name": "player_authority_unknown", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "authority": "server" } } }, "error": { "path": "sync.player.authority", "rule": "enum" } },
+    { "name": "player_space_unknown", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "space": "4d" } } }, "error": { "path": "sync.player.space", "rule": "enum" } },
+    { "name": "player_range_zero", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "range": 0 } } }, "error": { "path": "sync.player.range", "rule": "range" } },
+    { "name": "player_range_too_big", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "range": 100001 } } }, "error": { "path": "sync.player.range", "rule": "range" } },
+    { "name": "player_range_not_an_integer", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "range": 12.5 } } }, "error": { "path": "sync.player.range", "rule": "type" } },
+    { "name": "player_velocity_range_zero", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "velocityRange": 0 } } }, "error": { "path": "sync.player.velocityRange", "rule": "range" } },
+    { "name": "player_limit_zero", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "limits": { "maxSpeed": 0 } } } }, "error": { "path": "sync.player.limits.maxSpeed", "rule": "range" } },
+    { "name": "player_limit_interval_too_long", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "limits": { "minMeleeIntervalMs": 60001 } } } }, "error": { "path": "sync.player.limits.minMeleeIntervalMs", "rule": "range" } },
+    { "name": "player_limit_unknown_key", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "limits": { "maxJump": 3 } } } }, "error": { "path": "sync.player.limits.maxJump", "rule": "unknown_key" } },
+    { "name": "player_unknown_key", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "fields": [] } } }, "error": { "path": "sync.player.fields", "rule": "unknown_key" } },
+    { "name": "player_omit_unknown_name", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "omit": ["emote", "sprint"] } } }, "error": { "path": "sync.player.omit.1", "rule": "enum" } },
+    { "name": "player_omit_position_not_allowed", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "omit": ["position"] } } }, "error": { "path": "sync.player.omit.0", "rule": "enum" } },
+    { "name": "player_omit_not_an_array", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "omit": "emote" } } }, "error": { "path": "sync.player.omit", "rule": "type" } },
+    { "name": "player_omit_item_not_a_string", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": { "omit": [3] } } }, "error": { "path": "sync.player.omit.0", "rule": "type" } },
+    { "name": "player_not_an_object", "input": { "game": { "id": "a" }, "sync": { "mode": "replication", "player": true } }, "error": { "path": "sync.player", "rule": "type" } }
   ],
   "roomDesc": "roomValid and roomInvalid follow the room section of the schema (spec/room.md s.10) and have the shape of valid and invalid. The C# and GDScript loaders read them when they gain the section; the loaders that do not know it read only valid and invalid.",
   "roomValid": [

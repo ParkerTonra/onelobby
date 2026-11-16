@@ -24,7 +24,7 @@ namespace OneLobby
 
     public sealed record GameSection(string Id, string NetVersion, string? Title);
     public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly,
-        IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null, bool Lan = false)
+        IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
     {
         /// <summary>The <c>hosting.nostrRelays</c> list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).</summary>
         public IReadOnlyList<string> Relays => NostrRelays ?? Blueprint.DefaultNostrRelays;
@@ -48,8 +48,30 @@ namespace OneLobby
         };
     }
 
-    /// <summary><see cref="Mode"/> is "raw", "lockstep" or "replication".</summary>
-    public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
+    /// <summary>
+    /// <see cref="Mode"/> is "raw", "lockstep" or "replication". <see cref="Player"/> is the networked player layer
+    /// (spec/net-player.md; the defaults when the file has no <c>sync.player</c>); it needs mode "replication".
+    /// </summary>
+    public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks)
+    {
+        public PlayerSection Player { get; init; } = PlayerSection.Defaults;
+    }
+    /// <summary>The host's limits of the networked player; null = not set = not checked.</summary>
+    public sealed record PlayerLimits(int? MaxSpeed, int? MaxStep, int? MinShotIntervalMs, int? MinMeleeIntervalMs);
+    /// <summary>
+    /// <c>sync.player</c> (spec/net-player.md). <see cref="Authority"/>: "owner" or "host". <see cref="Space"/>: "2d" or "3d".
+    /// <see cref="Range"/> and <see cref="VelocityRange"/> shape the quantisation; <see cref="Omit"/> names the preset fields and events left out.
+    /// </summary>
+    public sealed record PlayerSection(string Authority, string Space, int Range, int VelocityRange, PlayerLimits Limits, IReadOnlyList<string> Omit)
+    {
+        public static readonly PlayerSection Defaults = new PlayerSection("owner", "3d", 300, 32, new PlayerLimits(null, null, null, null), Array.Empty<string>());
+        /// <summary>Preset fields and events a game may leave out; position and the teleport counter cannot go.</summary>
+        public static readonly string[] Omittable =
+        {
+            "velocity", "yaw", "pitch", "onGround", "mode", "item", "aiming", "blocking", "health", "alive", "team",
+            "jump", "land", "shoot", "melee", "reload", "use", "itemSwitch", "throw", "hit", "death", "respawn", "emote",
+        };
+    }
     /// <summary><see cref="Identity"/> is "name", "anonymous" or "platform".</summary>
     public sealed record PlayersSection(string Identity, int MaxNameLength);
     /// <summary><see cref="VoiceMode"/> is "pushToTalk" or "voiceActivity".</summary>
@@ -179,7 +201,7 @@ namespace OneLobby
                 w.WriteStartObject("hosting");
                 w.WriteBoolean("direct", Hosting.Direct); w.WriteBoolean("server", Hosting.Server);
                 w.WriteString("lobbyServer", Hosting.LobbyServer); w.WriteNumber("directPort", Hosting.DirectPort);
-                w.WriteBoolean("lan", Hosting.Lan); w.WriteBoolean("openPort", Hosting.OpenPort); w.WriteBoolean("relayOnly", Hosting.RelayOnly);
+                w.WriteBoolean("openPort", Hosting.OpenPort); w.WriteBoolean("relayOnly", Hosting.RelayOnly);
                 w.WriteStartArray("allowedOrigins");
                 foreach (var o in Hosting.AllowedOrigins) w.WriteStringValue(o);
                 w.WriteEndArray();
@@ -209,6 +231,22 @@ namespace OneLobby
                 w.WriteEndObject();
                 w.WriteStartObject("sync");
                 w.WriteString("mode", Sync.Mode); w.WriteNumber("tickRate", Sync.TickRate); w.WriteNumber("hashEveryTicks", Sync.HashEveryTicks);
+                if (Sync.Mode == "replication")
+                {
+                    w.WriteStartObject("player");
+                    w.WriteString("authority", Sync.Player.Authority); w.WriteString("space", Sync.Player.Space);
+                    w.WriteNumber("range", Sync.Player.Range); w.WriteNumber("velocityRange", Sync.Player.VelocityRange);
+                    w.WriteStartObject("limits");
+                    if (Sync.Player.Limits.MaxSpeed is { } l1) w.WriteNumber("maxSpeed", l1);
+                    if (Sync.Player.Limits.MaxStep is { } l2) w.WriteNumber("maxStep", l2);
+                    if (Sync.Player.Limits.MinShotIntervalMs is { } l3) w.WriteNumber("minShotIntervalMs", l3);
+                    if (Sync.Player.Limits.MinMeleeIntervalMs is { } l4) w.WriteNumber("minMeleeIntervalMs", l4);
+                    w.WriteEndObject();
+                    w.WriteStartArray("omit");
+                    foreach (var o in Sync.Player.Omit) w.WriteStringValue(o);
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
                 w.WriteEndObject();
                 w.WriteStartObject("players");
                 w.WriteString("identity", Players.Identity); w.WriteNumber("maxNameLength", Players.MaxNameLength);
@@ -317,6 +355,35 @@ namespace OneLobby
 
         // ---- structure -------------------------------------------------------------------------------------------------
 
+        private static void PlayerStructure(JsonElement v)
+        {
+            Object(v, "sync.player", Array.Empty<string>(), new[] { "authority", "space", "range", "velocityRange", "limits", "omit" }, (pk, pv) =>
+            {
+                var pp = "sync.player." + pk;
+                switch (pk)
+                {
+                    case "authority": Enum(pv, pp, "owner", "host"); break;
+                    case "space": Enum(pv, pp, "2d", "3d"); break;
+                    case "range": Int(pv, pp, 1, 100000); break;
+                    case "velocityRange": Int(pv, pp, 1, 1000); break;
+                    case "limits":
+                        Object(pv, pp, Array.Empty<string>(), new[] { "maxSpeed", "maxStep", "minShotIntervalMs", "minMeleeIntervalMs" }, (lk, lv) =>
+                            Int(lv, pp + "." + lk, 1, lk.StartsWith("min", StringComparison.Ordinal) ? 60000 : 100000));
+                        break;
+                    default:
+                        if (pv.ValueKind != JsonValueKind.Array) throw Err(pp, "type", "must be an array of names");
+                        var i = 0;
+                        foreach (var item in pv.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.String) throw Err(pp + "." + i, "type", "must be a string");
+                            if (Array.IndexOf(PlayerSection.Omittable, item.GetString()) < 0) throw Err(pp + "." + i, "enum", "must be one of " + string.Join(", ", PlayerSection.Omittable));
+                            i++;
+                        }
+                        break;
+                }
+            });
+        }
+
         private static void Structure(JsonElement root)
         {
             Object(root, "", new[] { "game" }, new[] { "version", "game", "engine", "hosting", "lobby", "room", "sync", "players", "chat", "session", "platforms", "ui", "diagnostics" }, (k, v) =>
@@ -338,7 +405,7 @@ namespace OneLobby
                         break;
                     case "engine": Enum(v, "engine", "web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"); break;
                     case "hosting":
-                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "lan", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
+                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
                         {
                             var hp = "hosting." + hk;
                             switch (hk)
@@ -393,11 +460,12 @@ namespace OneLobby
                         });
                         break;
                     case "sync":
-                        Object(v, "sync", Array.Empty<string>(), new[] { "mode", "tickRate", "hashEveryTicks" }, (sk, sv) =>
+                        Object(v, "sync", Array.Empty<string>(), new[] { "mode", "tickRate", "hashEveryTicks", "player" }, (sk, sv) =>
                         {
                             var sp = "sync." + sk;
                             if (sk == "mode") Enum(sv, sp, "raw", "lockstep", "replication");
                             else if (sk == "tickRate") Int(sv, sp, 1, 120);
+                            else if (sk == "player") PlayerStructure(sv);
                             else Int(sv, sp, 1, 100000);
                         });
                         break;
@@ -539,6 +607,18 @@ namespace OneLobby
                 RoomRules.ParseSeatDropped(SN(room, "seatDropped")), I(room, "rejoinWindowSeconds", d.RejoinWindowSeconds), data);
         }
 
+        private static PlayerSection BuildPlayer(JsonElement? sync)
+        {
+            var d = PlayerSection.Defaults;
+            var p = sync is { } sy0 ? Sec(sy0, "player") : null;
+            var lim = p is { } p0 ? Sec(p0, "limits") : null;
+            int? L(string k) => lim is { } e && e.TryGetProperty(k, out var v) ? (int)Int(v, k) : (int?)null;
+            var omit = new List<string>();
+            if (p is { } pe && pe.TryGetProperty("omit", out var oa)) foreach (var o in oa.EnumerateArray()) omit.Add(o.GetString()!);
+            return new PlayerSection(S(p, "authority", d.Authority), S(p, "space", d.Space), I(p, "range", d.Range), I(p, "velocityRange", d.VelocityRange),
+                new PlayerLimits(L("maxSpeed"), L("maxStep"), L("minShotIntervalMs"), L("minMeleeIntervalMs")), omit);
+        }
+
         internal static Blueprint Build(JsonElement root)
         {
             Structure(root);
@@ -594,11 +674,11 @@ namespace OneLobby
                 engine,
                 new HostingSection(B(hosting, "direct", !web), B(hosting, "server", web), S(hosting, "lobbyServer", ""),
                     I(hosting, "directPort", 47810), B(hosting, "openPort", true), B(hosting, "relayOnly", false), origins,
-                    B(hosting, "nostr", true), relays, B(hosting, "lan", false)),
+                    B(hosting, "nostr", true), relays),
                 new LobbySection(I(lobby, "maxPlayers", 4), B(lobby, "listed", false), B(lobby, "approveJoins", false),
                     B(lobby, "password", false), B(lobby, "lateJoin", roomJson is { } rj0 && rj0.TryGetProperty("lateJoin", out var rl0) ? rl0.GetString() != "refuse" : true), B(lobby, "rejoin", true),
                     B(lobby, "joinLink", web || engine == "node-browser"), meta),
-                new SyncSection(S(sync, "mode", "raw"), tick, I(sync, "hashEveryTicks", tick)),
+                new SyncSection(S(sync, "mode", "raw"), tick, I(sync, "hashEveryTicks", tick)) { Player = BuildPlayer(sync) },
                 new PlayersSection(S(players, "identity", "name"), I(players, "maxNameLength", 24)),
                 new ChatSection(B(chat, "text", true), B(chat, "voice", false), S(chat, "voiceMode", "pushToTalk")),
                 new SessionSection(S(session, "hostLeaves", "end"), S(session, "pause", "off"), I(session, "readyTimeoutMs", 15000),
@@ -617,8 +697,8 @@ namespace OneLobby
                 throw Err("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
             if (web && bp.Hosting.Direct)
                 throw Err("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
-            if (bp.Hosting.Lan && !bp.Hosting.Direct)
-                throw Err("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)");
+            if (sync is { } sy && sy.TryGetProperty("player", out _) && bp.Sync.Mode != "replication")
+                throw Err("sync.player", "player_needs_replication", "sync.player needs sync.mode replication");
             if (bp.Sync.Mode == "replication" && bp.Session.HostLeaves == "migrate")
                 throw Err("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
             var lateJoinGiven = lobby is { } lg && lg.TryGetProperty("lateJoin", out _);

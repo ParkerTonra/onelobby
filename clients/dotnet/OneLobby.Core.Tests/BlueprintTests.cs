@@ -171,6 +171,32 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void PlayerSectionDefaultsToOwnerAndNothingChecked()
+        {
+            var p = Blueprint.Parse(@"{""game"":{""id"":""a""}}").Sync.Player;
+            Assert.Equal("owner", p.Authority);
+            Assert.Equal("3d", p.Space);
+            Assert.Equal(300, p.Range);
+            Assert.Equal(32, p.VelocityRange);
+            Assert.Equal(new PlayerLimits(null, null, null, null), p.Limits);
+            Assert.Empty(p.Omit);
+        }
+
+        [Fact]
+        public void PlayerSectionReadsEveryKeyAndSurvivesToJson()
+        {
+            var bp = Blueprint.Parse(@"{""game"":{""id"":""a""},""sync"":{""mode"":""replication"",""player"":{""authority"":""host"",""space"":""2d"",""range"":2000,""velocityRange"":600,
+              ""limits"":{""maxSpeed"":9,""maxStep"":4,""minShotIntervalMs"":120,""minMeleeIntervalMs"":400},""omit"":[""velocity"",""emote""]}}}");
+            var p = bp.Sync.Player;
+            Assert.Equal(("host", "2d", 2000, 600), (p.Authority, p.Space, p.Range, p.VelocityRange));
+            Assert.Equal(new PlayerLimits(9, 4, 120, 400), p.Limits);
+            Assert.Equal(new[] { "velocity", "emote" }, p.Omit);
+            var again = Blueprint.Parse(bp.ToJson()).Sync.Player;
+            Assert.Equal(p.Limits, again.Limits);
+            Assert.Equal(p.Omit, again.Omit);
+        }
+
+        [Fact]
         public void DiagnosticsSwitchesReachTheConfig()
         {
             var d = Blueprint.Parse(@"{""game"":{""id"":""a""}}");

@@ -18,7 +18,6 @@ export interface Blueprint {
     readonly server: boolean;
     readonly lobbyServer: string;
     readonly directPort: number;
-    readonly lan: boolean;
     readonly openPort: boolean;
     readonly nostr: boolean;
     readonly nostrRelays: readonly string[];
@@ -52,6 +51,21 @@ export interface Blueprint {
     readonly mode: "raw" | "lockstep" | "replication";
     readonly tickRate: number;
     readonly hashEveryTicks: number;
+    /** The networked player layer (spec/net-player.md). Defaults apply when the key is absent; it costs nothing until a game uses the layer. */
+    readonly player: {
+      readonly authority: "owner" | "host";
+      readonly space: "2d" | "3d";
+      readonly range: number;
+      readonly velocityRange: number;
+      /** Only the limits that are set; a limit that is not set is not checked. */
+      readonly limits: {
+        readonly maxSpeed?: number;
+        readonly maxStep?: number;
+        readonly minShotIntervalMs?: number;
+        readonly minMeleeIntervalMs?: number;
+      };
+      readonly omit: readonly string[];
+    };
   };
   readonly players: { readonly identity: "name" | "anonymous" | "platform"; readonly maxNameLength: number };
   readonly chat: { readonly text: boolean; readonly voice: boolean; readonly voiceMode: "pushToTalk" | "voiceActivity" };
@@ -85,7 +99,6 @@ export interface BlueprintInput {
     server?: boolean;
     lobbyServer?: string;
     directPort?: number;
-    lan?: boolean;
     openPort?: boolean;
     nostr?: boolean;
     nostrRelays?: string[];
@@ -116,7 +129,21 @@ export interface BlueprintInput {
     rejoinWindowSeconds?: number;
     data?: Record<string, DataDecl & { $comment?: string }>;
   };
-  sync?: { $comment?: string; mode?: "raw" | "lockstep" | "replication"; tickRate?: number; hashEveryTicks?: number };
+  sync?: {
+    $comment?: string;
+    mode?: "raw" | "lockstep" | "replication";
+    tickRate?: number;
+    hashEveryTicks?: number;
+    player?: {
+      $comment?: string;
+      authority?: "owner" | "host";
+      space?: "2d" | "3d";
+      range?: number;
+      velocityRange?: number;
+      limits?: { $comment?: string; maxSpeed?: number; maxStep?: number; minShotIntervalMs?: number; minMeleeIntervalMs?: number };
+      omit?: string[];
+    };
+  };
   players?: { $comment?: string; identity?: "name" | "anonymous" | "platform"; maxNameLength?: number };
   chat?: { $comment?: string; text?: boolean; voice?: boolean; voiceMode?: "pushToTalk" | "voiceActivity" };
   session?: {
@@ -150,6 +177,12 @@ export class BlueprintError extends OneLobbyError {
   }
 }
 
+/** Preset fields and events a game may leave out of the networked player (spec/net-player.md); position and the teleport counter cannot go. */
+export const PLAYER_OMITTABLE: readonly string[] = [
+  "velocity", "yaw", "pitch", "onGround", "mode", "item", "aiming", "blocking", "health", "alive", "team",
+  "jump", "land", "shoot", "melee", "reload", "use", "itemSwitch", "throw", "hit", "death", "respawn", "emote",
+];
+
 // ---- schema as data (key order = spec/blueprint.schema.json) ----------------------------------------------------
 
 type Node =
@@ -160,6 +193,7 @@ type Node =
   | { k: "enum"; vals: string[] }
   | { k: "const"; val: number }
   | { k: "strarr" }
+  | { k: "omit" }
   | { k: "meta" }
   | { k: "roomdata" }
   | { k: "rate" }
@@ -185,7 +219,6 @@ const ROOT: Node = obj(
       server: bool,
       lobbyServer: str(),
       directPort: int(1024, 65535),
-      lan: bool,
       openPort: bool,
       nostr: bool,
       nostrRelays: { k: "strarr" },
@@ -214,7 +247,19 @@ const ROOT: Node = obj(
       rejoinWindowSeconds: int(0, 600),
       data: { k: "roomdata" },
     }),
-    sync: obj({ mode: en("raw", "lockstep", "replication"), tickRate: int(1, 120), hashEveryTicks: int(1, 100000) }),
+    sync: obj({
+      mode: en("raw", "lockstep", "replication"),
+      tickRate: int(1, 120),
+      hashEveryTicks: int(1, 100000),
+      player: obj({
+        authority: en("owner", "host"),
+        space: en("2d", "3d"),
+        range: int(1, 100000),
+        velocityRange: int(1, 1000),
+        limits: obj({ maxSpeed: int(1, 100000), maxStep: int(1, 100000), minShotIntervalMs: int(1, 60000), minMeleeIntervalMs: int(1, 60000) }),
+        omit: { k: "omit" },
+      }),
+    }),
     players: obj({ identity: en("name", "anonymous", "platform"), maxNameLength: int(1, 24) }),
     chat: obj({ text: bool, voice: bool, voiceMode: en("pushToTalk", "voiceActivity") }),
     session: obj({
@@ -277,6 +322,14 @@ function check(n: Node, v: unknown, path: string): void {
       if (!Array.isArray(v)) throw new Fail(path, "type", "must be an array of strings");
       v.forEach((x, i) => {
         if (typeof x !== "string") throw new Fail(join(path, i), "type", "must be a string");
+      });
+      return;
+    }
+    case "omit": {
+      if (!Array.isArray(v)) throw new Fail(path, "type", "must be an array of names");
+      v.forEach((x, i) => {
+        if (typeof x !== "string") throw new Fail(join(path, i), "type", "must be a string");
+        if (!PLAYER_OMITTABLE.includes(x)) throw new Fail(join(path, i), "enum", `must be one of ${PLAYER_OMITTABLE.join(", ")}`);
       });
       return;
     }
@@ -377,6 +430,8 @@ function fill(input: Record<string, unknown>): Blueprint {
   const platforms = sect(input.platforms);
   const ui = sect(input.ui);
   const diagnostics = sect(input.diagnostics);
+  const player = sect(sync.player);
+  const limits = sect(player.limits);
   const tickRate = (sync.tickRate as number | undefined) ?? 20;
   const web = engine === "web";
   const out = {
@@ -388,7 +443,6 @@ function fill(input: Record<string, unknown>): Blueprint {
       server: hosting.server ?? web,
       lobbyServer: hosting.lobbyServer ?? "",
       directPort: hosting.directPort ?? 47810,
-      lan: hosting.lan ?? false,
       openPort: hosting.openPort ?? true,
       nostr: hosting.nostr ?? true,
       nostrRelays: hosting.nostrRelays ?? [...DEFAULT_NOSTR_RELAYS],
@@ -417,7 +471,19 @@ function fill(input: Record<string, unknown>): Blueprint {
       rejoinWindowSeconds: room.rejoinWindowSeconds ?? 60,
       data: room.data ?? {},
     },
-    sync: { mode: sync.mode ?? "raw", tickRate, hashEveryTicks: sync.hashEveryTicks ?? tickRate },
+    sync: {
+      mode: sync.mode ?? "raw",
+      tickRate,
+      hashEveryTicks: sync.hashEveryTicks ?? tickRate,
+      player: {
+        authority: player.authority ?? "owner",
+        space: player.space ?? "3d",
+        range: player.range ?? 300,
+        velocityRange: player.velocityRange ?? 32,
+        limits: Object.fromEntries(["maxSpeed", "maxStep", "minShotIntervalMs", "minMeleeIntervalMs"].filter((k) => limits[k] !== undefined).map((k) => [k, limits[k]])),
+        omit: player.omit ?? [],
+      },
+    },
     players: { identity: players.identity ?? "name", maxNameLength: players.maxNameLength ?? 24 },
     chat: { text: chat.text ?? true, voice: chat.voice ?? false, voiceMode: chat.voiceMode ?? "pushToTalk" },
     session: {
@@ -449,7 +515,8 @@ function crossRules(b: Blueprint, input: Record<string, unknown>): void {
   if (!b.hosting.direct && !b.hosting.server) throw new Fail("hosting", "hosting_none", "at least one of direct, server must be true");
   if (b.lobby.listed && b.lobby.approveJoins) throw new Fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
   if (b.engine === "web" && b.hosting.direct) throw new Fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
-  if (b.hosting.lan && !b.hosting.direct) throw new Fail("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)");
+  if (sect(input.sync).player !== undefined && b.sync.mode !== "replication")
+    throw new Fail("sync.player", "player_needs_replication", "sync.player needs sync.mode replication");
   if (b.sync.mode === "replication" && b.session.hostLeaves === "migrate") throw new Fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
   const lateJoinGiven = sect(input.lobby).lateJoin !== undefined;
   const roomLate = sect(input.room).lateJoin;
