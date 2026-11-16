@@ -32,7 +32,7 @@ Note each finding with the file and line that told you:
   "A game that already has multiplayer" below says what to do with them.
 - **Game id and net version** of a game that already has them: grep its data and settings files for `game_id`, `gameId`, `net_version`, `netVersion` (a tunables or
   config file, the old client's constructor). Pass them as `--game-id` and `--net-version` (`--yes` would invent `com.example.<folder>` and the version `1`), and the game's own name as `--title '<its name>'` (Godot: `config/name` in
-  `project.godot`; `--yes` would take the folder name, so a game in `goo/` would be titled "goo").
+  `project.godot`; `--yes` would take the folder name, so a game in `mygame/` would be titled "mygame").
 - **One plain sentence** for the recommender: genre, **the engine named in the sentence itself** ("in Godot", "in Unity", "in the browser", "a Node server"; also when you will pass `--template`:
   a sentence with no engine answers `runCommand: null` and "no engine is known"), player count, and the tick rate when the game has one (a new game:
   leave it out; every game type has a default `tickRate`, and `why` says how to change it). Write "deterministic" only for what the
@@ -220,7 +220,7 @@ sync stays unless the user asks for OneLobby's.
 - **Its own sync stays: `--mode raw`.** `coop-snapshots` and `replication` both answer `sync.mode replication`, which means OneLobby's `ReplicationSession` replaces the game's
   snapshot code. A game that keeps its own codec and sessions passes `--mode raw` (the game sends its own bytes over `lobby.send` / `lobby.broadcast`), and the report says
   "Overrode the recommendation: sync.mode replication -> raw, because <the files that already do it>". Use `replication` only to replace that code on purpose (`docs/recipes/replication.md`).
-- **A test that drives your own sessions stays** (a bot or script that starts its own host and join sessions, for example `tools/coop_test.sh` with a code-driven bot): only a test of lobby linking (host, join by code, a message
+- **A test that drives your own sessions stays** (a bot or script that starts its own host and join sessions in code): only a test of lobby linking (host, join by code, a message
   each way) goes, with the add-on's `tests/multiplayer.gd` taking its place. Rewrite the script's flags to the menu's (`-- --host --local --autostart`, `-- --join=127.0.0.1:47810 --local`) and say in the report which tests stayed.
 - **Environment variables** the client reads for one run: `ONELOBBY_NAME`, `ONELOBBY_RELAY` (a TURN line), `ONELOBBY_LOBBY_SERVER` and `ONELOBBY_LAST_CODE` (`spec/settings.md`; in JS, C# and GDScript alike). They replace a game's own
   name and TURN environment variables (for example a `GAME_TURN_LINE` in a test script: set `ONELOBBY_RELAY` instead); the library applies the relay to the host's and the joiner's ICE list, so the game's own relay wiring goes.
@@ -240,7 +240,7 @@ sync stays unless the user asks for OneLobby's.
 - **`sync.tickRate` in `--mode raw`**: unused (the game ticks itself); leave the default in `onelobby.json`.
 - **Stays hand-built**: the game's session and snapshot code, its wire codec, host migration and rejoin logic (the lobby gives `host_changed` and `resume_token`), its in-world roster, its
   solo start, and anything it adds to the net version at run time (`client.net_version = <its own value>` after `from_config` is the game's own line, not a copy of `onelobby.json`).
-- **Old settings**: write the one-time import BEFORE deleting the old storage code, because it needs the old file path and keys (for example `user://settings.cfg`, section `[multiplayer]`, keys `name` and `turn_relay`). Read the old name and relay line once and keep them: `client.settings.save({"name": old_name, "relay": old_line})` returns `{ok, rejected}` (a relay line that
+- **Old settings**: write the one-time import BEFORE deleting the old storage code, because it needs the old file path and keys (for example a `user://` settings file with its own section and keys for the name and the relay). Read the old name and relay line once and keep them: `client.settings.save({"name": old_name, "relay": old_line})` returns `{ok, rejected}` (a relay line that
   does not parse is rejected). Then delete the old storage code. If you do not carry them over, say why in the report (existing players start with an empty name and no relay).
 - **Names**: `--into` refuses with `name_clash` when a script it adds would take a `class_name` or autoload name the game already has, or when a script makes a node named `Net` at run time (`name = "Net"`, `get_node("/root/Net")`), naming both files; rename the one in the game
   and run again. It never writes a clash. The autoload is `Net` (script `net.gd`, no `class_name`): a game with its own node or autoload called `Net` renames that one (the check reads the scripts' text for `name = "Net"` and `/root/Net`, so a node made another way still needs your own `grep`).
