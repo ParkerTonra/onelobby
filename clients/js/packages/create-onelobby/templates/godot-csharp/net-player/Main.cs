@@ -11,8 +11,9 @@ namespace {{ns}};
 ///   godot --path . -- --join=&lt;code or ip:port&gt; --name=Ann
 /// Add <c>--autostart</c> to BOTH copies for a test with no clicks: the host starts the match as soon as a second player has joined, and every copy
 /// walks its own player and prints one MULTIPLAYER_PLAYER line when it sees another player move (see <see cref="Game"/>):
-///   godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --host --local --autostart --name=Sam
-///   godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --join=127.0.0.1:47810 --local --autostart --name=Ann
+///   timeout 90 godot --headless --audio-driver Dummy --path . --log-file host.log -- --host --local --autostart --name=Sam
+///   timeout 90 godot --headless --audio-driver Dummy --path . --log-file join.log -- --join=&lt;the host's code&gt; --local --autostart --name=Ann
+/// (join by the host's code, read from its window, not a fixed port; stop by timeout, not --quit-after, which counts frames; --log-file because redirected stdout is lost on a kill)
 /// </summary>
 public partial class Main : Control
 {

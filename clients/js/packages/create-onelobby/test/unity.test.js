@@ -99,7 +99,10 @@ describe("unity: a new project", () => {
     for (const e of entries) {
       expect(e.command).toContain("-executeMethod OneLobbyBuild.Windows");
       expect(e.command).toContain(e.shell === "powershell" ? "'--host','--local','--name=Host'" : "--host --local --name=Host");
-      expect(e.command).toContain("--join=127.0.0.1:47810 --local --name=Joiner");
+      expect(e.command).toContain("--local --name=Joiner");
+      // the joiner takes no fixed port (another match on the PC may hold it) and nothing waits on the clock
+      expect(e.command).not.toMatch(/--join|47810|sleep|Start-Sleep/i);
+      expect(e.label).toContain("type the host's code");
       expect(e.command).not.toMatch(/[A-Z]:[\\/]/); // no machine path
     }
     expect(text("my-game/AGENTS.md")).toContain("--host --local --name=Sam");

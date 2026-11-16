@@ -13,7 +13,7 @@ const entries = JSON.parse(readFileSync(`${dir}/.olc/${basename(dir)}.json`, "ut
 const bash = entries.find((e) => e.shell === "bash")?.command ?? "";
 const ps = entries.find((e) => e.shell === "powershell")?.command ?? "";
 const host = /-- (--host[^&;]*?) *&/.exec(bash)?.[1];
-const join = /-- (--join=\S+[^;&]*)$/.exec(bash)?.[1];
+const join = /-- (--local --name=Joiner)$/.exec(bash)?.[1]; // no --join: the joiner takes the host's printed code, not a fixed port
 if (!host || !join) fail(`cannot read the host and joiner arguments from .olc/${basename(dir)}.json`);
 const quoted = (a) => a.split(" ").map((x) => `'${x}'`).join(",");
 if (!ps.includes(quoted(host)) || !ps.includes(`-- ${join}`)) fail("the powershell task has other arguments than the bash task");

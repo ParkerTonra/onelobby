@@ -10,11 +10,12 @@ using UnityEngine.SceneManagement;
 /// has loaded. The menu hosts and joins by itself and reads the blueprint at Assets/Resources/onelobby.json. Written by
 /// create-onelobby; yours to edit. Flags after the program name (the menu reads them, see docs/recipes/menu.md, "Unity"):
 ///   Game.exe --host --local --name=Sam                      (--local: 127.0.0.1 only, no Nostr, nothing leaves this PC)
-///   Game.exe --join=127.0.0.1:47810 --local --name=Ann
+///   Game.exe --local --name=Ann                          (type the code the host window shows, or --join=<that code>; no fixed port)
 /// Add <c>--autostart</c> to BOTH copies for a test with no clicks: the host starts the match as soon as a second player has joined, and every copy
 /// walks its own player and logs one MULTIPLAYER_PLAYER line when it sees another player move (see Game.cs):
-///   Game.exe -batchmode -nographics --host --local --autostart --name=Sam
-///   Game.exe -batchmode -nographics --join=127.0.0.1:47810 --local --autostart --name=Ann
+///   Game.exe -batchmode -nographics -logFile host.log --host --local --autostart --name=Sam
+///   Game.exe -batchmode -nographics -logFile join.log --join=<the code host.log prints after "code"> --local --autostart --name=Ann
+/// (join by the printed code, not a fixed port; stop each with timeout)
 /// When the game starts (<c>GameStarted</c>) it opens Game.cs, which makes the world and one networked character per player; it ends it again on
 /// <c>ReturnedToLobby</c> and <c>Left</c>. Delete this file when the game has its own start-up and put the lines of <see cref="Awake"/> there.
 /// </summary>

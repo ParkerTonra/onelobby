@@ -23,7 +23,7 @@ npx create-onelobby my-game --template godot-gdscript --yes
 cd my-game
 godot --headless --import --path .                                              # once: registers the WebRTC extension and the add-on's classes
 godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    # MULTIPLAYER_OK
-godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --join=127.0.0.1:47810 --local --name=Ann
+godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --local --name=Ann and type the code the host window shows (no fixed port)
 
 npx create-onelobby --into path/to/your-godot-project                           # an existing GDScript project (a folder with project.godot)
 ```
@@ -82,7 +82,7 @@ cd my-game
 dotnet build MyGame.csproj                                                      # restores the OneLobby packages and builds the game (the file is named: Godot also writes a .sln)
 godot --headless --import --path .                                              # once: registers the WebRTC extension
 godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn # MULTIPLAYER_OK
-godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --join=127.0.0.1:47810 --local --name=Ann
+godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --local --name=Ann and type the code the host window shows (no fixed port)
 
 npx create-onelobby --into path/to/your-godot-csharp-project                    # an existing one (project.godot with a .csproj beside it)
 ```

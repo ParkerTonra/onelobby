@@ -99,7 +99,10 @@ describe("godot-gdscript: a new project", () => {
     ]);
     expect(olc.entries[0].command).toContain("$env:GODOT");
     expect(olc.entries[1].command).toContain("${GODOT:-godot}");
-    expect(olc.entries[0].label).toContain("host + joiner");
+    expect(olc.entries[0].label).toContain("host + second window (type the host's code)");
+    // no fixed port a second match on the PC can hold, no wall-clock wait: the player types the host's code
+    for (const e of olc.entries) expect(e.command).not.toMatch(/--join|47810|sleep|Start-Sleep/i);
+    expect(olc.entries[0].command).toContain("-- --local --name=Joiner");
   });
 
   it("--no-natives skips them, says so and prints the command that fetches them later", async () => {
@@ -243,7 +246,7 @@ describe("godot-gdscript: --into", () => {
     mkdirSync(at("mine"));
     writeFileSync(at("mine/project.godot"), 'config_version=5\r\n\r\n[autoload]\r\n\r\nGlobals="*res://globals.gd"\r\n\r\n[display]\r\nx=1\r\n');
     await cli(["--into", "mine", ...FROM, "--no-natives"]);
-    expect(text("mine/project.godot")).toBe('config_version=5\r\n\r\n[autoload]\r\n\r\nGlobals="*res://globals.gd"\r\nNet="*res://net.gd"\r\n\r\n[display]\r\nx=1\r\n');
+    expect(text("mine/project.godot")).toBe('config_version=5\r\n\r\n[autoload]\r\n\r\nNet="*res://net.gd"\r\nGlobals="*res://globals.gd"\r\n\r\n[display]\r\nx=1\r\n');
   });
 
   it("merges into an existing .gitignore and .gitattributes without touching their lines", async () => {

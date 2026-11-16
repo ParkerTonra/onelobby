@@ -4,7 +4,7 @@
 #   0. pack the OneLobby NuGet packages to a fresh local folder under a new version (NuGet never re-reads a version it has seen)
 #   1. scaffold a new project (--packages-from that folder), dotnet build, import, run its own tests/MultiplayerTest.tscn, expect MULTIPLAYER_OK
 #   2. play it the way AGENTS.md and the .olc entry say: two headless processes (-- --host --local --name=Host and
-#      -- --join=127.0.0.1:47810 --local --name=Joiner); pass when the joiner's menu reaches the lobby with two players
+#      -- --local --name=Joiner --join=<the code the host's probe printed>); pass when the joiner's menu reaches the lobby with two players
 #   3. `create-onelobby verify` on that project must print VERIFY_OK (all routes on 127.0.0.1, the TURN helper fetched anonymously from npm
 #      into the project's .onelobby/), and on a copy with a broken onelobby.json VERIFY_FAIL naming the blueprint check
 #   3b. scaffold new projects with players in the world (sync.player: owner 3d, host 2d: addons/onelobby_net_player/ pinned, OneLobby.Replication referenced),
@@ -70,10 +70,6 @@ two_process() {
   lines="$(node "$ROOT/clients/gdscript/scaffold-play-args.mjs" "$dir" 2>&1)" || { echo "FAIL $name: $lines"; FAILS=$((FAILS + 1)); return; }
   host_args="$(echo "$lines" | sed -n 1p | tr -d '\r')"; join_args="$(echo "$lines" | sed -n 2p | tr -d '\r')"
   echo "play entry: host: -- $host_args | joiner: -- $join_args"
-  # the play entry's direct port: say plainly when another program holds it instead of timing out
-  if ! node -e 'const s = require("net").createServer(); s.once("error", (e) => { console.error(e.code); process.exit(3); }); s.listen(47810, "127.0.0.1", () => s.close(() => process.exit(0)));' 2> "$WORK/$name.port"; then
-    echo "FAIL $name: port 47810 (the play entry's direct port) is already in use on this machine ($(tr -d '\r\n' < "$WORK/$name.port")); stop what holds it and rerun"; FAILS=$((FAILS + 1)); return
-  fi
   cp "$PROBE" "$dir/ScaffoldProbe.cs"
   printf '\n[autoload]\n\nScaffoldProbe="*res://ScaffoldProbe.cs"\n' >> "$dir/project.godot"
   build "$dir" || { FAILS=$((FAILS + 1)); return; }
@@ -82,8 +78,10 @@ two_process() {
   local hpid=$! ok=1
   for _ in $(seq 1 400); do grep -a -q -E 'PROBE_HOST_LISTENING|PROBE_FAIL' "$WORK/$name.host.out" && break; kill -0 $hpid 2>/dev/null || break; sleep 0.1; done
   if grep -a -q PROBE_HOST_LISTENING "$WORK/$name.host.out"; then
+    # the joiner takes the code the host's probe printed, never a fixed port (another match on this machine may hold it)
+    local code; code="$(grep -a -m1 -o 'PROBE_HOST_LISTENING code=.*' "$WORK/$name.host.out" | sed 's/^PROBE_HOST_LISTENING code=//' | tr -d '\r')"
     # shellcheck disable=SC2086
-    timeout 70 "${G[@]}" --path "$dir" -- $join_args > "$WORK/$name.join.out" 2>&1
+    timeout 70 "${G[@]}" --path "$dir" -- $join_args --join="$code" > "$WORK/$name.join.out" 2>&1
     grep -a -q "^PROBE_OK joiner" "$WORK/$name.join.out" && ok=0
     for _ in $(seq 1 100); do grep -a -q "^PROBE_OK host" "$WORK/$name.host.out" && break; sleep 0.1; done
     grep -a -q "^PROBE_OK host" "$WORK/$name.host.out" || ok=1

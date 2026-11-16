@@ -3,7 +3,7 @@
 # not run by any workflow. Loopback only: the editor runs with -batchmode -nographics, every player with -batchmode and --local.
 #   1. scaffold a new project (--package-from a tarball), run its own play-mode test (expect MULTIPLAYER_OK in the Unity log)
 #   2. build the Windows player with the scaffolded editor script, then run two players the way the .olc entry does
-#      (--host --local --name=Host, --join=127.0.0.1:47810 --local --name=Joiner): both logs must say they bound 127.0.0.1 only and
+#      (--host --local --name=Host, then --local --name=Joiner --join=<the code the host's log prints>): both logs must say they bound 127.0.0.1 only and
 #      must hold the roster line the scaffolded Boot.cs logs, "Lobby: 2 players: Host, Joiner"
 #   3. `create-onelobby verify` must end in VERIFY_OK, and in VERIFY_FAIL blueprint: on a copy with a broken onelobby.json
 #   4. scaffold --into an empty Unity project (ProjectVersion.txt and a manifest only), the test again; a second --into run changes nothing
@@ -47,13 +47,15 @@ test -f "$WORK/new/Builds/Windows/Game.exe" || { echo "FAIL build: no Builds/Win
 ENTRY="$WORK/new/.olc/new.json"
 node -e '
 const e = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).entries.find((x) => x.shell === "bash").command;
-if (!/--host --local --name=Host/.test(e) || !/--join=127\.0\.0\.1:47810 --local --name=Joiner/.test(e)) { console.error("the .olc entry does not carry the host and joiner flags"); process.exit(1); }
+if (!/--host --local --name=Host/.test(e) || !/--local --name=Joiner/.test(e) || /--join|47810/.test(e)) { console.error("the .olc entry does not carry the host and joiner flags"); process.exit(1); }
 ' "$ENTRY" || FAILS=$((FAILS + 1))
 GAME="$WORK/new/Builds/Windows/Game.exe"
 if [ -f "$GAME" ]; then
   "$GAME" -batchmode -nographics -logFile "$WORK/host.log" --host --local --name=Host & HPID=$!
-  sleep 6
-  timeout 25 "$GAME" -batchmode -nographics -logFile "$WORK/join.log" --join=127.0.0.1:47810 --local --name=Joiner
+  # the joiner takes the code the host's log prints ("...; code <code> (...)"), never a fixed port another match may hold
+  CODE=""
+  for _ in $(seq 1 240); do CODE="$(grep -a -m1 'direct host listening' "$WORK/host.log" | sed -n 's/.*; code \([^ ]*\) .*/\1/p' | tr -d '\r')"; [ -n "$CODE" ] && break; sleep 0.25; done
+  timeout 25 "$GAME" -batchmode -nographics -logFile "$WORK/join.log" --join="$CODE" --local --name=Joiner
   kill $HPID 2>/dev/null; wait $HPID 2>/dev/null
   for l in host join; do
     grep -a -q "bound to 127.0.0.1 only" "$WORK/$l.log" || { echo "FAIL players: the $l log never says it bound 127.0.0.1 only"; FAILS=$((FAILS + 1)); }

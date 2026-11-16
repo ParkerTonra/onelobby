@@ -344,7 +344,7 @@ export function csharpNext({ into, rel, plan }) {
       "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby_menu/OneLobbyMenu.tscn",
       "in that scene's script, in _Ready: OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs());   // the menu applies --host / --join / --name right after, and reads --local itself",
       "connect it: menu.GameStarted += lobby => ...;  menu.ReturnedToLobby += lobby => ...;  menu.Left += () => ...;",
-      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it",
+      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --local --name=Ann, then type the code the host window shows (or -- --join=<that code>; never a fixed port: another match on this PC may hold it)); --local is 127.0.0.1 only, no Nostr, so never run --host without it",
       ...(plan.netPlayer ? netPlayerLines(plan.netPlayer) : []),
       `follow ${CSHARP_RECIPE_URL}`,
     );

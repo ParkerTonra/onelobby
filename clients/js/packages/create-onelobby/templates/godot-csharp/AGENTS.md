@@ -25,7 +25,7 @@ A Godot 4 (C#) game with OneLobby multiplayer wired in by `create-onelobby`. Rea
 dotnet build {{csproj}}                        # once, and after every C# change (Godot does not build for you in --headless runs)
 godot --headless --import --path .             # once on a fresh clone: registers the WebRTC extension
 godot --path . -- --host --local --name=Sam    # one window hosts (--local: 127.0.0.1 only)
-godot --path . -- --join=127.0.0.1:47810 --local --name=Ann   # a second window joins
+godot --path . -- --local --name=Ann   # a second window: type the code the host window shows (or --join=<that code>; no fixed port, another match on this PC may hold it)
 ```
 
 Use the .NET build of Godot (the "mono" download); the standard build cannot run C#. Name the project file in `dotnet build`: once you open the project in the editor Godot writes a `.sln` beside the `.csproj`, and a bare `dotnet build` then refuses to pick one.

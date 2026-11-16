@@ -119,8 +119,9 @@ project/assembly_name="MyGame"
     await j(["my-game", "--template", "godot-csharp", ...FROM]);
     const entries = JSON.parse(text("my-game/.olc/my-game.json")).entries;
     const bash = entries.find((e) => e.shell === "bash").command;
-    expect(bash).toBe('dotnet build MyGame.csproj -nologo -v q || exit 1; G="${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- --join=127.0.0.1:47810 --local --name=Joiner');
-    expect(entries.find((e) => e.shell === "powershell").command).toContain("-- --join=127.0.0.1:47810 --local --name=Joiner");
+    expect(bash).toBe('dotnet build MyGame.csproj -nologo -v q || exit 1; G="${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & "$G" --path . --resolution 640x360 -- --local --name=Joiner');
+    expect(entries.find((e) => e.shell === "powershell").command).toContain("-- --local --name=Joiner");
+    expect(entries.find((e) => e.shell === "powershell").command).not.toMatch(/--join|47810|Start-Sleep/);
     expect(text("my-game/AGENTS.md")).toContain("-- --host --local --name=Sam");
   });
 

@@ -33,7 +33,7 @@ Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode
 Unity.exe -batchmode -nographics -quit -projectPath . -logFile C:\abs\build.log -executeMethod {{build}}
 # play: one window hosts (--local: 127.0.0.1 only), a second one joins
 {{exe}} --host --local --name=Sam
-{{exe}} --join=127.0.0.1:{{port}} --local --name=Ann
+{{exe}} --local --name=Ann   # type the code the host window shows (or --join=<that code>; no fixed port, another match on this PC may hold it)
 ```
 
 A built player with no window: add `-batchmode -nographics -logFile C:\abs\host.log` (a player run for a test needs no screen). `--local` is required on every

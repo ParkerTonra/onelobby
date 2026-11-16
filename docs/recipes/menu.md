@@ -67,9 +67,11 @@ With `boot_flags` on (default), `--host`, `--join=<code>`, `--name=<name>`, `--l
 
 ```
 godot --path . -- --host --local --name=Sam                 # this PC only
-godot --path . -- --join=127.0.0.1:47810 --local --name=Ann
+godot --path . -- --join=<the code the host window shows> --local --name=Ann   # not a fixed port: another match on this PC may hold it
 godot --path . -- --join=D1PB-1X9S-FPV --name=Ann           # a real code: the internet
 ```
+
+The flags are read only after `--` (user args): a game that took a plain `--host` before now needs `-- --host`. A headless GDScript host prints one line, `OneLobby: hosting, join code <code>` (a Unity player logs `direct host listening ...; code <code>`), so a second headless copy joins by that code; start each with `timeout <seconds>` (`--quit-after` counts frames, not time) and `--log-file <path>` (redirected stdout is lost when a process is killed).
 
 `--autostart` (the GDScript menu; the C# menu and Unity have it for the player layer only) is for tests with no clicks: the host does what its Start button does, once, as soon as a second player is in the room, so `game_started` fires on both copies
 (`OneLobbyMenuModel.apply_autostart()`; it works in every sync mode and needs no player layer). Start both copies with `--local --autostart` and read what the game prints from

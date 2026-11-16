@@ -2,8 +2,8 @@
  "gd": {
   ".gitattributes": "66eca2cf668b4baa8e745d4d75a06705fb8e683a192d557a87d854dd434fd6bf",
   ".gitignore": "a0861ad00331d864f5e76f153e0db4f55f669ba16dc3da6122b345368ab82b80",
-  ".olc/my-game.json": "66f353d9e66e6a07f617bb1a2ea39e2adb74f4c9ab6de19f988617ec6fd56089",
-  "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
+  ".olc/my-game.json": "d44c6e2adbc7e547eada2b57ff57a7527af0f5a26a8334520eec1ab1dc17df37",
+  "AGENTS.md": "9e9675dcb97b0b038f0547f4d5ad7d9de56ed4c7874c1a191d0b39b0b193ba3d",
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
   "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
@@ -14,8 +14,8 @@
  "gd-replication": {
   ".gitattributes": "66eca2cf668b4baa8e745d4d75a06705fb8e683a192d557a87d854dd434fd6bf",
   ".gitignore": "a0861ad00331d864f5e76f153e0db4f55f669ba16dc3da6122b345368ab82b80",
-  ".olc/my-game.json": "66f353d9e66e6a07f617bb1a2ea39e2adb74f4c9ab6de19f988617ec6fd56089",
-  "AGENTS.md": "48d22c251c1f68635e50cb9e32fa041aa20e2b47b177c14b6fe66c71347ca5f4",
+  ".olc/my-game.json": "d44c6e2adbc7e547eada2b57ff57a7527af0f5a26a8334520eec1ab1dc17df37",
+  "AGENTS.md": "9e9675dcb97b0b038f0547f4d5ad7d9de56ed4c7874c1a191d0b39b0b193ba3d",
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
   "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
@@ -26,8 +26,8 @@
  "cs": {
   ".gitattributes": "05579fbcafcbcafcc3d31478f248438c4ab37486be839080ba8bd73686fd0524",
   ".gitignore": "bcc450d662e278cee6afddeb99eab5e94dfd23fb7e9ff4fcb1881101b3b75f35",
-  ".olc/my-game.json": "28ebc882687aae2a16b8be0875f57173dd9c6c406c3417d3056611b9f417473c",
-  "AGENTS.md": "676a1335f9e1af33c1f299ec6cfa787639d31c4b92e6686cbe7d880aafa12bc4",
+  ".olc/my-game.json": "90be68ffff455de0781b230c1d539fa5deed7a512ce9335309a5e0b6b20f67c9",
+  "AGENTS.md": "dd22f992dec12e74a424216eda1e17d0551afa17019bcbb9d81c1b4a820f9aa7",
   "Main.cs": "78bef920bbeb3ecd57b8e601409f9a3167af8046d3e133e6ee1c5fddbc5f07d7",
   "Main.tscn": "303b69b179227cd03a7148cd13ac8f7c61d8648e19fa1905c59203e699af9184",
   "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",
@@ -41,8 +41,8 @@
  "cs-replication": {
   ".gitattributes": "05579fbcafcbcafcc3d31478f248438c4ab37486be839080ba8bd73686fd0524",
   ".gitignore": "bcc450d662e278cee6afddeb99eab5e94dfd23fb7e9ff4fcb1881101b3b75f35",
-  ".olc/my-game.json": "28ebc882687aae2a16b8be0875f57173dd9c6c406c3417d3056611b9f417473c",
-  "AGENTS.md": "676a1335f9e1af33c1f299ec6cfa787639d31c4b92e6686cbe7d880aafa12bc4",
+  ".olc/my-game.json": "90be68ffff455de0781b230c1d539fa5deed7a512ce9335309a5e0b6b20f67c9",
+  "AGENTS.md": "dd22f992dec12e74a424216eda1e17d0551afa17019bcbb9d81c1b4a820f9aa7",
   "Main.cs": "78bef920bbeb3ecd57b8e601409f9a3167af8046d3e133e6ee1c5fddbc5f07d7",
   "Main.tscn": "303b69b179227cd03a7148cd13ac8f7c61d8648e19fa1905c59203e699af9184",
   "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",

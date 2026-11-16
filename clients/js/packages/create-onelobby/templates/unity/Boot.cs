@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 /// has loaded. The menu hosts and joins by itself and reads the blueprint at Assets/Resources/onelobby.json. Written by
 /// create-onelobby; yours to edit. Flags after the program name (the menu reads them, see docs/recipes/menu.md, "Unity"):
 ///   Game.exe --host --local --name=Sam                      (--local: 127.0.0.1 only, no Nostr, nothing leaves this PC)
-///   Game.exe --join=127.0.0.1:47810 --local --name=Ann
+///   Game.exe --local --name=Ann                          (type the code the host window shows, or --join=<that code>; no fixed port)
 /// Delete this file when the game has its own start-up and put the two lines of <see cref="Awake"/> there.
 /// </summary>
 public sealed class GameBoot : MonoBehaviour

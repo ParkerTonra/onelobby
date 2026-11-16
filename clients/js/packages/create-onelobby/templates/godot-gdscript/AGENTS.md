@@ -20,7 +20,7 @@ A Godot 4 (GDScript) game with OneLobby multiplayer wired in by `create-onelobby
 ```
 godot --headless --import --path .        # once on a fresh clone: registers the WebRTC extension and the add-on's classes
 godot --path . -- --host --local --name=Sam   # one window hosts (--local: 127.0.0.1 only)
-godot --path . -- --join=127.0.0.1:47810 --local --name=Ann   # a second window joins
+godot --path . -- --local --name=Ann   # a second window: type the code the host window shows (or --join=<that code>; no fixed port, another match on this PC may hold it)
 ```
 
 ## Test it (headless, loopback only)

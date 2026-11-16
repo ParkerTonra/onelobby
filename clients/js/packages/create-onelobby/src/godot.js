@@ -58,12 +58,12 @@ export const olcSkippedLine = (repo) => `no .olc entry was written: this project
 
 /** .olc/<slug>.json: two tasks that open the game as a host window plus a small joiner window on this PC (Godot from $GODOT). */
 export function olcEntry({ slug, title, build = false }) {
-  const joiner = `--join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Joiner`;
+  const joiner = "--local --name=Joiner"; // no --join: the host's port is whichever was free, so the player types the code the host window shows
   const psBuild = build ? `${build}; if ($LASTEXITCODE -ne 0) { exit 1 }; ` : ""; // build: a command line (godot-csharp builds first)
   const shBuild = build ? `${build} || exit 1; ` : "";
-  const ps = `${psBuild}$g = if ($env:GODOT) { $env:GODOT } else { 'godot' }; Start-Process -FilePath $g -ArgumentList '--path','.','--','--host','--local','--name=Host'; Start-Sleep -Seconds 4; & $g --path . --resolution 640x360 -- ${joiner}`;
-  const sh = `${shBuild}G="\${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & sleep 4; "$G" --path . --resolution 640x360 -- ${joiner}`;
-  const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + joiner${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
+  const ps = `${psBuild}$g = if ($env:GODOT) { $env:GODOT } else { 'godot' }; Start-Process -FilePath $g -ArgumentList '--path','.','--','--host','--local','--name=Host'; & $g --path . --resolution 640x360 -- ${joiner}`;
+  const sh = `${shBuild}G="\${GODOT:-godot}"; "$G" --path . -- --host --local --name=Host & "$G" --path . --resolution 640x360 -- ${joiner}`;
+  const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + second window (type the host's code)${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
 
@@ -297,8 +297,8 @@ export function godotNext({ into, rel, plan }) {
       "add the menu where your game opens (it is a Control with its own scene). In a scene: Scene > Instantiate Child Scene > res://addons/onelobby/menu/menu.tscn, and give it the client from the parent's _enter_tree: $Menu.client = Net.client",
       'built in code (a runtime CanvasLayer, no scene file): var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate(); menu.client = Net.client; layer.add_child(menu)   # set client BEFORE add_child',
       "connect it: menu.game_started.connect(func(lobby): ...); menu.returned_to_lobby.connect(func(lobby): ...); menu.left.connect(func(): ...)   # game_started hands you the OneLobbyLobby (host and joiner both get it); a menu inside a scene your game replaces: set menu.pump = false",
-      "a game that reads its own --host / --join flags: set menu.boot_flags = false (the menu then ignores all of --host --join --name --local --autostart; with it on, only the first menu in a process acts on --host, --join, --name and --autostart); see the skill's wiring step",
-      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
+      "the menu reads --host, --join, --name, --local and --autostart only after `--` (a game that took a plain --host now needs -- --host); a game that reads its own --host / --join flags: set menu.boot_flags = false (the menu then ignores all of --host --join --name --local --autostart; with it on, only the first menu in a process acts on --host, --join, --name and --autostart); see the skill's wiring step",
+      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --local --name=Ann, then type the code the host window shows (or -- --join=<that code>; never a fixed port: another match on this PC may hold it)); the menu reads --local itself (127.0.0.1 only, no Nostr), so never run --host without it",
       ...(players ? netPlayerLines(players) : []),
       `follow ${GODOT_RECIPE_URL}`,
     );

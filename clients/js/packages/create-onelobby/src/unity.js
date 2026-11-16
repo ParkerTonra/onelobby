@@ -197,18 +197,18 @@ export function wantedDependencies({ ref, testFramework }) {
  * this PC. The editor comes from $UNITY, else the newest in the Hub's default folder. The flags are the ones the Godot entries pass.
  */
 export function olcEntry({ slug, title }) {
-  const joiner = `--join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Joiner`;
+  const joiner = "--local --name=Joiner"; // no --join: the host's port is whichever was free, so the player types the code the host window shows
   const build = `-batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}`;
   const exe = PLAYER_EXE.replace(/\//g, "\\");
   const ps =
     `$u = if ($env:UNITY) { $env:UNITY } else { Join-Path (Get-ChildItem (Join-Path $env:ProgramFiles 'Unity/Hub/Editor') -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName 'Editor/Unity.exe' }; ` +
     `New-Item -ItemType Directory -Force .onelobby | Out-Null; & $u ${build}; if ($LASTEXITCODE -ne 0) { Write-Host 'the build failed: see .onelobby/build.log (is this project open in the Unity editor?)'; exit 1 }; ` +
-    `Start-Process -FilePath .\\${exe} -ArgumentList '--host','--local','--name=Host'; Start-Sleep -Seconds 4; & .\\${exe} -screen-fullscreen 0 -screen-width 640 -screen-height 360 ${joiner}`;
+    `Start-Process -FilePath .\\${exe} -ArgumentList '--host','--local','--name=Host'; & .\\${exe} -screen-fullscreen 0 -screen-width 640 -screen-height 360 ${joiner}`;
   const sh =
     `U="\${UNITY:-$(ls -d "\$PROGRAMFILES"/Unity/Hub/Editor/*/ | sort | tail -n 1)Editor/Unity.exe}"; ` +
     `mkdir -p .onelobby; "$U" ${build} || { echo 'the build failed: see .onelobby/build.log (is this project open in the Unity editor?)'; exit 1; }; ` +
-    `./${PLAYER_EXE} --host --local --name=Host & sleep 4; ./${PLAYER_EXE} -screen-fullscreen 0 -screen-width 640 -screen-height 360 ${joiner}`;
-  const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + joiner${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
+    `./${PLAYER_EXE} --host --local --name=Host & ./${PLAYER_EXE} -screen-fullscreen 0 -screen-width 640 -screen-height 360 ${joiner}`;
+  const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + second window (type the host's code)${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
 
@@ -397,14 +397,14 @@ export function unityNext({ into, rel, plan, titleFromFolder = false }) {
   if (titleFromFolder) next.push(`game.title in ${BLUEPRINT_PATH} came from the folder name: set the game's own name (edit the file, or pass --title "<name>" on the first run)`);
   if (into) {
     next.push(
-      `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local / --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local to its command`,
+      `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local to its command (a second copy joins by the code the host's log prints, never a fixed port)`,
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
       `the blueprint is ${BLUEPRINT_PATH}: change choices there`,
       ...(players ? netPlayerLines(players) : []),
       `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log`,
       `build the Windows player: Unity -batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}   # ${PLAYER_EXE}`,
-      `try it on this PC only: ${PLAYER_EXE} --host --local --name=Sam   (a second window: --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
+      `try it on this PC only: ${PLAYER_EXE} --host --local --name=Sam   (a second window: --local --name=Ann, then type the code the host window shows, or --join=<that code>; never a fixed port: another match on this PC may hold it); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
       `check it: npx create-onelobby verify   # one VERIFY_OK or VERIFY_FAIL line`,
       `follow ${UNITY_RECIPE_URL}`,
     );

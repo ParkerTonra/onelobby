@@ -5,8 +5,9 @@ extends Control
 ##   godot --path . -- --join=<code or ip:port> --name=Ann
 ##   add --autostart to BOTH copies for a test with no clicks: the menu's own flag makes the host start the match as soon as a second player
 ##   has joined, and every copy walks its own player and prints one line when it sees another player move (see game.gd):
-##     godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --host --local --autostart --name=Sam
-##     godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --join=127.0.0.1:47810 --local --autostart --name=Ann
+##     timeout 90 godot --headless --audio-driver Dummy --path . --log-file host.log -- --host --local --autostart --name=Sam
+##     timeout 90 godot --headless --audio-driver Dummy --path . --log-file join.log -- --join=<the code host.log prints after "join code"> --local --autostart --name=Ann
+##   (join by the printed code, not a fixed port; stop by timeout, not --quit-after, which counts frames; --log-file because redirected stdout is lost on a kill)
 
 const Game := preload("res://game.gd")
 
