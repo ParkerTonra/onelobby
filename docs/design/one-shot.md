@@ -168,7 +168,7 @@ Each is one lane unless noted; order matters for the first three.
     prints the spawner lines; `verify` has a `player` file check for such a game. A game without `sync.player` is written byte for byte as before (a test pins it). Run by `clients/gdscript/scaffold-test.sh` and
     `clients/dotnet/scaffold-test.sh` in CI. Landed (the Unity template): the same rule (`sync.mode` `replication` AND `sync.player` in the answers) writes `Assets/Scripts/Game.cs`, `GamePlayer.cs` (a character made in code, 3D or 2d, owner or host
     authority, the file says which), `OneLobbyGame.asmdef` and a `Boot.cs` that opens the game, and adds the player check to the play-mode test; `--into` prints the spawner lines and writes nothing; `verify` has the `player` line; a game without
-    `sync.player` is written byte for byte as before (a test pins it). Proven by local Unity runs only (Unity is not in CI): `clients/unity/scaffold-test.sh`. Not built: the web template.
+    `sync.player` is written byte for byte as before (a test pins it). Proven by local Unity runs only (Unity is not in CI): the generated project's play-mode test passed for owner and host authority in 3D and 2D, and a built host and joiner ran headless with both characters in the world. `clients/unity/scaffold-test.sh` step 5 repeats that check but has not yet been run as a whole. Not built: the web template.
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
 
 Estimate (a guess): about 17 lanes. Today's lanes took 6 to 50 minutes each, so roughly a day of agent time at 2 lanes.
