@@ -30,6 +30,9 @@ const REJECT_MUTED := 3
 var enabled := true
 ## Game-provided profanity hook, applied to every line a player is shown: `func(text: String) -> String`.
 var filter := Callable()
+## Host only: filters each line before it is stamped and broadcast (the lobby sets it from `room.filter`); an empty result
+## drops the line: `func(text: String) -> String`.
+var host_filter := Callable()
 
 var _l: OneLobbyLobby
 var _lines: Array = []
@@ -179,6 +182,10 @@ func _host_process(from: int, id: int, raw_text: String) -> void:
 		reject.call(REJECT_RATE)
 		return
 	var text := sanitize(raw_text)
+	if host_filter.is_valid():
+		var filtered: Variant = host_filter.call(text)
+		if filtered is String:
+			text = filtered
 	if text.length() == 0:
 		return
 	_stamp_id = (_stamp_id + 1) & 0xFFFFFFFF

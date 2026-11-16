@@ -640,6 +640,9 @@ func _kick(s: OLSession, m: Dictionary) -> void:
 		data["closeCode"] = code
 	if close_reason != null:
 		data["closeReason"] = close_reason
+	var removal_code: Variant = _str(m, "code")
+	if removal_code != null and OneLobbyRoomRules.is_code(removal_code):
+		data["code"] = removal_code # the room layer's stable removal code (spec/room.md 5.2)
 	if ban != false:
 		lobby.kicked[target.ip] = true
 	_remove_member(lobby, target, "disconnected" if ban == false else "kicked", data)

@@ -7,7 +7,7 @@ const LIB := "onelobby-gdscript"
 const VERSION := "0.1.0"
 
 
-static func hello(game_id: String, net_version: String, display_name: String, resume_token: String = "") -> String:
+static func hello(game_id: String, net_version: String, display_name: String, resume_token: String = "", player_id: String = "") -> String:
 	var m := {
 		"t": "hello", "proto": PROTO, "gameId": game_id, "netVersion": net_version,
 		"client": {"lib": LIB, "ver": VERSION, "platform": "godot-" + OS.get_name().to_lower()},
@@ -15,11 +15,14 @@ static func hello(game_id: String, net_version: String, display_name: String, re
 	}
 	if resume_token != "":
 		m["resumeToken"] = resume_token
+	if player_id != "":
+		m["playerId"] = player_id
 	return JSON.stringify(m)
 
 
-## `o`: name, max_players (4), visibility ("unlisted"), late_join (true), meta ({}), relay_only (false).
-static func create(o: Dictionary, mode: String, tick_rate: int) -> String:
+## `o`: name, max_players (4), visibility ("unlisted"), late_join (true), meta ({}), relay_only (false). `password` and
+## `spectators` (a hub with the "room" feature, spec/room.md 7) are sent when given.
+static func create(o: Dictionary, mode: String, tick_rate: int, password: String = "", spectators: int = 0) -> String:
 	var m := {
 		"t": "create", "name": str(o.get("name", "Lobby")), "maxPlayers": int(o.get("max_players", 4)),
 		"visibility": str(o.get("visibility", "unlisted")), "mode": mode, "tickRate": tick_rate,
@@ -27,11 +30,18 @@ static func create(o: Dictionary, mode: String, tick_rate: int) -> String:
 	}
 	if bool(o.get("relay_only", false)):
 		m["relayOnly"] = true
+	if password != "":
+		m["password"] = password
+	if spectators > 0:
+		m["spectators"] = spectators
 	return JSON.stringify(m)
 
 
-static func join(code: String) -> String:
-	return JSON.stringify({"t": "join", "code": code})
+static func join(code: String, password: String = "") -> String:
+	var m := {"t": "join", "code": code}
+	if password != "":
+		m["password"] = password
+	return JSON.stringify(m)
 
 
 ## Direct mode: a host runs exactly one lobby, so the join carries no code (the Nostr code was the invitation).
@@ -65,7 +75,7 @@ static func meta(m: Dictionary) -> String:
 	return JSON.stringify({"t": "meta", "meta": _meta(m)})
 
 
-static func kick(peer_id: int, ban: bool = true, close_code: int = 0, close_reason: String = "") -> String:
+static func kick(peer_id: int, ban: bool = true, close_code: int = 0, close_reason: String = "", code: String = "") -> String:
 	var m := {"t": "kick", "peerId": peer_id}
 	if not ban:
 		m["ban"] = false
@@ -73,7 +83,14 @@ static func kick(peer_id: int, ban: bool = true, close_code: int = 0, close_reas
 		m["closeCode"] = close_code
 	if close_reason != "":
 		m["closeReason"] = close_reason
+	if code != "":
+		m["code"] = code
 	return JSON.stringify(m)
+
+
+## Host: the banned player ids (a hub with the "room" feature; replaces the lobby's set).
+static func bans(ids: Array) -> String:
+	return JSON.stringify({"t": "bans", "ids": ids})
 
 
 static func approve(peer_id: int, ok: bool) -> String:

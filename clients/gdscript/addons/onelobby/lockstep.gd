@@ -206,6 +206,29 @@ func _become_joiner() -> void:
 	_last_frame_rx = _l.now_ms()
 
 
+## Back to the lobby phase: the next start is a fresh match (tick 0, no frames, hashes or pause hold). The host keeps its
+## role and the peers that said hi.
+func _reset() -> void:
+	_ticking = false
+	_started = false
+	_queue = []
+	_history = []
+	_pending = []
+	_last_frame_tick = 0 if _hosting else -1
+	_consumed_tick = 0
+	_awaiting_snapshot = false
+	_pending_snapshot = {}
+	_emitted = 0
+	_held = false
+	_snapshotting.clear()
+	_own_hashes.clear()
+	_peer_hashes.clear()
+	_desyncs.clear()
+	_last_hash_rx.clear()
+	_stale.clear()
+	_last_frame_rx = _l.now_ms() if _l != null else 0
+
+
 ## A joiner just learned the session is in game (first frame, snapshot, or phase from the server).
 func _mark_started() -> void:
 	if _started:

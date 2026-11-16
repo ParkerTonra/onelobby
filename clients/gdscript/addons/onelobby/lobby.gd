@@ -70,6 +70,11 @@ var chat: OneLobbyChat
 var pause: OneLobbyPause
 ## Host-ordered lockstep (frames, commands, hashes, snapshots); idle in a raw lobby.
 var lockstep: OneLobbyLockstep
+## The room layer: roster with per-player data, ready, countdown and auto start, spectators, seats, kick and ban
+## (docs/recipes/room.md, spec/room.md). Every lobby has one.
+var room: OneLobbyRoom
+## Why this peer was removed from the lobby ({code, reason, ban}), or {} (spec/room.md 5.1). `room.removed` fires with the same.
+var removal := {}
 
 var _c: OneLobbyClient
 ## Direct mode: no server, so no host migration. The host leaving (or the joiner losing its signaling) ends the session.
@@ -92,6 +97,11 @@ var _peers := {} # id -> PeerRec
 var _held := {} # from -> {at, signals}
 var _lingering: Array = [] # [link, until]
 var _rate := {} # id -> [start, n]
+## Host: phases this lobby sent whose echo (a `lobby` message) has not come back yet, oldest first.
+var _phase_sent: Array = []
+var _addrs := {} # peer id -> remote address of its link, once known
+var _last_addr_poll_ms := 0
+const ADDR_POLL_MS := 500
 
 
 class OLPeerRec:
@@ -114,7 +124,7 @@ class OLPeerRec:
 	var watch_deadline_ms := 0
 
 
-func _init(client: OneLobbyClient, msg: Dictionary) -> void:
+func _init(client: OneLobbyClient, msg: Dictionary, room_setup: Dictionary = {}) -> void:
 	_c = client
 	code = OneLobbySignaling.s(msg, "code")
 	local_peer_id = OneLobbySignaling.i(msg, "you")
@@ -141,6 +151,27 @@ func _init(client: OneLobbyClient, msg: Dictionary) -> void:
 	chat = OneLobbyChat.new(self)
 	lockstep = OneLobbyLockstep.new(self, client.hash_every_ticks if client.hash_every_ticks > 0 else tick_rate)
 	pause = OneLobbyPause.new(self)
+	_make_room(msg, room_setup)
+
+
+## The room layer's inputs: `setup` {options, password, max_players, pid, bans, join {role, data, password}} (all optional).
+func _make_room(msg: Dictionary, setup: Dictionary) -> void:
+	var j: Dictionary = setup.get("join", {})
+	var max_players := int(setup.get("max_players", 0))
+	if max_players <= 0:
+		max_players = OneLobbySignaling.i(msg, "maxPlayers")
+	if max_players <= 0:
+		max_players = maxi(2, _peers.size())
+	room = OneLobbyRoom.new(self, {
+		"settings": OneLobbyRoomRules.resolve_settings(setup.get("options", {}), max_players, late_join),
+		"password": str(setup.get("password", "")),
+		"pid": str(setup.get("pid", "")),
+		"bans": setup["bans"] if setup.get("bans") is OneLobbyBanList else OneLobbyBanList.new(null, _c.game_id),
+		"join": {"role": "spectator" if j.get("role") == "spectator" else "player", "data": (j.get("data", {}) as Dictionary).duplicate(), "password": str(j.get("password", ""))},
+	})
+	chat.host_filter = func(t: String) -> String: return OneLobbyRoomRules.apply_filter(room.filter, t, "chat")
+	if is_host and not room.bans.hub_ids().is_empty():
+		_send_bans(room.bans.hub_ids())
 
 
 static func _rec(id: int, peer_name: String) -> OLPeerRec:
@@ -201,18 +232,40 @@ func broadcast(bytes: PackedByteArray, channel: int = OneLobbyWire.RELIABLE) -> 
 func start() -> void:
 	if not _require_host("start the game"):
 		return
-	_set_phase("in_game")
-	_c.send_signaling(OneLobbySignaling.phase(true))
-	if mode == "lockstep":
-		lockstep._host_start()
+	_begin_game()
 
 
 ## Host: back to the lobby screen.
 func end_game() -> void:
 	if not _require_host("end the game"):
 		return
-	_set_phase("lobby")
+	_end_game()
+
+
+## Host: the phase goes to in_game (the room calls this at the end of its countdown).
+func _begin_game() -> void:
+	if phase == "in_game":
+		return
+	_c.send_signaling(OneLobbySignaling.phase(true))
+	_sent_phase("in_game")
+	_set_phase("in_game")
+	if mode == "lockstep":
+		lockstep._host_start()
+
+
+## Host: the phase goes back to lobby without touching any link (back to lobby, rematch).
+func _end_game() -> void:
+	if phase == "lobby":
+		return
 	_c.send_signaling(OneLobbySignaling.phase(false))
+	_sent_phase("lobby")
+	_set_phase("lobby")
+
+
+func _sent_phase(p: String) -> void:
+	_phase_sent.append(p)
+	if _phase_sent.size() > 16:
+		_phase_sent.pop_front()
 
 
 ## Changes your display name mid-session. The hub sanitises it (as at hello, at most 24 characters) and every member,
@@ -467,9 +520,11 @@ func _set_phase(p: String) -> void:
 	phase = p
 	if p == "lobby":
 		pause._on_lobby_phase()
+		lockstep._reset() # back to lobby: the next start is a fresh match
 	elif not lockstep.is_started:
 		lockstep._mark_started()
 	phase_changed.emit(p)
+	room._on_phase(p)
 
 
 # ---- the pump ------------------------------------------------------------------------------------------------------
@@ -523,6 +578,10 @@ func _pump() -> void:
 	if _closed:
 		return
 	_timeouts(now)
+	if _closed:
+		return
+	_poll_addresses(now)
+	room._tick(now)
 	if _closed:
 		return
 	if mode == "lockstep":
@@ -628,6 +687,8 @@ func _send_hi(rec: OLPeerRec) -> void:
 	rec.hi_sent = true
 	lockstep._touch()
 	_send_link(rec, OneLobbyWire.RELIABLE, OneLobbyWire.build_hi(local_peer_id, lockstep.hi_tick()))
+	if rec.id == _host_id:
+		room._on_host_link() # right behind hi, in the same call: the room `join`
 
 
 func _raise_ready(rec: OLPeerRec) -> void:
@@ -681,6 +742,7 @@ func _handle_as_host(rec: OLPeerRec, ch: int, m: Dictionary, data: PackedByteArr
 				OneLobbyWire.MODE_RAW if mode == "raw" else OneLobbyWire.MODE_LOCKSTEP, local_peer_id))
 			chat._send_history(rec.id)
 			pause._send_state(rec.id)
+			room._on_peer_hi(rec.id)
 			if mode == "lockstep":
 				lockstep._on_peer_hi(rec.id, int(m["lastTick"]))
 		OneLobbyWire.HOST_CLAIM:
@@ -804,7 +866,15 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 				name = OneLobbySignaling.s(e, "name")
 			if OneLobbySignaling.s(e, "resumeToken") != "":
 				resume_token = OneLobbySignaling.s(e, "resumeToken")
-			_set_phase(OneLobbySignaling.s(e, "phase", "lobby"))
+			# the host is the source of the phase: while phase changes it sent are still echoing back, a late echo must not undo them
+			var echoed := OneLobbySignaling.s(e, "phase", "lobby")
+			if not is_host:
+				_set_phase(echoed)
+			elif not _phase_sent.is_empty():
+				if echoed == _phase_sent[0]:
+					_phase_sent.pop_front()
+			else:
+				_set_phase(echoed)
 			var list: Variant = e.get("peers")
 			if list is Array:
 				for p: Variant in list:
@@ -816,6 +886,7 @@ func _on_signaling(t: String, e: Dictionary) -> void:
 							var old_name := known.name
 							known.name = new_name
 							peer_renamed.emit(_to_peer(known), old_name)
+							room._on_renamed(id, new_name)
 						continue
 					var rec := _rec(id, OneLobbySignaling.s(p, "name"))
 					_peers[id] = rec
@@ -870,9 +941,28 @@ func _accepts_signal_from(from: int) -> bool:
 	return not alive
 
 
-func _on_server_error(error_code: String, disconnected: bool) -> void:
-	if error_code == "kicked":
-		_end("disconnected" if disconnected else "kicked")
+func _on_server_error(error_code: String, disconnected: bool, data: Dictionary = {}) -> void:
+	if error_code != "kicked":
+		return
+	# a room `deny` the host sent over the data channel just before the kick carries the precise code (an old hub drops the
+	# kick's code): read what the host link already holds before the session ends
+	if not is_host and _peers.has(_host_id):
+		var host: OLPeerRec = _peers[_host_id]
+		if host.link != null:
+			for item: Array in host.link.receive():
+				_handle_frame(host, item[0], item[1])
+				if _closed or host.link == null:
+					break
+		if _closed:
+			return
+	var raw_code := OneLobbySignaling.s(data, "code")
+	var denied := OneLobbySignaling.s(data, "reason") == "denied"
+	var rc := raw_code if OneLobbyRoomRules.is_code(raw_code) else ("denied" if denied else ("disconnected" if disconnected else "kicked"))
+	if removal.is_empty():
+		removal = {"code": rc, "reason": OneLobbyRoomRules.removal_reason(rc, OneLobbySignaling.s(data, "closeReason")),
+			"ban": (not disconnected or rc == "banned") and not denied}
+	room._on_removed(removal)
+	_end("disconnected" if disconnected else "kicked")
 
 
 func _on_socket_closed() -> void:
@@ -892,10 +982,11 @@ func _to_peer(r: OLPeerRec) -> Dictionary:
 	return {"peer_id": r.id, "name": r.name, "ping_ms": r.ping_ms, "relayed": r.link != null and r.link.relayed}
 
 
-func _drop_peer(rec: OLPeerRec, reason: String, linger: bool = false) -> void:
+func _drop_peer(rec: OLPeerRec, reason: String, linger: bool = false, final: bool = false) -> void:
 	if not _peers.has(rec.id):
 		return
 	_peers.erase(rec.id)
+	_addrs.erase(rec.id)
 	lockstep._on_peer_left(rec.id)
 	chat._on_peer_left(rec.id)
 	pause._on_peer_left(rec.id)
@@ -904,6 +995,7 @@ func _drop_peer(rec: OLPeerRec, reason: String, linger: bool = false) -> void:
 	elif rec.link != null:
 		rec.link.close()
 	rec.link = null
+	room._on_peer_left(rec.id, reason, linger or final)
 	if rec.watching:
 		rec.watching = false
 		if reason != "kicked" and reason != "disconnected":
@@ -1033,6 +1125,8 @@ func _become_host() -> void:
 	if mode == "lockstep":
 		lockstep._become_host()
 	pause._on_became_host()
+	room._on_became_host()
+	_phase_sent.clear()
 	for r: OLPeerRec in _peers.values():
 		if r.id != local_peer_id:
 			_connect_peer(r, true)
@@ -1044,6 +1138,7 @@ func _demote(new_host: int, epoch: int) -> void:
 	_epoch = epoch
 	_host_id = new_host
 	lockstep._become_joiner()
+	room._on_became_joiner()
 	for r: OLPeerRec in _peers.values():
 		if r.id != new_host and r.link != null:
 			r.link.close()
@@ -1055,6 +1150,59 @@ func _demote(new_host: int, epoch: int) -> void:
 	if h != null and h.link == null:
 		_connect_peer(h, false)
 	host_changed.emit(new_host)
+
+
+# ---- room plumbing (OneLobbyRoom uses these) -----------------------------------------------------------------------
+
+func _peer_ids() -> Array:
+	return _peers.keys()
+
+
+func _peer_name(peer_id: int) -> String:
+	return (_peers[peer_id] as OLPeerRec).name if _peers.has(peer_id) else ""
+
+
+## The remote address of a peer's link, "" until the transport knows it.
+func _link_address(peer_id: int) -> String:
+	if _addrs.has(peer_id):
+		return _addrs[peer_id]
+	var r: OLPeerRec = _peers.get(peer_id)
+	return r.link.remote_address if r != null and r.link != null else ""
+
+
+func _set_removal(info: Dictionary) -> void:
+	if removal.is_empty():
+		removal = info
+
+
+## Host: tells the hub the banned player ids, when the hub understands `bans`.
+func _send_bans(ids: Array) -> void:
+	if _c.features.has("room"):
+		_c.send_signaling(OneLobbySignaling.bans(ids))
+
+
+## The one place that sends `kick` with a code and a reason and removes the peer locally (the room's kick, ban and deny).
+func _remove_peer_with(peer_id: int, ban: bool, code: String, reason: String) -> void:
+	var text := reason
+	while text.to_utf16_buffer().size() / 2 > 120:
+		text = text.substr(0, text.length() - 1)
+	_c.send_signaling(OneLobbySignaling.kick(peer_id, ban, 0, text, code))
+	if _peers.has(peer_id):
+		_drop_peer(_peers[peer_id], "kicked" if ban else "disconnected", true)
+
+
+## Host: reads each link's remote address once it is known (a banned address is removed at once).
+func _poll_addresses(now: int) -> void:
+	if not is_host or now - _last_addr_poll_ms < ADDR_POLL_MS:
+		return
+	_last_addr_poll_ms = now
+	for r: OLPeerRec in _peers.values().duplicate():
+		if r.id == local_peer_id or _addrs.has(r.id) or r.link == null or r.link.remote_address == "":
+			continue
+		_addrs[r.id] = r.link.remote_address
+		room._on_link_address(r.id, r.link.remote_address)
+		if _closed:
+			return
 
 
 # ---- sync helpers (chat, pause and lockstep use these) -------------------------------------------------------------
@@ -1069,6 +1217,9 @@ func _handle_sync(rec: OLPeerRec, m: Dictionary) -> bool:
 			chat._handle(rec.id, int(m["route"]), m)
 		"pause_request", "pause_state", "pause_refuse":
 			pause._handle(rec.id, m)
+		"room":
+			if not is_host or rec.hello: # a host ignores a room frame from a peer that has not said hi
+				room._handle_frame(rec.id, m["body"])
 		_:
 			return false
 	return true
@@ -1115,7 +1266,7 @@ func _next_chunk_id() -> int:
 func _drop_for_lockstep(peer_id: int, reason: String) -> void:
 	_c.send_signaling(OneLobbySignaling.kick(peer_id, false, 0, reason))
 	if _peers.has(peer_id):
-		_drop_peer(_peers[peer_id], reason) # the host closes that connection at once
+		_drop_peer(_peers[peer_id], reason, false, true) # the host closes that connection at once
 
 
 # ---- teardown ------------------------------------------------------------------------------------------------------
@@ -1129,6 +1280,7 @@ func _end(reason: String) -> void:
 
 func _close() -> void:
 	_closed = true
+	room._close()
 	lockstep._stop()
 	chat._detach()
 	pause._detach()
