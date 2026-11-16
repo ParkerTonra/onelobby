@@ -19,70 +19,6 @@ namespace OneLobby.Tests
         }
     }
 
-    /// <summary>An in-memory UDP network: sends to 127.0.0.1:port reach the socket bound there; broadcasts go nowhere. No OS socket exists.</summary>
-    internal sealed class FakeLanNet
-    {
-        private readonly object _lock = new object();
-        private readonly Dictionary<int, Sock> _bound = new Dictionary<int, Sock>();
-        private int _next = 50000;
-        public int Created;
-        public readonly List<string> Sent = new List<string>();
-        public Func<ILanUdp> Factory => () => { Interlocked.Increment(ref Created); return new Sock(this); };
-        public int BoundCount { get { lock (_lock) return _bound.Count; } }
-
-        private sealed class Sock : ILanUdp
-        {
-            private readonly FakeLanNet _net;
-            private readonly ConcurrentQueue<(byte[] Data, IPAddress From, int Port)> _in = new ConcurrentQueue<(byte[], IPAddress, int)>();
-            private int _port;
-            private volatile bool _closed;
-            public Sock(FakeLanNet net) { _net = net; }
-
-            public int Bind(IPAddress address, int port, bool broadcast)
-            {
-                lock (_net._lock)
-                {
-                    if (port == 0) port = _net._next++;
-                    if (_net._bound.ContainsKey(port)) throw new SocketException((int)SocketError.AddressAlreadyInUse);
-                    _net._bound[port] = this;
-                    _port = port;
-                    return port;
-                }
-            }
-
-            public void Send(byte[] data, IPAddress to, int port)
-            {
-                if (_closed) return;
-                lock (_net._lock)
-                {
-                    _net.Sent.Add(to + ":" + port);
-                    if (IPAddress.IsLoopback(to) && _net._bound.TryGetValue(port, out var peer) && !peer._closed)
-                        peer._in.Enqueue((data, IPAddress.Loopback, _port));
-                }
-            }
-
-            public bool TryReceive(int waitMs, out byte[] data, out IPAddress from, out int fromPort)
-            {
-                var until = Environment.TickCount64 + waitMs;
-                do
-                {
-                    if (_closed) break;
-                    if (_in.TryDequeue(out var d)) { data = d.Data; from = d.From; fromPort = d.Port; return true; }
-                    if (waitMs > 0) Thread.Sleep(1);
-                } while (Environment.TickCount64 < until);
-                data = Array.Empty<byte>(); from = IPAddress.None; fromPort = 0;
-                return false;
-            }
-
-            public void Dispose()
-            {
-                if (_closed) return;
-                _closed = true;
-                lock (_net._lock) if (_port != 0 && _net._bound.TryGetValue(_port, out var s) && s == this) _net._bound.Remove(_port);
-            }
-        }
-    }
-
     public class LanDiscoveryTests
     {
         private static readonly JsonDocument V = Spec.Load("vectors/lan-discovery.json");
@@ -239,9 +175,9 @@ namespace OneLobby.Tests
 
         private sealed class Clock { public long Now = 1000; public Func<long> Fn => () => Now; }
 
-        private static (FakeLanNet net, LanHost host, LanFinder finder, Clock clock, List<string> hostLog) Pair(Func<LanHostInfo?> info, string hostGame = "g", string hostVersion = "1", string finderGame = "g", string finderVersion = "1")
+        private static (InMemoryLanNet net, LanHost host, LanFinder finder, Clock clock, List<string> hostLog) Pair(Func<LanHostInfo?> info, string hostGame = "g", string hostVersion = "1", string finderGame = "g", string finderVersion = "1")
         {
-            var net = new FakeLanNet();
+            var net = new InMemoryLanNet();
             var log = new List<string>();
             var host = new LanHost(hostGame, hostVersion, info, 47840, IPAddress.Loopback, net.Factory, log.Add);
             Assert.True(host.Start());
@@ -332,7 +268,7 @@ namespace OneLobby.Tests
         [Fact]
         public void TheTakenPortCaseTheSecondHostGoesOnWithoutLanDiscoveryAndSaysWhy()
         {
-            var net = new FakeLanNet();
+            var net = new InMemoryLanNet();
             var a = new LanHost("g", "1", () => Info(), 47840, IPAddress.Loopback, net.Factory);
             Assert.True(a.Start());
             var log = new List<string>();
@@ -346,7 +282,7 @@ namespace OneLobby.Tests
         [Fact]
         public void TheSwitchOffOpensNoSocket()
         {
-            var net = new FakeLanNet();
+            var net = new InMemoryLanNet();
             // a finder from a blueprint with hosting.lan false stays off and never asks the factory for a socket
             var off = Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""dotnet""}");
             Assert.False(off.Hosting.Lan);

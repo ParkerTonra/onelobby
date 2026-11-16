@@ -749,5 +749,194 @@ namespace OneLobby.Tests
             w.Run(m.LeaveAsync());
             Assert.Equal(m.CheckVerdict, m.StartCheckLine);
         }
+
+        // ---- LAN games: the Browse screen's second list, on the in-memory UDP network (no OS socket) -----------------------------
+
+        private static string Bp(bool server, bool lan) =>
+            @"{""game"":{""id"":""menu-test""},""hosting"":{""direct"":true,""server"":" + (server ? "true" : "false") + @",""lan"":" + (lan ? "true" : "false") + @",""lobbyServer"":""ws://127.0.0.1:1/ws""},""diagnostics"":{""checkOnOpen"":false}}";
+
+        private sealed class LanKit
+        {
+            public InMemoryLanNet Net = new InMemoryLanNet();
+            public long Clock = 1000;
+            public readonly List<LanFinder> Made = new();
+            public P P = null!;
+            public MenuModel M => P.M;
+        }
+
+        private static LanKit LanKit_(World w, bool server, bool lan)
+        {
+            var k = new LanKit { P = w.FromBlueprint(Bp(server, lan)) };
+            k.M.NowMs = () => k.Clock;
+            k.M.FinderFactory = o =>
+            {
+                o.Udp = k.Net.Factory; o.NowMs = () => k.Clock;
+                var f = k.P.Client.CreateLanFinder(o);
+                k.Made.Add(f);
+                return f;
+            };
+            return k;
+        }
+
+        private LanHost HostOnNet(LanKit k, Func<LanHostInfo?> info, string version = "1")
+        {
+            var host = new LanHost("menu-test", version, info, 47840, System.Net.IPAddress.Loopback, k.Net.Factory);
+            Assert.True(host.Start());
+            return host;
+        }
+
+        private static bool WaitFor(Func<bool> cond, int ms = 3000)
+        {
+            var until = Environment.TickCount64 + ms;
+            while (!cond()) { if (Environment.TickCount64 > until) return false; System.Threading.Thread.Sleep(5); }
+            return true;
+        }
+
+        [Fact]
+        public void TheLanListIsAvailableByTheBlueprintAndTheSwitchInAllFourCombinations()
+        {
+            var w = new World();
+            foreach (var (server, lan, online, lanOn, tabs, shown) in new[]
+            {
+                (false, false, false, false, false, "online"), (true, false, true, false, false, "online"),
+                (false, true, false, true, false, "lan"), (true, true, true, true, true, "online"),
+            })
+            {
+                var k = LanKit_(w, server, lan);
+                Assert.Equal((online, lanOn, online || lanOn, tabs), (k.M.CanBrowse(), k.M.LanAvailable, k.M.BrowseAvailable, k.M.BrowseTabsShown));
+                if (online || lanOn) Assert.Equal(shown, k.M.ShownList);
+                Assert.Empty(k.Made);
+            }
+            var plain = w.New("p");
+            plain.M.Route = MenuRoute.Direct;
+            Assert.False(plain.M.LanAvailable);
+            plain.M.Lan = true;
+            Assert.True(plain.M.LanAvailable && plain.M.BrowseAvailable && !plain.M.BrowseTabsShown && plain.M.ShownList == "lan");
+            plain.M.LanSupported = false;
+            Assert.False(plain.M.LanAvailable);
+        }
+
+        [Fact]
+        public void TheFinderExistsOnlyWhileTheLanListIsShownAndEveryExitStopsItOnce()
+        {
+            var w = new World();
+            var k = LanKit_(w, false, true);
+            var m = k.M;
+            m.LocalOnly = true;
+            Assert.Equal("LAN games", m.BrowseTitle);
+            Assert.Equal((false, 0, 0), (m.FinderRunning, k.Net.Created, k.Net.BoundCount));
+            w.Run(m.OpenBrowseAsync());
+            Assert.Equal((true, 1, 1, MenuScreen.Browse), (m.FinderRunning, k.Made.Count, k.Net.BoundCount, m.Screen));
+            Assert.Equal(new[] { "127.0.0.1:47840" }, k.Net.Sent.Distinct().ToArray()); // --local: the only target
+            Assert.Equal("Looking for games on your network...", m.LanStatusText());
+            k.Clock += 2900; m.Pump();
+            Assert.Equal("Looking for games on your network...", m.LanStatusText());
+            k.Clock += 100;
+            Assert.StartsWith("No games found on your network.", m.LanStatusText());
+            Assert.Contains("address", m.LanStatusText());
+            m.Back();
+            Assert.Equal((false, 0, MenuScreen.Start), (m.FinderRunning, k.Net.BoundCount, m.Screen));
+            // each other way out
+            w.Run(m.OpenBrowseAsync()); Assert.Equal(1, k.Net.BoundCount);
+            m.Shutdown(); Assert.Equal((false, 0, MenuScreen.Browse), (m.FinderRunning, k.Net.BoundCount, m.Screen));
+            m.Shutdown(); Assert.Equal(0, k.Net.BoundCount);
+            m.Resume(); Assert.Equal((true, 1), (m.FinderRunning, k.Net.BoundCount));
+            m.Back(); Assert.Equal(0, k.Net.BoundCount);
+            w.Run(m.OpenBrowseAsync());
+            w.Run(m.LeaveAsync()); // with no lobby this only shows the Start screen: leaving Browse stops the finder
+            Assert.Equal((false, 0), (m.FinderRunning, k.Net.BoundCount));
+            Assert.Equal(k.Made.Count, k.Net.Created);
+            Assert.Equal(0, k.Net.BoundCount);
+        }
+
+        [Fact]
+        public void RowsComeFromTheFinderInItsOrderWithTheOtherVersionRowGreyedAndAJoinGoesThroughTheJoinPath()
+        {
+            var w = new World();
+            var k = LanKit_(w, false, true);
+            var m = k.M;
+            m.LocalOnly = true;
+            var joined = new List<(string, string?)>();
+            m.JoinDirect = (text, pw) => { joined.Add((text, pw)); return Task.FromException<Lobby>(new OneLobbyException("bad_address", "test: no lobby")); };
+            using var a = HostOnNet(k, () => new LanHostInfo("Sam's game", "Sam", 2, 4, true, 47811));
+            w.Run(m.OpenBrowseAsync());
+            Assert.True(WaitFor(() => { k.Clock += 10; m.Pump(); return m.LanRows().Count == 1; }));
+            var r = m.LanRows()[0];
+            Assert.Equal(("127.0.0.1", 47811, "Sam's game (Sam) 2/4", "Needs a password", true, ""), (r.Address, r.Port, r.Text, r.Lock, r.CanJoin, r.Note));
+            Assert.Equal("", m.LanStatusText());
+            m.SetLanPassword("pw1");
+            w.Run(m.JoinLanAsync(0));
+            Assert.Equal(new[] { ("127.0.0.1:47811", (string?)"pw1") }, joined.ToArray());
+            Assert.False(m.FinderRunning);
+            Assert.Equal(1, k.Net.BoundCount); // the host's own socket only: the finder's is closed
+            Assert.NotEqual(MenuScreen.Browse, m.Screen);
+        }
+
+        [Fact]
+        public void ARowOfAnotherVersionStaysListedCannotBeJoinedAndSaysWhy()
+        {
+            var w = new World();
+            var k = LanKit_(w, false, true);
+            var m = k.M;
+            m.LocalOnly = true;
+            var joins = 0;
+            m.JoinDirect = (_, _) => { joins++; return Task.FromException<Lobby>(new OneLobbyException("x", "no")); };
+            using var host = HostOnNet(k, () => new LanHostInfo("<b>Old</b>", "Bob", 1, 4, false, 47812), version: "0");
+            w.Run(m.OpenBrowseAsync());
+            Assert.True(WaitFor(() => { k.Clock += 10; m.Pump(); return m.LanRows().Count == 1; }));
+            var r = m.LanRows()[0];
+            Assert.Equal(("<b>Old</b> (Bob) 1/4", false, "You and the host are running different versions of the game."), (r.Text, r.CanJoin, r.Note));
+            w.Run(m.JoinLanAsync(0));
+            Assert.Equal((0, MenuScreen.Browse, true), (joins, m.Screen, m.FinderRunning));
+        }
+
+        [Fact]
+        public void TheTabsStartAndStopTheFinderOnceEachAndBrowseOpensOnTheTabUsedLast()
+        {
+            var w = new World();
+            var k = LanKit_(w, true, true);
+            var m = k.M;
+            Assert.Equal("Games to join", m.BrowseTitle);
+            w.Run(m.OpenBrowseAsync());
+            Assert.Equal(("online", 0), (m.ShownList, k.Made.Count));
+            w.Run(m.SetBrowseTabAsync("lan"));
+            Assert.Equal(("lan", 1, 1), (m.ShownList, k.Made.Count, k.Net.BoundCount));
+            w.Run(m.SetBrowseTabAsync("lan"));
+            Assert.Single(k.Made);
+            w.Run(m.SetBrowseTabAsync("online"));
+            Assert.Equal((0, false), (k.Net.BoundCount, m.FinderRunning));
+            w.Run(m.SetBrowseTabAsync("lan"));
+            m.Back();
+            Assert.Equal((0, MenuScreen.Start), (k.Net.BoundCount, m.Screen));
+            w.Run(m.OpenBrowseAsync());
+            Assert.Equal(("lan", 3, 1), (m.ShownList, k.Made.Count, k.Net.BoundCount));
+            m.Shutdown();
+            Assert.Equal(0, k.Net.BoundCount);
+        }
+
+        [Fact]
+        public void AFinderThatCannotOpenItsSocketOrIsOffHasItsOwnSentence()
+        {
+            var w = new World();
+            var k = LanKit_(w, false, true);
+            var m = k.M;
+            m.LocalOnly = true;
+            // a socket that cannot be opened
+            m.FinderFactory = o => { o.Udp = () => new ThrowingUdp(); o.NowMs = () => k.Clock; return k.P.Client.CreateLanFinder(o); };
+            w.Run(m.OpenBrowseAsync());
+            Assert.Equal("Couldn't look for games on your network. Ask the host for their address and type it in the join box.", m.LanStatusText());
+            m.Back();
+            m.FinderFactory = o => { o.Enabled = false; return k.P.Client.CreateLanFinder(o); };
+            w.Run(m.OpenBrowseAsync());
+            Assert.Equal("LAN games are switched off in this game.", m.LanStatusText());
+        }
+
+        private sealed class ThrowingUdp : ILanUdp
+        {
+            public int Bind(System.Net.IPAddress address, int port, bool broadcast) => throw new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.AccessDenied);
+            public void Send(byte[] data, System.Net.IPAddress to, int port) { }
+            public bool TryReceive(int waitMs, out byte[] data, out System.Net.IPAddress from, out int fromPort) { data = Array.Empty<byte>(); from = System.Net.IPAddress.None; fromPort = 0; return false; }
+            public void Dispose() { }
+        }
     }
 }

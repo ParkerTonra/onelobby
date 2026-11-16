@@ -39,6 +39,9 @@ namespace OneLobby
     /// <summary>A line of the lobby's chat log, with the sender's name.</summary>
     public sealed record MenuChatLine(int PeerId, string Name, string Text);
 
+    /// <summary>One LAN game row. <c>Text</c> is plain text (never markup); <c>Lock</c> the password mark ("" when none); <c>Note</c> says why <c>CanJoin</c> is false.</summary>
+    public sealed record MenuLanRow(string Address, int Port, string Name, string HostName, int Players, int MaxPlayers, bool HasPassword, bool SameVersion, string Text, string Lock, bool CanJoin, string Note);
+
     /// <summary>The settings the room layer lets the host change; <c>AutoStart</c> is <c>off</c>, <c>all_ready</c> or <c>players</c>.</summary>
     public sealed record MenuLobbySettings(string AutoStart, int MinPlayers, int CountdownSeconds, bool LateJoin);
 
@@ -65,6 +68,10 @@ namespace OneLobby
         private bool _gameStarted;
         private bool _direct;
         private LobbyError? _lastError;
+        private LanFinder? _finder;
+        private long _lanEmptySince = -1;
+        private string _lanStatusShown = "";
+        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
 
         public MenuModel(LobbyClient client)
         {
@@ -121,6 +128,18 @@ namespace OneLobby
         /// <summary>Runs the connection check: gets <see cref="CheckOptions"/>. Default: the client's own.</summary>
         public Func<CheckOptions?, Task<CheckResult>>? CheckRunner { get; set; }
 
+        /// <summary>LAN games for a game with no blueprint (with one, <c>hosting.lan</c> decides): the Browse screen shows a "LAN games" list.</summary>
+        public bool Lan { get; set; }
+
+        /// <summary>False where the client cannot open a UDP socket (a web player): there is no LAN list.</summary>
+        public bool LanSupported { get; set; } = true;
+
+        /// <summary>Makes the finder (default: <c>client.CreateLanFinder(options)</c>). A test passes one over an in-memory network.</summary>
+        public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
+
+        /// <summary>The clock for "nothing found after 3 seconds" (default: a stopwatch).</summary>
+        public Func<long>? NowMs { get; set; }
+
         public CheckOptions? CheckOptions { get; set; }
 
         // ---- what the screens show ----------------------------------------------------------------------------------------
@@ -139,6 +158,9 @@ namespace OneLobby
         public IReadOnlyList<MenuRequest> Requests { get; private set; } = Array.Empty<MenuRequest>();
         public IReadOnlyList<LobbySummary> BrowseItems { get; private set; } = Array.Empty<LobbySummary>();
         public string BrowseStatus { get; private set; } = "";
+        /// <summary>"online" or "lan": the list the Browse screen opened on last in this run (first time: Online).</summary>
+        public string BrowseTab { get; private set; } = "online";
+        public string LanPasswordText { get; private set; } = "";
         public string SettingsNote { get; private set; } = "";
         public string RelayNote { get; private set; } = "";
         public string ServerText { get; private set; } = "";
@@ -182,6 +204,18 @@ namespace OneLobby
         /// <summary>Browse needs a lobby server address (and a blueprint that uses one).</summary>
         public bool CanBrowse() =>
             (_client.Blueprint == null || _client.Blueprint.Hosting.Server) && Route != MenuRoute.Direct && _client.EffectiveServer.Length > 0;
+
+        /// <summary>True when this game has LAN discovery on (blueprint <c>hosting.lan</c>; with no blueprint, <see cref="Lan"/>) and the client can open UDP.</summary>
+        public bool LanAvailable => LanSupported && (_client.Blueprint != null ? _client.Blueprint.Hosting.Lan : Lan);
+
+        /// <summary>The Browse button shows when the lobby server list or the LAN list is available.</summary>
+        public bool BrowseAvailable => CanBrowse() || LanAvailable;
+
+        /// <summary>True when the Browse screen shows the two-button tab bar (both lists are available).</summary>
+        public bool BrowseTabsShown => CanBrowse() && LanAvailable;
+
+        /// <summary>"online" or "lan": the list the Browse screen shows now.</summary>
+        public string ShownList => LanAvailable && (!CanBrowse() || BrowseTab == "lan") ? "lan" : "online";
 
         public bool ConnectionCheckShown => _client.Blueprint == null || _client.Blueprint.Diagnostics.ShowConnectionCheck;
 
@@ -961,13 +995,38 @@ namespace OneLobby
 
         public async Task OpenBrowseAsync()
         {
-            if (Screen != MenuScreen.Start || !CanBrowse()) return;
+            if (Screen != MenuScreen.Start || !BrowseAvailable) return;
             SetScreen(MenuScreen.Browse);
-            await RefreshBrowseAsync().ConfigureAwait(true);
+            await ShowListAsync().ConfigureAwait(true);
         }
 
+        /// <summary>Starts what the shown list needs: the LAN finder for the LAN list (and only then), the lobby server query for the other.</summary>
+        private async Task ShowListAsync()
+        {
+            if (ShownList == "lan") StartLan();
+            else
+            {
+                StopLan();
+                await RefreshBrowseAsync().ConfigureAwait(true);
+            }
+        }
+
+        /// <summary>Picks a tab ("online" or "lan") on the Browse screen. Leaving the LAN tab closes the finder; opening it starts one.</summary>
+        public async Task SetBrowseTabAsync(string tab)
+        {
+            if (Screen != MenuScreen.Browse || !BrowseTabsShown || (tab != "online" && tab != "lan") || tab == BrowseTab) return;
+            BrowseTab = tab;
+            await ShowListAsync().ConfigureAwait(true);
+        }
+
+        /// <summary>Refresh: asks the server again, or asks the LAN now.</summary>
         public async Task RefreshBrowseAsync()
         {
+            if (ShownList == "lan")
+            {
+                _finder?.AskNow();
+                return;
+            }
             BrowseStatus = MenuText.T("browse_loading");
             BrowseItems = Array.Empty<LobbySummary>();
             Changed?.Invoke();
@@ -975,7 +1034,7 @@ namespace OneLobby
             string failed = "";
             try { items = await _client.ListAsync().ConfigureAwait(true); }
             catch (Exception ex) { failed = Friendly.DescribeError(ex).Message; }
-            if (Screen != MenuScreen.Browse) return;
+            if (Screen != MenuScreen.Browse || ShownList != "online") return;
             BrowseStatus = failed.Length > 0 ? failed : items.Count > 0 ? "" : MenuText.T("browse_empty");
             BrowseItems = items;
             Changed?.Invoke();
@@ -993,9 +1052,119 @@ namespace OneLobby
             await JoinAsync().ConfigureAwait(true);
         }
 
+        // ---- LAN games --------------------------------------------------------------------------------------------------
+
+        /// <summary>How long the LAN list says "looking" before it says nothing was found.</summary>
+        public const int LanEmptyAfterMs = 3000;
+
+        /// <summary>True while a finder exists (the LAN list is the shown list). A test counts this.</summary>
+        public bool FinderRunning => _finder != null;
+
+        private long Now => NowMs != null ? NowMs() : _clock.ElapsedMilliseconds;
+
+        public void SetLanPassword(string text) => LanPasswordText = text.Length > 64 ? text.Substring(0, 64) : text;
+
+        private void StartLan()
+        {
+            if (_finder != null) return;
+            var o = new LanFinderOptions();
+            if (LocalOnly) o.Targets = new[] { "127.0.0.1" }; // --local: nothing is broadcast
+            _finder = FinderFactory != null ? FinderFactory(o) : _client.CreateLanFinder(o);
+            _finder.Changed += OnLanChanged;
+            _lanEmptySince = Now;
+            _lanStatusShown = "";
+            _finder.Start();
+            Changed?.Invoke();
+        }
+
+        /// <summary>Closes the finder's socket and drops it. Safe to call when there is none.</summary>
+        private void StopLan()
+        {
+            var f = _finder;
+            if (f == null) return;
+            _finder = null;
+            f.Changed -= OnLanChanged;
+            f.Stop();
+            f.Dispose();
+        }
+
+        /// <summary>For the view: the menu left the tree, the application is quitting, or the menu was hidden. The finder goes; the screen stays.</summary>
+        public void Shutdown() => StopLan();
+
+        /// <summary>For the view: the menu is visible again; a LAN list that is on screen looks again.</summary>
+        public void Resume()
+        {
+            if (Screen == MenuScreen.Browse && ShownList == "lan") StartLan();
+        }
+
+        private void OnLanChanged(IReadOnlyList<LanGame> games)
+        {
+            if (_finder == null) return;
+            if (games.Count == 0) { if (_lanEmptySince < 0) _lanEmptySince = Now; }
+            else _lanEmptySince = -1;
+            Changed?.Invoke();
+        }
+
+        /// <summary>For the view, every frame (any screen): reads the finder's answers while the LAN list is up and lets "nothing found" appear after 3 seconds.</summary>
+        public void Pump()
+        {
+            var f = _finder;
+            if (f == null) return;
+            f.Pump();
+            if (_finder == null) return;
+            var t = LanStatusText();
+            if (t != _lanStatusShown) { _lanStatusShown = t; Changed?.Invoke(); }
+        }
+
+        /// <summary>The LAN list's rows, in the finder's order (first seen first; not re-sorted).</summary>
+        public IReadOnlyList<MenuLanRow> LanRows()
+        {
+            if (_finder == null) return Array.Empty<MenuLanRow>();
+            var rows = new List<MenuLanRow>();
+            foreach (var g in _finder.Games)
+                rows.Add(new MenuLanRow(g.Address, g.Port, g.Name, g.HostName, g.Players, g.MaxPlayers, g.HasPassword, g.SameVersion,
+                    MenuText.T("lan_row", g.Name, g.HostName, g.Players, g.MaxPlayers),
+                    g.HasPassword ? MenuText.T("lan_locked") : "",
+                    g.SameVersion,
+                    g.SameVersion ? "" : Friendly.DescribeError("version_mismatch").Message));
+            return rows;
+        }
+
+        /// <summary>The sentence under the LAN list's title: still looking, nothing found (after 3 seconds), the socket failed, or LAN switched off. "" with rows.</summary>
+        public string LanStatusText()
+        {
+            var f = _finder;
+            if (f == null) return "";
+            if (f.Status == LanFinderStatus.SocketFailed) return MenuText.T("lan_socket_failed");
+            if (f.Status == LanFinderStatus.Off) return MenuText.T("lan_off");
+            if (f.Games.Count > 0) return "";
+            return _lanEmptySince >= 0 && Now - _lanEmptySince >= LanEmptyAfterMs ? MenuText.T("lan_empty") : MenuText.T("lan_looking");
+        }
+
+        /// <summary>The status line of the shown list.</summary>
+        public string ListStatus => ShownList == "lan" ? LanStatusText() : BrowseStatus;
+
+        /// <summary>The title of the Browse screen: it says which list when only one is available.</summary>
+        public string BrowseTitle => BrowseTabsShown ? MenuText.T("browse_title") : MenuText.T(ShownList == "lan" ? "browse_title_lan" : "browse_title_online");
+
+        /// <summary>Joins row <paramref name="index"/> of the LAN list through the join path, as if its "address:port" had been typed. The finder stops with the screen.</summary>
+        public async Task JoinLanAsync(int index)
+        {
+            if (Screen != MenuScreen.Browse || ShownList != "lan") return;
+            var rows = LanRows();
+            if (index < 0 || index >= rows.Count || !rows[index].CanJoin) return;
+            var r = rows[index];
+            var pw = LanPasswordText;
+            SetScreen(MenuScreen.Start);
+            SetJoinText(r.Address + ":" + r.Port);
+            SetPassword(pw);
+            await JoinAsync().ConfigureAwait(true);
+        }
+
         private void SetScreen(MenuScreen s)
         {
             Screen = s;
+            if (s != MenuScreen.Browse) StopLan(); // the finder lives only while the LAN list is on screen
             Changed?.Invoke();
         }
     }
