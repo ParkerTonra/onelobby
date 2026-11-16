@@ -479,6 +479,59 @@ namespace OneLobby.Unity.PlayTests
         }
 
         [UnityTest]
+        public IEnumerator Spawner_ASpectatorWhoBecomesAPlayerGetsACharacter()
+        {
+            var host = new Peer { Name = "host" };
+            host.Client = new LobbyClient(Config("host"), _net.CreateTransport());
+            _peers.Add(host);
+            var t = host.Client.HostAsync(new LobbyOptions("room", 8) { Room = new RoomOptions { Spectators = 2 } });
+            yield return Wait(t);
+            host.Lobby = t.Result;
+            BeginSpawner(host, null);
+            var s = new Peer { Name = "spectator" };
+            s.Client = new LobbyClient(Config("spectator"), _net.CreateTransport());
+            _peers.Add(s);
+            var tj = s.Client.JoinAsync(host.Lobby.Code, new RoomJoinOptions { Role = RoomRole.Spectator });
+            yield return Wait(tj);
+            s.Lobby = tj.Result;
+            BeginSpawner(s, null);
+            yield return Frames(60);
+            Check(s.Spawner.CharacterOf(s.Id) == null && host.Spawner.CharacterOf(s.Id) == null, "no character while it is a spectator");
+            s.Lobby.Room.SetRole(RoomRole.Player);
+            yield return Frames(120);
+            Report("spectator to player: roster role " + s.Lobby.Room.Player(s.Id)?.Role + ", own character " + (s.Spawner.CharacterOf(s.Id) != null) + ", host's copy " + (host.Spawner.CharacterOf(s.Id) != null));
+            Check(s.Spawner.CharacterOf(s.Id) != null && s.Spawned.Exists(x => x.Peer == s.Id && x.Local), "its own character is made, marked local");
+            Check(host.Spawner.CharacterOf(s.Id) != null, "and the host has a copy of it");
+        }
+
+        [UnityTest]
+        public IEnumerator HostAuthority_ACharactersOwnStepSurvivesASpawnerWithoutOne()
+        {
+            var p = new Peer { Name = "host" };
+            p.Client = new LobbyClient(Config("host"), _net.CreateTransport());
+            _peers.Add(p);
+            var t = p.Client.HostAsync(new LobbyOptions("room", 4));
+            yield return Wait(t);
+            p.Lobby = t.Result;
+            PlayerStepFunc own = (st, i, dt) => st;
+            var go = new GameObject("spawner own step");
+            _objects.Add(go);
+            p.Spawner = go.AddComponent<OneLobbyNetPlayerSpawner>();
+            p.Spawner.Factory = peer =>
+            {
+                var c = MakeCharacter(peer);
+                c.GetComponentInChildren<OneLobbyNetPlayer>(true).Step = own; // what a character's own Awake or prefab setup does
+                return c;
+            };
+            p.Spawner.Begin(p.Lobby, null, new NetPlayersOptions { Authority = PlayerAuthority.Host });
+            yield return Frames(20);
+            var np = p.Spawner.CharacterOf(p.Lobby.LocalPeerId)!.GetComponentInChildren<OneLobbyNetPlayer>(true);
+            Check(np.Step == own, "the character keeps its own step");
+            Check(p.Spawner.Players!.Step == own, "and the layer got it");
+            Check(!_logged.Exists(l => l.StartsWith("Error", StringComparison.Ordinal) || l.StartsWith("Exception", StringComparison.Ordinal)), "no error: " + string.Join(" | ", _logged));
+        }
+
+        [UnityTest]
         public IEnumerator HostAuthority_SpawnerWithoutAStepLogsOneErrorAndNeverThrows()
         {
             var p = new Peer { Name = "host" };
@@ -488,12 +541,18 @@ namespace OneLobby.Unity.PlayTests
             yield return Wait(t);
             p.Lobby = t.Result;
             LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("give the component a Step"));
+            LogAssert.Expect(LogType.Exception, new System.Text.RegularExpressions.Regex("authority Host needs a step function"));
             BeginSpawner(p, new NetPlayersOptions { Authority = PlayerAuthority.Host });
             _logged.Clear();
             yield return Frames(60);
+            // the spawner pumps the layer itself (no workaround): the layer reports the missing step once and keeps working
             var bad = _logged.FindAll(l => l.StartsWith("Error", StringComparison.Ordinal) || l.StartsWith("Exception", StringComparison.Ordinal));
-            Check(bad.Count == 0, "no throw per frame: " + string.Join(" | ", bad));
+            var again = bad.FindAll(l => l.Contains("needs a step function"));
+            Check(again.Count == 1, "the layer reports the missing step once, not every frame: " + again.Count + " of " + string.Join(" | ", bad));
+            yield return Frames(20);
+            Check(_logged.FindAll(l => l.Contains("needs a step function")).Count == 1, "and still once after 20 more frames");
             // a step arrives later: the layer runs
+            _logged.Clear();
             p.Spawner.Players!.Step = (st, i, dt) => st;
             yield return Frames(30);
             Check(!_logged.Exists(l => l.StartsWith("Exception", StringComparison.Ordinal) || l.StartsWith("Error", StringComparison.Ordinal)), "and runs once a Step is set");
@@ -593,9 +652,10 @@ namespace OneLobby.Unity.PlayTests
             BeginSpawner(j, null);
             Check(j.Spawner.CharacterOf(j.Id) != null, "a second Begin on the same lobby works");
             var wait = 0;
-            while (wait < 600 && j.Spawner.CharacterOf(host.Id) == null) { Step(); wait++; yield return null; }
+            while (wait < 60 && j.Spawner.CharacterOf(host.Id) == null) { Step(); wait++; yield return null; }
             Report("a second layer on a lobby that is already playing saw the host's player after " + wait + " frames (" + wait * FrameMs + " ms)");
-            Check(j.Spawner.CharacterOf(host.Id) != null, "and sees the host again");
+            // a full snapshot answers the new layer's ack 0 at once (replication spec "Resync"): 198 ms measured, bound 300 ms (50% room)
+            Check(j.Spawner.CharacterOf(host.Id) != null && wait * FrameMs <= 300, "and sees the host again within 300 ms (" + wait * FrameMs + " ms)");
             var second = j.Layer;
             var tick2 = second.Session.LatestTick;
             Check(tick2 > 0, "the second session had snapshots");

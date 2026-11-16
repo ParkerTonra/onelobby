@@ -122,13 +122,8 @@ namespace OneLobby.Unity
         {
             var layer = _players;
             if (layer == null) return;
-            if (PumpLayer)
-            {
-                // authority "host" with no step: the layer would throw from Pump() every tick; the component has logged the one clear error,
-                // so only the lobby is pumped until a Step is set
-                if (layer.Authority == PlayerAuthority.Host && layer.Step == null) layer.Session.Lobby.Pump();
-                else layer.Pump();
-            }
+            // authority "host" with no step: the layer reports it once (one exception out of the Pump that first needed a step) and keeps pumping
+            if (PumpLayer) layer.Pump();
             // The roster says Player for a joiner's own peer when the join returns and Spectator a little later, and the layer never announces a
             // local spectator: look now and then, take the local character back when the roster says spectator, make it again when it says player.
             if (Time.frameCount % 8 == 0) CheckLocalRole(layer);
