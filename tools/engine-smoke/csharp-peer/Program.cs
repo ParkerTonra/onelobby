@@ -9,6 +9,7 @@ using OneLobby;
 using OneLobby.DataChannel;
 using OneLobby.Direct;
 using OneLobby.Direct.Nostr;
+using OneLobby.Replication;
 
 // C# engine peer for tools/engine-smoke (its README has the shared peer protocol and flags). OneLobby.Core + OneLobby.Direct over
 // DataChannelTransport (libdatachannel), the transport the Unity package uses. Prints "RESULT PASS ..." / "RESULT FAIL ...".
@@ -71,6 +72,11 @@ internal static class Program
         if (A.GetValueOrDefault("scenario") == "room")
         {
             try { return role == "host" ? RoomHost(client, route, limitMs) : RoomJoin(client, route, nostr, limitMs); }
+            finally { client.DisposeAsync().AsTask().Wait(1000); }
+        }
+        if (A.GetValueOrDefault("scenario") == "replication")
+        {
+            try { return role == "host" ? ReplHost(client, route, limitMs) : ReplJoin(client, route, nostr, limitMs); }
             finally { client.DisposeAsync().AsTask().Wait(1000); }
         }
         try { return role == "host" ? Host(client, route, joiners, rounds, turn, nostr, limitMs) : Join(client, route, rounds, turn, nostr, limitMs); }
@@ -152,6 +158,134 @@ internal static class Program
         if (!Wait(() => removed != null, lobby.Pump, limitMs)) return Finish(false, "no kick");
         var ok = removed!.Code == "smoke_kick" && removed.Reason == "Smoke test: bye";
         return Finish(ok, ok ? "room joiner" : "removal was " + removed.Code + "|" + removed.Reason);
+    }
+
+    // ---- replication scenario (--scenario=replication): the same flow and numbers as js-peer.mjs (see the comment there) ------------------
+    private sealed class ReplState : IReplicatedEntity
+    {
+        public float X, Z, Yaw; public int Hp;
+        public void Write(NetWriter w) { w.WriteQuantized(X, -256, 256, 16); w.WriteQuantized(Z, -256, 256, 16); w.WriteAngle(Yaw, 9); w.WriteBits((uint)Hp, 7); }
+    }
+
+    private struct ReplView : IReplicatedState<ReplView>
+    {
+        public float X, Z, Yaw; public uint Hp;
+        public void Read(NetReader r) { X = r.ReadQuantized(-256, 256, 16); Z = r.ReadQuantized(-256, 256, 16); Yaw = r.ReadAngle(9); Hp = r.ReadBits(7); }
+        public ReplView Interpolate(in ReplView to, float t) => t < 0.5f ? this : to;
+    }
+
+    private static void E1(ReplState s, long t) { var T = (int)Math.Min(t, 60); s.X = -100f + 1.5f * T; s.Z = 20; s.Yaw = T * 7 % 360; s.Hp = 100 - T % 10; }
+    private static void E2(ReplState s, long t) { var T = (int)Math.Min(t, 60); s.X = 50f - 0.5f * T; s.Z = -20; s.Yaw = T * 3 % 360; s.Hp = 90; }
+
+    private static uint ReplHash(int owner, ReplState s)
+    {
+        var w = new NetWriter();
+        s.Write(w);
+        var h = 0x811c9dc5u;
+        foreach (var b in new byte[] { 1, 1, (byte)owner }.Concat(w.ToArray())) h = unchecked((h ^ b) * 16777619u);
+        return h;
+    }
+
+    private static int ReplHost(LobbyClient client, string route, int limitMs)
+    {
+        Lobby lobby;
+        string typed = "";
+        if (route == "server")
+        {
+            var t = client.HostAsync(new LobbyOptions("smoke", 4));
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+        }
+        else
+        {
+            var port = int.Parse(A["port"]);
+            var t = client.HostDirectAsync(new DirectHostOptions
+            {
+                Port = port, FallbackPorts = 0, BindAddress = System.Net.IPAddress.Loopback, PublicAddress = "127.0.0.1", OpenPort = false,
+                MaxPlayers = 4, Nostr = new NostrOptions { Enabled = false },
+            });
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+            typed = "127.0.0.1:" + port;
+        }
+        Say($"HOST_READY code={(route == "server" ? lobby.Code : typed)} typed={typed} ipcode=");
+        var ready = new HashSet<int>();
+        lobby.PeerReady += p => ready.Add(p.PeerId);
+        if (!Wait(() => ready.Count >= 1, lobby.Pump, limitMs)) return Finish(false, "no linked joiner");
+        var joiner = ready.First();
+        var rep = new ReplicationSession(lobby);
+        ReplState e1 = new(), e2 = new();
+        E1(e1, 0); E2(e2, 0);
+        int spawned = 0, despawned = 0, events = 0;
+        var bye = false;
+        var bad = "";
+        rep.Spawn(1, 0, e1); spawned++;
+        var id2 = rep.Spawn(2, joiner, e2); spawned++;
+        rep.EventReceived += (_, _, p) => { var s = Encoding.UTF8.GetString(p.Span); if (s == "hello-host") events++; else bad = "event " + s; };
+        rep.OtherMessage += (_, p, _) => { if (Encoding.UTF8.GetString(p.Span) == "bye") bye = true; };
+        var seqs = new List<uint>();
+        while (!(bye && rep.Clock.Tick >= 75 && events == 1))
+        {
+            rep.Pump();
+            while (rep.Clock.TryAdvance())
+            {
+                var t = rep.Clock.Tick;
+                E1(e1, t); E2(e2, t);
+                if (t == 10) rep.SendEvent(B("hello-client"), joiner, Channel.Reliable, 1);
+                if (t == 40) { rep.Despawn(id2); despawned++; }
+                if (rep.TryGetInput(joiner, out var f) && !f.Repeated)
+                {
+                    seqs.Add(f.Seq);
+                    if (f.Bytes.Length != 1 || f.Bytes.Span[0] != (byte)(f.Seq & 255)) bad = "input bytes of seq " + f.Seq;
+                }
+                rep.SendSnapshot();
+            }
+            Thread.Sleep(2);
+            if (Sw.ElapsedMilliseconds > limitMs) return Finish(false, $"stalled: bye {bye} tick {rep.Clock.Tick} events {events}");
+        }
+        var contiguous = seqs.Count >= 20 && Enumerable.Range(1, seqs.Count - 1).All(i => seqs[i] == seqs[i - 1] + 1);
+        Say($"REPL spawned={spawned} despawned={despawned} entities={rep.HostEntities.Count()} events={events} hash={ReplHash(0, e1)}");
+        var until = Sw.ElapsedMilliseconds + 300;
+        Wait(() => Sw.ElapsedMilliseconds > until, rep.Pump, limitMs);
+        var leave = lobby.LeaveAsync();
+        Wait(() => leave.IsCompleted, lobby.Pump, limitMs);
+        var ok = contiguous && bad == "" && rep.Stats.Malformed == 0;
+        return Finish(ok, ok ? "replication host" : $"inputs {seqs.Count} contiguous={contiguous} {bad} malformed={rep.Stats.Malformed}");
+    }
+
+    private static int ReplJoin(LobbyClient client, string route, NostrOptions nostr, int limitMs)
+    {
+        var code = A["code"];
+        Task<Lobby> t = route == "server" ? client.JoinAsync(code) : client.JoinDirectAsync(code, new JoinDirectOptions { Nostr = nostr });
+        if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "join timeout");
+        var lobby = t.GetAwaiter().GetResult();
+        if (!Wait(() => lobby.ReadyAsync.IsCompleted, lobby.Pump, limitMs) || !lobby.ReadyAsync.IsCompletedSuccessfully) return Finish(false, "link to host not open");
+        var rep = new ReplicationSession(lobby);
+        int spawned = 0, despawned = 0, events = 0;
+        var said = false;
+        rep.EntitySpawned += _ => { spawned++; if (!said) { said = true; rep.SendEvent(B("hello-host")); } };
+        rep.EntityDespawned += _ => despawned++;
+        rep.EventDelivered += e => { if (Encoding.UTF8.GetString(e.Payload.Span) == "hello-client" && e.Stream == 1 && e.Seq == 1) events++; };
+        while (!(spawned == 2 && despawned == 1 && events == 1 && rep.LatestTick >= 66 && rep.LastProcessedInput > 0))
+        {
+            rep.Pump();
+            while (rep.Clock.TryAdvance()) rep.SubmitInput(new[] { (byte)(rep.Clock.Tick & 255) });
+            Thread.Sleep(2);
+            if (Sw.ElapsedMilliseconds > limitMs) return Finish(false, $"stalled: spawned {spawned} despawned {despawned} events {events} latest {rep.LatestTick}");
+        }
+        rep.TryGetLatest<ReplView>(new NetId(1), out var latest, out _);
+        var s = new ReplState { X = latest.X, Z = latest.Z, Yaw = latest.Yaw, Hp = (int)latest.Hp };
+        Say($"REPL spawned={spawned} despawned={despawned} entities={rep.Entities.Count} events={events} hash={ReplHash(0, s)}");
+        lobby.Send(lobby.HostPeerId, B("bye"));
+        var until = Sw.ElapsedMilliseconds + 500;
+        Wait(() => Sw.ElapsedMilliseconds > until, rep.Pump, limitMs);
+        var flush = lobby.FlushAsync(TimeSpan.FromSeconds(1));
+        Wait(() => flush.IsCompleted, lobby.Pump, limitMs);
+        var leave = lobby.LeaveAsync();
+        Wait(() => leave.IsCompleted, lobby.Pump, limitMs);
+        var e1 = new ReplState(); E1(e1, 60);
+        var ok = rep.Stats.Malformed == 0 && rep.Entities.Count == 1 && Math.Abs(latest.X - e1.X) < 0.01f;
+        return Finish(ok, ok ? "replication joiner" : $"malformed={rep.Stats.Malformed} entities={rep.Entities.Count} x={latest.X}");
     }
 
     private static int Host(LobbyClient client, string route, int joiners, int rounds, IceServer? turn, NostrOptions nostr, int limitMs)

@@ -6,7 +6,7 @@ client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneL
 the server never sees game data.
 Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
-`OneLobby.Replication` (C#): delta snapshots, interpolation, inputs, events, prediction and lag-compensation helpers.
+`OneLobby.Replication` (C#) or `ReplicationSession` (JS, same wire): delta snapshots, interpolation, inputs, events (C# also has prediction and lag-compensation helpers).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
 
 ## API surface (same shape in both languages)
@@ -57,6 +57,10 @@ new PredictionSmoother().Correct(dx, dy, dz, sequence); smoother.Update(ms); smo
 ```
 
 ```ts
+// JS replication (docs/recipes/replication.md s.5): const rep = new ReplicationSession(lobby) on a mode "raw" lobby; rep.pump() every frame;
+//   host: rep.spawn(type, owner, replicated(schema, () => state)); while (rep.clock.tryAdvance()) { rep.tryGetInput(peer); rep.sendSnapshot(); }
+//   client: rep.submitInput(bytes) per tick; rep.trySample(id, schema); rep.on("entitySpawned" | "entityDespawned" | "eventDelivered" | "eventGap" | "hostLost", ...); rep.sendEvent(bytes, { to, stream })
+//   rep.trafficRates / rep.stats / rep.describe(bytes) / rep.packetLog = true; keyframe (reliable full snapshot) on join and every 5 s
 // JS: onelobby (no pump(): events come from the event loop)
 const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer, mode: "raw", displayName: "Ann" });
 const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public" });
@@ -314,7 +318,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
-- Replicated state (host-authoritative real-time: shooters, physics, AI), C#: `docs/recipes/replication.md`
+- Replicated state (host-authoritative real-time: shooters, physics, AI), C# and JS: `docs/recipes/replication.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

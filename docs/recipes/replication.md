@@ -1,6 +1,6 @@
 # Recipe: replicated state (host-authoritative real-time games)
 
-Use `OneLobby.Replication` when the host runs the real simulation (physics, AI, NavMesh: anything non-deterministic)
+Use `OneLobby.Replication` (C#) or `ReplicationSession` from `onelobby` (JS, section 5) when the host runs the real simulation (physics, AI, NavMesh: anything non-deterministic)
 and the other players see it: shooters, brawlers, co-op horde games. It sits on a `raw`-mode lobby and gives you a tick
 clock, entity spawn/despawn, delta snapshots (about 100 kbit/s per client for 50 moving enemies), interpolation, a
 redundant input stream, reliable events, local-player prediction and lag-compensated hitscan. No engine types: the same
@@ -257,6 +257,114 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 // Godot client: GlobalPosition = new Vector3(s.X, s.Y, s.Z); Rotation = new Vector3(0, Mathf.DegToRad(s.Yaw), 0);
 ```
 
+## 5. JavaScript (browser and Node)
+
+`onelobby` has the same layer: `ReplicationSession` over a `mode: "raw"` lobby, byte for byte compatible with the C#
+host and clients (same `spec/replication.md`, same vectors), so a browser client can join a .NET or Godot C# host and the
+other way round. The names are the C# ones in camelCase; ids are plain numbers; events are emitter events. Set
+`sync.mode: "replication"` in `onelobby.json` and `OneLobby.fromConfig` gives you the raw lobby to build it on (it works
+for every engine except `godot-gdscript`).
+
+A state schema is one object that writes (host), reads (client) and blends two snapshots (`lerp`):
+
+```ts compile file=replication-state.ts
+import { NetMath, type StateSchema } from "onelobby";
+
+export interface Alien { x: number; y: number; z: number; yaw: number; anim: number; hp: number }
+
+export const ALIEN = 7;
+
+export const alienSchema: StateSchema<Alien> = {
+  write(w, s) {
+    w.writeQuantized(s.x, -256, 256, 16);
+    w.writeQuantized(s.y, -32, 32, 12);
+    w.writeQuantized(s.z, -256, 256, 16);
+    w.writeAngle(s.yaw, 9);
+    w.writeBits(s.anim, 4);
+    w.writeBits(s.hp, 7);
+  },
+  read(r) {
+    return { x: r.readQuantized(-256, 256, 16), y: r.readQuantized(-32, 32, 12), z: r.readQuantized(-256, 256, 16), yaw: r.readAngle(9), anim: r.readBits(4), hp: r.readBits(7) };
+  },
+  lerp(a, b, t) {
+    return { x: NetMath.lerp(a.x, b.x, t), y: NetMath.lerp(a.y, b.y, t), z: NetMath.lerp(a.z, b.z, t), yaw: NetMath.lerpAngle(a.yaw, b.yaw, t), anim: t < 0.5 ? a.anim : b.anim, hp: t < 0.5 ? a.hp : b.hp };
+  },
+};
+```
+
+Host loop: spawn, one sim step per clock tick, read inputs, send the snapshot. Call `pump()` every frame (the lobby
+delivers messages on its own; `pump()` runs the clock-driven parts):
+
+```ts compile file=replication-host.ts
+import { ReplicationSession, replicated, type Lobby } from "onelobby";
+import { ALIEN, alienSchema, type Alien } from "./replication-state";
+
+export function runHost(lobby: Lobby): void {
+  const rep = new ReplicationSession(lobby);                       // host: 30 Hz tick, a delta snapshot per tick per client
+  const alien: Alien = { x: 0, y: 0, z: 10, yaw: 0, anim: 0, hp: 100 };
+  rep.spawn(ALIEN, 0, replicated(alienSchema, () => alien));        // owner 0 = the host (AI, doors)
+  rep.on("clientReady", (peer) => rep.spawn(1, peer, replicated(alienSchema, () => ({ ...alien, hp: 100 }))));   // an avatar per joiner
+  rep.on("eventReceived", (from, _tick, payload) => console.log("event from", from, payload.length, "bytes"));
+  const frame = () => {
+    rep.pump();
+    while (rep.clock.tryAdvance()) {
+      for (const peer of rep.clients) {
+        const input = rep.tryGetInput(peer);                        // the client's input for this tick (repeated if none arrived)
+        if (input) alien.x += (input.bytes[0] - 128) * 0.01;        // game rules decide what an input means
+      }
+      alien.yaw = (alien.yaw + 3) % 360;
+      rep.sendSnapshot();                                           // once per tick, after the sim step
+    }
+    requestAnimationFrame(frame);
+  };
+  frame();
+  rep.sendEvent(new TextEncoder().encode("round start"));            // reliable, to every client; { to, channel: "fast", stream } optional
+}
+```
+
+Client loop: one input per tick, render at `renderTick` (100 ms behind the host):
+
+```ts compile file=replication-client.ts
+import { ReplicationSession, type Lobby } from "onelobby";
+import { alienSchema } from "./replication-state";
+
+export function runClient(lobby: Lobby, readStick: () => number): void {
+  const rep = new ReplicationSession(lobby);
+  const objects = new Map<number, { x: number; z: number }>();      // your game objects, by entity id
+  rep.on("entitySpawned", (e) => objects.set(e.id, { x: 0, z: 0 })); // e = { id, typeId, owner }; create the object here
+  rep.on("entityDespawned", (e) => objects.delete(e.id));
+  rep.on("eventDelivered", (ev) => console.log("event", ev.stream, ev.seq, new TextDecoder().decode(ev.payload)));
+  rep.on("hostLost", () => console.log("the host left: end the match"));
+  const frame = () => {
+    rep.pump();
+    while (rep.clock.tryAdvance()) rep.submitInput(Uint8Array.of(readStick()));   // sent with the last 3 inputs on the fast channel
+    for (const [id, obj] of objects) {
+      const s = rep.trySample(id, alienSchema);                     // interpolated at rep.renderTick, undefined if not visible
+      if (s) { obj.x = s.x; obj.z = s.z; }
+    }
+    requestAnimationFrame(frame);
+  };
+  frame();
+  rep.sendEvent(new TextEncoder().encode("ready"));                  // client to host
+}
+```
+
+Also: `rep.tryGetLatest(id, schema)` (newest snapshot, not interpolated, with `rep.lastProcessedInput` for prediction),
+`rep.trySampleAt(id, tick, schema)`, `rep.sendFullSnapshot(peer)`, `rep.rttMs`, `rep.snapshotAgeMs`, `rep.stats`,
+`rep.trafficRates` (bytes per second sent and received over the last second: snapshots, inputs, events, total) and
+`rep.config` (`new ReplicationSession(lobby, { tickRate, interpolationDelayMs, keyframeSeconds, ... })`).
+A host sends each new client a full snapshot on the reliable channel when its link comes up and again every
+`keyframeSeconds` (default 5; 0 turns keyframes off). Raw payloads that do not start with `0x52` come out as the
+`otherMessage` event, untouched.
+
+Debug view: the wire stays binary. `rep.describe(bytes)` (or `describeReplication(bytes)`) turns any replication message into a
+plain object (`kind`, `tick`, `records` with `op` and ids, state bytes as hex); `rep.packetLog = true` writes one such line per packet
+(`rep out 2 fast {"kind":"snapshot",...}`, at most 20 a second) to the kit's net log, or pass a function to get the lines.
+
+Tests: `onelobby/testing` has `ManualClock` and `MemoryNetwork`; set `net.clock`, `net.latencyMs`, `net.dropFast`,
+`net.extraDelayMs`, `net.dropReliable`, `net.duplicateReliable` and `net.reorderReliable` for latency, loss and jitter
+(see `clients/js/packages/client/test/replication-rig.ts`).
+
 ## Rules
 
 - Call `rep.Pump()` every frame instead of `lobby.Pump()`, and step the sim only inside `while (rep.Clock.TryAdvance())`.
@@ -302,6 +410,7 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 - Two players: the joiner sees aliens move smoothly while the host plays, its own avatar responds without delay, and a
   shot that hits an alien on the joiner's screen kills it on the host.
 - `rep.Stats` on the host shows `FullSnapshotsSent` growing only when someone joins.
+- JS: the same checks over `MemoryNetwork` with `net.dropFast` at 5% (`clients/js/packages/client/test/replication-session.test.ts`).
 - Under a test with `InMemoryNetwork` (`DropUnreliable`, `ExtraDelayMs`), the same checks hold at 5% loss.
   `DropReliable`, `ReorderReliable` and `DuplicateReliable` break the reliable contract on purpose, to test your own
   handling of `EventGap` and resync.

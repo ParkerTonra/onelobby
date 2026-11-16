@@ -61,6 +61,8 @@ export { NetLog } from "./netlog.js";
 export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
 export { checkConnection } from "./connection-check.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
+export { ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication, DEFAULT_REPLICATION_CONFIG, } from "./replication/index.js";
+export type { EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates, ReplicationEvents, ReplicationErrorCode, } from "./replication/index.js";
 ```
 
 ## onelobby
@@ -831,6 +833,10 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     readonly ready: Promise<void>;
     constructor(cfg: LobbyConfig);
     get isHost(): boolean;
+    /** The kit's monotonic millisecond clock (what the replication layer ticks and timestamps on). */
+    get nowMs(): number;
+    /** The kit's net log, or null when diagnostics are off: the replication packet log writes here. */
+    get netLog(): NetLog | null;
     get peers(): Peer[];
     peer(peerId: number): Peer | undefined;
     /** Peers whose link is open and handshake done (host: the ready joiners; joiner: the host once ready). */

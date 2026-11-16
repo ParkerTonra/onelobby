@@ -21,6 +21,14 @@ data (`color`, `team`), says ready; the host checks the data, starts, the countd
 kicks it with a code and a reason the joiner must read back; joiner 2 uses a wrong password and must be refused with
 `bad_password`. The GDScript peer is `clients/gdscript/tests/engine_smoke_peer.gd` with `--scenario=room` (and `--wrongpw`).
 
+## The replication scenario
+
+`node tools/engine-smoke/run.mjs --replication` (JS and C# peers, routes `server` and `typed`: every host/joiner pair of the two) runs
+`ReplicationSession` end to end: the host spawns two entities with a small quantised state, steps them as a function of the host tick (frozen
+after tick 60), despawns one at tick 40 and sends the joiner one numbered stream event; the joiner submits one input byte per tick, sends one
+event to the host and the raw message `bye`. Both print `REPL spawned=2 despawned=1 entities=1 events=1 hash=<FNV-1a of the final state>`
+and `run.mjs` requires the two lines to be equal (the joiner reads the state back through the codec, the host writes it from its own variables).
+
 ## What a case is
 
 One host and two joiners, each its own process, play three rounds on one route: the host sends `ping|r` (reliable) and

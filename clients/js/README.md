@@ -15,6 +15,11 @@ await lobby.start();
 setInterval(() => { let f; while ((f = lobby.lockstep.nextFrame())) lobby.lockstep.reportHash(f.tick, game.step(f.tick, f.commands)); }, 25);
 ```
 
+Binary replication (host-authoritative real-time games; `docs/recipes/replication.md` s.5, wire format `spec/replication.md`): on a `mode: "raw"` lobby,
+`new ReplicationSession(lobby)` gives delta snapshots (bit-packed, quantised, against the last acked baseline; a reliable keyframe on join and every 5 s),
+a redundant input stream, events (also numbered streams), interpolated sampling, a tick clock and per-second byte rates, compatible byte for byte with the
+C# `OneLobby.Replication`. `describeReplication(bytes)` / `rep.packetLog = true` read packets by eye. Call `rep.pump()` every frame.
+
 Tick convention (spec/binary.md): the initial state is tick 0; `frame(T)` produces tick T; call `reportHash(tick, hash)` after
 applying each frame (the library only sends it when `tick % hashEveryTicks == 0`). `snapshot()` returns the state after the last
 frame handed out by `nextFrame()`; `restore(tick, bytes)` receives that tick and the next frame is `tick + 1`.

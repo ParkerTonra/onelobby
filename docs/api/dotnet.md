@@ -1241,6 +1241,12 @@ public sealed class ReplicationSession : IDisposable
     /// Host: the authoritative sim tick. Client: the local input tick (same rate, its own count).
     public NetworkClock Clock { get; }
     public ReplicationStats Stats { get; }
+    /// Replication bytes per second sent and received over the last second, per kind (no lobby header).
+    public TrafficRates Rates;
+    /// Debug view: when set, receives one line per replication packet sent or received, at most ReplicationConfig.PacketLogPerSecond a second: rep out|in &lt;peer&gt; &lt;channel&gt; &lt;json&gt;, the JSON from DescribeMessage. The wire stays binary.
+    public Action<string>? PacketLog { get; set; }
+    /// One replication message as a JSON object text (spec/replication.md "Debug view"). Pass the baseline world of a delta snapshot for its records.
+    public static string DescribeMessage(ReadOnlySpan<byte> payload);
     /// Client: a reliable or fast event from the host; host: from a client. (from peerId, tick, payload).
     public event Action<int, uint, ReadOnlyMemory<byte>>? EventReceived;
     /// Every event, like EventReceived, with its stream and sequence number. Subscribe to one of the two.
@@ -1353,7 +1359,7 @@ public readonly struct InputFrame
     /// True when no new input had arrived for this tick and the previous one is handed out again.
     public bool Repeated { get; }
 /// Tunables. Defaults are the DESIGN s.18 decisions (30 Hz tick and send, 100 ms interpolation, 4x input redundancy).
-public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0)
+public sealed record ReplicationConfig(int TickRate = 30, int SnapshotEveryTicks = 1, double InterpolationDelayMs = 100, int InputRedundancy = 4, int HistoryTicks = 64, int MaxInputBuffer = 4, double MaxRewindMs = 250, int SnapshotWarnBytes = 1200, int HoldEventsForTicks = 0, double KeyframeSeconds = 5, int PacketLogPerSecond = 20)
     public double TickMs;
 /// A hole in a numbered stream that was given up on: events FirstMissing up to (not including) NextDelivered from From on Stream never arrived; delivery goes on at NextDelivered.
 public readonly record struct StreamGap(int From, byte Stream, uint FirstMissing, uint NextDelivered)
@@ -1389,4 +1395,8 @@ public sealed class ReplicationStats
     /// Numbered stream events that arrived ahead of a missing one and waited for it.
     public long EventsOutOfOrder { get; internal set; }
     public long Malformed { get; internal set; }
+    /// Reliable full snapshots sent (late join and every ReplicationConfig.KeyframeSeconds); also counted in SnapshotsSent and FullSnapshotsSent.
+    public long KeyframesSent { get; internal set; }
+/// Replication payload bytes per second over the last 1000 ms (no lobby header), for a net stats overlay (ReplicationSession.Rates). Events include numbered stream events.
+public readonly record struct TrafficRates(double SnapshotsSent, double InputsSent, double EventsSent, double TotalSent, double SnapshotsReceived, double InputsReceived, double EventsReceived, double TotalReceived);
 ```

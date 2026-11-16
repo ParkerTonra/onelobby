@@ -24,7 +24,7 @@ Missing or half there:
 
 | Area | Gap |
 |---|---|
-| GDScript | Voice (needs Opus) and replication (C# only) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
+| GDScript | Voice (needs Opus) and replication (C# and JS have it; the GDScript port is next) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
 | UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
 | Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. No drop-in menu draws it yet. |
@@ -107,6 +107,8 @@ Each is one lane unless noted; order matters for the first three.
 10. **Proof (section 6)**, then move the existing games onto the drop-in pieces where it removes their own code.
 11. **Binary by default (section 7.1).** Shared codec spec + vectors; JS and GDScript encoders matching the C# bit-packer;
     every snapshot, input and event path uses it; JSON only behind a debug switch. 2 lanes (spec+JS, GDScript).
+    Spec + vectors + JS landed (`spec/replication.md`, `ReplicationSession` in `onelobby`, reliable keyframes, `describe` debug view,
+    bytes per second stats, engine-smoke `--replication`); GDScript is the next lane. Lockstep and chat stay on their own codecs.
 12. **Networked player (sections 7.2-7.4).** The player preset (state + action events), smoothing and prediction, the
     Godot node and the Unity component that read the character and animator with no game code. 2 lanes (Godot, Unity+JS).
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.
