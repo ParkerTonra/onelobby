@@ -580,7 +580,7 @@ public sealed class LobbyClient : IAsyncDisposable
     public PlayerSettings Settings { get; }
     /// A plain sentence for the player: a saved relay line was skipped because it is not valid. Fires once, never holds the line.
     public event Action<string>? Warning;
-    /// The list plus this player's saved relay entry, unless it is already in it (spec/settings.md s.5).
+    /// The lobby server this client uses now as text, e.g. wss://lobby.mygame.example/ws: the config's, or (when the config has none) the one the player saved in the settings; empty when there is none or the client is direct.
     public string EffectiveServer;
     public event Action<LobbyError>? Error;
     /// The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. NetLog.Export() is the text a player copies; addresses are masked unless asked for, credentials never print. It stays on this machine.

@@ -77,14 +77,13 @@ namespace OneLobby
             }
         }
 
-        /// <summary>The list plus this player's saved relay entry, unless it is already in it (spec/settings.md s.5).</summary>
         /// <summary>
         /// The lobby server this client uses now as text, e.g. <c>wss://lobby.mygame.example/ws</c>: the config's, or (when the
         /// config has none) the one the player saved in the settings; empty when there is none or the client is direct.
         /// </summary>
         public string EffectiveServer => Direct || ReferenceEquals(HubUri, OneLobby.Blueprint.NoServer) ? "" : HubUri.ToString();
-
 
+        /// <summary>The list plus this player's saved relay entry, unless it is already in it (spec/settings.md s.5).</summary>
         internal IReadOnlyList<IceServer> WithSavedRelay(IReadOnlyList<IceServer>? ice)
         {
             var list = ice ?? Array.Empty<IceServer>();
