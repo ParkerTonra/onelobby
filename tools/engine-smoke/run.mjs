@@ -5,7 +5,8 @@
 // line per case and finally ENGINE_SMOKE_OK or ENGINE_SMOKE_FAIL <list>. Everything binds 127.0.0.1; see README.md.
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createSocket } from "node:dgram";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +91,48 @@ function freePort() {
     s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); });
   });
 }
+// ---- host ports --------------------------------------------------------------------------------------------------------
+// A host needs its TCP port and, for the GDScript peer, a few UDP ports above it. They must never be a port the system can hand
+// to an outgoing connection: Linux gives those out from ip_local_port_range (32768-60999), and a socket of an earlier case
+// (even one in TIME_WAIT, which lasts 60 s after a peer is killed) on the same number makes the host's listen fail with
+// AddressAlreadyInUse. So the host ports sit just below that range, and every slot is probed (TCP and UDP) before a case uses it.
+const SLOT_SIZE = 8, SLOTS = 40;
+function ephemeralLow() {
+  try { const lo = Number(readFileSync("/proc/sys/net/ipv4/ip_local_port_range", "utf8").trim().split(/\s+/)[0]); if (lo > 1024) return lo; } catch { /* not Linux */ }
+  return 32768; // Linux default; Windows and macOS start at 49152, which is above every slot too
+}
+const PORT_BASE = Math.max(1100, Math.min(ephemeralLow(), 49152) - SLOTS * SLOT_SIZE - 64);
+function canBind(port) {
+  return new Promise((res) => {
+    const s = createServer();
+    s.once("error", () => res(false));
+    s.listen(port, "127.0.0.1", () => s.close(() => {
+      const u = createSocket("udp4");
+      u.once("error", () => { try { u.close(); } catch { /* closed */ } res(false); });
+      u.bind(port, "127.0.0.1", () => u.close(() => res(true)));
+    }));
+  });
+}
+// the first slot at or after idx's own whose SLOT_SIZE ports are all free right now
+async function hostPort(idx) {
+  for (let k = 0; k < SLOTS; k++) {
+    const base = PORT_BASE + ((idx + k) % SLOTS) * SLOT_SIZE;
+    let free = true;
+    for (let d = 0; d < SLOT_SIZE && free; d++) free = await canBind(base + d);
+    if (free) return base;
+  }
+  throw new Error(`no free host port slot in ${PORT_BASE}-${PORT_BASE + SLOTS * SLOT_SIZE - 1}`);
+}
+// who holds the host's ports (Linux: ss; any other system or a missing tool prints nothing)
+function whoHolds(port) {
+  if (process.platform !== "linux") return "";
+  try {
+    const out = execFileSync("ss", ["-anp"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const ports = new Set(Array.from({ length: SLOT_SIZE }, (_, d) => String(port + d)));
+    const hits = out.split("\n").filter((l) => /^(tcp|udp)/i.test(l) && l.split(/\s+/).slice(4, 6).some((a) => ports.has(a.slice(a.lastIndexOf(":") + 1))));
+    return `  --- sockets on ports ${port}-${port + SLOT_SIZE - 1} (ss -anp) ---\n` + (hits.length ? hits.join("\n") : "  (none now)");
+  } catch { return ""; }
+}
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: ["ignore", "pipe", "inherit"], encoding: "utf8", ...opts });
 
 // ---- prerequisites ---------------------------------------------------------------------------------------------------
@@ -135,7 +178,7 @@ function peer(engine, args, tag) {
 async function runCase(c, route, idx, sync = "raw") {
   const label = `${ENGINE_NAME[c.host]} host + ${c.joiners.map((j) => ENGINE_NAME[j]).join(" + ")} joiners${ROOM ? " (room)" : REPL ? " (replication)" : ""}${sync === "lockstep" ? " (lockstep)" : ""}`;
   const t0 = Date.now();
-  const port = 47900 + (idx % 40) * 8;
+  const port = await hostPort(idx);
   const common = [`--route=${route}`, `--rounds=${ROUNDS}`, `--timeout=${CASE_TIMEOUT}`, ...(flags.loopback ? ["--loopback"] : []), ...(ROOM ? ["--scenario=room"] : REPL ? ["--scenario=replication"] : []),
     ...(sync === "lockstep" ? ["--sync=lockstep", `--peers=${c.joiners.length + 1}`] : [])];
   if (route === "server") common.push(`--server=${serverUrl}`);
@@ -181,6 +224,7 @@ async function runCase(c, route, idx, sync = "raw") {
   if (!ok || verbose) {
     for (const p of ps) console.log(`  --- ${p.tag} output ---\n${p.getOut().split(/\r?\n/).filter((l) => !/resources still in use|ObjectDB|^\s*$|Godot Engine v|WARNING: .*leaked|at: .*\(/i.test(l)).slice(-40).join("\n")}`);
   }
+  if (!ok && ps.some((p) => /port_in_use|AddressAlreadyInUse|EADDRINUSE/.test(p.getOut()))) { const w = whoHolds(port); if (w) console.log(w); }
   for (const p of ps) kill(p);
   await sleep(300); // let the OS release the case's ports
   return { name: `${c.host}${c.joiners.every((j) => j === c.host) ? "" : `->${c.joiners.join("+")}`} ${route}${sync === "lockstep" ? " lockstep" : ""}`, label, route, ok, warn, note, secs: (Date.now() - t0) / 1000, detail };

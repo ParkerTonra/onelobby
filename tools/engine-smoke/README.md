@@ -65,6 +65,10 @@ paste parser (JS `parseTurnLine`, C# `TurnLogin.Parse`, GDScript `OneLobbyTurn.p
 fixes to talk to libjuice (see `turn-server.mjs`: sign ChannelBind replies, relay ChannelData from clients, do not
 kill an allocation on a Refresh without LIFETIME). They are in the test server only.
 
+Host ports come from slots of 8 just below the system's outgoing-connection range (Linux 32768-60999), each probed (TCP and UDP) before a case
+uses it, so a socket left by an earlier peer cannot collide with a host. If a host still fails with `port_in_use`, the run prints
+`ss -anp` for those ports (Linux).
+
 Everything binds 127.0.0.1 except the WebRTC ICE sockets of the JS and GDScript peers (their libraries bind every
 interface; on Windows that can raise a firewall prompt for node and Godot once). `--loopback` makes the C# peers bind
 ICE to 127.0.0.1 as well. The lobby server is started with a dead local STUN entry so nothing leaves the machine.
