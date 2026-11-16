@@ -5,6 +5,9 @@
 #   clients/unity/build-unity-package.sh --pack     # also write clients/unity/com.onelobby.unity-<version>.tgz
 # Extra projects: EXTRA="OneLobby.Foo OneLobby.Bar" clients/unity/build-unity-package.sh
 #   clients/unity/build-unity-package.sh --pack --version 0.6.0-dev.4   # stamp that version into the packed package.json and file name
+# A tarball with no Windows WebRTC library (datachannel.dll) cannot link two peers on Windows, so --pack / --out STOP without it:
+#   clients/unity/fetch-natives.sh   # puts the natives in place (anonymous download of the released package's), then pack again
+#   ONELOBBY_PACK_WITHOUT_WIN_X64=1 clients/unity/build-unity-package.sh --pack   # a package for macOS/Linux only
 # Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
 #   clients/unity/build-unity-package.sh --out /tmp/feed --version 0.6.0-dev.12   # read-only checkout: implies --pack;
 # builds a staged copy of the package with dotnet bin/obj in a temp folder and writes only <out>/<tgz>.
@@ -92,10 +95,15 @@ done
 
 # libdatachannel natives into Unity's platform folders, import settings from plugin-meta/*.meta.template
 runtimes="$dotnetdir/OneLobby.DataChannel/runtimes"
+missing_win=0
 for spec in "win-x64 datachannel.dll x86_64" "linux-x64 libdatachannel.so x86_64" "osx libdatachannel.dylib macOS"             "android-arm64 libdatachannel.so Android/arm64-v8a"; do
   set -- $spec
   from="$runtimes/$1/native/$2"
-  if [ ! -f "$from" ]; then echo "native $1: not built (skipped)"; continue; fi
+  if [ ! -f "$from" ]; then
+    echo "native $1: not built (skipped)"
+    [ "$1" = win-x64 ] && missing_win=1
+    continue
+  fi
   dir="$plugins"
   IFS=/ read -r -a parts <<< "$3"
   for part in "${parts[@]}"; do
@@ -107,6 +115,15 @@ for spec in "win-x64 datachannel.dll x86_64" "linux-x64 libdatachannel.so x86_64
   echo "native $1: $(wc -c < "$dir/$2") bytes"
 done
 rm -rf "$out"
+if [ "$missing_win" = 1 ]; then
+  echo "WARNING: this package has NO Windows WebRTC library (Runtime/Plugins/x86_64/datachannel.dll): on Windows two peers never link."
+  echo "  Get it with: clients/unity/fetch-natives.sh   (or build it: clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1), then run this script again."
+  if [ "$pack" = 1 ] && [ "${ONELOBBY_PACK_WITHOUT_WIN_X64:-0}" != 1 ]; then
+    echo "PACK_FAIL no tarball written: it would have no datachannel.dll. Run clients/unity/fetch-natives.sh, then this command again (ONELOBBY_PACK_WITHOUT_WIN_X64=1 packs without it on purpose)." >&2
+    [ -n "$stage_root" ] && rm -rf "$stage_root"
+    exit 1
+  fi
+fi
 
 # Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
 repo="$(dirname "$(dirname "$dotnetdir")")"

@@ -5,12 +5,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { gzipSync } from "node:zlib";
 import { main } from "../src/cli.js";
 import { addDependencies, inspectManifest, moveDependency, readDependency } from "../src/manifest.js";
 import { chooseEditor, compareEditors, editorIsNewEnough, hubEditors, parseEditorVersion, resolveUnity } from "../src/unity.js";
 import { decide } from "../src/unity-update.js";
 import { runChecks } from "../src/verify/core.js";
-import { exitWarning, lastError, unityChecks } from "../src/verify/unity.js";
+import { exitWarning, lastError, packageHasWindowsLibrary, unityChecks } from "../src/verify/unity.js";
+import { tgzNames } from "../src/tar.js";
 import { wiringCheck } from "../src/verify/wiring.js";
 
 let cwd;
@@ -414,6 +416,86 @@ describe("unity verify: the checks", () => {
     const noTest = await runChecks(unityChecks(), { ...ctx, facts: undefined, services: {} });
     expect(noTest.verdict).toContain("VERIFY_FAIL direct: Assets/OneLobby/Tests/MultiplayerTests.cs / .asmdef is missing");
     expect(noTest.verdict).toContain("npx create-onelobby --into .");
+  });
+});
+
+// A real .tgz: a ustar header per name (an empty body), so the package check has something to list.
+const tgz = (names) => {
+  const blocks = names.map((name) => {
+    const h = Buffer.alloc(512);
+    h.write(name, 0);
+    h.write("0000644 ", 100);
+    h.write("00000000000 ", 124);
+    h.write("        ", 148);
+    h.write("0", 156);
+    h.write("ustar " + "00", 257);
+    h.write(`${[...h].reduce((a, b) => a + b, 0).toString(8).padStart(6, "0")}  `, 148);
+    return h;
+  });
+  return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
+};
+const LIB = "package/Runtime/Plugins/x86_64/datachannel.dll";
+
+describe("unity verify: the Windows WebRTC library in the package", () => {
+  it("lists the names of a tarball", () => {
+    expect(tgzNames(tgz(["package/package.json", LIB]))).toEqual(["package/package.json", LIB]);
+    expect(tgzNames(tgz([]))).toEqual([]);
+  });
+
+  it("packageHasWindowsLibrary: a tarball, a folder, a missing file and one it cannot read", () => {
+    const dir = at("game");
+    mkdirSync(join(dir, "Packages"), { recursive: true });
+    writeFileSync(join(dir, "Packages", "with.tgz"), tgz(["package/package.json", LIB]));
+    writeFileSync(join(dir, "Packages", "without.tgz"), tgz(["package/package.json", "package/Runtime/Plugins/x86_64/libdatachannel.so"]));
+    writeFileSync(join(dir, "Packages", "junk.tgz"), "x");
+    expect(packageHasWindowsLibrary(dir, "file:with.tgz").has).toBe(true);
+    expect(packageHasWindowsLibrary(dir, "file:without.tgz").has).toBe(false);
+    expect(packageHasWindowsLibrary(dir, "file:junk.tgz").has).toBeNull();
+    expect(packageHasWindowsLibrary(dir, "file:gone.tgz").has).toBeNull();
+    mkdirSync(join(dir, "pkg/Runtime/Plugins/x86_64"), { recursive: true });
+    expect(packageHasWindowsLibrary(dir, `file:${join(dir, "pkg")}`).has).toBe(false);
+    writeFileSync(join(dir, "pkg/Runtime/Plugins/x86_64/datachannel.dll"), "x");
+    expect(packageHasWindowsLibrary(dir, `file:${join(dir, "pkg")}`).has).toBe(true);
+    expect(packageHasWindowsLibrary(dir, "0.7.2").has).toBeNull(); // a registry version Unity has not unpacked
+    mkdirSync(join(dir, "Library/PackageCache/com.onelobby.unity@abc/Runtime/Plugins/x86_64"), { recursive: true });
+    expect(packageHasWindowsLibrary(dir, "0.7.2").has).toBe(false);
+  });
+
+  const scaffold = async () => {
+    await j(["my-game", ...NEW]);
+    return at("my-game");
+  };
+  const editor = { resolveUnity: () => ({ exe: "e", version: "6000.2.7f2", from: "$UNITY" }) };
+
+  it("verify fails the package check, before any Unity run, when the tarball has no datachannel.dll, and names the fix", async () => {
+    const dir = await scaffold();
+    const tarball = "com.onelobby.unity-0.7.9-ci.3.tgz"; // the manifest points at it, one folder above the game
+    writeFileSync(at(tarball), tgz(["package/package.json", "package/Runtime/Plugins/OneLobby.Core.dll"]));
+    let ran = 0;
+    const out = await runChecks(unityChecks(), { dir, opts: {}, env: {}, services: {}, kind: "unity", platform: "win32", ...editor, run: async () => (ran++, { code: 0, out: "" }) });
+    expect(ran).toBe(0);
+    expect(out.verdict).toContain("VERIFY_FAIL package:");
+    expect(out.verdict).toContain("has no Runtime/Plugins/x86_64/datachannel.dll (the Windows WebRTC library)");
+    expect(out.verdict).toContain("clients/unity/fetch-natives.sh");
+    expect(out.verdict).toContain("clients/unity/build-unity-package.sh --pack");
+    expect(out.verdict).toContain(`Packages/${JSON.parse(readFileSync(join(dir, "Packages/manifest.json"), "utf8")).dependencies["com.onelobby.unity"].slice(5)}`);
+    expect(out.results.slice(2).every((r) => r.status === "skipped")).toBe(true); // no peers were started
+  });
+
+  it("a tarball that has it passes that part and goes on to open the project; another platform is not checked", async () => {
+    const dir = await scaffold();
+    const tarball = "com.onelobby.unity-0.7.9-ci.3.tgz";
+    writeFileSync(at(tarball), tgz(["package/package.json", LIB]));
+    writeFileSync(join(dir, "Packages/packages-lock.json"), JSON.stringify({ dependencies: { "com.onelobby.unity": { version: "x", source: "local-tarball" } } }));
+    const opened = [];
+    const run = async (cmd, args) => (opened.push(args), { code: 0, out: "" });
+    const ctx = { dir, opts: {}, env: {}, services: {}, kind: "unity", platform: "win32", ...editor, run };
+    const out = await runChecks([unityChecks()[0], unityChecks()[1]], ctx);
+    expect(out.results.find((r) => r.name === "package").status).toBe("ok");
+    expect(opened.length).toBe(1);
+    writeFileSync(at(tarball), tgz(["package/package.json"]));
+    const mac = await runChecks([unityChecks()[0], unityChecks()[1]], { ...ctx, platform: "darwin" });
+    expect(mac.results.find((r) => r.name === "package").status).toBe("ok");
   });
 });
 

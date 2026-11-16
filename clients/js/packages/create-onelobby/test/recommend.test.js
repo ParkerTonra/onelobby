@@ -62,6 +62,10 @@ const SENTENCES = [
   ["tic-tac-toe", "turn-based", "raw", 2, ["tic-tac-toe"]],
   ["our game already has its own backend over a websocket, 6 players", "own-server", "raw", 6, ["own backend", "websocket"]],
   ["it keeps the existing server code", "own-server", "raw", 4, ["existing server"]],
+  // a new game: no code to survey, the sentence is all there is (movement words lead to a player world)
+  ["a Unity 3D game where 2 to 4 friends run and jump around a small arena together", "replication", "replication", 4, ["run", "jump", "arena"]],
+  ["a Godot GDScript 2D side-view platformer, 4 players, 30 tick", "replication", "replication", 4, ["platformer"]],
+  ["co-op", "coop-snapshots", "replication", 4, ["co-op"]],
   // near misses
   ["a deterministic shooter", "lockstep", "lockstep", 4, ["deterministic"]], // an explicit determinism claim outweighs the genre word
   ["survival card game", "turn-based", "raw", 4, ["card game"]], // "survival" inside a card game is only a weak word
@@ -76,7 +80,6 @@ const SENTENCES = [
   // unknown is an answer
   ["a puzzle game", null, undefined, undefined, []],
   ["survival", null, undefined, undefined, []], // one weak word
-  ["co-op", null, undefined, undefined, []],
   ["party", null, undefined, undefined, []],
   ["multiplayer", null, undefined, undefined, []],
   ["Ein Kartenspiel fuer vier Spieler online", null, undefined, undefined, []], // not English: no guess
@@ -104,6 +107,46 @@ describe("the matcher: sentence -> shape, mode, players, matched words", () => {
       for (const [, , why] of rec.answers) expect(why.length).toBeGreaterThan(10);
     });
   }
+
+  it("a sentence of movement words leads to a player world, and says so", () => {
+    const rec = recommend({ description: "a Unity 3D game where 2 to 4 friends run and jump around a small arena together" });
+    expect(rec.shape).toBe("replication");
+    expect(rec.fallback).toBe("world");
+    expect(rec.answers.find((r) => r[0] === "sync.player.authority")?.[1]).toBe("host");
+    expect(rec.answers.find((r) => r[0] === "sync.player.space")).toBeUndefined(); // 3D is the schema default: no row
+    expect(rec.notes.join(" ")).toContain("no code to survey");
+    expect(rec.questions.map((q) => q.id)).not.toContain("shape");
+  });
+
+  it("movement words never override a word that says another kind of game", () => {
+    for (const text of ["a turn based puzzle game where you jump", "a deterministic lockstep arena game", "a puzzle platformer", "chess in an arena"]) {
+      const rec = recommend({ description: text });
+      expect(rec.fallback, text).toBeUndefined();
+    }
+    expect(recommend({ description: "a puzzle platformer" }).shape).toBeNull();
+  });
+
+  it("a game still unknown lists its candidates, best first", () => {
+    const rec = recommend({ description: "shooter with a turn-based mode" });
+    expect(rec.shape).toBeNull();
+    expect(rec.candidates.length).toBeGreaterThan(1);
+    expect(rec.candidates[0].score).toBeGreaterThanOrEqual(rec.candidates[1].score);
+  });
+
+  it("reads 2D, side view, top-down and platformer as sync.player.space 2d; an explicit 3D wins", () => {
+    const space = (d) => recommend({ description: d }).answers.find((r) => r[0] === "sync.player.space")?.[1];
+    expect(space("a Godot GDScript 2D side-view platformer, 4 players, 30 tick")).toBe("2d");
+    for (const d of ["a 2D arena shooter in Godot", "top-down shooter in Godot", "top down co-op in Unity", "a side scroller brawler", "a platformer where friends run and jump"]) expect(space(d), d).toBe("2d");
+    for (const d of ["a 3D platformer in Unity, co-op", "a Unity 3D game where friends run and jump around an arena", "a first person shooter"]) expect(space(d), d).toBeUndefined();
+    // a game with no player layer (lockstep, turn based) gets no row: there is no player to place
+    expect(space("a 2D deterministic lockstep game")).toBeUndefined();
+  });
+
+  it("the 2D row reaches the command: the flags carry --set sync.player.space=2d", () => {
+    const rec = recommend({ description: "a Godot GDScript 2D side-view platformer, 4 players, 30 tick" });
+    expect(rec.flags.join(" ")).toContain("--set sync.player.space=2d");
+    expect(rec.runCommand).toContain("sync.player.space=2d");
+  });
 
   it("an empty or blank description is bad_flag, alone and with a scaffold", async () => {
     for (const args of [["--recommend", ""], ["--recommend", "   "], ["--recommend="], ["g", "--recommend", " "]]) {

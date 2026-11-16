@@ -11,8 +11,9 @@
 //
 // What it writes: .onelobby/ (the Unity logs and test results; gitignored) and what Unity itself writes into the project when it opens it:
 // Library/, Temp/, Logs/, UserSettings/, obj/, Packages/packages-lock.json, ProjectSettings/ files, and .meta files beside the assets.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { tgzNames } from "../tar.js";
 import { validate } from "../blueprint.js";
 import { MIN_EDITOR, TEST_ASSEMBLY, TEST_FILES, editorIsNewEnough, resolveUnity } from "../unity.js";
 import { PACKAGE_NAME, readDependency } from "../manifest.js";
@@ -32,6 +33,33 @@ const secs = (ms) => (ms / 1000).toFixed(0);
 /** The note for a test run that passed and then ended with a non-zero exit code (Windows codes also in hex: 3221225477 is 0xC0000005). */
 export const exitWarning = (code) =>
   `the test passed, then Unity ended with exit code ${code}${code > 255 ? ` (0x${code.toString(16).toUpperCase()})` : ""} while it closed${code === 3221225477 ? " (known on Windows after a process used the WebRTC library; the result stands)" : ""}`;
+
+/** Where the Windows WebRTC library sits in the package: without it two peers on Windows never link. */
+export const WIN_LIBRARY = "Runtime/Plugins/x86_64/datachannel.dll";
+const LIBRARY_NEXT = (shown) =>
+  `Use a package that has it: a release tarball or the unity-dev-package CI artifact. In a OneLobby clone: clients/unity/fetch-natives.sh, then clients/unity/build-unity-package.sh --pack, and put the new tarball at ${shown} (docs/recipes/unity.md, "Getting the package").`;
+
+/**
+ * Does the game's com.onelobby.unity package hold the Windows WebRTC library? `ref`: the manifest's reference. Returns
+ * { has: true|false|null, what } (null: cannot tell, for example a registry package Unity has not unpacked yet).
+ * A `file:` tarball is listed, a `file:` folder is looked into, anything else is looked for in Library/PackageCache.
+ */
+export function packageHasWindowsLibrary(dir, ref) {
+  const file = /^file:(.+)$/i.exec(ref)?.[1];
+  if (file) {
+    const path = isAbsolute(file) ? file : resolve(dir, "Packages", file);
+    if (!existsSync(path)) return { has: null, what: file };
+    if (statSync(path).isDirectory()) return { has: existsSync(join(path, ...WIN_LIBRARY.split("/"))), what: file };
+    try {
+      return { has: tgzNames(readFileSync(path)).some((n) => n.endsWith(`/${WIN_LIBRARY}`)), what: file };
+    } catch {
+      return { has: null, what: file };
+    }
+  }
+  const cache = join(dir, "Library", "PackageCache");
+  const hit = existsSync(cache) ? readdirSync(cache).find((d) => d.startsWith("com.onelobby.unity@")) : undefined;
+  return hit ? { has: existsSync(join(cache, hit, ...WIN_LIBRARY.split("/"))), what: ref } : { has: null, what: ref };
+}
 
 /** The line of a Unity log that names the error: the first compiler error (`Assets/x.cs(3,4): error CS...`), else the last line that names one; shortened. */
 export function lastError(log) {
@@ -115,6 +143,11 @@ export function unityChecks() {
         const file = /^file:(.+\.(?:tgz|tar\.gz))$/i.exec(ref)?.[1];
         if (file && !/^[a-z]:|^[/\\]/i.test(file) && !existsSync(join(ctx.dir, "Packages", file)))
           return { status: "fail", detail: `Packages/manifest.json references ${ref}, but Packages/${file} is not there.`, next: `Put the tarball there (clients/unity/build-unity-package.sh --pack, or the unity-dev-package CI artifact), or run: npx create-onelobby update --package-from <tarball>.` };
+        // before the minutes of opening the project: a tarball (or folder) with no Windows WebRTC library can only fail later as "never linked"
+        const winOnly = (ctx.platform ?? process.platform) === "win32";
+        const before = winOnly && file ? packageHasWindowsLibrary(ctx.dir, ref) : null;
+        if (before?.has === false)
+          return { status: "fail", detail: `${before.what} has no ${WIN_LIBRARY} (the Windows WebRTC library): on Windows the two peers would never link.`, next: LIBRARY_NEXT(`Packages/${file}`) };
         const t0 = Date.now();
         const { r, log } = await u(ctx, "import", ["-quit"], { timeoutMs: 900000 });
         const lock = join(ctx.dir, "Packages", "packages-lock.json");
@@ -125,6 +158,9 @@ export function unityChecks() {
           /* no lock: Unity did not get as far as resolving */
         }
         const compile = /error CS\d+/.test(log);
+        const after = winOnly && !file && resolved ? packageHasWindowsLibrary(ctx.dir, ref) : null;
+        if (after?.has === false)
+          return { status: "fail", detail: `the package Unity resolved (${after.what}) has no ${WIN_LIBRARY} (the Windows WebRTC library): on Windows the two peers would never link.`, next: LIBRARY_NEXT("Packages/ (a file: tarball in Packages/manifest.json)") };
         if (r.code === 0 && !r.timedOut && resolved && !compile)
           return { status: "ok", detail: `${ref}; Unity resolved ${PACKAGE_NAME}${resolved.version && resolved.version !== ref ? ` ${resolved.version}` : ""} (${resolved.source ?? "unknown source"}) and opened the project in ${secs(Date.now() - t0)} s` };
         const registry = /Unable to resolve|Failed to resolve|An error occurred while resolving packages/i.test(log) || !resolved;

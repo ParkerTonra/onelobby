@@ -5,6 +5,9 @@
 #   powershell -File clients/unity/build-unity-package.ps1 -Pack   # also write clients/unity/com.onelobby.unity-<version>.tgz
 # Mirrors build-unity-package.sh. Needs the .NET 8 SDK or newer.
 #   powershell -File clients/unity/build-unity-package.ps1 -Pack -Version 0.6.0-dev.4   # stamp that version into the packed package.json and the file name
+# A tarball with no Windows WebRTC library (datachannel.dll) cannot link two peers on Windows, so -Pack / -Out STOP without it:
+#   bash clients/unity/fetch-natives.sh   # puts the natives in place (anonymous download of the released package's), then pack again
+#   $env:ONELOBBY_PACK_WITHOUT_WIN_X64 = '1'   # a package for macOS/Linux only
 # Every run also copies the recipes into com.onelobby.unity/Documentation~ (untracked build output).
 #   powershell -File clients/unity/build-unity-package.ps1 -Out C:/feed -Version 0.6.0-dev.12   # read-only checkout:
 # implies -Pack; builds a staged copy of the package with dotnet bin/obj in a temp folder and writes only <Out>/<tgz>.
@@ -108,9 +111,10 @@ $natives = @(
     @{ Rid = 'android-arm64'; File = 'libdatachannel.so';    Dir = 'Android/arm64-v8a' }
 )
 $runtimes = Join-Path $dotnet 'OneLobby.DataChannel/runtimes'
+$missingWin = $false
 foreach ($n in $natives) {
     $from = Join-Path $runtimes "$($n.Rid)/native/$($n.File)"
-    if (-not (Test-Path $from)) { Write-Host "native $($n.Rid): not built (skipped)"; continue }
+    if (-not (Test-Path $from)) { Write-Host "native $($n.Rid): not built (skipped)"; if ($n.Rid -eq 'win-x64') { $missingWin = $true }; continue }
     $dir = $plugins
     foreach ($part in $n.Dir.Split('/')) {
         $dir = Join-Path $dir $part
@@ -122,6 +126,15 @@ foreach ($n in $natives) {
     Write-Host ("native $($n.Rid): {0:N0} bytes" -f (Get-Item $to).Length)
 }
 Remove-Item -Recurse -Force $out
+if ($missingWin) {
+    Write-Host 'WARNING: this package has NO Windows WebRTC library (Runtime/Plugins/x86_64/datachannel.dll): on Windows two peers never link.'
+    Write-Host '  Get it with: bash clients/unity/fetch-natives.sh   (or build it: clients/dotnet/OneLobby.DataChannel/native/build-windows.ps1), then run this script again.'
+    if ($Pack -and $env:ONELOBBY_PACK_WITHOUT_WIN_X64 -ne '1') {
+        if ($stageRoot) { Remove-Item -Recurse -Force $stageRoot -ErrorAction SilentlyContinue }
+        Write-Host 'PACK_FAIL no tarball written: it would have no datachannel.dll. Run bash clients/unity/fetch-natives.sh, then this command again (ONELOBBY_PACK_WITHOUT_WIN_X64=1 packs without it on purpose).'
+        exit 1
+    }
+}
 
 # Docs a game team needs, shipped in Documentation~ (Unity ignores it; the copies are gitignored build output).
 $repo = Split-Path (Split-Path $here)

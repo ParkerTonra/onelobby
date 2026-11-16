@@ -21,8 +21,13 @@ import {
   QUESTIONS,
   SHAPES,
   SPECTATOR_DEFAULT,
+  SPACE_TERMS,
   SPECTATOR_TERMS,
   VETOES,
+  WORLD_BLOCKERS,
+  WORLD_NOTE,
+  WORLD_SHAPES,
+  WORLD_TERMS,
 } from "./recommend-data.js";
 
 // ---- reading the sentence ----------------------------------------------------------------------------------------------
@@ -168,6 +173,26 @@ function pickShape(scores) {
   return null;
 }
 
+/**
+ * No shape won, but the sentence is about players in a world (run, jump, arena, co-op ...) and says nothing against it: the better of
+ * the world shapes by score (a tie goes to the first), as the same { id, score, matched, notes } a scored shape has. Else null.
+ */
+function worldFallback(tokens, scores) {
+  const matched = matchTerms(tokens, WORLD_TERMS);
+  if (!matched.length || hasAny(tokens, WORLD_BLOCKERS)) return null;
+  const pool = WORLD_SHAPES.map((id) => scores.find((s) => s.id === id)).filter((s) => s && !s.banned);
+  const top = pool.reduce((a, b) => (b.score > a.score ? b : a), pool[0]);
+  return top ? { ...top, matched: [...top.matched, ...matched.filter((w) => !top.matched.some((m) => w.from <= m.to && m.from <= w.to))].sort((a, b) => a.from - b.from), notes: [...top.notes, WORLD_NOTE], fromWorld: true } : null;
+}
+
+/** "2d" when the sentence says side view, top-down, platformer or 2D and does not say 3D; else null. */
+export function readSpace(text) {
+  const tokens = tokenize(text);
+  if (hasAny(tokens, SPACE_TERMS["3d"])) return null;
+  const [m] = matchTerms(tokens, SPACE_TERMS["2d"].map((t) => [t, 1]));
+  return m ? { value: "2d", text: slice(text, tokens, m) } : null;
+}
+
 // ---- building the proposal ---------------------------------------------------------------------------------------------
 
 const engineData = (id) => (id ? ENGINES[id] : null);
@@ -261,7 +286,7 @@ export function recommend({ description, engine } = {}) {
   }
 
   const scores = scoreShapes(tokens, eng.id);
-  const best = pickShape(scores);
+  const best = pickShape(scores) ?? worldFallback(tokens, scores);
   const shape = best ? SHAPES.find((s) => s.id === best.id) : null;
   const engineInfo = {
     id: eng.id,
@@ -277,6 +302,7 @@ export function recommend({ description, engine } = {}) {
     description: text,
     shape: shape?.id ?? null,
     shapeName: shape?.name ?? null,
+    ...(best?.fromWorld ? { fallback: "world" } : {}),
     matched: best ? best.matched.map((m) => slice(text, tokens, m)) : [],
     engine: engineInfo,
     answers: [],
@@ -289,6 +315,7 @@ export function recommend({ description, engine } = {}) {
     shapes: SHAPES.map((s) => ({ id: s.id, name: s.name, summary: s.summary })),
   };
   if (!shape) rec.candidates = scores.filter((s) => s.score > 0).sort((a, b) => b.score - a.score).map((s) => ({ shape: s.id, score: s.score, matched: s.matched.map((m) => slice(text, tokens, m)) }));
+  if (best?.fromWorld) rec.notes.push(...best.notes.filter((n) => !rec.notes.includes(n)));
   for (const s of scores) if (s.id === rec.shape || (!shape && s.score > 0) || s.banned) rec.notes.push(...s.notes.filter((n) => !rec.notes.includes(n)));
 
   const ask = (id) => rec.questions.push({ id, question: QUESTIONS[id].question, add: QUESTIONS[id].add });
@@ -312,7 +339,11 @@ export function recommend({ description, engine } = {}) {
     rows.push(["sync.tickRate", given ?? shape.tickRate.value, given && shape.tickRate.fromText ? shape.tickRate.fromText : shape.tickRate.why]);
     if (shape.id === "lockstep" && !given) ask("tickRate");
   }
-  if (shape.playerAuthority && mode.row.mode === "replication") rows.push(["sync.player.authority", shape.playerAuthority.value, shape.playerAuthority.why]);
+  if (shape.playerAuthority && mode.row.mode === "replication") {
+    rows.push(["sync.player.authority", shape.playerAuthority.value, shape.playerAuthority.why]);
+    const space = readSpace(text);
+    if (space) rows.push(["sync.player.space", space.value, `your description says "${space.text}": the player is a side-on or top-down 2D character (sync.player.space)`]);
+  }
   if (shape.hashEveryTicks && mode.row.mode === "lockstep") rows.push(["sync.hashEveryTicks", shape.hashEveryTicks.value, shape.hashEveryTicks.why]);
 
   const read = readPlayers(text);

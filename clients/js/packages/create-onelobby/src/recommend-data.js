@@ -137,6 +137,43 @@ export const SHAPES = [
   },
 ];
 
+/**
+ * A new game has no code to survey, so its sentence is the only input. When no shape clears MIN_SCORE / MIN_MARGIN but the sentence
+ * has WORLD_TERMS (players who run, jump or move around a place together), the proposal is a world the players move in:
+ * the better of the two player-world shapes (a tie goes to the first), unless a WORLD_BLOCKERS word says it is another kind of game.
+ * Terms are weighted like SHAPES.terms, but their weights only decide that the fallback applies (one match is enough).
+ */
+export const WORLD_TERMS = [
+  ["run", 1],
+  ["running", 1],
+  ["jump", 1],
+  ["jumping", 1],
+  ["arena", 1],
+  ["platform", 1],
+  ["platformer", 1],
+  ["move around", 1],
+  ["moving around", 1],
+  ["walk around", 1],
+  ["roam", 1],
+  ["explore", 1],
+  ["co op", 1],
+  ["coop", 1],
+  ["cooperative", 1],
+];
+export const WORLD_SHAPES = ["replication", "coop-snapshots"];
+export const WORLD_BLOCKERS = ["turn based", "puzzle", "deterministic", "lockstep", "board game", "card game", "chess", "own server"];
+export const WORLD_NOTE =
+  "your description names a world the players move in but no shape word clearly (no code to survey): this proposes the nearest player-world shape. Add 'turn based', 'puzzle', 'deterministic' or 'lockstep' if the game is one of those; the `candidates` list has the runners-up.";
+
+/**
+ * The look of the player, read from the description: "2d" (side view, top-down, platformer) or null. An explicit "3d" keeps the
+ * schema default (3d), so no row is written for it.
+ */
+export const SPACE_TERMS = {
+  "2d": ["2d", "side view", "sideview", "side scroller", "side scrolling", "side on", "top down", "topdown", "platformer"],
+  "3d": ["3d", "first person", "third person"],
+};
+
 /** Things that change one key across shapes. First match wins, in this order. */
 export const PAUSE_MODIFIERS = [
   { value: "host", terms: ["host runs the world", "host authoritative", "host is authoritative"], why: "your description says the host runs the world, so the host decides when it stops" },
