@@ -32,6 +32,7 @@ const KEYED = /\b(username|credential|password|pwd|token|secret)=([^\s,"]*)/g;
 const KEYED_JSON = /("(?:username|credential|password|pwd|token|secret)"\s*:\s*")([^"]*)(")/g;
 const ICE_SECRET = /(a=ice-(?:ufrag|pwd):)(\S+)/g;
 const TURN_LINE = /\b(turns?:[^\s?]+(?:\?\S*)?)\s+\S+\s+\S+/g;
+const URL_USER = /(\b[A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/g;
 // 2. addresses
 const IPV6_BRACKET = /\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](?::\d{1,5})?/g;
 const IPV6_BARE = /(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Za-z:])/g;
@@ -53,7 +54,8 @@ export function maskText(text: string, includeAddresses = false): string {
     .replace(KEYED, (_m, k) => `${k}=${HIDDEN}`)
     .replace(KEYED_JSON, (_m, a, _v, c) => `${a}${HIDDEN}${c}`)
     .replace(ICE_SECRET, (_m, a) => `${a}${HIDDEN}`)
-    .replace(TURN_LINE, (_m, url) => `${url} ${HIDDEN} ${HIDDEN}`);
+    .replace(TURN_LINE, (_m, url) => `${url} ${HIDDEN} ${HIDDEN}`)
+    .replace(URL_USER, (_m, scheme) => `${scheme}${HIDDEN}@`);
   if (includeAddresses) return s;
   s = s.replace(IPV6_BRACKET, (m) => (looksLikeIpv6(m.replace(/^\[|\](?::\d+)?$/g, "")) ? "<ip6>" : m));
   s = s.replace(IPV6_BARE, (m) => (looksLikeIpv6(m) ? "<ip6>" : m));
@@ -263,7 +265,7 @@ function render(entries: readonly NetLogEntry[], meta: NetLogMeta, dropped: numb
   ];
   for (const e of entries) {
     let line = maskText(`#${e.seq} +${e.t}ms ${e.kind} ${e.text}`, includeAddresses);
-    if (includeAddresses && e.addr) line += ` addr=${e.addr}`;
+    if (includeAddresses && e.addr) line += ` addr=${maskText(e.addr, true)}`;
     lines.push(line);
   }
   return lines.join("\n") + "\n";

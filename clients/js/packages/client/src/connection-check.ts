@@ -246,6 +246,11 @@ export function nodeUdp(): UdpSocketLike | null {
   return out;
 }
 
+/** True when every target is a loopback address (spec/diagnostics.md s.8): such a check binds 127.0.0.1, not all interfaces. */
+export function allLoopback(targets: { host: string }[]): boolean {
+  return targets.length > 0 && targets.every((t) => /^(127\.\d+\.\d+\.\d+|::1|\[::1\]|localhost)$/i.test(t.host));
+}
+
 /** `host` and `port` of a `stun:` / `turn:` URL (UDP only: `stuns:`, `turns:` and a tcp transport give null). */
 export function iceUrlTarget(url: string): { host: string; port: number } | null {
   const m = /^(stun|turn):([^:?\s/]+)(?::(\d+))?(\?\S*)?$/i.exec(url.trim());
@@ -320,7 +325,9 @@ export async function probeRelay(s: IceServer, udp: () => UdpSocketLike | null =
   const listeners = new Set<(b: Uint8Array) => void>();
   sock.onMessage = (b) => [...listeners].forEach((l) => l(b));
   try {
-    await sock.bind();
+    const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u) => /^turn:/i.test(u));
+    const ts = urls.map(iceUrlTarget).filter((x): x is { host: string; port: number } => x !== null);
+    await sock.bind(allLoopback(ts.slice(0, 1)) ? "127.0.0.1" : undefined);
     return await probeTurn(sock, listeners, s, ms);
   } catch {
     return "unknown";
@@ -333,8 +340,9 @@ async function checkRaw(sock: UdpSocketLike, o: CheckOptions, stun: string[], tu
   const listeners = new Set<(b: Uint8Array) => void>();
   sock.onMessage = (b) => [...listeners].forEach((l) => l(b));
   try {
-    const local = await sock.bind(o.bindAddress);
     const targets = stun.map(iceUrlTarget).filter((x): x is { host: string; port: number } => x !== null);
+    const turnTarget = turn ? (Array.isArray(turn.urls) ? turn.urls : [turn.urls]).filter((u) => /^turn:/i.test(u)).map(iceUrlTarget).filter((x): x is { host: string; port: number } => x !== null).slice(0, 1) : [];
+    const local = await sock.bind(o.bindAddress ?? (allLoopback([...targets, ...turnTarget]) ? "127.0.0.1" : undefined));
     // the servers are asked one after the other from the same socket: a NAT that maps by destination shows two ports
     const answers: MappedAddress[] = [];
     for (const t of targets) {

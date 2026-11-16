@@ -1070,6 +1070,12 @@
    "input": "192.168.1.5 -> 198.51.100.7:3478 token=abc123",
    "masked": "<ip4> -> <ip4> token=<hidden>",
    "included": "192.168.1.5 -> 198.51.100.7:3478 token=<hidden>"
+  },
+  {
+   "name": "a URL with user:password and a token",
+   "input": "sig open wss://sam:hunter2@example.test:8080/ws?token=abc123&x=1",
+   "masked": "sig open wss://<hidden>@example.test:8080/ws?token=<hidden>",
+   "included": "sig open wss://<hidden>@example.test:8080/ws?token=<hidden>"
   }
  ],
  "export": {
@@ -1106,10 +1112,16 @@
     "t": 15013,
     "kind": "info",
     "text": "turn credential=hunter2 seen 192.168.1.5"
+   },
+   {
+    "t": 15014,
+    "kind": "sig",
+    "text": "close",
+    "addr": "wss://sam:hunter2@198.51.100.2:8080/ws?token=abc123"
    }
   ],
-  "masked": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 5 dropped 0\n# addresses masked\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server\n#3 +40ms cand out srflx\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen <ip4>\n",
-  "included": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 5 dropped 0\n# addresses included\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server addr=203.0.113.9:8080\n#3 +40ms cand out srflx addr=198.51.100.7:51000\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen 192.168.1.5\n"
+  "masked": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 6 dropped 0\n# addresses masked\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server\n#3 +40ms cand out srflx\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen <ip4>\n#6 +15014ms sig close\n",
+  "included": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 6 dropped 0\n# addresses included\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server addr=203.0.113.9:8080\n#3 +40ms cand out srflx addr=198.51.100.7:51000\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen 192.168.1.5\n#6 +15014ms sig close addr=wss://<hidden>@198.51.100.2:8080/ws?token=<hidden>\n"
  },
  "ring": {
   "capacity": 50,

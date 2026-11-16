@@ -178,7 +178,9 @@ Entry { seq: int (from 1, never reused), t: int (ms, monotonic, since the log wa
 
 - Header line 3: `# entries <kept> dropped <dropped>`; line 4: `# addresses masked` or `# addresses included`.
 - Entry line: `#<seq> +<t>ms <kind> <text>`, then ` addr=<addr>` only when `includeAddresses` and `addr` is set.
-- Every entry line goes through the masker (6) before printing, whatever the switch says about addresses. The three
+- Every entry line goes through the masker (6) before printing, whatever the switch says about addresses. The `addr`
+  field printed by `includeAddresses` goes through step 1 of the masker (credentials) first, so a signaling URL with
+  `?token=...` or `user:pass@` never prints a secret (`vectors.export`, `vectors.mask`). The three
   header lines are not masked (they hold no address; a four-part version string would otherwise look like one).
 
 **Persistence (decision).** Where a client has a file system and a log path is configured, the buffer is written to that
@@ -197,6 +199,7 @@ never changes how a crash behaves (a handler observes the error, it does not swa
    - `a=ice-ufrag:` and `a=ice-pwd:` values become `<hidden>`.
    - A TURN line `turn:` or `turns:` URL followed by two more whitespace-separated words (the paste format
      `url user credential`): the two words become `<hidden> <hidden>`.
+   - The userinfo of a URL, `scheme://user:pass@host`: `user:pass` becomes `<hidden>` (`scheme://<hidden>@host`).
 2. **Addresses, unless `includeAddresses`:**
    - IPv6: a bracketed `[...]` form, with an optional `:port`, or a bare run of 2 to 8 groups of 0-4 hex digits
      separated by `:` that contains `::` or has exactly 8 groups; becomes `<ip6>`. (`12:30:45` is a time, not an
@@ -278,6 +281,9 @@ contacted.
   servers that see the same mapped port give one `srflx` candidate (the browser merges them): `cone`. Two `srflx`
   candidates with different ports: `symmetric`. No `srflx` at all: `blocked`. A browser cannot see its own address
   (mDNS), so it never reports `open`.
+- **Loopback targets (decision).** A check or probe socket whose every target (STUN servers, TURN entry) is a loopback
+  address (`127.0.0.0/8`, `::1`, `localhost`) binds `127.0.0.1` instead of all interfaces. Tests then never touch a
+  firewall; real servers are never loopback, so a player's check is unchanged.
 - Classification (`vectors.classify`): no answer from any server: `udp` `blocked`, `natType` `unknown`. One answer:
   `udp` `ok`, `natType` `unknown`. Two or more answers: any difference in port or address: `symmetric`; all the same, and
   equal to the socket's own local address and port: `open`; all the same: `cone`. `udp` `unknown` is for a client that
