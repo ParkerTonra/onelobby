@@ -176,7 +176,7 @@ func _run() -> void:
 
 func _main_flow() -> void:
 	var data_decl := {"nick": {"type": "string", "maxLength": 8}, "vip": {"type": "bool", "hostOnly": true}}
-	var h := await _host("Sam", {"max_players": 3, "room": {"spectators": 1, "min_players": 2, "countdown_seconds": 1, "data": data_decl}}, "lockstep")
+	var h := await _host("Sam", {"max_players": 3, "room": {"spectators": 1, "min_players": 2, "countdown_seconds": 5, "data": data_decl}}, "lockstep")
 	if h == null:
 		return
 	var hr := h.lobby.room
@@ -232,13 +232,13 @@ func _main_flow() -> void:
 	hr.configure({"min_players": 2})
 	await _until(func() -> bool: return ar.settings()["minPlayers"] == 2)
 
-	# ---- countdown, cancel, start
+	# ---- countdown, cancel, start (a 5 s first countdown so the cancel never races the clock)
 	ann.log.clear()
 	h.log.clear()
 	_check(hr.start() == "" and hr.state == "countdown", "start enters the countdown")
 	_check(await _until(func() -> bool: return ar.state == "countdown" and ann.count("countdown") >= 1), "every peer sees the countdown")
 	var cd := ar.countdown()
-	_check(cd.get("total") == 1000 and cd.get("remaining", -1) > 0 and cd.get("remaining", 9999) <= 1000 and hr.start() == "wrong_state", "it counts down 1 s on the joiner's own clock; a second start is wrong_state")
+	_check(cd.get("total") == 5000 and cd.get("remaining", -1) > 0 and cd.get("remaining", 9999) <= 5000 and hr.start() == "wrong_state", "it counts down 5 s on the joiner's own clock; a second start is wrong_state")
 	hr.cancel_countdown()
 	_check(await _until(func() -> bool: return ar.state == "lobby" and ann.count("cancelled") == 1) and ann.last("cancelled")[1] == "host" and h.last("cancelled")[1] == "host", "cancel_countdown ends it with the reason host everywhere")
 	_check(ar.countdown().is_empty() and hr.all_ready, "no countdown is left and ready flags stay")
