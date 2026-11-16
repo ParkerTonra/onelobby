@@ -13,6 +13,14 @@ It prints one line per case and ends with `ENGINE_SMOKE_OK` or `ENGINE_SMOKE_FAI
 PASS turn   JS host + GDScript + C# joiners    2.5s  TURN: 4 relay allocations, 8 relayed packets
 ```
 
+## The room scenario
+
+`node tools/engine-smoke/run.mjs --room` (JS and C# peers, routes `server` and `typed`, so four host/joiner pairs on each) runs
+the room layer instead of the ping rounds: the host has a password and a 1 s countdown; joiner 1 joins with the password and
+data (`color`, `team`), says ready; the host checks the data, starts, the countdown and start reach the joiner, then the host
+kicks it with a code and a reason the joiner must read back; joiner 2 uses a wrong password and must be refused with
+`bad_password`. GDScript is not in it yet.
+
 ## What a case is
 
 One host and two joiners, each its own process, play three rounds on one route: the host sends `ping|r` (reliable) and

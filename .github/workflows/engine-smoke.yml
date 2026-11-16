@@ -85,7 +85,11 @@ jobs:
         run: |
           set -o pipefail
           GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" node tools/engine-smoke/run.mjs | tee engine-smoke.log
+      - name: Engine smoke, room layer (JS and C#)
+        run: |
+          set -o pipefail
+          node tools/engine-smoke/run.mjs --room --no-build | tee engine-smoke-room.log
       - name: Result
         if: always()
         run: |
-          grep -E '^(PASS|FAIL|engine-smoke:|ENGINE_SMOKE)' engine-smoke.log >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E '^(PASS|FAIL|engine-smoke:|ENGINE_SMOKE)' engine-smoke.log engine-smoke-room.log >> "$GITHUB_STEP_SUMMARY" || true

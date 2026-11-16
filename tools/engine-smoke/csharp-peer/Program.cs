@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -67,8 +68,90 @@ internal static class Program
         var client = new LobbyClient(cfg, new DataChannelTransport { BindAddress = A.ContainsKey("loopback") ? "127.0.0.1" : null });
         var nostr = new NostrOptions { Enabled = route != "typed" && route != "ipcode", Stun = new string[0] };
         if (A.TryGetValue("relay", out var relay)) nostr.Relays = new[] { relay };
+        if (A.GetValueOrDefault("scenario") == "room")
+        {
+            try { return role == "host" ? RoomHost(client, route, limitMs) : RoomJoin(client, route, nostr, limitMs); }
+            finally { client.DisposeAsync().AsTask().Wait(1000); }
+        }
         try { return role == "host" ? Host(client, route, joiners, rounds, turn, nostr, limitMs) : Join(client, route, rounds, turn, nostr, limitMs); }
         finally { client.DisposeAsync().AsTask().Wait(1000); }
+    }
+
+    // ---- room scenario (--scenario=room): the room layer end to end on one route (same protocol as js-peer.mjs) ----------------------
+    private const string RoomPw = "smoke-pw";
+
+    private static int RoomHost(LobbyClient client, string route, int limitMs)
+    {
+        var room = new RoomOptions { CountdownSeconds = 1, MinPlayers = 2 };
+        Lobby lobby;
+        string typed = "";
+        if (route == "server")
+        {
+            var t = client.HostAsync(new LobbyOptions("smoke", 4) { Password = RoomPw, Room = room });
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+        }
+        else
+        {
+            var port = int.Parse(A["port"]);
+            var t = client.HostDirectAsync(new DirectHostOptions
+            {
+                Port = port, FallbackPorts = 0, BindAddress = System.Net.IPAddress.Loopback, PublicAddress = "127.0.0.1", OpenPort = false,
+                MaxPlayers = 4, Password = RoomPw, Room = room, Nostr = new NostrOptions { Enabled = false },
+            });
+            if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "host timeout");
+            lobby = t.GetAwaiter().GetResult();
+            typed = "127.0.0.1:" + port;
+        }
+        Say($"HOST_READY code={(route == "server" ? lobby.Code : typed)} typed={typed} ipcode=");
+        bool Ready() => lobby.Room.Players.Count == 2 && lobby.Room.Players.All(p => p.Id == lobby.LocalPeerId || p.Ready);
+        if (!Wait(Ready, lobby.Pump, limitMs)) return Finish(false, "no ready joiner");
+        var j = lobby.Room.Players.First(p => p.Id != lobby.LocalPeerId);
+        if (j.Data.GetValueOrDefault("color") != "#ff8800" || j.Data.GetValueOrDefault("team") != "1") return Finish(false, "joiner data was " + string.Join(",", j.Data.Select(kv => kv.Key + "=" + kv.Value)));
+        var started = false;
+        lobby.Room.Started += () => started = true;
+        lobby.Room.Start();
+        if (!Wait(() => started, lobby.Pump, limitMs)) return Finish(false, "start timed out");
+        Say("started");
+        lobby.Room.Kick(j.Id, "smoke_kick", "Smoke test: bye");
+        if (!Wait(() => lobby.Room.Players.Count == 1, lobby.Pump, limitMs)) return Finish(false, "the kick did not remove the joiner");
+        var until = Sw.ElapsedMilliseconds + 300;
+        Wait(() => Sw.ElapsedMilliseconds > until, lobby.Pump, limitMs);
+        var leave = lobby.LeaveAsync();
+        Wait(() => leave.IsCompleted, lobby.Pump, limitMs);
+        return Finish(true, "room host");
+    }
+
+    private static int RoomJoin(LobbyClient client, string route, NostrOptions nostr, int limitMs)
+    {
+        var code = A["code"];
+        if (A.ContainsKey("wrongpw"))
+        {
+            Task<Lobby> bad = route == "server"
+                ? client.JoinAsync(code, new RoomJoinOptions { Password = "wrong-pw" })
+                : client.JoinDirectAsync(code, new JoinDirectOptions { Password = "wrong-pw", Nostr = nostr });
+            if (!Wait(() => bad.IsCompleted, client.Pump, limitMs)) return Finish(false, "join timeout");
+            if (bad.IsFaulted && bad.Exception!.GetBaseException() is OneLobbyException e && e.Code == "bad_password") return Finish(true, "refused with bad_password");
+            return Finish(false, bad.IsFaulted ? "wrong password gave " + bad.Exception!.GetBaseException().Message : "a wrong password was accepted");
+        }
+        var data = new Dictionary<string, string> { ["color"] = "#ff8800", ["team"] = "1" };
+        Task<Lobby> t = route == "server"
+            ? client.JoinAsync(code, new RoomJoinOptions { Password = RoomPw, Data = data })
+            : client.JoinDirectAsync(code, new JoinDirectOptions { Password = RoomPw, Data = data, Nostr = nostr });
+        if (!Wait(() => t.IsCompleted, client.Pump, limitMs)) return Finish(false, "join timeout");
+        var lobby = t.GetAwaiter().GetResult();
+        RemovalInfo? removed = null;
+        bool started = false, counted = false;
+        lobby.Room.Removed += r => removed = r;
+        lobby.Room.Started += () => started = true;
+        lobby.Room.CountdownUpdated += _ => counted = true;
+        if (!Wait(() => lobby.Room.Supported == true && lobby.Room.Me != null, lobby.Pump, limitMs)) return Finish(false, "no room snapshot");
+        lobby.Room.SetReady(true);
+        if (!Wait(() => started, lobby.Pump, limitMs)) return Finish(false, "start timed out");
+        if (!counted) return Finish(false, "no countdown reached the joiner");
+        if (!Wait(() => removed != null, lobby.Pump, limitMs)) return Finish(false, "no kick");
+        var ok = removed!.Code == "smoke_kick" && removed.Reason == "Smoke test: bye";
+        return Finish(ok, ok ? "room joiner" : "removal was " + removed.Code + "|" + removed.Reason);
     }
 
     private static int Host(LobbyClient client, string route, int joiners, int rounds, IceServer? turn, NostrOptions nostr, int limitMs)

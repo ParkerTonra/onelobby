@@ -4,7 +4,7 @@ Every lobby has a room layer. It is one host-authoritative state machine that ri
 SERVER (or the Direct hub) never sees room traffic and never needs game data. It works the same on server lobbies and on
 Direct lobbies (IP codes, Nostr codes, a browser tab as host). A game that never touches `lobby.room` is unchanged.
 
-Status: JS implements it in 0.7.2. C# (`lobby.Room`) and GDScript (`room`) are coming in this release and must match this
+Status: JS (`lobby.room`) and C# (`lobby.Room`) implement it in 0.7.2; GDScript (`room`) is coming in this release and must match this
 file and `spec/vectors/room.json` exactly. Words in **(decision)** go beyond what the design plan fixed.
 
 Contents: 1 model, 2 wire, 3 messages, 4 host rules (names, data, seats, ready, countdown, spectators, roster states,
@@ -215,7 +215,8 @@ room splits it.
   lost; the hub keeps its slot for its own resume window) becomes `reconnecting` for `rejoinWindowMs` (default 60000;
   0 = never, remove at once). It keeps its entry, seat, data and ready flag. The peer, resuming with the same peer id,
   or joining again with the same `pid` under a new peer id, goes back to `connected` after its `join` (a new peer id
-  replaces the old entry; the old one is dropped without a `seatDropped`).
+  replaces the old entry; the old one is dropped without a `seatDropped`; the new entry starts fresh: not ready, data from its own
+  `join`, the seat from the seat memory, 4.3).
 - **Reconnecting to left.** At the end of the window the entry is removed (`gone why:"timeout"`).
 - **Left at once.** Reasons `left`, `kicked`, `disconnected` remove the entry immediately.
 - **Seat dropped (hook).** For an entry with role `player` that is removed, the host raises `seatDropped
@@ -261,7 +262,9 @@ joiners cannot see or change it (the older receiver-side `chat.filter` still exi
 A removal carries a stable `code` (`^[a-z][a-z0-9_]{0,31}$`) and a free-text `reason` (at most 120 characters, after
 stripping control and bidi characters). An empty reason becomes the default sentence of its code (vectors
 `defaultReasons`). The removed player sees `removed { code, reason, ban }` (the `room` event `removed`; also
-`lobby.removal`) before its `sessionEnded`. A host's declined join request has code `denied` ("The host did not let you in."). The reason is plain text for the player, never a stack or an address.
+`lobby.removal`) before its `sessionEnded`. A host's declined join request has code `denied` ("The host did not let you in."). The reason is plain text for the player, never a stack or an address. When a `deny` frame and the signaling kick notice both reach
+the joiner, the `deny`'s code and reason are the removal (an old hub drops the kick's `code`), so a joiner reads the frames its
+host already sent before it ends the session on the kick notice.
 
 ### 5.2 How it travels
 

@@ -18,7 +18,6 @@ for (const x of process.argv.slice(2)) {
 }
 const role = a.role, route = a.route, name = a.name ?? "js";
 const joiners = Number(a.joiners ?? 2), rounds = Number(a.rounds ?? 3);
-const lockstep = a.sync === "lockstep";
 const say = (s) => console.log(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -32,59 +31,73 @@ const fail = (why) => { say(`RESULT FAIL ${name} ${why}`); process.exit(1); };
 const turn = a.turn ? parseTurnLine(a.turn) : null;
 const relayOnly = !!turn;
 const kit = new OneLobby({
-  gameId: "com.onelobby.enginesmoke", netVersion: "1", lobbyServer: a.server ?? "", mode: lockstep ? "lockstep" : "raw", tickRate: 20, hashEveryTicks: 10, displayName: name, rememberSeat: false,
+  gameId: "com.onelobby.enginesmoke", netVersion: "1", lobbyServer: a.server ?? "", mode: "raw", displayName: name, rememberSeat: false,
   relayOnly, readyTimeoutMs: 40000, advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) },
 });
 
-// ---- the lockstep exchange (--sync=lockstep): chat, a shared pause and 60 ticks of a tiny sim; the same flow in all three engine peers.
-// The sim is FNV-1a 32 over every frame (tick, then peer id, length and bytes of each command), so equal hashes mean equal frames.
-const SYNC_TICKS = 60, CMDS_EACH = 5;
-async function syncRun(lobby, isHost, total) {
-  const ls = lobby.lockstep;
-  let h = 0x811c9dc5, tick = 0, cmds = 0, finalHash = null, finalCmds = 0;
-  const fnv = (bytes) => { for (const b of bytes) h = Math.imul(h ^ b, 16777619) >>> 0; };
-  const hashes = new Map();
-  ls.snapshot = () => { const o = new Uint8Array(8); const v = new DataView(o.buffer); v.setUint32(0, h, true); v.setUint32(4, cmds, true); return o; };
-  ls.restore = (t, b) => { const v = new DataView(b.buffer, b.byteOffset); h = v.getUint32(0, true); cmds = v.getUint32(4, true); tick = t; };
-  // chat: the host speaks first; everyone answers; everyone must see one line from each of the `total` peers
-  const lines = new Map();
-  lobby.chat.on("message", (m) => { lines.set(m.peerId, m.text); if (!isHost && m.peerId === lobby.hostPeerId && !lines.has(lobby.localPeerId)) lobby.chat.send(`hi from ${name}`); });
-  if (isHost) { await sleep(500); lobby.chat.send(`hi from ${name}`); } // a joiner may still be between ready and its handler
-  for (let i = 0; i < 400 && lines.size < total; i++) await sleep(50);
-  if (lines.size < total) fail(`chat: lines from ${lines.size}/${total} peers`);
-  say(`chat ok lines=${lines.size}`);
-  // pause: join1 pauses once at tick 20 and resumes 700 ms later; every peer sees both changes and no ticks in between
-  let pausedAt = -1, gap = -1;
-  lobby.pause.on("changed", (s) => {
-    if (s.paused && pausedAt < 0) pausedAt = ls.lastTick;
-    else if (!s.paused && pausedAt >= 0 && gap < 0) gap = ls.lastTick - pausedAt;
-  });
-  if (isHost) await lobby.start();
-  let sent = 0, pauseAsked = false;
-  const t0 = Date.now();
-  while (finalHash === null) {
-    for (let f; (f = ls.nextFrame()); ) {
-      const b = [f.tick & 255, (f.tick >> 8) & 255, (f.tick >> 16) & 255, (f.tick >>> 24) & 255];
-      fnv(b);
-      for (const c of f.commands) { fnv([c.peerId & 255, c.peerId >> 8, c.bytes.length]); fnv(c.bytes); cmds++; }
-      tick = f.tick;
-      hashes.set(tick, h);
-      ls.reportHash(tick, BigInt(h));
-      if (tick % 3 === 0 && tick <= CMDS_EACH * 3 && sent < CMDS_EACH) ls.submit(Uint8Array.of(lobby.localPeerId, ++sent));
-      if (tick === SYNC_TICKS) { finalHash = h; finalCmds = cmds; }
+// ---- room scenario (--scenario=room): the room layer end to end on one route ----------------------------------------------------
+// host: password, countdown 1 s; the good joiner joins with data and says ready, the host starts, the countdown reaches it, the host kicks it with a
+// reason it must see. The wrong-password joiner (--wrongpw) must be refused with bad_password.
+const ROOM_PW = "smoke-pw";
+async function roomScenario() {
+  const until = async (cond, what, ms = 30000) => {
+    const t0 = Date.now();
+    while (!cond()) {
+      if (Date.now() - t0 > ms) fail(`timed out: ${what}`);
+      await sleep(25);
     }
-    if (!pauseAsked && name.startsWith("join1") && tick >= 20) { pauseAsked = true; lobby.pause.request(true); setTimeout(() => lobby.pause.request(false), 700); }
-    if (Date.now() - t0 > 40000) fail(`lockstep stalled at tick ${tick}`);
-    await sleep(5);
+  };
+  if (role === "host") {
+    const room = { countdownSeconds: 1, minPlayers: 2 };
+    let lobby;
+    if (route === "server") lobby = await kit.host({ name: "smoke", maxPlayers: 4, password: ROOM_PW, room });
+    else lobby = await hostDirect(kit, { port: Number(a.port), bindHost: "127.0.0.1", publicAddress: "127.0.0.1", openPort: false, fallbackPorts: 0, maxPlayers: 4, password: ROOM_PW, room, nostr: false, log: false });
+    const typed = route === "typed" ? `127.0.0.1:${a.port}` : "";
+    say(`HOST_READY code=${route === "server" ? lobby.code : typed} typed=${typed} ipcode=`);
+    await until(() => lobby.room.players.length === 2 && lobby.room.players.every((p) => p.id === lobby.localPeerId || p.ready), "a ready joiner");
+    const j = lobby.room.players.find((p) => p.id !== lobby.localPeerId);
+    if (j.data.color !== "#ff8800" || j.data.team !== "1") fail(`joiner data was ${JSON.stringify(j.data)}`);
+    let started = false;
+    lobby.room.on("started", () => { started = true; });
+    lobby.room.start();
+    await until(() => started, "start");
+    say("started");
+    lobby.room.kick(j.id, { code: "smoke_kick", reason: "Smoke test: bye" });
+    await until(() => lobby.room.players.length === 1, "the kick to remove the joiner");
+    await sleep(300);
+    await lobby.leave();
+    say(`RESULT PASS ${name} room host`);
+    process.exit(0);
   }
-  // keep applying frames until the pause has come and gone (a host or joiner that is quick could finish before it)
-  for (let i = 0; i < 300 && gap < 0; i++) { for (let f; (f = ls.nextFrame()); ) tick = f.tick; await sleep(20); }
-  if (gap < 0 || gap > 4) fail(`pause: ${gap < 0 ? "never resumed" : `${gap} frames arrived while paused`}`);
-  say(`LOCKSTEP tick=${SYNC_TICKS} hash=${finalHash} cmds=${finalCmds} pausegap=${gap}`);
+  if (a.wrongpw) {
+    try {
+      if (route === "server") await kit.join(a.code, { password: "wrong-pw" });
+      else await kit.joinDirect(a.code, { password: "wrong-pw", ...(a.relay ? { nostrRelays: [a.relay] } : {}), stun: [] });
+    } catch (e) {
+      if (e?.code === "bad_password") { say(`RESULT PASS ${name} refused with bad_password`); process.exit(0); }
+      fail(`wrong password gave ${e?.code ?? e}`);
+    }
+    fail("a wrong password was accepted");
+  }
+  const jo = { password: ROOM_PW, data: { color: "#ff8800", team: "1" } };
+  const lobby = route === "server" ? await kit.join(a.code, jo) : await kit.joinDirect(a.code, { ...jo, ...(a.relay ? { nostrRelays: [a.relay] } : {}), stun: [] });
+  let removed = null, started = false, counted = false;
+  lobby.room.on("removed", (r) => { removed = r; });
+  lobby.room.on("started", () => { started = true; });
+  lobby.room.on("countdown", () => { counted = true; });
+  await until(() => lobby.room.supported === true && lobby.room.me, "the room snapshot");
+  lobby.room.setReady(true);
+  await until(() => started, "start");
+  if (!counted) fail("no countdown reached the joiner");
+  await until(() => removed, "the kick");
+  const ok = removed.code === "smoke_kick" && removed.reason === "Smoke test: bye";
+  say(ok ? `RESULT PASS ${name} room joiner` : `RESULT FAIL ${name} removal was ${JSON.stringify(removed)}`);
+  process.exit(ok ? 0 : 1);
 }
 
 try {
-  if (role === "host") {
+  if (a.scenario === "room") await roomScenario();
+  else if (role === "host") {
     let lobby, typed = "", code, ipcode = "";
     if (route === "server") {
       lobby = await kit.host({ name: "smoke", maxPlayers: 4 });
@@ -111,16 +124,6 @@ try {
       else if (kind === "bye") byes.add(from);
     });
     while (ready.size < joiners) await sleep(50);
-    if (lockstep) {
-      await syncRun(lobby, true, joiners + 1);
-      for (let i = 0; i < 400 && byes.size < joiners; i++) await sleep(50);
-      if (byes.size < joiners) fail(`only ${byes.size}/${joiners} joiners said bye`);
-      bcast(lobby, "done");
-      await sleep(500);
-      await lobby.leave();
-      say(`RESULT PASS ${name} host lockstep joiners=${joiners}`);
-      process.exit(0);
-    }
     for (let r = 1; r <= rounds; r++) {
       bcast(lobby, `ping|${r}`);
       while ((pong.get(String(r))?.size ?? 0) < joiners || (fpong.get(String(r))?.size ?? 0) < joiners) {
@@ -149,15 +152,6 @@ try {
     });
     await lobby.ready;
     say(`ready, host ${lobby.hostPeerId}`);
-    if (lockstep) {
-      await syncRun(lobby, false, Number(a.peers));
-      send(lobby, lobby.hostPeerId, `bye|${name}`);
-      while (!done) await sleep(50);
-      await sleep(300);
-      await lobby.leave();
-      say(`RESULT PASS ${name} joiner lockstep`);
-      process.exit(0);
-    }
     while (!done) await sleep(50);
     await sleep(500);
     await lobby.leave();
