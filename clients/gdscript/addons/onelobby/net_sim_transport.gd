@@ -92,6 +92,13 @@ class OLSimLink:
 		remote_address = _inner.remote_address
 		_inner.on_trace = on_trace
 
+	## The lobby's linger loop in leave_and_flush calls poll() on a link (the stock link has one): poll the inner link, then send what is due.
+	func poll() -> void:
+		if _inner.has_method("poll"):
+			_inner.call("poll")
+		sync_state()
+		flush()
+
 	func facts() -> Dictionary:
 		return _inner.facts()
 
