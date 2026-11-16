@@ -6,12 +6,16 @@
 import { ANSWER_FLAGS, CliError } from "./flags.js";
 import {
   ADVICE,
+  DENIED_WORDS,
   DETERMINISM_WORD,
   DUEL_TERMS,
   ENGINES,
   ENGINE_TERMS,
   MIN_MARGIN,
   MIN_SCORE,
+  NEGATION_FILLERS,
+  NEGATORS,
+  NOT_PLAYERS_AFTER_FOR,
   NUMBER_WORDS,
   PAUSE_MODIFIERS,
   QUESTIONS,
@@ -34,11 +38,31 @@ const words = (term) => term.split(" ");
 /** Does `word` equal `base` or its plain plural? */
 const sameWord = (word, base) => word === base || word === `${base}s` || word === `${base}es`;
 
-/** First place the term's words appear in a row (the last word may be plural) that no `claimed` token covers; -1 if none. */
+/** Is the word at `i` denied by the words before it ("no physics", "non-deterministic", "not a shooter")? */
+const negated = (tokens, i) => (i > 0 && NEGATORS.includes(tokens[i - 1].w)) || (i > 1 && NEGATION_FILLERS.includes(tokens[i - 1].w) && NEGATORS.includes(tokens[i - 2].w));
+
+/** Join a denied word that has a meaning of its own with its denial: "not fully deterministic" becomes the one word "nondeterministic". */
+function joinDenied(tokens) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const joined = DENIED_WORDS[tokens[i].w];
+    if (joined && negated(tokens, i)) {
+      const back = NEGATORS.includes(tokens[i - 1].w) ? 1 : 2;
+      out.splice(out.length - back, back);
+      out.push({ w: joined, start: tokens[i - back].start, end: tokens[i].end });
+    } else out.push(tokens[i]);
+  }
+  return out;
+}
+
+/**
+ * First place the term's words appear in a row (the last word may be plural) that no `claimed` token covers and that is not denied
+ * by the words before it; -1 if none.
+ */
 function findTerm(tokens, term, claimed) {
   const ws = words(term);
   for (let i = 0; i + ws.length <= tokens.length; i++) {
-    let ok = true;
+    let ok = !negated(tokens, i);
     for (let k = 0; k < ws.length && ok; k++) {
       if (claimed.has(i + k)) ok = false;
       else ok = k === ws.length - 1 ? sameWord(tokens[i + k].w, ws[k]) : tokens[i + k].w === ws[k];
@@ -77,7 +101,7 @@ export function detectEngine(text) {
       const picks = row.allOf.map((group) => ws.findIndex((w) => group.includes(w)));
       if (picks.every((i) => i >= 0)) return { id: row.engine, words: picks.map((i) => text.slice(tokens[i].start, tokens[i].end)), settled: true };
     } else {
-      const at = ws.findIndex((w) => row.anyOf.includes(w));
+      const at = ws.findIndex((w, i) => row.anyOf.includes(w) && !row.notBefore?.[w]?.includes(ws[i + 1]));
       if (at >= 0) return { id: row.engine, words: [text.slice(tokens[at].start, tokens[at].end)], settled: !row.settledBy || ws.some((w) => row.settledBy.includes(w)) };
     }
   }
@@ -95,7 +119,7 @@ export function readPlayers(text) {
     [new RegExp(`\\bup to ${NUM}\\b`), (m) => numberOf(m[1])],
     [/\b(\d+)\s*v\s*(\d+)\b/, (m) => Number(m[1]) + Number(m[2])],
     [new RegExp(`\\b${NUM}[\\s-]*(?:players?|people|persons?|friends)\\b`), (m) => numberOf(m[1])],
-    [new RegExp(`\\bfor ${NUM}\\b(?!\\s*(?:hz|ticks?|kb|min|sec))`), (m) => numberOf(m[1])],
+    [new RegExp(`\\bfor ${NUM}\\b(?!\\s*(?:${NOT_PLAYERS_AFTER_FOR.join("|")})\\b)`), (m) => numberOf(m[1])],
   ];
   for (const [re, pick] of tries) {
     const m = re.exec(lower);
@@ -224,7 +248,7 @@ const shell = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `"${a.replace(/"/g, '\\"'
 export function recommend({ description, engine } = {}) {
   if (typeof description !== "string" || description.trim() === "") throw new CliError("bad_flag", '--recommend: needs a one-line description of the game, e.g. --recommend "4 player party minigames in Godot"');
   const text = description.trim();
-  const tokens = tokenize(text);
+  const tokens = joinDenied(tokenize(text));
 
   let eng = engine?.id ? { id: engine.id, from: engine.from ?? "template", words: [] } : null;
   let assumedLanguage = false;
@@ -311,7 +335,7 @@ export function recommend({ description, engine } = {}) {
   rows.push(...hostingRows(eng.id));
 
   rec.advice = adviceFor(shape.id, eng.id);
-  if (shape.id === "lockstep" && !tokens.some((t) => t.w === DETERMINISM_WORD)) ask("determinism");
+  if (shape.id === "lockstep" && !has(tokens, DETERMINISM_WORD)) ask("determinism");
   if (shape.id === "coop-snapshots") ask("stateSize");
   if (!eng.id) rec.differences = differences(shape, rec.advice);
   finish(rec, eng);
@@ -414,10 +438,11 @@ export function renderText(rec) {
 }
 
 /** The part of a scaffold run's text that names the keys that came from the recommendation. */
-export function renderApplied(applied, overridden, shape) {
+export function renderApplied(applied, overridden, shape, dropped = []) {
   const out = [`From the recommendation (${shape ?? "no shape matched"}):`];
   if (applied.length) out.push(table(applied));
   else out.push("  nothing: every key it proposes was already set by a flag or --from.");
   for (const o of overridden) out.push(`  kept ${o.key} = ${show(o.value)} from ${o.by} (the recommendation said ${show(o.recommended)})`);
+  for (const d of dropped) out.push(`  left out ${d.key} = ${show(d.recommended)}: ${d.why}`);
   return out.join("\n");
 }

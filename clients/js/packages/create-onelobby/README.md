@@ -288,9 +288,10 @@ From the recommendation (coop-snapshots):
 #### In a scaffold run
 
 With a folder or `--into`, `--json` is the usual scaffold result plus `recommendation`: `{ description, shape, matched, engine,
-applied, overridden, limits, questions, notes }`. `applied` is `[key, value, why]` rows for the keys the recommendation really
-supplied; `overridden` is `{ key, value, recommended, by }` for keys it proposed that a flag (`"a flag"`), a `--from` file or an
-answer typed at a prompt (`"your answer"`) kept instead.
+applied, overridden, dropped, limits, questions, notes }`. `applied` is `[key, value, why]` rows for the keys the recommendation
+really supplied; `overridden` is `{ key, value, recommended, by }` for keys it proposed that a flag (`"a flag"`), a `--from` file or
+an answer typed at a prompt (`"your answer"`) kept instead; `dropped` is `{ key, recommended, why }` for the other `sync.*` values
+it proposed when its `sync.mode` was replaced (a tick rate chosen for lockstep is not applied to a raw game).
 
 ## All templates
 

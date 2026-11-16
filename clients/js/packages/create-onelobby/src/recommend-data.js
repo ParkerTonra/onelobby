@@ -78,6 +78,7 @@ export const SHAPES = [
       ["brawler", 3],
       ["racing", 3],
       ["physics", 3],
+      ["nondeterministic", 4],
     ],
     modes: [
       { mode: "replication", why: "the host decides, joiners interpolate its snapshots and send inputs; a physics or AI game is not deterministic, so lockstep is out" },
@@ -142,9 +143,21 @@ export const PAUSE_MODIFIERS = [
 
 /** A veto on one shape. `engine`: only for that engine; `unless`: terms in the description that lift a penalty; `ban`: the shape can never win. */
 export const VETOES = [
+  { shape: "lockstep", terms: ["nondeterministic"], ban: true, note: "your description says the simulation is not deterministic, so lockstep is out: the peers would drift apart" },
   { shape: "lockstep", engine: "unity", terms: ["physics", "rigidbody", "ragdoll", "racing", "vehicle"], ban: true, note: "Unity physics is not deterministic, so lockstep is out" },
   { shape: "lockstep", terms: ["physics", "rigidbody", "ragdoll"], unless: ["deterministic", "lockstep"], penalty: 3, note: "physics does not run the same on every peer unless you say it is deterministic" },
 ];
+
+/**
+ * A term does not count when one of these words stands right before it ("no physics", "non-deterministic"), or before it with one
+ * filler word between ("not a shooter", "not fully deterministic"). A term that itself starts with one ("not deterministic") still matches.
+ */
+export const NEGATORS = ["not", "non", "no", "never", "without", "isn't", "aren't", "wasn't", "doesn't", "don't"];
+export const NEGATION_FILLERS = ["a", "an", "the", "any", "fully", "really", "quite", "use", "have", "need"];
+/** A denied word that means something of its own: it is read as this one word ("not fully deterministic" counts as "nondeterministic"). */
+export const DENIED_WORDS = { deterministic: "nondeterministic" };
+/** After "for <number>" these words mean the number is not a player count ("for 3 rounds"). Each is a regular expression piece. */
+export const NOT_PLAYERS_AFTER_FOR = ["hz", "ticks?", "kb", "min", "minutes?", "sec", "seconds?", "hours?", "days?", "rounds?", "turns?", "laps?", "levels?", "maps?", "lives", "teams?"];
 
 /** Words that decide a spectator row, the player count and the tick rate. */
 export const SPECTATOR_TERMS = ["spectator", "spectate", "spectating", "watch", "watching", "watcher", "observer"];
@@ -155,14 +168,15 @@ export const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6
 
 /**
  * Engine names in a description (single words). The first row that matches wins, so the specific ones come first.
- * `anyOf`: any of these words; `allOf`: one word from every group; `unless`: if one of these words is also there, the language is
- * settled (otherwise the answer is the assumed one and the "godotLanguage" question is asked).
+ * `anyOf`: any of these words; `allOf`: one word from every group; `settledBy`: if one of these words is also there, the language is
+ * settled (otherwise the answer is the assumed one and the "godotLanguage" question is asked); `notBefore`: a word does not name the
+ * engine when one of these follows it ("web socket" is a transport, not the browser).
  */
 export const ENGINE_TERMS = [
   { engine: "unity", anyOf: ["unity", "unity3d"] },
   { engine: "godot-csharp", allOf: [["godot"], ["c#", "csharp", "mono", "dotnet"]] },
   { engine: "godot-gdscript", anyOf: ["gdscript", "godot"], settledBy: ["gdscript"] },
-  { engine: "web", anyOf: ["browser", "web", "html5", "javascript", "typescript", "webgl", "phaser", "js"] },
+  { engine: "web", anyOf: ["browser", "web", "html5", "javascript", "typescript", "webgl", "phaser", "js"], notBefore: { web: ["socket", "sockets"] } },
   { engine: "dotnet", anyOf: ["dotnet", "monogame", "csharp", "c#"] },
 ];
 

@@ -150,6 +150,38 @@ describe("the matcher: sentence -> shape, mode, players, matched words", () => {
     expect(q.question).toMatch(/wall clock/);
   });
 
+  it("a game that says it is not deterministic never gets lockstep (the determinism question's own words)", () => {
+    for (const s of [
+      "4 player party minigames in Godot, not deterministic",
+      "a non-deterministic party game in Godot with GDScript",
+      "nondeterministic rts for 4",
+      "party minigames on a fixed tick, but the simulation isn't deterministic",
+      "a party game that is not fully deterministic",
+    ]) {
+      const rec = recommend({ description: s });
+      expect(rec.shape, s).not.toBe("lockstep");
+      expect(rec.answers.find((r) => r[0] === "sync.mode")?.[1], s).not.toBe("lockstep");
+      expect(rec.matched.map((m) => m.toLowerCase()), s).not.toContain("deterministic");
+    }
+    const rec = recommend({ description: "4 player party minigames in Godot, not deterministic" });
+    expect(rec.shape).toBe("replication");
+    expect(rec.notes.join(" ")).toMatch(/not deterministic, so lockstep is out/);
+    expect(rec.questions.map((q) => q.id)).not.toContain("determinism");
+  });
+
+  it("a denied word does not count: no physics, not a shooter, no spectators", () => {
+    expect(recommend({ description: "deterministic party game with no physics in Godot" }).notes).toEqual([]);
+    expect(recommend({ description: "a card game, not a shooter" }).shape).toBe("turn-based");
+    expect(recommend({ description: "online card game with no spectators" }).answers.find((r) => r[0] === "room.spectators")).toBeUndefined();
+  });
+
+  it("a number after 'for' that counts something else is not the player count; 'web socket' is not the browser", () => {
+    const p = (s) => readPlayers(s)?.max ?? null;
+    expect([p("a card game for 3 rounds"), p("for 10 minutes"), p("for 2 teams"), p("for 5"), p("for 6 friends")]).toEqual([null, null, null, 5, 6]);
+    const e = (s) => detectEngine(s)?.id ?? null;
+    expect([e("its own server loop over a web socket"), e("a web game"), e("web sockets in the browser")]).toEqual([null, "web", "web"]);
+  });
+
   it("never recommends lockstep for Unity physics, even when told it is deterministic", () => {
     for (const s of ["deterministic Unity physics game", "lockstep RTS in Unity with physics", "deterministic ragdoll brawler in Unity", "deterministic racing in Unity"]) expect(recommend({ description: s }).shape).not.toBe("lockstep");
     expect(recommend({ description: "deterministic physics party game in Godot" }).shape).toBe("lockstep"); // only Unity is banned outright
@@ -329,6 +361,22 @@ describe("with a scaffold run", () => {
     expect(r.json.recommendation.applied.map((a) => a[0])).toEqual(expect.arrayContaining(["session.pause", "hosting.direct"]));
   });
 
+  it("a replaced sync.mode leaves out the other sync values that were proposed for the recommended mode", async () => {
+    const r = await dry(["--recommend", "4 player party minigames", "--mode", "raw"]);
+    expect(r.code).toBe(0);
+    expect(r.json.blueprint.sync.mode).toBe("raw");
+    expect(r.json.recommendation.applied.map((a) => a[0]).filter((k) => k.startsWith("sync."))).toEqual([]);
+    expect(r.json.recommendation.dropped.map((d) => d.key).sort()).toEqual(["sync.hashEveryTicks", "sync.tickRate"]);
+    expect(r.json.recommendation.dropped[0].why).toMatch(/proposed for sync\.mode lockstep, and sync\.mode is raw/);
+    expect(r.json.recommendation.overridden).toEqual([{ key: "sync.mode", value: "raw", recommended: "lockstep", by: "a flag" }]);
+    expect(r.json.recommendation.applied.map((a) => a[0])).toEqual(expect.arrayContaining(["lobby.maxPlayers", "session.pause"])); // not sync: still applied
+    const same = await dry(["--recommend", "4 player party minigames", "--mode", "lockstep"]);
+    expect(same.json.recommendation.dropped).toEqual([]);
+    expect(same.json.recommendation.applied.map((a) => a[0])).toEqual(expect.arrayContaining(["sync.tickRate", "sync.hashEveryTicks"]));
+    const text = await cli(["g", "--template", "godot-gdscript", "--yes", "--dry-run", "--no-natives", "--recommend", "4 player party minigames", "--mode", "raw"]);
+    expect(text.out).toMatch(/left out sync\.tickRate = 20: it was proposed for sync\.mode lockstep/);
+  });
+
   it("--dry-run --json lists the keys that came from the recommendation with their reasons, and writes nothing", async () => {
     const r = await dry(["--recommend", "4 player wave survival first-person shooter"]);
     expect(r.json.dryRun).toBe(true);
@@ -463,7 +511,7 @@ describe("the JSON contract", () => {
 
   it("the scaffold run's recommendation block has the documented fields", async () => {
     const r = await json(["g", "--template", "godot-gdscript", "--recommend", SAMPLE, "--max-players", "6", "--yes", "--dry-run", "--no-natives"]);
-    expect(Object.keys(r.json.recommendation).sort()).toEqual(["applied", "description", "engine", "limits", "matched", "notes", "overridden", "questions", "shape"]);
+    expect(Object.keys(r.json.recommendation).sort()).toEqual(["applied", "description", "dropped", "engine", "limits", "matched", "notes", "overridden", "questions", "shape"]);
   });
 });
 

@@ -198,20 +198,29 @@ export async function run(argv, io) {
     }
 
     // the recommendation fills what no flag, --set, --from or answer gave; the built-in defaults come after it
+    // when the sync mode it proposed was replaced, the other sync.* values it proposed were chosen for that mode: they are left out
     const applied = [];
     const overridden = [];
+    const dropped = [];
+    const modeRow = recRows.get("sync.mode");
+    const haveMode = getPath(answers, "sync.mode");
+    const modeReplaced = modeRow !== undefined && haveMode !== undefined && haveMode !== modeRow[1];
     for (const row of recRows.values()) {
       const [key, value] = row;
       const have = getPath(answers, key);
       if (have === undefined) {
+        if (modeReplaced && key.startsWith("sync.")) {
+          dropped.push({ key, recommended: value, why: `it was proposed for sync.mode ${modeRow[1]}, and sync.mode is ${haveMode}` });
+          continue;
+        }
         setPath(answers, key, value);
         applied.push(row);
       } else if (JSON.stringify(have) !== JSON.stringify(value)) overridden.push({ key, value: have, recommended: value, by: flagKeys.has(key) ? "a flag" : fromKeys.has(key) ? "--from" : "your answer" });
     }
     const recommendation = rec
       ? {
-          json: { description: rec.description, shape: rec.shape, matched: rec.matched, engine: rec.engine, applied, overridden, limits: rec.limits, questions: rec.questions, notes: rec.notes },
-          text: renderApplied(applied, overridden, rec.shape),
+          json: { description: rec.description, shape: rec.shape, matched: rec.matched, engine: rec.engine, applied, overridden, dropped, limits: rec.limits, questions: rec.questions, notes: rec.notes },
+          text: renderApplied(applied, overridden, rec.shape, dropped),
         }
       : undefined;
 
