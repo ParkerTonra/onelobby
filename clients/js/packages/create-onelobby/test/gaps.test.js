@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { buildLine, main } from "../src/cli.js";
 import { fixtureNativesZip } from "./helpers/zip.js";
-import { WIRING_LIST_MAX, blueprintNext, wiringCheck, wiringDetail } from "../src/verify/wiring.js";
+import { WIRING_LIST_MAX, blueprintNext, wiringCheck, wiringDetail, withoutComments } from "../src/verify/wiring.js";
 import { runChecks } from "../src/verify/core.js";
 
 let cwd;
@@ -220,13 +220,44 @@ describe("the wiring check", () => {
     put("m/ui/a.gd", 'var m = load("res://addons/onelobby/menu/menu.tscn")\n');
     const one = await run("godot-gdscript", at("m"));
     expect(one.status).toBe("ok");
-    expect(one.detail).toBe("ui/a.gd uses the drop-in menu");
+    expect(one.detail).toBe("ui/a.gd builds the drop-in menu");
     for (const n of ["b", "c", "d", "e", "f", "g", "h"]) put(`m/ui/${n}.gd`, "var m = OneLobbyMenu.new()\n");
     put("m/ui/skip.gd", "var nothing = 1\n");
     const many = await run("godot-gdscript", at("m"));
     expect(many.status).toBe("ok");
-    expect(many.detail).toBe("8 files use the drop-in menu: ui/a.gd, ui/b.gd, ui/c.gd, ui/d.gd, ui/e.gd and 3 more");
+    expect(many.detail).toBe("8 files build the drop-in menu: ui/a.gd, ui/b.gd, ui/c.gd, ui/d.gd, ui/e.gd and 3 more");
     expect(many.detail).not.toContain("skip.gd");
+  });
+
+  it("only a file that builds the menu counts: the client alone, a type annotation or a comment do not (negative controls)", async () => {
+    put("nm-k/project.godot", "config_version=5\n");
+    put("nm-k/onelobby.json", bp());
+    // the adopting game's shape: a service that holds the autoload's client, mentions the menu in a comment and types a variable with it
+    put("nm-k/net/service.gd", "# the drop-in menu (addons/onelobby/menu/menu.tscn, OneLobbyMenu.new()) lives in the panel\nvar client: OneLobbyClient = Net.client\nvar menu: OneLobbyMenu\nfunc f(m: OneLobbyMenu) -> void:\n\tpass # OneLobbyMenu.new()\n");
+    const bad = await run("godot-gdscript", at("nm-k"));
+    expect(bad.status).toBe("fail");
+    expect(bad.detail).toContain("builds the drop-in menu");
+    put("nm-k/ui/panel.gd", 'var url := "#ff8800"; var m = load("res://addons/onelobby/menu/menu.tscn").instantiate()\n');
+    const ok = await run("godot-gdscript", at("nm-k"));
+    expect(ok.status).toBe("ok");
+    expect(ok.detail).toBe("ui/panel.gd builds the drop-in menu"); // net/service.gd is not named
+    // the same for a C# game: a type, a comment and a block comment do not count, the scene path and new OneLobbyMenu( do
+    put("nm-kc/project.godot", "config_version=5\n");
+    put("nm-kc/onelobby.json", bp());
+    put("nm-kc/Panel.cs", "// OneLobbyMenu.tscn\n/* new OneLobbyMenu( */\nprivate OneLobbyMenu _menu;\n");
+    expect((await run("godot-csharp", at("nm-kc"))).status).toBe("fail");
+    put("nm-kc/Panel.cs", "var m = new OneLobbyMenu();\n");
+    expect((await run("godot-csharp", at("nm-kc"))).status).toBe("ok");
+    // a ; comment line of project.godot is not a use either
+    put("nm-ks/project.godot", 'config_version=5\n; run/main_scene="res://addons/onelobby/menu/menu.tscn"\n');
+    put("nm-ks/onelobby.json", bp());
+    expect((await run("godot-gdscript", at("nm-ks"))).status).toBe("fail");
+  });
+
+  it("withoutComments: # outside a string ends a GDScript line, inside one it stays", () => {
+    expect(withoutComments("a.gd", 'var a = 1 # note\nvar b = "#x" # y\nvar c = \'#\'')).toBe('var a = 1 \nvar b = "#x" \nvar c = \'#\'');
+    expect(withoutComments("a.cs", "int a; // x\n/* y */int b;")).toBe("int a; \nint b;");
+    expect(withoutComments("a.tscn", "; c\nkeep")).toBe("\nkeep");
   });
 
   it("wiringDetail: one, exactly the limit, one over the limit", () => {

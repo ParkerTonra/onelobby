@@ -50,13 +50,20 @@ describe("the play entry and the repository root", () => {
 describe("a node named Net made in code", () => {
   it("is found, and --into stops with name_clash naming the file", async () => {
     godot("g");
-    put("g/world.gd", 'extends Node\nfunc _ready():\n\tvar n := Node.new()\n\tn.name = "Net"\n\tadd_child(n)\n');
+    put("g/world.gd", 'extends Node\nfunc _ready():\n\tvar n := Node.new()\n\tn.name = "Net"\n\tget_tree().root.add_child(n)\n');
     expect(runtimeNodeNamed(join(cwd, "g"), "Net")).toBe("world.gd");
     const r = await run(ARGS("g"));
     expect(r.code).toBe(1);
     expect(r.json.error.code).toBe("name_clash");
     expect(r.json.error.message).toContain("world.gd");
-    expect(r.json.error.message).toContain("makes a node named Net at run time");
+    expect(r.json.error.message).toContain("puts a node named Net under /root");
+    expect(r.json.error.message).toContain("child of another node is not a clash");
+  });
+  it("negative control: a node named Net that is a child of another node is no clash", async () => {
+    godot("gc");
+    put("gc/net/service.gd", 'extends Node\nfunc _ready():\n\tvar n := Node.new()\n\tn.name = "Net"\n\tadd_child(n)\n');
+    expect(runtimeNodeNamed(join(cwd, "gc"), "Net")).toBeNull();
+    expect((await run(ARGS("gc"))).code).toBe(0);
   });
   it("also finds get_node(\"/root/Net\"); negative control: a longer name or none is no clash", async () => {
     godot("g2");

@@ -1,7 +1,8 @@
 // The `wiring` check: a static look, no process started. `verify` proves the routes with its own two peers, so a game whose
 // scenes or page never touch OneLobby would still pass them; this check fails until some file of the game does.
-//   godot-gdscript, ui.kind drop-in: a scene or script outside addons/ and tests/ names the menu (res://addons/onelobby/menu/menu.tscn, OneLobbyMenu)
-//   godot-csharp,   ui.kind drop-in: the same for OneLobbyMenu.tscn / OneLobbyMenu (not OneLobbyNet.cs, which the scaffolder wrote)
+//   godot-gdscript, ui.kind drop-in: a scene or script outside addons/ and tests/ builds the menu: its scene path (res://addons/onelobby/menu/menu.tscn) or OneLobbyMenu.new(.
+//     Comments are skipped, and so is a bare mention of the class (a type annotation, "Net.client"): only a file that builds the menu counts.
+//   godot-csharp,   ui.kind drop-in: the same for the OneLobbyMenu.tscn path or new OneLobbyMenu( (not OneLobbyNet.cs, which the scaffolder wrote)
 //   godot, ui.kind none or generated: a script outside addons/ and tests/ uses the client (OneLobbyClient; not net.gd, the scaffolder's autoload)
 //   unity: a .cs file outside Packages/, Library/ and Assets/OneLobby/ (the scaffolder's test and build script) uses OneLobbyMenu, OneLobbyRunner or the client
 //   web: a file outside test/ and node_modules/ imports the glue (session.js) or onelobby (not the glue file itself)
@@ -30,6 +31,35 @@ function gameFiles(dir, pattern, skipDirs, rel = "") {
 /** The first file whose text matches `regex`, or undefined. */
 const firstMatch = (dir, files, regex) => files.find((f) => regex.test(readFileSync(join(dir, f), "utf8")));
 
+// `text` of the game file `path` without its comments, so a mention in a comment is not a use: `#` (GDScript; a `#` inside a quoted string
+// stays), `//` and block comments (C#), a `;` line (a scene, a .tres or project.godot).
+export function withoutComments(path, text) {
+  if (/\.(tscn|tres)$|(^|\/)project\.godot$/i.test(path)) return text.replace(/^[ \t]*;.*$/gm, "");
+  if (/\.cs$/i.test(path)) {
+    const noBlocks = text.replace(/\/\*[\s\S]*?\*\//g, "");
+    return noBlocks.replace(/^(.*?)\/\/.*$/gm, (whole, head) => (head.split('"').length % 2 === 0 ? whole : head));
+  }
+  if (!/\.gd$/i.test(path)) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      let quote = "";
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (quote) {
+          if (c === "\\") i++;
+          else if (c === quote) quote = "";
+        } else if (c === '"' || c === "'") quote = c;
+        else if (c === "#") return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** Every file whose text matches `regex` once its comments are taken out, in the order of `files`. */
+const codeMatches = (dir, files, regex) => files.filter((f) => regex.test(withoutComments(f, readFileSync(join(dir, f), "utf8"))));
+
 /** Every file whose text matches `regex`, in the order of `files`. */
 const allMatches = (dir, files, regex) => files.filter((f) => regex.test(readFileSync(join(dir, f), "utf8")));
 
@@ -41,7 +71,7 @@ export function wiringDetail(hits, what) {
   if (hits.length === 1) return `${hits[0]} ${what}`;
   const shown = hits.slice(0, WIRING_LIST_MAX).join(", ");
   const more = hits.length > WIRING_LIST_MAX ? ` and ${hits.length - WIRING_LIST_MAX} more` : "";
-  return `${hits.length} files ${what.replace(/^uses\b/, "use").replace(/^imports\b/, "import")}: ${shown}${more}`;
+  return `${hits.length} files ${what.replace(/^uses\b/, "use").replace(/^imports\b/, "import").replace(/^builds\b/, "build")}: ${shown}${more}`;
 }
 
 /** The onelobby.json's ui.kind (unreadable or unset: the drop-in menu, the default of both Godot templates). */
@@ -86,14 +116,14 @@ export function wiringCheck() {
       const files = gameFiles(dir, GODOT_FILES, SKIP_DIRS).filter((f) => f !== "net.gd" && f !== "OneLobbyNet.cs");
       const kind = uiKind(dir);
       if (kind === "drop-in") {
-        const regex = csharp ? /\bOneLobbyMenu(?:\.tscn)?\b/ : /addons\/onelobby\/menu\/menu\.tscn|\bOneLobbyMenu\b/;
+        const regex = csharp ? /OneLobbyMenu\.tscn|\bnew\s+OneLobbyMenu\s*\(/ : /addons\/onelobby\/menu\/menu\.tscn|\bOneLobbyMenu\.new\s*\(/;
         if (existsSync(join(dir, "project.godot"))) files.push("project.godot"); // the menu as the main scene or an autoload
-        const hits = allMatches(dir, files, regex);
-        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "uses the drop-in menu") };
+        const hits = codeMatches(dir, files, regex);
+        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "builds the drop-in menu") };
         const scene = csharp ? "res://addons/onelobby_menu/OneLobbyMenu.tscn" : "res://addons/onelobby/menu/menu.tscn";
         return {
           status: "fail",
-          detail: "no scene or script outside addons/ and tests/ uses the drop-in menu, so the game never shows it (the routes pass on their own two peers).",
+          detail: "no scene or script outside addons/ and tests/ builds the drop-in menu (its scene path or OneLobbyMenu.new; a comment, a type annotation or the client alone does not count), so the game never shows it (the routes pass on their own two peers).",
           next: `Instance ${scene} in your menu scene and connect ${csharp ? "its GameStarted event" : "its game_started signal"} (docs/recipes/menu.md).`,
         };
       }

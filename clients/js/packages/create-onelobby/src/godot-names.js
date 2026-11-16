@@ -29,11 +29,16 @@ export function gameClassNames(dir, ignore = new Set()) {
 }
 
 /**
- * The first script of the game that makes a node of that name at run time (`node.name = "Net"`, `get_node("/root/Net")`): the autoload would
- * land on the same path under /root, so Godot renames one of the two. null when none. `ignore`: files to leave out.
+ * The first script of the game that puts a node of that name directly under /root (it sets `name = "Net"` AND adds a node to the root:
+ * `get_tree().root.add_child(...)`) or looks it up as `get_node("/root/Net")`: the autoload would land on the same path, so Godot renames one
+ * of the two. A node named Net that is the child of another node (`add_child` on self) is no clash and is not reported. null when none.
+ * `ignore`: files to leave out.
  */
 export function runtimeNodeNamed(dir, name, ignore = new Set()) {
-  const re = new RegExp(`\\bname\\s*=\\s*["']${name}["']|["']/root/${name}["']`);
+  const lookup = new RegExp(`["']/root/${name}["']`);
+  const named = new RegExp(`\\bname\\s*=\\s*["']${name}["']`);
+  const underRoot = /\broot\.add_child\b|get_node\(\s*["']\/root["']\s*\)\.add_child\b|\broot\.call_deferred\(\s*["']add_child["']/;
+  const re = { test: (text) => lookup.test(text) || (named.test(text) && underRoot.test(text)) };
   let found = null;
   const walk = (rel) => {
     for (const e of readdirSync(join(dir, ...rel.split("/").filter(Boolean)), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -90,10 +95,10 @@ export function checkNameClashes({ target, classes, autoload, ignore = new Set()
   const node = runtimeNodeNamed(target, autoload.name, ignore);
   if (node) clashes.push({ name: autoload.name, adds: `${autoload.file} (the autoload ${autoload.name})`, kind: "node", gameFile: node });
   if (!clashes.length) return;
-  const lines = clashes.map((c) => `  ${c.name}: ${c.adds} would take the name, but ${c.gameFile} already ${c.kind === "class_name" ? `declares class_name ${c.name}` : c.kind === "node" ? `makes a node named ${c.name} at run time` : "uses it"}`);
+  const lines = clashes.map((c) => `  ${c.name}: ${c.adds} would take the name, but ${c.gameFile} already ${c.kind === "class_name" ? `declares class_name ${c.name}` : c.kind === "node" ? `puts a node named ${c.name} under /root or looks up /root/${c.name}` : "uses it"}`);
   throw new CliError(
     "name_clash",
-    `--into would add names your game already uses, so Godot would refuse to load both; nothing was written:\n${lines.join("\n")}\nWay out: rename the one in your game (its class_name or autoload, and every use of it), then run the same command again.`,
+    `--into would add names your game already uses, so Godot would refuse to load both; nothing was written:\n${lines.join("\n")}\nWay out: rename the one in your game (its class_name or autoload, and every use of it), then run the same command again. A node named ${autoload.name} that is a child of another node is not a clash: only one added directly under /root counts.`,
     undefined,
     { clashes },
   );

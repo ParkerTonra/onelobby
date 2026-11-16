@@ -209,20 +209,21 @@ describe("project.godot autoload editor", () => {
     expect(r.text).toBe(`[application]\n\n[autoload]\n${ENTRY}\n\n[display]\nx=1\n`);
   });
 
-  it("adds after the other entries of the section", () => {
+  it("adds before the first entry, so OneLobby's Net loads before the game's autoloads that read Net.client (negative control: not after the last)", () => {
     const src = '[autoload]\n\nGlobals="*res://globals.gd"\nAudio="*res://audio.gd"\n\n[display]\nx=1\n';
     const r = addAutoload(src, "Net", "res://net.gd");
-    expect(r.text).toBe(`[autoload]\n\nGlobals="*res://globals.gd"\nAudio="*res://audio.gd"\n${ENTRY}\n\n[display]\nx=1\n`);
+    expect(r.text).toBe(`[autoload]\n\n${ENTRY}\nGlobals="*res://globals.gd"\nAudio="*res://audio.gd"\n\n[display]\nx=1\n`);
+    expect(r.text.indexOf(ENTRY)).toBeLessThan(r.text.indexOf("Globals"));
   });
 
-  it("adds to a section that ends the file with no final newline", () => {
-    expect(addAutoload('[autoload]\nA="*res://a.gd"', "Net", "res://net.gd").text).toBe(`[autoload]\nA="*res://a.gd"\n${ENTRY}`);
+  it("adds before the first entry of a section that ends the file with no final newline", () => {
+    expect(addAutoload('[autoload]\nA="*res://a.gd"', "Net", "res://net.gd").text).toBe(`[autoload]\n${ENTRY}\nA="*res://a.gd"`);
   });
 
   it("CRLF files stay CRLF everywhere", () => {
     const src = '[application]\r\nconfig/name="x"\r\n\r\n[autoload]\r\n\r\nA="*res://a.gd"\r\n\r\n[display]\r\nx=1\r\n';
     const r = addAutoload(src, "Net", "res://net.gd");
-    expect(r.text).toBe('[application]\r\nconfig/name="x"\r\n\r\n[autoload]\r\n\r\nA="*res://a.gd"\r\n' + ENTRY + "\r\n\r\n[display]\r\nx=1\r\n");
+    expect(r.text).toBe('[application]\r\nconfig/name="x"\r\n\r\n[autoload]\r\n\r\n' + ENTRY + '\r\nA="*res://a.gd"\r\n\r\n[display]\r\nx=1\r\n');
     expect(r.text.replace(/\r\n/g, "")).not.toContain("\n");
     const none = addAutoload('[application]\r\nconfig/name="x"\r\n', "Net", "res://net.gd");
     expect(none.text).toBe(`[application]\r\nconfig/name="x"\r\n\r\n[autoload]\r\n\r\n${ENTRY}\r\n`);
