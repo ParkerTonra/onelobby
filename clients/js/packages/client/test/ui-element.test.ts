@@ -335,6 +335,19 @@ describe("<one-lobby> connection check on open", () => {
     expect(shown(el, "startCheck")).toBe(true);
   });
 
+  it("the start screen first shows later than the element (another screen came first, as after a join link): the check runs then, once", async () => {
+    const el = mount({ game: "oo7" }, undefined, "el", (e) => e._controller.openSettings());
+    await flush();
+    expect([el.screen, checkRuns]).toEqual(["settings", 0]); // the start screen was not up when the element opened
+    el._controller.back();
+    await flush();
+    expect([el.screen, checkRuns]).toEqual(["start", 1]);
+    el._controller.openSettings();
+    el._controller.back();
+    await flush();
+    expect(checkRuns).toBe(1); // and not again
+  });
+
   it("the element removed from the page while the check runs: the late answer draws nothing and throws nothing", async () => {
     let release!: () => void;
     const gate = new Promise<void>((res) => (release = res));

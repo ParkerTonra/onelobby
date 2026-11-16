@@ -613,6 +613,13 @@ function makeClass(): CustomElementConstructor {
       if (screen === "settings") this.renderSettings(changed);
       if (screen === "browse") this.renderBrowse();
       if (changed && screen !== "settings") (this.$("relay") as HTMLInputElement).value = "";
+      // The start screen comes up later than the element (a join link, a resumed seat or another screen was shown first): the check on
+      // open has its turn now. The controller runs it once; after this draw, so its own change is drawn in turn.
+      if (changed && screen === "start" && this.lastScreen !== null) {
+        queueMicrotask(() => {
+          if (this.isConnected) void this._controller.startShown();
+        });
+      }
 
       this.lastScreen = screen;
       if (mayMoveFocus) this.focusFor(screen);
