@@ -30,8 +30,8 @@ public class PortMapperTests
         public FakeUpnp()
         {
             Http.Start();
-            _ = Task.Run(SsdpLoop);
-            _ = Task.Run(HttpLoop);
+            _ = SsdpLoop(); // runs to its first await here, so the socket is already being read when the constructor returns
+            _ = HttpLoop();
         }
 
         private async Task SsdpLoop()
@@ -131,7 +131,7 @@ public class PortMapperTests
         private readonly CancellationTokenSource _cts = new();
         public IPEndPoint Endpoint => (IPEndPoint)Udp.Client.LocalEndPoint!;
 
-        public FakeNatPmp() => _ = Task.Run(Loop);
+        public FakeNatPmp() => _ = Loop();
 
         private async Task Loop()
         {
@@ -170,7 +170,7 @@ public class PortMapperTests
         NatPmpEndpoint = n?.Endpoint ?? new IPEndPoint(IPAddress.Loopback, 9),
         TryUpnp = u != null,
         TryNatPmp = n != null,
-        DiscoveryTimeout = TimeSpan.FromSeconds(10), // a fake gateway always answers and discovery returns on the first reply: this only bounds a slow runner
+        DiscoveryTimeout = TimeSpan.FromSeconds(30), // hang guard only: a fake gateway always answers and discovery returns on the first reply
         Description = "OneLobby test",
     };
 
@@ -236,7 +236,7 @@ public class PortMapperTests
         var m = new PortMapper(47810, Opts(gw));
         var open = m.OpenAsync();
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!gw.Mappings.ContainsKey("TCP 47810")) { Assert.True(sw.ElapsedMilliseconds < 5000, "no AddPortMapping"); await Task.Delay(10); }
+        while (!gw.Mappings.ContainsKey("TCP 47810")) { Assert.True(sw.ElapsedMilliseconds < 30000, "no AddPortMapping"); await Task.Delay(10); }
         m.Dispose(); // the game quits while the router has not answered yet
         var r = await open;
         Assert.False(r.Mapped);
@@ -280,7 +280,7 @@ public class PortMapperTests
         // Dispose sends the two NAT-PMP deletes and does not wait for the gateway's reply (NatPmpOnce is fire and forget),
         // so the fake gateway may still be reading them: wait for the condition, not a fixed time
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!gw.Mappings.IsEmpty && sw.ElapsedMilliseconds < 5000) await Task.Delay(10);
+        while (!gw.Mappings.IsEmpty && sw.ElapsedMilliseconds < 30000) await Task.Delay(10);
         Assert.Empty(gw.Mappings);
         Assert.Equal(new[] { "direct host mapping deleted port=47810 protocols=TCP,UDP mapping=NAT-PMP" }, log);
     }
