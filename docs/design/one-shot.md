@@ -26,10 +26,10 @@ Missing or half there:
 |---|---|
 | GDScript | Voice (needs Opus) and replication (C# and JS have it; the GDScript port is next) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
-| UI | No drop-in menu for Godot or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
-| Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. No drop-in menu draws it yet. |
+| UI | The Godot (GDScript) drop-in menu landed (`menu.tscn`, `docs/recipes/menu.md`); none yet for Godot C# or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
+| Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. The GDScript menu draws it (roster, ready, countdown, kick, ban, unban); the web element, Godot C# and Unity do not yet. |
 | Ban | Per lobby, by IP, forgotten when the lobby ends. No game shows kick/ban in its UI. |
-| Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. No drop-in menu draws the fields yet. |
+| Settings | Landed (`spec/settings.md`, `docs/recipes/settings.md`): name, relay line (masked view), last code and lobby server are saved on the player's machine in JS, C# (Unity PlayerPrefs, Godot `user://`) and GDScript, applied as defaults, environment override, never logged. The GDScript menu draws the fields (name, masked relay line, lobby server, last code); the web element, Godot C# and Unity do not yet. |
 | Errors | Plain-language `describeError` exists in JS only. Players never see *why* a connection failed. |
 | Verify | No one-command two-peer test for a game; Unity is not in engine-smoke. |
 | Recommendation | The skill has sync-mode rules; the scaffolder asks instead of recommending. |

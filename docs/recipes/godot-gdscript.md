@@ -81,7 +81,31 @@ func _wire() -> void:
 		message.emit(from, bytes.get_string_from_utf8()))
 ```
 
-## 3. Host / Join / Browse buttons
+## 3. Add the menu scene
+
+One scene gives the player Name, Host, Join (a code, `ip:port` or an invite link), Browse, a lobby with ready / start / kick / ban,
+a relay field, a connection check and plain-words errors, all driven by `onelobby.json` (`ui.kind` is `drop-in` for this engine).
+Add `res://addons/onelobby/menu/menu.tscn` to your main scene and connect one signal; there is no other game code:
+
+```gdscript compile file=main.gd
+extends Control
+
+@onready var menu: OneLobbyMenu = $OneLobbyMenu
+
+
+func _ready() -> void:
+	menu.game_started.connect(func(lobby: OneLobbyLobby) -> void:
+		print("go: ", lobby.room.players().size(), " players"))   # the menu hid itself; start your game here
+	menu.returned_to_lobby.connect(func(_lobby: OneLobbyLobby) -> void: pass)   # the menu is back; end the match
+```
+
+The menu makes its own `OneLobbyClient` from `res://onelobby.json` (`config_path`), pumps it, saves the name, relay line and last code,
+and takes `--host`, `--join=<code>` and `--name=<name>` after `--` on the command line. Restyle it with a `Theme`, reword it with a
+text table, hand it your own client: [docs/recipes/menu.md](menu.md). A runnable demo: `clients/gdscript/examples/menu_demo/`.
+
+### Build your own
+
+The menu is built on public calls only, so you can draw your own. This is the same flow with hand-made buttons:
 
 ```gdscript compile file=menu.gd
 extends Control
@@ -246,7 +270,7 @@ libwebrtc_native.windows.template_release.x86_64.dll
 
 ## Done when
 
-- The menu shows Host / Join / Browse and the project opens without script errors.
+- The menu (the scene, or your own buttons) shows Host / Join / Browse and the project opens without script errors.
 - With a local `onelobby-server`, two Godot instances (`-- --lobby-server=ws://127.0.0.1:8080/ws`; use 127.0.0.1, not
   localhost): one presses Host and shows a code, the other joins it, and its "hello" shows on the host.
 - With the server address wrong, the game still starts and the menu shows "Multiplayer unavailable".

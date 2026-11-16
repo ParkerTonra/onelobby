@@ -91,12 +91,17 @@ public sealed record EpicSetting(bool Enabled, IReadOnlyDictionary<string, strin
 public sealed record PlatformsSection(SteamSetting Steam, EpicSetting Epic, bool Discord);
 /// Kind: "drop-in", "generated" or "none". Theme: "light", "dark" or "auto".
 public sealed record UiSection(string Kind, string? Entry, string Theme);
+/// The diagnostics switches (spec/diagnostics.md); LogSize is 50..5000. ShowConnectionCheck is for a drop-in menu.
+public sealed record DiagnosticsSection(bool ReportToHost, int LogSize, bool RelayProbe, bool ShowConnectionCheck)
+    public static readonly DiagnosticsSection Defaults;
 /// The settings file onelobby.json (spec/blueprint.schema.json, docs/design/blueprint.md), validated and with every default filled in. Immutable. Use LobbyClient.FromBlueprint to run a client from it, or the To... adapters to adopt it one call at a time.
 public sealed record Blueprint(int Version, GameSection Game, string? Engine, HostingSection Hosting, LobbySection Lobby, SyncSection Sync, PlayersSection Players, ChatSection Chat, SessionSection Session, PlatformsSection Platforms, UiSection Ui)
     /// Stand-in server URL used by ToConfig when the file names no lobby server (direct-only games).
     public static readonly Uri NoServer;
     /// The room layer's defaults (room; spec/room.md s.10).
     public RoomSection Room { get; init; }
+    /// The diagnostics switches (diagnostics); ToConfig applies them to OneLobbyConfig.Diagnostics.
+    public DiagnosticsSection Diagnostics { get; init; }
     /// Default public Nostr relays (the JS DEFAULT_NOSTR_RELAYS, same URLs in the same order; probed 2026-10-26, docs/design/no-server-fallback.md): all accept and echo ephemeral kind 25050.
     public static readonly IReadOnlyList<string> DefaultNostrRelays;
     /// The JSON Schema (spec/blueprint.schema.json), embedded in this assembly.

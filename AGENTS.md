@@ -90,6 +90,7 @@ lobby.lockstep.reportHash(tick, hash); lobby.lockstep.snapshot = () => bytes; lo
 ```
 
 ```gdscript
+# Drop-in menu: add res://addons/onelobby/menu/menu.tscn (class OneLobbyMenu), then $Menu.game_started.connect(func(lobby): ...); docs/recipes/menu.md
 # GDScript (Godot 4, no .NET): clients/gdscript/addons/onelobby; signals instead of events, Dictionaries {peer_id, name, ping_ms, relayed}
 var client := OneLobbyClient.new()                         # a Node: add_child it, it pumps every frame; set client.sync_mode = "lockstep" before host()
 client.game_id = "com.you.game"; client.lobby_server = "ws://127.0.0.1:8080/ws"; client.display_name = "Ann"; add_child(client)

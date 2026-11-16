@@ -471,6 +471,12 @@ export interface Blueprint {
         readonly entry?: string;
         readonly theme: "light" | "dark" | "auto";
     };
+    readonly diagnostics: {
+        readonly reportToHost: boolean;
+        readonly logSize: number;
+        readonly relayProbe: boolean;
+        readonly showConnectionCheck: boolean;
+    };
 }
 /** What you may write: only `game.id` is required. */
 export interface BlueprintInput {
@@ -566,6 +572,13 @@ export interface BlueprintInput {
         kind?: "drop-in" | "generated" | "none";
         entry?: string;
         theme?: "light" | "dark" | "auto";
+    };
+    diagnostics?: {
+        $comment?: string;
+        reportToHost?: boolean;
+        logSize?: number;
+        relayProbe?: boolean;
+        showConnectionCheck?: boolean;
     };
 }
 /** Identity function for TypeScript completion in a `.ts` config (like Vite's `defineConfig`). */
