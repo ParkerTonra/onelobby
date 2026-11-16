@@ -15,11 +15,11 @@ PASS turn   JS host + GDScript + C# joiners    2.5s  TURN: 4 relay allocations, 
 
 ## The room scenario
 
-`node tools/engine-smoke/run.mjs --room` (JS and C# peers, routes `server` and `typed`, so four host/joiner pairs on each) runs
+`node tools/engine-smoke/run.mjs --room` (JS, GDScript and C# peers, routes `server` and `typed`, so nine host/joiner pairs on each) runs
 the room layer instead of the ping rounds: the host has a password and a 1 s countdown; joiner 1 joins with the password and
 data (`color`, `team`), says ready; the host checks the data, starts, the countdown and start reach the joiner, then the host
 kicks it with a code and a reason the joiner must read back; joiner 2 uses a wrong password and must be refused with
-`bad_password`. GDScript is not in it yet.
+`bad_password`. The GDScript peer is `clients/gdscript/tests/engine_smoke_peer.gd` with `--scenario=room` (and `--wrongpw`).
 
 ## What a case is
 

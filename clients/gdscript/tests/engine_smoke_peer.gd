@@ -4,6 +4,8 @@ extends SceneTree
 ## channels and prints "RESULT PASS ..." / "RESULT FAIL ..." (exit 0 / 1).
 ##   godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/engine_smoke_peer.gd -- \
 ##       --role=host|join --route=... [--server=ws://..] [--relay=ws://..] [--port=N] [--code=..] [--turn="turn:.. user pass"]
+## `--scenario=room` runs the room layer instead of the ping rounds (a joiner with `--wrongpw` must be refused with bad_password);
+## the protocol is the one in tools/engine-smoke/js-peer.mjs `roomScenario()`.
 
 var _a := {}
 var _client: OneLobbyClient
@@ -55,8 +57,11 @@ func _run() -> void:
 		ice = [r.server]
 		_client.relay_only = true
 	_client.lobby_server = str(_a.get("server", "ws://localhost:8080"))
+	_client.store = OneLobbyStore.memory() # peers on one machine must not share a player id through user://
 	root.add_child(_client)
-	if _a.get("role") == "host":
+	if _a.get("scenario") == "room":
+		await _room(ice)
+	elif _a.get("role") == "host":
 		await _host(ice)
 	else:
 		await _join(ice)
@@ -196,6 +201,100 @@ func _join(ice: Array) -> void:
 	await lobby.leave_and_flush()
 	var ok: bool = seen.size() == rounds and fseen.size() == rounds
 	_finish(ok, "joiner rounds=%d (reliable %d fast %d)" % [rounds, seen.size(), fseen.size()])
+
+
+# ---- the room scenario (--scenario=room): the host has a password and a 1 s countdown; the good joiner joins with the password and
+# data, says ready; the host checks the data, starts, the countdown and start reach the joiner, then the host kicks it with a code
+# and a reason the joiner must read back. The wrong-password joiner (--wrongpw) must be refused with bad_password.
+
+const ROOM_PW := "smoke-pw"
+
+
+func _until(cond: Callable, what: String, secs: float = 30.0) -> bool:
+	var t0 := Time.get_ticks_msec()
+	while not cond.call():
+		if Time.get_ticks_msec() - t0 > int(secs * 1000.0):
+			_finish(false, "timed out: " + what)
+			return false
+		await process_frame
+	return true
+
+
+func _room(ice: Array) -> void:
+	var route := str(_a.get("route"))
+	if _a.get("role") == "host":
+		var room := {"countdown_seconds": 1, "min_players": 2}
+		var lobby: OneLobbyLobby
+		var typed := ""
+		if route == "server":
+			lobby = await _client.host({"name": "smoke", "max_players": 4, "password": ROOM_PW, "room": room})
+		else:
+			var port := int(_a.get("port"))
+			lobby = await _client.host_direct({"name": "smoke", "max_players": 4, "password": ROOM_PW, "room": room, "tcp_port": port,
+				"listen_address": "127.0.0.1", "public_ip": "127.0.0.1", "udp_port_range": [port, port + 3], "ice_servers": ice, "stun": [], "nostr": false})
+			typed = "127.0.0.1:%d" % port
+		if lobby == null:
+			_finish(false, "host failed: %s" % _client.last_error)
+			return
+		print("HOST_READY code=%s typed=%s ipcode=" % [lobby.code if route == "server" else typed, typed])
+		var r := lobby.room
+		if not await _until(func() -> bool: return r.players().size() == 2 and r.players().all(func(p: Dictionary) -> bool: return p["id"] == lobby.local_peer_id or p["ready"]), "a ready joiner"):
+			return
+		var j: Dictionary = r.players().filter(func(p: Dictionary) -> bool: return p["id"] != lobby.local_peer_id)[0]
+		if j["data"].get("color") != "#ff8800" or j["data"].get("team") != "1":
+			_finish(false, "joiner data was %s" % JSON.stringify(j["data"]))
+			return
+		var started := [false]
+		r.started.connect(func() -> void: started[0] = true)
+		var err := r.start()
+		if err != "":
+			_finish(false, "start: " + err)
+			return
+		if not await _until(func() -> bool: return started[0], "start"):
+			return
+		print("started")
+		r.kick(int(j["id"]), {"code": "smoke_kick", "reason": "Smoke test: bye"})
+		if not await _until(func() -> bool: return r.players().size() == 1, "the kick to remove the joiner"):
+			return
+		await create_timer(0.3).timeout
+		await lobby.leave_and_flush()
+		_finish(true, "room host")
+		return
+	var code := str(_a.get("code", ""))
+	var jo := {"password": ROOM_PW, "data": {"color": "#ff8800", "team": "1"}}
+	if _a.has("wrongpw"):
+		jo["password"] = "wrong-pw"
+	if route != "server":
+		jo.merge({"ice_servers": ice, "timeout_ms": 40000, "relays": [str(_a.get("relay", ""))] if _a.has("relay") else []})
+	var lobby: OneLobbyLobby = await _client.join(code, jo) if route == "server" else await _client.join_direct(code, jo)
+	if _a.has("wrongpw"):
+		if lobby == null and str(_client.last_error.get("code")) == "bad_password":
+			_finish(true, "refused with bad_password")
+		else:
+			_finish(false, "a wrong password gave %s" % ("a lobby" if lobby != null else str(_client.last_error)))
+		return
+	if lobby == null:
+		_finish(false, "join failed: %s" % _client.last_error)
+		return
+	var removed: Array = []
+	var started := [false]
+	var counted := [false]
+	lobby.room.removed.connect(func(info: Dictionary) -> void: removed.append(info))
+	lobby.room.started.connect(func() -> void: started[0] = true)
+	lobby.room.countdown_changed.connect(func(_c: Dictionary) -> void: counted[0] = true)
+	if not await _until(func() -> bool: return lobby.room.supported == true and not lobby.room.me().is_empty(), "the room snapshot"):
+		return
+	lobby.room.set_ready(true)
+	if not await _until(func() -> bool: return started[0], "start"):
+		return
+	if not counted[0]:
+		_finish(false, "no countdown reached the joiner")
+		return
+	if not await _until(func() -> bool: return not removed.is_empty(), "the kick"):
+		return
+	var info: Dictionary = removed[0]
+	var ok: bool = info.get("code") == "smoke_kick" and info.get("reason") == "Smoke test: bye"
+	_finish(ok, "room joiner" if ok else "removal was %s" % JSON.stringify(info))
 
 
 # ---- the lockstep exchange (--sync=lockstep): chat, a shared pause and 60 ticks of a tiny sim; the same flow in all three

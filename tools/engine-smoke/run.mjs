@@ -19,9 +19,9 @@ for (const x of process.argv.slice(2)) {
   const m = /^--([^=]+)(?:=(.*))?$/s.exec(x);
   if (m) flags[m[1]] = m[2] ?? "1";
 }
-// --room: the room layer scenario (password, data, ready, countdown, start, kick with a reason, a wrong password) between JS and C# peers
+// --room: the room layer scenario (password, data, ready, countdown, start, kick with a reason, a wrong password) between JS, GDScript and C# peers
 const ROOM = !!flags.room;
-const ENGINES = (flags.engines ?? (ROOM ? "js,cs" : "js,gd,cs")).split(",");
+const ENGINES = (flags.engines ?? "js,gd,cs").split(",");
 const ROUTES = (flags.routes ?? (ROOM ? "server,typed" : "server,nostr,typed,ipcode,turn")).split(",");
 const ROUNDS = Number(flags.rounds ?? 3);
 const CASE_TIMEOUT = Number(flags.timeout ?? 60);
