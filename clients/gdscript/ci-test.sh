@@ -18,6 +18,7 @@ step() { # step <name> <cmd...>
   echo "::group::$name"
   timeout 240 "$@" > "$LOG/$name.out" 2>&1; local rc=$?
   tail -n 40 "$LOG/$name.out"
+  [ $rc -eq 0 ] || grep -a -m 20 "FAIL" "$LOG/$name.out" | grep -v "^::" # the failing check, even when it scrolled out of the tail
   echo "::endgroup::"
   if [ $rc -eq 0 ]; then PASSED+=("$name"); echo "PASS $name"; else FAILED+=("$name"); echo "::error::FAIL $name (exit $rc)"; fi
 }
