@@ -19,6 +19,7 @@ import { MIN_EDITOR, TEST_ASSEMBLY, TEST_FILES, editorIsNewEnough, resolveUnity 
 import { PACKAGE_NAME, readDependency } from "../manifest.js";
 import { ownNetcodeNote } from "./core.js";
 import { run } from "./procs.js";
+import { record, watchOption } from "./sockets.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
 import { testLine } from "./csharp.js";
@@ -96,7 +97,7 @@ export function unityChecks() {
   /** One headless Unity run on the game's project; resolves { r, log }. The log goes to an absolute path (a relative one lands in the project). */
   const u = async (ctx, name, extra, o) => {
     const log = join(logDir(ctx), `unity-${name}.log`);
-    const r = await exec(ctx, ctx.unity.exe, [...UNITY_FLAGS, "-projectPath", ctx.dir, "-logFile", log, ...extra], { cwd: ctx.dir, ...o });
+    const r = record(ctx, await exec(ctx, ctx.unity.exe, [...UNITY_FLAGS, "-projectPath", ctx.dir, "-logFile", log, ...extra], { cwd: ctx.dir, ...o }));
     return { r, log: ctx.readLog ? ctx.readLog(log) : logText(log) };
   };
   const routeByHand = (route, more = "") => `Rerun that route by hand: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>.xml -logFile <abs>.log --local --route=${route}${more}`;
@@ -104,7 +105,7 @@ export function unityChecks() {
   // (no connection check against the internet). The test's own two clients are loopback-only whatever the flags say.
   const runRoute = async (ctx, route, args, timeoutMs = 300000) => {
     const results = join(logDir(ctx), `tests-${route}.xml`);
-    const { r, log } = await u(ctx, route, ["-runTests", "-testPlatform", "PlayMode", "-assemblyNames", TEST_ASSEMBLY, "-testResults", results, "--local", `--route=${route}`, ...args], { timeoutMs });
+    const { r, log } = await u(ctx, route, ["-runTests", "-testPlatform", "PlayMode", "-assemblyNames", TEST_ASSEMBLY, "-testResults", results, "--local", `--route=${route}`, ...args], { timeoutMs, watch: watchOption(ctx, route) });
     return { r, log, line: testLine(log, route) };
   };
   const routeResult = ({ r, log, line }, next) => {

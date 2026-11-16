@@ -4,7 +4,9 @@
 //     Comments are skipped, and so is a bare mention of the class (a type annotation, "Net.client"): only a file that builds the menu counts.
 //   godot-csharp,   ui.kind drop-in: the same for the OneLobbyMenu.tscn path or new OneLobbyMenu( (not OneLobbyNet.cs, which the scaffolder wrote)
 //   godot, ui.kind none or generated: a script outside addons/ and tests/ uses the client (OneLobbyClient; not net.gd, the scaffolder's autoload)
-//   unity: a .cs file outside Packages/, Library/ and Assets/OneLobby/ (the scaffolder's test and build script) uses OneLobbyMenu, OneLobbyRunner or the client
+//   unity, ui.kind drop-in: a .cs file outside Packages/, Library/ and Assets/OneLobby/ (the scaffolder's test and build script) BUILDS the menu
+//     (AddComponent<OneLobbyMenu>(); comments skipped), or a scene or prefab holds the component (found by its script guid): naming the runner or
+//     the client alone does not count, as with the Godot menu. ui.kind none or generated: a script uses the runner or the client
 //   web: a file outside test/ and node_modules/ imports the glue (session.js) or onelobby (not the glue file itself)
 // Every project the scaffolder writes passes untouched; a fresh `--into` fails until the game is wired.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -16,6 +18,10 @@ const GODOT_FILES = /\.(tscn|gd|cs|tres)$/i;
 const UNITY_SKIP = new Set(["Packages", "Library", "Temp", "Logs", "UserSettings", "Builds", "obj", "node_modules"]);
 const WEB_FILES = /\.(html?|[cm]?[jt]sx?)$/i;
 
+// Unity: code that builds the menu (a mention of the class, a field of its type or a using line is not it). The menu's script guid (the package's OneLobbyMenu.cs.meta) names it in a scene or prefab.
+const UNITY_MENU_BUILD = /\bAddComponent\s*<\s*OneLobbyMenu\s*>|\bAddComponent\s*\(\s*typeof\s*\(\s*OneLobbyMenu\s*\)|\bInstantiate\s*<\s*OneLobbyMenu\s*>/;
+export const UNITY_MENU_GUID = "cbe34bd5e4d6f3845943d8e150050af8";
+
 /** Every file of the game (relative posix paths) that `pattern` accepts, skipping dot folders and `skipDirs`. */
 function gameFiles(dir, pattern, skipDirs, rel = "") {
   const out = [];
@@ -26,6 +32,13 @@ function gameFiles(dir, pattern, skipDirs, rel = "") {
     } else if (e.isFile() && pattern.test(e.name)) out.push(path);
   }
   return out;
+}
+
+/** Scenes and prefabs under Assets/ (outside Assets/OneLobby/) that hold the OneLobbyMenu component, found by its script guid. */
+function unityAssetsWithMenu(dir) {
+  const assets = join(dir, "Assets");
+  if (!existsSync(assets)) return [];
+  return gameFiles(dir, /\.(unity|prefab)$/i, UNITY_SKIP, "Assets").filter((f) => !f.startsWith("Assets/OneLobby/") && readFileSync(join(dir, f), "utf8").includes(`guid: ${UNITY_MENU_GUID}`));
 }
 
 /** The first file whose text matches `regex`, or undefined. */
@@ -87,9 +100,9 @@ function engineOf(dir) {
 }
 
 /** The onelobby.json's ui.kind (unreadable or unset: the drop-in menu, the default of both Godot templates). */
-function uiKind(dir) {
+function uiKind(dir, file = "onelobby.json") {
   try {
-    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.ui?.kind ?? "drop-in";
+    return JSON.parse(readFileSync(join(dir, ...file.split("/")), "utf8"))?.ui?.kind ?? "drop-in";
   } catch {
     return "drop-in";
   }
@@ -126,12 +139,24 @@ export function wiringCheck() {
 
       if (ctx.kind === "unity") {
         const files = gameFiles(dir, /\.cs$/i, UNITY_SKIP).filter((f) => !f.startsWith("Assets/OneLobby/"));
+        const kind = uiKind(dir, "Assets/Resources/onelobby.json");
+        if (kind === "drop-in") {
+          // the menu must be BUILT: added by code (AddComponent<OneLobbyMenu>) or put on a GameObject in a scene or prefab; naming the runner or the client alone is not a menu
+          const hits = [...codeMatches(dir, files, UNITY_MENU_BUILD), ...unityAssetsWithMenu(dir)];
+          if (hits.length) return { status: "ok", detail: wiringDetail(hits, "builds the drop-in menu") };
+          const clientOnly = allMatches(dir, files, /\b(?:OneLobbyRunner|LobbyClient)\b/);
+          return {
+            status: "fail",
+            detail: `no script outside Packages/ and Assets/OneLobby/ builds the drop-in menu (AddComponent<OneLobbyMenu>(), or a scene or prefab with the component; a comment, the runner or the client alone does not count), so the game never shows it${clientOnly.length ? ` (${clientOnly.slice(0, WIRING_LIST_MAX).join(", ")}${clientOnly.length > WIRING_LIST_MAX ? ` and ${clientOnly.length - WIRING_LIST_MAX} more` : ""} mention${clientOnly.length === 1 ? "s" : ""} the runner or the client only)` : ""} (the routes pass on their own two peers).`,
+            next: 'Add the menu where your game starts: var go = new GameObject("Menu"); go.SetActive(false); var menu = go.AddComponent<OneLobbyMenu>(); (set Runner, BootFlags, StartOnHost, ...) go.SetActive(true); with using OneLobby.Unity; and connect its GameStarted event (docs/recipes/unity.md, "--into a game that already has its own multiplayer", step 2; docs/recipes/menu.md, "Unity"). A game with no menu on purpose sets ui.kind to "none" in onelobby.json.',
+          };
+        }
         const hits = allMatches(dir, files, /\b(?:OneLobbyMenu|OneLobbyRunner|LobbyClient)\b/);
-        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "uses the menu or the client") };
+        if (hits.length) return { status: "ok", detail: wiringDetail(hits, `uses the client (ui.kind ${kind})`) };
         return {
           status: "fail",
-          detail: "no script outside Packages/ and Assets/OneLobby/ uses OneLobbyMenu, OneLobbyRunner or the client, so the game never shows a menu or opens a lobby (the routes pass on their own two peers).",
-          next: 'Add the menu where your game starts: new GameObject("Menu").AddComponent<OneLobbyMenu>(); with using OneLobby.Unity; and connect its GameStarted event (docs/recipes/menu.md, "Unity").',
+          detail: `ui.kind is ${kind} and no script outside Packages/ and Assets/OneLobby/ uses OneLobbyRunner or the client, so the game never opens a lobby.`,
+          next: "Create and use the runner or the client from your own scripts (docs/recipes/unity.md).",
         };
       }
 

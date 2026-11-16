@@ -399,6 +399,30 @@ describe("unity verify: the checks", () => {
     expect(exitWarning(1)).toBe("the test passed, then Unity ended with exit code 1 while it closed");
   });
 
+  it("direct: a host the test started that listens beyond 127.0.0.1 fails the check naming the address; loopback passes and says what was seen; an unreadable table is said", async () => {
+    const dir = await scaffold();
+    writeFileSync(join(dir, "Packages/packages-lock.json"), JSON.stringify({ dependencies: { "com.onelobby.unity": { version: "x", source: "local-tarball" } } }));
+    const withSockets = (sockets) => async (cmd, args) => {
+      const route = args.find((a) => a.startsWith("--route="))?.slice(8);
+      const log = args[args.indexOf("-logFile") + 1];
+      mkdirSync(join(log, ".."), { recursive: true });
+      writeFileSync(log, route === "config" ? "MULTIPLAYER_OK config sync=raw direct=true nostr=false server=false relay_only=false\n" : route ? "MULTIPLAYER_OK\n" : "ok\n");
+      return { code: 0, out: "", ...(route === "direct" ? { sockets } : {}) };
+    };
+    const ctx = (sockets) => ctxFor(dir, { resolveUnity: () => ({ exe: "unity.exe", version: "6000.2.7f2", from: "$UNITY" }), run: withSockets(sockets) });
+    const checks = () => unityChecks().filter((c) => ["unity", "package", "blueprint", "wiring", "direct"].includes(c.name)); // the routes that start a host: direct
+    const L = (proto, addr, port) => ({ proto, addr, port, pid: 9 });
+    const seen = (listeners, extra = {}) => ({ samples: 5, listeners, wide: listeners.filter((l) => l.addr === "0.0.0.0" || l.addr === "::"), error: null, ...extra });
+    const bad = await runChecks(checks(), ctx(seen([L("tcp", "0.0.0.0", 47810), L("udp", "0.0.0.0", 47810), L("tcp", "127.0.0.1", 38000)])));
+    expect(bad.verdict).toMatch(/^VERIFY_FAIL direct: .*listened beyond 127\.0\.0\.1: TCP 0\.0\.0\.0:47810 \(pid 9\), UDP 0\.0\.0\.0:47810 \(pid 9\)/);
+    const good = await runChecks(checks(), ctx(seen([L("tcp", "127.0.0.1", 38000), L("udp", "127.0.0.1", 38000)])));
+    expect(good.verdict).toBe("VERIFY_OK");
+    expect(good.results.find((r) => r.name === "direct").detail).toContain("no TCP+UDP host pair beyond 127.0.0.1");
+    const blind = await runChecks(checks(), ctx(seen([], { samples: 0, error: "no socket table reader for darwin" })));
+    expect(blind.verdict).toBe("VERIFY_OK");
+    expect(blind.results.find((r) => r.name === "direct").warning).toContain("bound addresses NOT checked");
+  });
+
   it("a compile error is named by its own line, not by Unity's summary line", () => {
     const log = "x\nAssets\\Scripts\\Boot.cs(19,20): error CS0029: Cannot implicitly convert type 'string' to 'int'\nmore\nScripts have compiler errors.\n";
     expect(lastError(log)).toBe("Assets\\Scripts\\Boot.cs(19,20): error CS0029: Cannot implicitly convert type 'string' to 'int'");
@@ -526,5 +550,50 @@ describe("unity verify: the wiring check", () => {
     put("game2/Library/PackageCache/x/Menu.cs", "class OneLobbyMenu {}\n");
     put("game2/Packages/p/Menu.cs", "class OneLobbyMenu {}\n");
     expect((await wiring(at("game2"))).status).toBe("fail");
+  });
+  const unityGame = (name, ui = "drop-in") => {
+    put(`${name}/Assets/Resources/onelobby.json`, JSON.stringify({ ui: { kind: ui } }));
+    return at(name);
+  };
+  it("a game that only names the runner and the client (its own Setup page, no menu built) fails, and names those files", async () => {
+    const dir = unityGame("runner-only");
+    put("runner-only/Assets/Net/Session.cs", "using OneLobby.Unity;\nclass Session { OneLobbyRunner runner; LobbyClient client; void Awake() { runner = gameObject.AddComponent<OneLobbyRunner>(); } }\n");
+    put("runner-only/Assets/Tests/ProbeTests.cs", "class P { OneLobbyMenu menu; void Make() { /* AddComponent<OneLobbyMenu>() lives in another file */ } }\n");
+    const r = await wiring(dir);
+    expect(r.status).toBe("fail");
+    expect(r.detail).toContain("builds the drop-in menu");
+    expect(r.detail).toContain("Assets/Net/Session.cs");
+    expect(r.detail).toContain("the runner or the client only");
+    expect(r.next).toContain("AddComponent<OneLobbyMenu>()");
+  });
+  it("building the menu counts: AddComponent, AddComponent(typeof(...)), Instantiate<...>, or a scene or prefab that holds the component", async () => {
+    for (const [i, code] of ["go.AddComponent<OneLobbyMenu>();", "go.AddComponent(typeof(OneLobbyMenu));", "Instantiate<OneLobbyMenu>(prefab);"].entries()) {
+      const dir = unityGame(`builds-${i}`);
+      put(`builds-${i}/Assets/Game/Start.cs`, `class Start { void Awake() { ${code} } }\n`);
+      const r = await wiring(dir);
+      expect(r.status, code).toBe("ok");
+      expect(r.detail).toContain("builds the drop-in menu");
+    }
+    const scene = unityGame("in-scene");
+    put("in-scene/Assets/Scenes/Main.unity", "MonoBehaviour:\n  m_Script: {fileID: 11500000, guid: cbe34bd5e4d6f3845943d8e150050af8, type: 3}\n");
+    const r = await wiring(scene);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("Assets/Scenes/Main.unity");
+    const other = unityGame("other-script");
+    put("other-script/Assets/Scenes/Main.unity", "MonoBehaviour:\n  m_Script: {fileID: 11500000, guid: 0123456789abcdef0123456789abcdef, type: 3}\n");
+    expect((await wiring(other)).status).toBe("fail");
+  });
+  it("a mention in a comment is not a built menu", async () => {
+    const dir = unityGame("comment-only");
+    put("comment-only/Assets/Game/Start.cs", "// go.AddComponent<OneLobbyMenu>();\n/* AddComponent<OneLobbyMenu>() */\nclass Start { }\n");
+    expect((await wiring(dir)).status).toBe("fail");
+  });
+  it("ui.kind none or generated (a game with its own screens on purpose) is satisfied by the runner or the client", async () => {
+    const dir = unityGame("own-ui", "none");
+    put("own-ui/Assets/Net/Session.cs", "class Session { OneLobbyRunner runner; }\n");
+    const r = await wiring(dir);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("ui.kind none");
+    expect((await wiring(unityGame("own-ui-bare", "none"))).status).toBe("fail");
   });
 });

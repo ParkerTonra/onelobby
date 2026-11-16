@@ -15,6 +15,7 @@ import { MENU_DIR, NATIVES_MARKER, verifyPin } from "../vendor.js";
 import { ownNetcodeNote } from "./core.js";
 import { resolveGodot } from "./godot.js";
 import { run } from "./procs.js";
+import { record, watchOption } from "./sockets.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
 import { blueprintNext, wiringCheck } from "./wiring.js";
@@ -44,11 +45,11 @@ const hasTest = (dir) => TEST_FILES.every((f) => existsSync(join(dir, ...f.split
 /** The checks for a godot-csharp game, in order. `ctx`: { dir, opts, env, services, godot, csproj, facts }. */
 export function csharpChecks() {
   const exec = (ctx, ...a) => (ctx.run ?? run)(...a); // ctx.run: a test seam (fake processes)
-  const g = (ctx, extra, o) => exec(ctx, ctx.godot.exe, [...GODOT_FLAGS, "--path", ctx.dir, ...extra], { cwd: ctx.dir, ...o });
+  const g = async (ctx, extra, o) => record(ctx, await exec(ctx, ctx.godot.exe, [...GODOT_FLAGS, "--path", ctx.dir, ...extra], { cwd: ctx.dir, ...o }));
   const facts = (ctx) => ctx.facts ?? {};
   const routeByHand = (route, more = "") => `Rerun that route by hand: dotnet build, then godot --headless --audio-driver Dummy --path . ${TEST_SCENE} -- --route=${route}${more}`;
   const runRoute = async (ctx, route, args, timeoutMs = 100000) => {
-    const r = await g(ctx, [TEST_SCENE, "--", `--route=${route}`, ...args], { timeoutMs });
+    const r = await g(ctx, [TEST_SCENE, "--", `--route=${route}`, ...args], { timeoutMs, watch: watchOption(ctx, route) });
     return { r, line: testLine(r.out, route) };
   };
   const routeResult = ({ r, line }, next) => {

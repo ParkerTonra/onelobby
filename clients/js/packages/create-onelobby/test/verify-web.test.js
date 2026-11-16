@@ -73,3 +73,24 @@ describe("nostr and turn skip reasons are true for this folder", () => {
     expect(skipReason(dir)).toContain("is installed here");
   });
 });
+
+describe("a web or Node game: the passing run says it saw no listening address", () => {
+  const run = async (opts = { json: true }) => {
+    let out = "";
+    const io = { stdout: { write: (s) => (out += s) }, stderr: { write: () => {} }, env: process.env, cwd: dir };
+    const { runVerify } = await import("../src/verify/index.js");
+    const code = await runVerify({ dir, opts, io });
+    return { code, out };
+  };
+  it("the note names the one thing to do instead, in the JSON and in the text", async () => {
+    put("onelobby.json", JSON.stringify({ version: 1, game: { id: "dev.example.x", netVersion: "1" }, engine: "node-browser", hosting: { direct: true, server: false }, sync: { mode: "raw" } }));
+    put("server.js", 'const { hostDirect } = await import("onelobby/direct");\n');
+    const r = await run();
+    expect(r.code).toBe(0);
+    const j = JSON.parse(r.out);
+    expect(j.notes.join(" ")).toContain("verify starts no host for a web or Node game, so no listening address was checked");
+    expect(j.notes.join(" ")).toContain("hostDirect(kit, { local: true, port: 0 })");
+    const text = await run({});
+    expect(text.out).toContain("note: verify starts no host for a web or Node game");
+  });
+});

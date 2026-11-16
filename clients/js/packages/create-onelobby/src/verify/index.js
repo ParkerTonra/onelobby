@@ -45,6 +45,9 @@ export async function runVerify({ dir, opts, io }) {
     if (found.kind === "godot-gdscript") writeProbe(target); // a C# game has no probe file: its own tests/MultiplayerTest.cs takes the routes
   }
 
+  // a web or Node game: verify starts no host of its own (no JS peers), so there is no bound address to look at; say so rather than let the pass read as "loopback only"
+  if (found.kind === "web" && !injected) notes.push("verify starts no host for a web or Node game, so no listening address was checked: run the game's own two-peer test with hostDirect(kit, { local: true, port: 0 }) and name it in the report");
+
   const progress = opts.json ? io.stderr : io.stdout;
   const t0 = Date.now();
   // a web-kind folder is a plain browser game or a Node process that hosts the pages (the engine in onelobby.json): say which

@@ -2,7 +2,11 @@
 // then ONE verdict line. Checks are plain objects, so the unit tests drive it with fake runners.
 //   check  = { name, blocking?: true, run(ctx) -> result }
 //   result = { status: "ok" | "fail" | "skipped", detail?: string, warning?: string, next?: string }
+// A check that starts a host records the sockets of its process in `ctx.watched` (sockets.js); the runner folds them into the result
+// (a host listening beyond 127.0.0.1 fails the check; a table it could not read is a warning, never a silent pass).
 // A failed `blocking` check makes every later check "skipped" (it needs that one); other failures do not stop the run.
+
+import { judgeSockets, mergeSockets } from "./sockets.js";
 
 /** The text of one check line: "ok (...)", "FAIL <why>" or "skipped <why>". */
 export function lineText(r) {
@@ -43,7 +47,9 @@ export async function runChecks(checks, ctx, { onLine = () => {}, now = Date.now
     if (blockedBy) r = { status: "skipped", detail: `needs the ${blockedBy} check, which failed` };
     else {
       try {
+        ctx.watched = [];
         r = await check.run(ctx);
+        if (ctx.watched.length) r = judgeSockets(r, mergeSockets(ctx.watched), { engine: ctx.kind });
       } catch (e) {
         r = { status: "fail", detail: `the check itself broke (${e?.message ?? e}).`, next: "This is a bug in create-onelobby verify: rerun it, and report it with this line." };
       }

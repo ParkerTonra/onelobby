@@ -1,5 +1,6 @@
 // Child processes started by `verify`: tracked so none outlives the run (also on a failed check, a timeout or Ctrl+C).
 import { execFileSync, spawn } from "node:child_process";
+import { watchSockets } from "./sockets.js";
 
 const live = new Set();
 
@@ -22,9 +23,10 @@ export function killAll() {
 /**
  * Run a command to its end (or `timeoutMs`), collecting stdout and stderr together.
  * Resolves { code, timedOut, out }; never rejects (a spawn error is { code: null, error }).
- * `onOutput(chunk)` sees the text as it arrives.
+ * `onOutput(chunk)` sees the text as it arrives. `watch`: { sampler?, intervalMs? } also watches the sockets of the process and its
+ * children while it runs (sockets.js) and adds `sockets` to the result.
  */
-export function run(cmd, args, { cwd, env, timeoutMs = 120000, onOutput } = {}) {
+export function run(cmd, args, { cwd, env, timeoutMs = 120000, onOutput, watch } = {}) {
   return new Promise((resolve) => {
     let child;
     let out = "";
@@ -36,6 +38,7 @@ export function run(cmd, args, { cwd, env, timeoutMs = 120000, onOutput } = {}) 
       return;
     }
     live.add(child);
+    const watcher = watch && child.pid ? watchSockets(child.pid, watch) : null;
     const take = (d) => {
       const s = d.toString("utf8");
       out += s;
@@ -47,16 +50,16 @@ export function run(cmd, args, { cwd, env, timeoutMs = 120000, onOutput } = {}) 
       timedOut = true;
       killTree(child);
     }, timeoutMs);
-    child.on("error", (e) => {
+    child.on("error", async (e) => {
       clearTimeout(timer);
       live.delete(child);
-      resolve({ code: null, timedOut, out, error: e.message });
+      resolve({ code: null, timedOut, out, error: e.message, ...(watcher ? { sockets: await watcher.stop() } : {}) });
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       clearTimeout(timer);
       killTree(child); // anything the child left behind
       live.delete(child);
-      resolve({ code, timedOut, out });
+      resolve({ code, timedOut, out, ...(watcher ? { sockets: await watcher.stop() } : {}) });
     });
   });
 }

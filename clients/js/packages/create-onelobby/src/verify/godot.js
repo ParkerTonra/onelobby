@@ -6,6 +6,7 @@ import { validate } from "../blueprint.js";
 import { LEGACY_PIN, NATIVES_MARKER, WEBRTC_NATIVE_VERSION, existingNativesVersion, verifyPin } from "../vendor.js";
 import { ownNetcodeNote } from "./core.js";
 import { run } from "./procs.js";
+import { record, watchOption } from "./sockets.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
 import { blueprintNext, wiringCheck } from "./wiring.js";
@@ -35,8 +36,8 @@ const lastError = (out) => (out.split(/\r?\n/).filter((l) => /error/i.test(l)).s
 
 /** The checks for a godot-gdscript game, in order. `ctx`: { dir, opts, env, services, godot (set by the first check), facts (by blueprint) }. */
 export function godotChecks() {
-  const g = (ctx, extra, o) => run(ctx.godot.exe, [...GODOT_FLAGS, "--path", ctx.dir, ...extra], { cwd: ctx.dir, ...o });
-  const probe = (ctx, args, timeoutMs = 100000) => g(ctx, ["-s", PROBE_RES, "--", ...args], { timeoutMs });
+  const g = async (ctx, extra, o) => record(ctx, await run(ctx.godot.exe, [...GODOT_FLAGS, "--path", ctx.dir, ...extra], { cwd: ctx.dir, ...o }));
+  const probe = (ctx, args, timeoutMs = 100000) => g(ctx, ["-s", PROBE_RES, "--", ...args], { timeoutMs, watch: watchOption(ctx, /^--route=(\w+)$/.exec(args[0] ?? "")?.[1]) });
   const facts = (ctx) => ctx.facts ?? {};
   const probeResult = (r, route, next) => {
     const ok = probeLine(r.out, "VERIFY_PROBE_OK");
@@ -149,7 +150,7 @@ export function godotChecks() {
         if (!f.direct) return { status: "skipped", detail: "hosting.direct is false in onelobby.json (the game hosts through a lobby server only)" };
         if (existsSync(join(ctx.dir, "tests/multiplayer.gd"))) {
           const t0 = Date.now();
-          const r = await g(ctx, ["-s", "res://tests/multiplayer.gd"], { timeoutMs: 120000 });
+          const r = await g(ctx, ["-s", "res://tests/multiplayer.gd"], { timeoutMs: 120000, watch: watchOption(ctx, "direct") });
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
           if (/^MULTIPLAYER_OK/m.test(r.out) && !r.timedOut) return { status: "ok", detail: `two peers on 127.0.0.1, host and join by code, one message each way: the game's tests/multiplayer.gd${ownNetcodeNote(f.mode)}` };
           const fail = /^MULTIPLAYER_FAIL (.*)$/m.exec(r.out)?.[1];
