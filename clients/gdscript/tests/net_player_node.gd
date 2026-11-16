@@ -27,7 +27,7 @@ func _check(ok: bool, what: String) -> void:
 
 
 func _run() -> void:
-	for t: Callable in [_test_owner_3d, _test_host_authority, _test_host_authority_spawn_point, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_teleport_and_corrections, _test_body_and_missing_step]:
+	for t: Callable in [_test_owner_3d, _test_host_authority, _test_host_authority_spawn_point, _test_events_and_animation, _test_2d_and_mismatch, _test_leave_and_spectator, _test_late_spectator, _test_teleport_and_corrections, _test_body_and_missing_step]:
 		_tests += 1
 		t.call()
 	print("net_player_node: %d passed, %d failed (%d test cases)" % [_pass, _fail, _tests])
@@ -380,6 +380,32 @@ func _test_leave_and_spectator() -> void:
 		_frame(rig, ms)
 	_check(_char(h, bpeer) == null and b_on_host.is_queued_for_deletion(), "leave: B's character is freed on the host")
 	_check(_char(a, bpeer) == null, "leave: and on A")
+	_cleanup(ms)
+
+
+func _test_late_spectator() -> void:
+	# a joiner's roster says "player" at first and "spectator" a little later: its character is made at once and taken back
+	var rig: Rig = Rig.player_rig({"layer": {"authority": "owner"}})
+	rig.host_players()
+	rig.join_players("a")
+	rig.join_players("c")
+	var scene := _character_scene("node3d")
+	var h := _machine(rig, "host", scene)
+	var a := _machine(rig, "a", scene)
+	var c := _machine(rig, "c", scene)
+	var ms := [h, a, c]
+	var cpeer: int = rig.layers["c"].local_peer_id
+	var removed := []
+	(c["spawner"] as OneLobbyNetPlayerSpawner).player_removed.connect(func(peer: int, _ch: Node) -> void: removed.append(peer))
+	_check(_char(c, cpeer) != null, "late spectator: the local character is made at once")
+	rig.net.spectators[cpeer] = true # the room snapshot arrives before this peer's first state: it is a spectator
+	for i in 30:
+		_frame(rig, ms)
+	_check(_char(c, cpeer) == null and removed == [cpeer], "late spectator: the roster says spectator, the character is taken back with player_removed (%s)" % str(removed))
+	rig.net.spectators.erase(cpeer) # and it becomes a player again
+	for i in 30:
+		_frame(rig, ms)
+	_check(_char(c, cpeer) != null, "late spectator: the role becomes player, the character is made again")
 	_cleanup(ms)
 
 

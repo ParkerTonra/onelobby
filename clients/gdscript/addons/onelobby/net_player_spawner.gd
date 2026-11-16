@@ -66,6 +66,7 @@ func use_players(layer: OneLobbyNetPlayers) -> void:
 	players = layer
 	_connect(layer.player_joined, _on_joined)
 	_connect(layer.player_left, _on_left)
+	_connect(layer.tick, _on_tick)
 	if not layer.is_spectator(layer.local_peer_id):
 		_on_joined(layer.local_peer_id) # this machine's own character at once: its state is what makes the player appear on the others
 	for peer: int in layer.player_ids():
@@ -118,6 +119,31 @@ func _patch(v: Variant) -> Dictionary:
 	if v is Vector2:
 		return {"x": v.x, "y": v.y}
 	return {}
+
+
+## A joiner's roster says "player" for its own peer until the host's room snapshot arrives, and the layer never announces a local
+## spectator: look at the roster on every tick, take the local character back (`player_removed`) when it says spectator and make
+## it again when it says player.
+func _on_tick(_n: int) -> void:
+	if players == null:
+		return
+	var me := players.local_peer_id
+	var has := characters.has(me)
+	if has and players.is_spectator(me):
+		_on_left(me)
+	elif not has and _is_seated_player(me):
+		_on_joined(me)
+
+
+## True when the roster lists this peer and says it is a player (an unknown peer is not one: no character is made for it here).
+func _is_seated_player(peer: int) -> bool:
+	var room: Variant = players.session.lobby_handle.get("room")
+	if room == null:
+		return false
+	for e: Dictionary in room.entries():
+		if int(e["id"]) == peer:
+			return str(e.get("role", "")) == "player"
+	return false
 
 
 func _on_joined(peer: int) -> void:
