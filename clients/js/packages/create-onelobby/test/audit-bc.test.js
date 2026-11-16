@@ -163,7 +163,9 @@ describe("a Unity game with its own player build (item 21)", () => {
   });
   it("the Unity Next lines answer items 19, 20, 22, 23, 27, 28 in one place", async () => {
     const next = (await cli(INTO)).json.next.join("\n");
-    expect(next).toContain("no start_on_host and no --autostart");
+    expect(next).toContain("Unity has no --autostart");
+    expect(next).toContain("menu.StartOnHost = true");
+    expect(next).toContain("menu.BeforeHost");
     expect(next).toContain('room.autoStart to "players"');
     expect(next).toContain("menu.BootFlags = false");
     expect(next).toContain("add OneLobbyRunner yourself FIRST");

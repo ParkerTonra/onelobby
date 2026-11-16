@@ -179,7 +179,8 @@ describe("unity --into", () => {
     put("game/Packages/manifest.json", MANIFEST.replace('"com.unity.ide.rider"', '"com.onelobby.unity": "0.6.0",\n    "com.unity.ide.rider"'));
     const r = await into();
     expect(readDependency(text("game/Packages/manifest.json"), "com.onelobby.unity")).toBe("0.6.0");
-    expect(r.json.notes.join(" ")).toContain("already references com.onelobby.unity (0.6.0); that line was left alone");
+    expect(r.json.notes.join(" ")).toContain("already references com.onelobby.unity 0.6.0, not");
+    expect(r.json.notes.join(" ")).toContain("that line was NOT moved");
   });
 
   it("refuses a manifest it cannot edit, and a project with no manifest, before writing anything", async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { main } from "../src/cli.js";
+import { ONELOBBY_VERSION } from "../src/blueprint.js";
 
 let cwd;
 beforeEach(() => {
@@ -49,6 +50,44 @@ describe("unity --into Next lines", () => {
     expect(r.json.files.some((f) => f.startsWith(".olc"))).toBe(false);
     const named = await run([...INTO, "--title", "My Game"]);
     expect(named.json.next.join("\n")).not.toContain("came from the folder name");
+  });
+  it("a manifest on an older tarball: the note and the Next line say it was not moved and the exact step", async () => {
+    put("mygame/Packages/manifest.json", manifest('    "com.onelobby.unity": "file:com.onelobby.unity-0.7.0-ci.30.tgz",\n'));
+    put("mygame/Packages/com.onelobby.unity-0.7.0-ci.30.tgz", "x");
+    const r = await run(INTO);
+    const notes = r.json.notes.join("\n");
+    expect(notes).toContain("com.onelobby.unity-0.7.0-ci.30.tgz");
+    expect(notes).toContain("NOT moved");
+    expect(notes).toContain("update --package-from <the new tarball>");
+    expect(notes).toContain("(0.7.0-ci.30)");
+    const next = r.json.next.join("\n");
+    expect(next).toContain("stays at file:com.onelobby.unity-0.7.0-ci.30.tgz");
+    expect(next).toContain("update --package-from");
+    expect(next).toContain("delete the old tarball");
+  });
+  it("a manifest on an older version number: the step is a plain update", async () => {
+    put("mygame/Packages/manifest.json", manifest('    "com.onelobby.unity": "0.6.0",\n'));
+    const r = await run(INTO);
+    expect(r.json.notes.join("\n")).toContain("run: npx create-onelobby update");
+    expect(r.json.notes.join("\n")).not.toContain("--package-from");
+    expect(r.json.next.join("\n")).toContain("stays at 0.6.0");
+  });
+  it("--package-from names that exact tarball in the note", async () => {
+    put("mygame/Packages/manifest.json", manifest('    "com.onelobby.unity": "file:com.onelobby.unity-0.7.0-ci.30.tgz",\n'));
+    put("mygame/Packages/com.onelobby.unity-0.7.0-ci.30.tgz", "x");
+    put("mygame/Packages/com.onelobby.unity-0.8.0.tgz", "y");
+    const tgz = join(cwd, "mygame", "Packages", "com.onelobby.unity-0.8.0.tgz");
+    const r = await run([...INTO, "--package-from", tgz]);
+    expect(r.json.notes.join("\n")).toContain("update --package-from " + tgz);
+  });
+  it("negative control: a line that is already the one this run writes says nothing about moving", async () => {
+    put("mygame/Packages/manifest.json", manifest(`    "com.onelobby.unity": "file:com.onelobby.unity-${ONELOBBY_VERSION}.tgz",\n`));
+    put(`mygame/Packages/com.onelobby.unity-${ONELOBBY_VERSION}.tgz`, "x");
+    const r = await run(INTO);
+    const text = r.json.notes.join("\n") + r.json.next.join("\n");
+    expect(text).not.toContain("NOT moved");
+    expect(text).not.toContain("stays at");
+    expect(r.json.notes.join("\n")).toContain("the same as this run");
   });
   it("negative control: a new project still gets its .olc entry", async () => {
     const r = await run(["fresh", "--template", "unity", "--yes", "--json", "--dry-run"]);

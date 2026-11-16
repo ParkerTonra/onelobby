@@ -181,6 +181,20 @@ export function packageRef({ opts, target, cwd }) {
   return { value: `file:${path}`, from: "tarball", version: tarballVersion(tgz) ?? ONELOBBY_VERSION, file: tgz };
 }
 
+/**
+ * The note for a manifest that already has the com.onelobby.unity line. `--into` and the add never move that line; when it differs from the line this run
+ * would write (an older tarball, another path), the note says so and names the exact step: put the new tarball in Packages/ and `update --package-from <it>`.
+ */
+export function oldPackageNote(value, ref, opts = {}) {
+  if (value === ref.value) return `${MANIFEST_PATH} already references ${PACKAGE_NAME} (${value}), the same as this run; that line was left alone`;
+  const tar = tarballVersion(value.replace(/^file:/, ""));
+  const have = tar ? ` (${tar})` : "";
+  const move = value.startsWith("file:")
+    ? `copy the new tarball into Packages/ and run: npx create-onelobby update --package-from ${opts.packageFrom ?? "<the new tarball>"}`
+    : "run: npx create-onelobby update";
+  return `${MANIFEST_PATH} already references ${PACKAGE_NAME} ${value}${have}, not ${ref.value} (${ref.version}), which this run would write: that line was NOT moved (the add never moves it). To move it: ${move}`;
+}
+
 /** The dependencies the OneLobby package needs in a manifest, in the order they are written. */
 export function wantedDependencies({ ref, testFramework }) {
   return [
@@ -341,7 +355,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
     const text = readFileSync(p, "utf8");
     const r = addDependencies(text, wanted, MANIFEST_PATH);
     const mine = r.present.find((d) => d.name === PACKAGE_NAME);
-    if (mine) notes.push(`${MANIFEST_PATH} already references ${PACKAGE_NAME} (${mine.value}); that line was left alone. To move it to this version run: npx create-onelobby update${mine.value.startsWith("file:") ? " --package-from <tarball>" : ""}`);
+    if (mine) notes.push(oldPackageNote(mine.value, ref, opts));
     manifestPlan = { file: MANIFEST_PATH, content: Buffer.from(r.text, "utf8"), action: r.changed ? "update" : "unchanged", added: r.added, present: r.present };
     if (mine) existingRef = { value: mine.value, exists: mine.value.startsWith("file:") ? existsSync(resolve(target, "Packages", mine.value.slice(5))) : null };
   } else {
@@ -423,6 +437,7 @@ export function unityNext({ into, rel, plan, titleFromFolder = false }) {
   if (rel !== ".") next.push(`cd ${rel}`);
   const existing = plan.package.existing;
   if (existing && existing.exists === false) next.push(`the manifest already references ${existing.value} but no such file is in Packages/: put the tarball there or run: npx create-onelobby update --package-from <tarball>`);
+  else if (existing && existing.value !== plan.package.value) next.push(`${PACKAGE_NAME} stays at ${existing.value}; this run would use ${plan.package.value} (${plan.package.version}) and did not move it. To move it: copy the new tarball into Packages/ and run: npx create-onelobby update --package-from <the new tarball>${existing.value.startsWith("file:") ? " (then delete the old tarball from Packages/)" : ""}`);
   else if (plan.package.from === "default" && !existing) next.push(`put the package tarball next to the manifest: Packages/${defaultTarball()} (the package is not on a registry yet: build it with clients/unity/build-unity-package.sh --pack, or take the unity-dev-package CI artifact; or rerun with --package-from <tarball>)`);
   if (titleFromFolder) next.push(`game.title in ${BLUEPRINT_PATH} came from the folder name: set the game's own name (edit the file, or pass --title "<name>" on the first run)`);
   if (into) {
@@ -430,8 +445,8 @@ export function unityNext({ into, rel, plan, titleFromFolder = false }) {
       `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local to its command (a second copy joins by the code the host's log prints, never a fixed port)`,
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
-      "a game that has its own runner or client: add OneLobbyRunner yourself FIRST and set Blueprint (and ConfigureConfig = c => c with { NetVersion = <your constant> }) before anything reads runner.Client; then add the menu, which takes the runner it finds. A menu added first adds its own runner and builds the client at once",
-      "Unity has no start_on_host and no --autostart: to start with no click (a headless two-copy test) set room.autoStart to \"players\" with room.autoStartPlayers 2 in the blueprint, else the host clicks Start; your own code that reads --host / --join must set menu.BootFlags = false, or both copies act on the flag",
+      "a game that has its own runner or client: add OneLobbyRunner yourself FIRST and set Blueprint (and ConfigureConfig = c => c with { NetVersion = <your constant> }) before anything reads runner.Client; then add the menu, which takes the runner it finds. A menu added first adds its own runner and builds the client at once. A game with its own Setup page, Room screen and runner: docs/recipes/unity.md, \"--into a game that already has its own multiplayer\" (every member and a code skeleton)",
+      "Unity has no --autostart: to start both copies with no click (a headless two-copy test) set room.autoStart to \"players\" with room.autoStartPlayers 2 in the blueprint, else the host clicks Start. A game with its own room screen after the menu sets menu.StartOnHost = true (before the first frame) so its host does not press Start twice, and menu.BeforeHost = () => Task<bool> to ask \"end the run in progress?\" before a host (false cancels); your own code that reads --host / --join must set menu.BootFlags = false, or both copies act on the flag",
       `the blueprint is ${BLUEPRINT_PATH}: change choices there (lobby.joinLink stays false for a Unity player: a joinLink is a web page's share URL)`,
       ...(players ? netPlayerLines(players) : []),
       `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log; run only this assembly here: the game's own PlayMode assembly is a separate run (-assemblyNames <its name>), because these flags would reach its tests too; the editor must be closed (a project open in the editor cannot be opened again)`,
