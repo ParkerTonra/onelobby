@@ -13,8 +13,49 @@ import { run } from "./procs.js";
 
 export const TURN_HELPER = { name: "node-turn", version: "0.0.6" };
 export const helperDir = (projectDir) => join(resolve(projectDir), ".onelobby", "helpers");
-/** The one command that gets the helper (also what `--fetch-helpers` runs). */
-export const fetchCommand = (projectDir) => `npm install --prefix ${JSON.stringify(helperDir(projectDir))} ${TURN_HELPER.name}@${TURN_HELPER.version} --no-audit --no-fund --ignore-scripts`;
+const INSTALL_FLAGS = ["--no-audit", "--no-fund", "--ignore-scripts"];
+const installArgs = (prefix) => ["install", "--prefix", prefix, `${TURN_HELPER.name}@${TURN_HELPER.version}`, ...INSTALL_FLAGS];
+
+/**
+ * The one command that gets the helper (also what `--fetch-helpers` runs), as one line for a person to paste into the shell of
+ * `platform`: a POSIX shell gets single quotes (every quote inside is closed and re-opened), cmd.exe gets double quotes. cmd.exe has
+ * no way to quote a `%` or a `"` inside a path, so for such a folder the line uses the relative prefix and is meant to be run in
+ * the game folder.
+ */
+export function fetchCommand(projectDir, platform = process.platform) {
+  const abs = helperDir(projectDir);
+  let prefix;
+  if (platform === "win32") prefix = /["%]/.test(abs) ? join(".onelobby", "helpers") : `"${abs}"`;
+  else prefix = `'${abs.replace(/'/g, `'\\''`)}'`;
+  return `npm ${installArgs(prefix).join(" ")}`;
+}
+
+/**
+ * How to start npm without any shell: [file, args]. npm's own JS entry runs under the node that is running us (found through
+ * $npm_execpath when it names npm-cli.js, else next to node), so no part of a path is ever parsed by cmd.exe or sh. Returns null
+ * when it cannot be found on Windows (npm there is a .cmd file, which needs a shell); elsewhere the `npm` executable is spawned
+ * directly (still no shell).
+ */
+export function npmCommand(args, { platform = process.platform, execPath = process.execPath, env = process.env, exists = existsSync } = {}) {
+  const sep = platform === "win32" ? "\\" : "/";
+  const fromEnv = env.npm_execpath;
+  if (fromEnv && /(^|[\\/])npm-cli\.js$/.test(fromEnv) && exists(fromEnv)) return [execPath, [fromEnv, ...args]];
+  const nodeDir = execPath.slice(0, Math.max(execPath.lastIndexOf("/"), execPath.lastIndexOf("\\")));
+  for (const rel of platform === "win32" ? [["node_modules", "npm", "bin", "npm-cli.js"]] : [["..", "lib", "node_modules", "npm", "bin", "npm-cli.js"], ["node_modules", "npm", "bin", "npm-cli.js"]]) {
+    const cli = [nodeDir, ...rel].join(sep);
+    if (exists(cli)) return [execPath, [cli, ...args]];
+  }
+  return platform === "win32" ? null : ["npm", args];
+}
+
+/** `npm install` the helper into <game>/.onelobby/helpers (anonymous; the registry is the only host). Resolves { ok, out }. */
+export async function fetchTurnHelper(projectDir, { runImpl = run, ...env } = {}) {
+  const args = installArgs(helperDir(projectDir));
+  const cmd = npmCommand(args, env);
+  if (!cmd) return { ok: false, out: `could not find npm's own script next to this node; run it yourself: ${fetchCommand(projectDir, env.platform)}` };
+  const r = await runImpl(cmd[0], cmd[1], { cwd: projectDir, timeoutMs: 180000 });
+  return { ok: r.code === 0 && findTurnHelper(projectDir) !== null, out: (r.out ?? "").trim().split(/\r?\n/).slice(-3).join(" | ") };
+}
 
 /** Where node-turn is installed for this game, or null: the game's own node_modules first, then the helper cache. */
 export function findTurnHelper(projectDir) {
@@ -22,15 +63,6 @@ export function findTurnHelper(projectDir) {
     if (existsSync(join(base, "node_modules", TURN_HELPER.name, "package.json"))) return base;
   }
   return null;
-}
-
-/** `npm install` the helper into <game>/.onelobby/helpers (anonymous; the registry is the only host). Resolves { ok, out }. */
-export async function fetchTurnHelper(projectDir) {
-  const dir = helperDir(projectDir);
-  const args = ["install", "--prefix", dir, `${TURN_HELPER.name}@${TURN_HELPER.version}`, "--no-audit", "--no-fund", "--ignore-scripts"];
-  const [file, fileArgs] = process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", ["npm", ...args.map((a) => (/\s/.test(a) ? `"${a}"` : a))].join(" ")]] : ["npm", args];
-  const r = await run(file, fileArgs, { cwd: projectDir, timeoutMs: 180000 });
-  return { ok: r.code === 0 && findTurnHelper(projectDir) !== null, out: r.out.trim().split(/\r?\n/).slice(-3).join(" | ") };
 }
 
 function freeUdpPort() {
