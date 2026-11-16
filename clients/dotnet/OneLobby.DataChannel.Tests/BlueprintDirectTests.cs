@@ -24,6 +24,15 @@ public class BlueprintDirectTests
     }
 
     [Fact]
+    public void ToDirectHostOptionsCarriesTheLanSwitch()
+    {
+        Assert.False(Blueprint.Parse(@"{ ""game"": {""id"":""a""} }").ToDirectHostOptions().Lan);
+        var on = Blueprint.Parse(@"{ ""game"": {""id"":""a""}, ""hosting"": {""lan"":true} }").ToDirectHostOptions();
+        Assert.True(on.Lan);
+        Assert.Equal(LanWire.DefaultPort, on.LanPort);
+    }
+
+    [Fact]
     public async Task HostDirectAsyncRefusesABlueprintWithDirectOff()
     {
         var bp = Blueprint.Parse(@"{ ""game"": {""id"":""a""}, ""hosting"": {""direct"":false,""server"":true,""lobbyServer"":""ws://x.test/ws""} }");

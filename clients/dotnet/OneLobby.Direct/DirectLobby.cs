@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -81,6 +82,17 @@ namespace OneLobby.Direct
         /// through <c>ReadyTimeout</c>. See spec/nostr-signaling.md s.5.
         /// </summary>
         public IReadOnlyList<IceServer>? IceServers { get; set; }
+        /// <summary>
+        /// LAN discovery (spec/lan-discovery.md), default off; the blueprint's <c>hosting.lan</c> sets it. On: this host answers the
+        /// questions of players' games on the same local network, on one UDP port (<see cref="LanPort"/>) that exists only while the
+        /// lobby is open. Off: no socket is opened. If the port is taken, hosting goes on without it and the net log says so.
+        /// With <see cref="BindAddress"/> 127.0.0.1 the socket binds the loopback only.
+        /// </summary>
+        public bool Lan { get; set; }
+        /// <summary>The UDP port a LAN host answers on; every host of one game must use the same one. Default <see cref="LanWire.DefaultPort"/> (47840).</summary>
+        public int LanPort { get; set; } = LanWire.DefaultPort;
+        /// <summary>Test seam: the UDP socket factory for LAN discovery.</summary>
+        public Func<ILanUdp>? LanUdp { get; set; }
     }
 
     /// <summary>Settings for the <c>JoinDirectAsync</c> / <c>RejoinDirectAsync</c> overloads that take options.</summary>
@@ -150,6 +162,7 @@ namespace OneLobby.Direct
                 LateJoin = bp.Lobby.LateJoin,
                 Meta = bp.Lobby.Meta.Count == 0 ? null : bp.Lobby.Meta,
                 RateLimit = bp.Session.RateLimit,
+                Lan = bp.Hosting.Lan,
                 Name = string.IsNullOrEmpty(name) ? Blueprint.DefaultLobbyName(displayName) : name,
                 Nostr = new NostrOptions
                 {
@@ -227,7 +240,29 @@ namespace OneLobby.Direct
                 ? MapAsync(hub, mapOptions)
                 : Task.FromResult<PortMapResult?>(null);
             var create = client.HostAsync(new LobbyOptions(name, o.MaxPlayers, Visibility.Unlisted, o.LateJoin, o.Meta) { RateLimit = o.RateLimit, Password = o.Password, Room = o.Room }, ct);
-            return RememberHostCode(client, FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode));
+            return RememberHostCode(client, FinishHost(create, mapping, transport, hub, port, manual.Length > 0 ? manual : null, o.PublicAddress != null ? "manual" : "manual (ONELOBBY_PUBLIC_IP)", mapOptions.RetryMs, bridge, nostrCode, client, o));
+        }
+
+        /// <summary>
+        /// LAN discovery for this lobby (spec/lan-discovery.md): one UDP socket, only while the lobby is open and the switch is on.
+        /// Failing to open it never stops hosting: the net log gets one line and the host goes on. The answering thread reads a
+        /// snapshot that only the pump thread writes (peer events fire inside Pump), so it never touches the live lobby.
+        /// </summary>
+        private static void StartLan(LobbyClient client, DirectHostOptions o, Lobby lobby, DirectHubHost hub)
+        {
+            LanHostInfo? snapshot = null;
+            void Refresh()
+            {
+                var me = lobby.Peers.FirstOrDefault(p => p.PeerId == lobby.LocalPeerId);
+                snapshot = new LanHostInfo(lobby.Name, me?.Name ?? client.Config.DisplayName, lobby.Peers.Count, o.MaxPlayers, !string.IsNullOrEmpty(o.Password), hub.Port);
+            }
+            Refresh();
+            lobby.PeerJoined += _ => Refresh();
+            lobby.PeerLeft += (_, _) => Refresh();
+            lobby.PeerRenamed += (_, _) => Refresh();
+            var host = new LanHost(client.Config.GameId, client.Config.NetVersion, () => Volatile.Read(ref snapshot), o.LanPort, o.BindAddress, o.LanUdp,
+                line => client.NetLog.Add("info", line));
+            if (host.Start()) hub.Own(host);
         }
 
         /// <summary>The host's join code is the player's last code (spec/settings.md s.5).</summary>
@@ -368,7 +403,7 @@ namespace OneLobby.Direct
             catch (Exception e) { return new PortMapResult { Detail = e.Message }; }
         }
 
-        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort, string? manual, string manualNote, int retryMs, NostrHostBridge? bridge, string? nostrCode)
+        private static async Task<Lobby> FinishHost(Task<Lobby> create, Task<PortMapResult?> mapping, DirectHostTransport transport, DirectHubHost hub, int requestedPort, string? manual, string manualNote, int retryMs, NostrHostBridge? bridge, string? nostrCode, LobbyClient client, DirectHostOptions o)
         {
             // the relays connect while the lobby is made and the router answers (JS does the same)
             var settle = bridge != null ? SettleRelays(bridge.Relays) : Task.FromResult(false);
@@ -384,6 +419,7 @@ namespace OneLobby.Direct
                 var relaysNote = nostrUp ? bridge!.Relays.Connected + "/" + bridge.Relays.Total : "";
                 var retrying = false;
                 lobby.DirectAddresses = DirectAddress.Local(hub.Port);
+                if (o.Lan) StartLan(client, o, lobby, hub);
                 // Sets JoinCode / JoinCodeKind / PortMapping / DirectHostLog and what GET /joininfo answers.
                 void Apply(string? ip, JoinCodeKind kind, string note)
                 {
