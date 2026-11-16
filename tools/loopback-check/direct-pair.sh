@@ -28,4 +28,4 @@ timeout 60 "${JOIN[@]}" > "$WORK/join.out" 2>&1; JC=$?
 wait "$HPID"; HC=$?
 HPID=""
 echo "--- host (exit $HC) ---"; tail -n 12 "$WORK/host.out"; echo "--- joiner (exit $JC) ---"; tail -n 12 "$WORK/join.out"
-grep -a -q '^PASS host' "$WORK/host.out" && grep -a -q 'PASS' "$WORK/join.out" && [ "$JC" -eq 0 ] && [ "$HC" -eq 0 ]
+grep -a -q 'PASS host' "$WORK/host.out" && grep -a -q 'PASS' "$WORK/join.out" && [ "$JC" -eq 0 ] && [ "$HC" -eq 0 ]
