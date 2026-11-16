@@ -21,7 +21,7 @@ import {
 } from "./vendor.js";
 
 const templates = join(dirname(fileURLToPath(import.meta.url)), "../templates/godot-gdscript");
-const read = (...p) => readFileSync(join(templates, ...p), "utf8");
+const read = (...p) => readFileSync(join(templates, ...p), "utf8").replace(/\r\n/g, "\n"); // LF whatever the checkout did
 
 export const GODOT_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/main/docs/recipes/godot-gdscript.md";
 export const AUTOLOAD_NAME = "Net";
