@@ -413,7 +413,8 @@ export class LanHost {
 export interface LanGame {
   address: string;
   port: number;
-  lobbyName: string;
+  /** The lobby's name (`LobbySummary.name`). */
+  name: string;
   hostName: string;
   players: number;
   maxPlayers: number;
@@ -590,7 +591,7 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
     const row: LanGame = {
       address,
       port: a.port,
-      lobbyName: cleanLanName(a.lobbyName),
+      name: cleanLanName(a.lobbyName),
       hostName: cleanLanName(a.hostName),
       players: a.players,
       maxPlayers: a.maxPlayers,
@@ -603,7 +604,7 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
     let changed = false;
     if (i >= 0) {
       const old = this.rows[i];
-      changed = old.lobbyName !== row.lobbyName || old.hostName !== row.hostName || old.players !== row.players || old.maxPlayers !== row.maxPlayers || old.hasPassword !== row.hasPassword || old.sameVersion !== row.sameVersion || old.netVersion !== row.netVersion;
+      changed = old.name !== row.name || old.hostName !== row.hostName || old.players !== row.players || old.maxPlayers !== row.maxPlayers || old.hasPassword !== row.hasPassword || old.sameVersion !== row.sameVersion || old.netVersion !== row.netVersion;
       this.rows[i] = row;
     } else if (this.rows.length < LAN_MAX_ROWS) {
       this.rows.push(row);

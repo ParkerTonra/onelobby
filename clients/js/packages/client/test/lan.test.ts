@@ -162,7 +162,7 @@ describe("host and finder on 127.0.0.1", () => {
     expect(await finder.start()).toBe("running");
     await until(() => finder.games.length === 1, "first row");
     const row = finder.games[0];
-    expect(row).toMatchObject({ address: "127.0.0.1", port: 47812, lobbyName: "Ants!", hostName: "Sam", players: 1, maxPlayers: 4, hasPassword: true, sameVersion: true });
+    expect(row).toMatchObject({ address: "127.0.0.1", port: 47812, name: "Ants!", hostName: "Sam", players: 1, maxPlayers: 4, hasPassword: true, sameVersion: true });
     now = { ...now, players: 2 };
     await until(() => finder.games[0]?.players === 2, "player count change");
     expect(finder.games.length).toBe(1);

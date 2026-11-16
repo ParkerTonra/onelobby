@@ -52,7 +52,7 @@ public sealed class LanDirectTests
         PumpUntil(() => finder.Games.Count == 1, () => { host.Pump(); finder.Pump(); }, "the row appears");
         var row = finder.Games[0];
         Assert.Equal("127.0.0.1", row.Address);
-        Assert.Equal(("Sam's game", "Sam", 1, 3, true, true), (row.LobbyName, row.HostName, row.Players, row.MaxPlayers, row.HasPassword, row.SameVersion));
+        Assert.Equal(("Sam's game", "Sam", 1, 3, true, true), (row.Name, row.HostName, row.Players, row.MaxPlayers, row.HasPassword, row.SameVersion));
         Assert.True(row.Port > 0);
         _ = host.LeaveAsync();
         PumpUntil(() => finder.Games.Count == 0, () => finder.Pump(), "the row goes after the lobby closed");

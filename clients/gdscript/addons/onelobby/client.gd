@@ -99,6 +99,7 @@ var _socket_factory := Callable()
 ## The join code (display form) of the direct lobby being hosted, joined or rejoined; "" outside Direct mode.
 var _direct_code := ""
 var _direct_host: OneLobbyDirectHost = null
+var _lan_finder: OneLobbyLanFinder = null
 ## Direct mode: the host's fixed UDP port range [begin, end] (set by host_direct's udp_port_range), applied to every
 ## peer connection this client makes.
 var port_range: Array = []
@@ -305,6 +306,20 @@ func rejoin(token: String) -> OneLobbyLobby:
 	return await _run(token, "", ["lobby"], finish)
 
 
+## A finder for LAN games (spec/lan-discovery.md): `finder.start()` asks the local network, `finder.games` is the list and
+## `finder.changed` fires when it changes, `finder.stop()` closes its socket. It is a child of this client and polls itself.
+## With a blueprint whose `hosting.lan` is false it stays off (`finder.status == "off"`). Options: targets (PackedStringArray; default the
+## broadcast address, a test passes ["127.0.0.1"]), port. The same finder is returned every call.
+func lan_finder(options: Dictionary = {}) -> OneLobbyLanFinder:
+	if _lan_finder == null:
+		_lan_finder = OneLobbyLanFinder.new(game_id, net_version, options)
+		if config != null:
+			_lan_finder.enabled = bool(config.hosting["lan"])
+		_lan_finder.log_fn = func(line: String) -> void: get_net_log().add("info", line)
+		add_child(_lan_finder)
+	return _lan_finder
+
+
 ## Direct mode, host: runs the lobby inside this game with no lobby server. Joiners find you through public Nostr
 ## relays with a short code: `lobby.code` ("D1PB-1X9S-FPV"; show it, or copy it). The lobby, its signals and peers are
 ## the same as raw mode, and JS and .NET players can join it.
@@ -312,7 +327,8 @@ func rejoin(token: String) -> OneLobbyLobby:
 ##     var lobby := await client.host_direct({"name": "My game", "max_players": 4})
 ##     print("Join code: ", lobby.code)
 ##
-## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit, data and room as in host(); relays (wss URLs,
+## `options`: name, max_players (4), password (""), late_join (true), meta, rate_limit, data and room as in host(); lan (false; the
+## blueprint's hosting.lan: answer LAN discovery questions on UDP `lan_port` 47840, see spec/lan-discovery.md); relays (wss URLs,
 ## default: seven public ones), stun (default: Google and Cloudflare), upnp_port (0 = off: asks the router to forward
 ## that UDP port; best effort, see the README), ice_servers (Array of {urls, username?, credential?}, e.g. a TURN relay
 ## for players behind a strict NAT: sent to every joiner in welcome.ice; OneLobbyTurn.login() mints coturn-style
@@ -342,6 +358,10 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 	var cap := players + int(OneLobbyRoomRules.resolve_settings(room_opts, players, true)["spectators"])
 	var hub_options := options.duplicate()
 	hub_options["max_players"] = cap
+	if bool(options.get("lan", false)):
+		hub_options["lan_game_id"] = game_id
+		hub_options["lan_net_version"] = net_version
+		hub_options["lan_log"] = func(line: String) -> void: get_net_log().add("info", line)
 	var d := OneLobbyDirectHost.start(hub_options)
 	if d == null:
 		if OneLobbyIpListener.last_error != "" and (options.has("tcp_port") or options.has("udp_port_range") or not bool(options.get("nostr", true))):
@@ -351,6 +371,8 @@ func host_direct(options: Dictionary = {}) -> OneLobbyLobby:
 		return null
 	port_range = range
 	_direct_host = d
+	d.lan_max_players = players
+	d.lan_password = pw != ""
 	_direct_code = d.code
 	# the relays connect while we wait; pump() polls the host meanwhile
 	var deadline := transport.now_ms() + OneLobbyNostrLimits.HOST_NOSTR_FIRST_RELAY_MS
@@ -681,6 +703,17 @@ func _enter_lobby(e: Dictionary, room_setup: Dictionary = {}) -> OneLobbyLobby:
 		l.code = _direct_code
 		if _direct_host != null:
 			l.ip_code = _direct_host.ip_code
+			if _direct_host.lan != null:
+				var dh := _direct_host
+				dh.lan_info = func() -> Dictionary:
+					if l._closed or dh.ip == null:
+						return {}
+					var host_name := ""
+					for p in l.peers():
+						if int(p["peer_id"]) == l.local_peer_id:
+							host_name = str(p["name"])
+					return {"lobby_name": l.name, "host_name": host_name, "players": l.peers().size(), "max_players": dh.lan_max_players,
+						"password": dh.lan_password, "port": dh.ip.port}
 	if config != null:
 		l.pause.mode = str(config.session["pause"])
 		l.chat.enabled = bool(config.chat["text"])

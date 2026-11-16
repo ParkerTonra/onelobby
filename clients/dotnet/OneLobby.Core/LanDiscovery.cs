@@ -394,7 +394,7 @@ namespace OneLobby
     }
 
     /// <summary>One row of the list a menu draws (one per host), as <see cref="LobbySummary"/> is for the lobby browser.</summary>
-    public sealed record LanGame(string Address, int Port, string LobbyName, string HostName, int Players, int MaxPlayers, bool HasPassword, bool SameVersion, string NetVersion, long LastSeenMs);
+    public sealed record LanGame(string Address, int Port, string Name, string HostName, int Players, int MaxPlayers, bool HasPassword, bool SameVersion, string NetVersion, long LastSeenMs);
 
     public enum LanFinderStatus { Idle, Running, Off, SocketFailed }
 
@@ -539,7 +539,7 @@ namespace OneLobby
             if (i >= 0)
             {
                 var o = _rows[i];
-                changed = o.LobbyName != row.LobbyName || o.HostName != row.HostName || o.Players != row.Players || o.MaxPlayers != row.MaxPlayers || o.HasPassword != row.HasPassword || o.SameVersion != row.SameVersion || o.NetVersion != row.NetVersion;
+                changed = o.Name != row.Name || o.HostName != row.HostName || o.Players != row.Players || o.MaxPlayers != row.MaxPlayers || o.HasPassword != row.HasPassword || o.SameVersion != row.SameVersion || o.NetVersion != row.NetVersion;
                 _rows[i] = row;
             }
             else if (_rows.Count < LanWire.MaxRows) { _rows.Add(row); changed = true; }

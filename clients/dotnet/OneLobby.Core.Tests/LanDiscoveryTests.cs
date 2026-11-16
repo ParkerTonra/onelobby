@@ -266,7 +266,7 @@ namespace OneLobby.Tests
             Assert.Equal(LanFinderStatus.Running, finder.Start());
             PumpUntil(finder, clock, () => finder.Games.Count == 1, "first row");
             var row = finder.Games[0];
-            Assert.Equal(("127.0.0.1", 47812, "Ants!", "Sam", 1, 4, true, true), (row.Address, row.Port, row.LobbyName, row.HostName, row.Players, row.MaxPlayers, row.HasPassword, row.SameVersion));
+            Assert.Equal(("127.0.0.1", 47812, "Ants!", "Sam", 1, 4, true, true), (row.Address, row.Port, row.Name, row.HostName, row.Players, row.MaxPlayers, row.HasPassword, row.SameVersion));
             info = info with { Players = 2 };
             PumpUntil(finder, clock, () => finder.Games[0].Players == 2, "player count change");
             host.Dispose();
@@ -384,7 +384,7 @@ namespace OneLobby.Tests
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (finder.Games.Count == 0 && sw.ElapsedMilliseconds < 8000) { finder.Pump(); Thread.Sleep(5); }
             Assert.Single(finder.Games);
-            Assert.Equal(("127.0.0.1", 47812, "Sam's game"), (finder.Games[0].Address, finder.Games[0].Port, finder.Games[0].LobbyName));
+            Assert.Equal(("127.0.0.1", 47812, "Sam's game"), (finder.Games[0].Address, finder.Games[0].Port, finder.Games[0].Name));
             info = info with { Players = 3 };
             while (finder.Games[0].Players != 3 && sw.ElapsedMilliseconds < 8000) { finder.Pump(); Thread.Sleep(5); }
             Assert.Equal(3, finder.Games[0].Players);

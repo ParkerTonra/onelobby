@@ -16,6 +16,13 @@ var code := ""
 var ip_code := ""
 ## The IP path's listener, null when off.
 var ip: OneLobbyIpListener = null
+## LAN discovery's answering socket (spec/lan-discovery.md), null when the `lan` option is off or its UDP port could not be opened.
+var lan: OneLobbyLanHost = null
+## Set by the client once the lobby exists: returns {} or {lobby_name, host_name, players, max_players, password, port}.
+var lan_info := Callable()
+## What the answer says about the lobby besides its live name and player count (the client sets both).
+var lan_max_players := 4
+var lan_password := false
 ## Result of the optional UPnP request: {mapped: bool, detail: String, external_ip: String}; empty until it finishes.
 var upnp_result := {}
 
@@ -32,6 +39,9 @@ var _closed := false
 ## per joiner) or `tcp_port` is given, or `nostr` is false: then a TCP WebSocket listens on `tcp_port` (47810) at
 ## `listen_address` ("*") and `ip_code` is a version 0 code of `public_ip` (default: this machine's first private IPv4)
 ## and that port. `nostr` false skips the relays (no internet needed; `code` is then the IP code).
+## `lan` (false) turns LAN discovery on: one UDP socket (`lan_port`, 47840) answers the questions of players' games on the same network,
+## only while this host exists (it needs the IP path, so it switches that on). With `listen_address` "127.0.0.1" it binds the loopback only.
+## `lan_game_id`, `lan_net_version` and `lan_log` (Callable(line)) come from the client. If the port is taken, hosting goes on without it.
 ## Null when the join code could not be made.
 static func start(options: Dictionary) -> OneLobbyDirectHost:
 	var d := OneLobbyDirectHost.new()
@@ -39,7 +49,8 @@ static func start(options: Dictionary) -> OneLobbyDirectHost:
 	var stun: Array = options.get("stun", OneLobbyNostrPool.DEFAULT_STUN)
 	d.hub = OneLobbyHub.direct(max_players, str(options.get("password", "")), stun, options.get("ice_servers", []))
 	var use_nostr := bool(options.get("nostr", true))
-	if options.has("udp_port_range") or options.has("tcp_port") or not use_nostr:
+	var use_lan := bool(options.get("lan", false))
+	if options.has("udp_port_range") or options.has("tcp_port") or not use_nostr or use_lan:
 		d.ip = OneLobbyIpListener.start(d.hub, int(options.get("tcp_port", DEFAULT_PORT)), str(options.get("listen_address", "*")))
 		if d.ip == null:
 			return null
@@ -47,6 +58,12 @@ static func start(options: Dictionary) -> OneLobbyDirectHost:
 		if addr == "":
 			addr = lan_ipv4()
 		d.ip_code = OneLobbyJoinCode.encode_ip(addr, d.ip.port)
+		if use_lan:
+			d.lan = OneLobbyLanHost.new(str(options.get("lan_game_id", "")), str(options.get("lan_net_version", "1")), d._lan_info, {
+				"port": int(options.get("lan_port", OneLobbyLan.DEFAULT_PORT)), "bind_address": str(options.get("listen_address", "*")),
+				"log": options.get("lan_log", Callable())})
+			if not d.lan.start():
+				d.lan = null
 	if use_nostr:
 		var room := OneLobbyJoinCode.random_room()
 		d.code = OneLobbyJoinCode.encode_room(room)
@@ -92,6 +109,8 @@ func poll() -> void:
 		nostr.poll()
 	if ip != null:
 		ip.poll()
+	if lan != null:
+		lan.poll()
 	var now := Time.get_ticks_msec()
 	if now - _last_tick >= TICK_MS:
 		_last_tick = now
@@ -105,6 +124,10 @@ func poll() -> void:
 ## True once at least one relay is connected.
 func relays_up() -> bool:
 	return nostr == null or nostr.relays_connected() > 0
+
+
+func _lan_info() -> Dictionary:
+	return lan_info.call() if lan_info.is_valid() else {}
 
 
 func ip_close() -> void:
@@ -125,6 +148,9 @@ func close() -> void:
 		nostr.close()
 	if ip != null:
 		ip.close()
+	if lan != null:
+		lan.close()
+		lan = null
 	if _upnp_thread != null:
 		upnp_result = _upnp_thread.wait_to_finish()
 		_upnp_thread = null
