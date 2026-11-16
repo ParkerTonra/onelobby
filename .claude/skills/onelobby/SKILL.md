@@ -73,8 +73,8 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword: `docs/recipes/menu.md`.
    **Test on this PC only.** The menu acts on `-- --host` and `-- --join=<code>` by itself, and a plain `--host` opens a port and
    reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by the GDScript menu itself, with no game code, as long as `boot_flags`
-   is on; C#: the "Next:" line's `OneLobbyNet.Wire(menu, args)` reads it (the menu's `BootFlags` off). Never run `-- --host`
-   without `--local`.
+   is on; the C# menu reads it too (no lobby server, no check on open), and the "Next:" line's `OneLobbyNet.Wire(menu, args)` in the
+   scene script's `_Ready` gives it the 127.0.0.1 host (`BootFlags` stays on). Never run `-- --host` without `--local`.
 3. **Web** `--into` writes `onelobby.json`, `multiplayer/session.js` and `test/multiplayer.mjs` only: no menu (`ui.kind` stays
    `generated`, you draw the buttons; `--ui drop-in` is refused) and no `AGENTS.md`, and a minimal `package.json` only when the folder has
    none (an existing one is never edited: add `onelobby` and `"type": "module"` as the "Next:" lines say, then `npm install`). Put the game behind

@@ -55,6 +55,7 @@ public partial class MenuSelfCheck : Node
             foreach (var size in new[] { new Vector2I(1280, 720), new Vector2I(640, 360) })
                 await Layouts(size);
             await OnOpen();
+            await BootFlagsOn();
         }
         catch (Exception e)
         {
@@ -93,7 +94,7 @@ public partial class MenuSelfCheck : Node
     /// A menu on the in-memory network. Its connection check is always a counted fake (<c>Runs</c>): this check never sends a packet
     /// to the internet. <paramref name="answer"/> is the fake's NAT type; <paramref name="gate"/> holds it until set.
     /// </summary>
-    private Player NewPlayer(string name, string answer = "cone", TaskCompletionSource<bool>? gate = null, string[]? bootArgs = null, string? blueprint = null)
+    private Player NewPlayer(string name, string answer = "cone", TaskCompletionSource<bool>? gate = null, string[]? bootArgs = null, string? blueprint = null, bool bootFlags = false)
     {
         var config = new OneLobbyConfig("menu-selfcheck", "1", new Uri("ws://mem/ws"), SyncMode.Raw, 20, 20, "") { SettingsEnv = PlayerSettings.NoEnvironment };
         var menu = GD.Load<PackedScene>("res://addons/onelobby_menu/OneLobbyMenu.tscn").Instantiate<OneLobbyMenu>();
@@ -109,7 +110,7 @@ public partial class MenuSelfCheck : Node
             return new CheckResult("ok", answer, "none", v.Verdict, v.Message);
         };
         if (bootArgs != null) menu.BootArgs = bootArgs;
-        menu.BootFlags = false;
+        menu.BootFlags = bootFlags;
         menu.HostOptions = new LobbyOptions("selfcheck", 4) { Room = new RoomOptions { CountdownSeconds = 1 } };
         var p = player;
         menu.GameStarted += _ => p.Started++;
@@ -198,6 +199,42 @@ public partial class MenuSelfCheck : Node
         gate2.SetResult(true);
         await Frames(5);
         Check(!GodotObject.IsInstanceValid(q.Menu) && !model.CheckRunning && model.CheckVerdictId == "likely_fail", "freed mid-check: the late answer ended quietly");
+    }
+
+    /// <summary>
+    /// The menu's own boot flags (BootFlags on), with the direct route handed over right after the menu is in the tree: that is when a
+    /// game's scene script runs (the parent's _Ready comes after the menu's).
+    /// </summary>
+    private async Task BootFlagsOn()
+    {
+        var wired = NewPlayer("Eve", bootArgs: new[] { "--host", "--local" }, bootFlags: true);
+        var directHosts = 0;
+        wired.Menu.HostDirect = _ => { directHosts++; return wired.Menu.Client!.HostAsync(new LobbyOptions("selfcheck", 4)); };
+        wired.Menu.Route = MenuRoute.Auto; // a game cannot take a --local menu off the direct route
+        await Frames(6);
+        Check(directHosts == 1 && wired.M.Route == MenuRoute.Direct && wired.M.Screen == MenuScreen.Lobby && wired.Runs == 0,
+            $"boot flags on, --host --local, wired after the menu's _Ready: hosted once through HostDirect (calls {directHosts}, route {wired.M.Route}, screen {wired.M.Screen}, checks {wired.Runs})");
+        await wired.M.LeaveAsync();
+        await Frames(3);
+        wired.Menu.QueueFree();
+
+        var bare = NewPlayer("Flo", bootArgs: new[] { "--host", "--local" }, bootFlags: true);
+        await Frames(6);
+        Check(bare.M.Screen == MenuScreen.Error && bare.M.Lobby == null && bare.M.Error.Code == LobbyErrorCodes.NoServer,
+            $"boot flags on, --host --local, no direct route given: an error, not a lobby on the server (screen {bare.M.Screen}, code '{bare.M.Error.Code}')");
+        bare.Menu.QueueFree();
+
+        var server = NewPlayer("Gus", bootArgs: new[] { "--host" }, bootFlags: true);
+        await Frames(6);
+        Check(server.M.Screen == MenuScreen.Lobby && server.Runs == 0, $"boot flags on, --host: hosted, and the check on open stayed out of its way (screen {server.M.Screen}, checks {server.Runs})");
+        await server.M.LeaveAsync();
+        await Frames(3);
+        server.Menu.QueueFree();
+
+        var off = NewPlayer("Hal", bootArgs: new[] { "--host" });
+        await Frames(6);
+        Check(off.M.Screen == MenuScreen.Start, $"boot flags off: --host does nothing by itself (screen {off.M.Screen})");
+        off.Menu.QueueFree();
     }
 
     private async Task Audit(Player p, string label, Vector2 viewport, bool expectFocus = false)

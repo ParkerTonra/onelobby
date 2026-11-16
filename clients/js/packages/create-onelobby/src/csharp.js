@@ -264,10 +264,10 @@ export function csharpNext({ into, rel, plan }) {
   next.push(`${TEST_COMMAND}   # expect MULTIPLAYER_OK`);
   if (into) {
     next.push(
-      "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby_menu/OneLobbyMenu.tscn, and turn its Boot Flags off in the inspector (the wiring below applies them)",
-      "in that scene's script, after the menu's _Ready (the parent's _Ready is): OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs());  menu.Model!.ApplyBootFlags(OS.GetCmdlineUserArgs());",
+      "add the menu to your main scene: Scene > Instantiate Child Scene > res://addons/onelobby_menu/OneLobbyMenu.tscn",
+      "in that scene's script, in _Ready: OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs());   // the menu applies --host / --join / --name right after, and reads --local itself",
       "connect it: menu.GameStarted += lobby => ...;  menu.ReturnedToLobby += lobby => ...;  menu.Left += () => ...;",
-      "try it: godot --path . -- --host --name=Sam   (a second window: -- --join=<code> --name=Ann)",
+      "try it on this PC only: godot --path . -- --host --local --name=Sam   (a second window: -- --join=127.0.0.1:47810 --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it",
       `follow ${CSHARP_RECIPE_URL}`,
     );
   } else {

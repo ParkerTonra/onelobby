@@ -213,9 +213,14 @@ public partial class Main : Node
 | `ConfigPath` (exported) | the blueprint to read when `Client` is not set; default `res://onelobby.json` |
 | `Pump`, `AutoHideOnStart`, `BootFlags`, `InviteBase`, `Texts` (exported) | as `pump`, `auto_hide_on_start`, `boot_flags`, `invite_base`, `texts` above (`Texts` is a `Dictionary<string, string>` of `MenuText` keys) |
 | `Client` | the `LobbyClient` the menu drives; default `LobbyClient.FromBlueprint(...)` over `GodotTransport` with `WithUserSettings()`. Set it before the menu enters the tree to use your own. |
-| `HostOptions`, `JoinOptions`, `Route` | `LobbyOptions`, `RoomJoinOptions` and `MenuRoute` (`Auto`, `Direct`, `Server`), passed to `HostAsync` / `JoinAsync` |
+| `HostOptions`, `JoinOptions`, `Route` | `LobbyOptions`, `RoomJoinOptions` and `MenuRoute` (`Auto`, `Direct`, `Server`), passed to `HostAsync` / `JoinAsync`. A menu started with `--local` stays on `Direct` |
 | `HostDirect`, `JoinDirect` | optional: how to host and join a direct lobby (`client.HostDirectAsync(...)` and friends from `OneLobby.Direct`, which `OneLobby.Core` cannot reference). Without them a direct code or an `ip:port` shows the "no server" sentence. |
-| `BootArgs`, `Model` | the command line the boot flags read (default `OS.GetCmdlineUserArgs()`), and the `MenuModel` being drawn |
+| `BootArgs`, `Model` | the command line the boot flags and `--local` are read from (default `OS.GetCmdlineUserArgs()`), and the `MenuModel` being drawn |
+
+The boot flags are applied right after the scene's `_Ready` calls, not inside the menu's own: a scene script that sets `HostDirect` /
+`JoinDirect` in its `_Ready` (the scaffolder's `OneLobbyNet.Wire(menu, args)`) is in time, with `BootFlags` left on. `--local` is read
+whatever `BootFlags` says: the menu then never hosts through a lobby server and never runs the check on open, and with no `HostDirect`
+`--host --local` ends on the "no server" sentence instead of leaving this PC.
 
 The saved name reaches the lobby when the client's config name is empty or "Player" (what `FromBlueprint` with no name gives), because
 a `LobbyClient` has no settable display name. The menu pumps the client itself; set `Pump = false` when your game pumps.

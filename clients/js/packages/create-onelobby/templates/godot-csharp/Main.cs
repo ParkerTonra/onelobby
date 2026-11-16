@@ -29,6 +29,6 @@ public partial class Main : Control
 
         var args = OS.GetCmdlineUserArgs();
         OneLobbyNet.Wire(menu, args);            // direct hosting: HostDirect / JoinDirect (OneLobby.Core cannot reference OneLobby.Direct)
-        menu.Model!.ApplyBootFlags(args);        // --host, --join=<code> and --name=<name> (BootFlags is off in Main.tscn so the wiring above comes first)
+        // The menu acts on --host, --join=<code> and --name=<name> by itself, right after this method: the wiring above is in time.
     }
 }

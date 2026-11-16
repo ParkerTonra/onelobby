@@ -53,7 +53,11 @@ public partial class OneLobbyMenu : Control
     /// <summary>Hide the menu while a game runs, show it again when the lobby comes back.</summary>
     [Export] public bool AutoHideOnStart { get; set; } = true;
 
-    /// <summary>Act on <c>--host</c>, <c>--join=&lt;code&gt;</c> and <c>--name=&lt;name&gt;</c> (after <c>--</c> on the command line) at once. One switch for all three.</summary>
+    /// <summary>
+    /// Act on <c>--host</c>, <c>--join=&lt;code&gt;</c> and <c>--name=&lt;name&gt;</c> (after <c>--</c> on the command line). One switch for all three.
+    /// They are applied right after the scene's <c>_Ready</c> calls, so a parent that sets <see cref="HostDirect"/> / <see cref="JoinDirect"/> in its own
+    /// <c>_Ready</c> is in time. <c>--local</c> is read whatever this says.
+    /// </summary>
     [Export] public bool BootFlags { get; set; } = true;
 
     /// <summary>Base address of an invite link ("https://game.example/play"); with it the copied invite sentence ends with the link.</summary>
@@ -68,7 +72,7 @@ public partial class OneLobbyMenu : Control
     /// <summary>The model the menu draws (set when the menu enters the tree).</summary>
     public MenuModel? Model { get; private set; }
 
-    /// <summary>The command line the boot flags are read from (default: <c>OS.GetCmdlineUserArgs()</c>).</summary>
+    /// <summary>The command line the boot flags and <c>--local</c> are read from (default: <c>OS.GetCmdlineUserArgs()</c>).</summary>
     public string[] BootArgs { get; set; } = Array.Empty<string>();
 
     /// <summary>Runs the connection check instead of <c>Client.CheckConnectionAsync</c> (a test gives a fake; see <see cref="MenuModel.CheckRunner"/>). Set it before the menu enters the tree.</summary>
@@ -77,6 +81,7 @@ public partial class OneLobbyMenu : Control
     private LobbyOptions? _hostOptions;
     private RoomJoinOptions? _joinOptions;
     private MenuRoute _route = MenuRoute.Auto;
+    private bool _local;
     private Func<string?, System.Threading.Tasks.Task<Lobby>>? _hostDirect;
     private Func<string, string?, System.Threading.Tasks.Task<Lobby>>? _joinDirect;
 
@@ -86,8 +91,8 @@ public partial class OneLobbyMenu : Control
     /// <summary>Base options for Join (see <see cref="MenuModel.JoinOptions"/>).</summary>
     public RoomJoinOptions? JoinOptions { get => _joinOptions; set { _joinOptions = value; if (Model != null) Model.JoinOptions = value; } }
 
-    /// <summary><c>Auto</c> (the blueprint decides), <c>Direct</c> or <c>Server</c>.</summary>
-    public MenuRoute Route { get => _route; set { _route = value; if (Model != null) Model.Route = value; } }
+    /// <summary><c>Auto</c> (the blueprint decides), <c>Direct</c> or <c>Server</c>. A menu started with <c>--local</c> stays on <c>Direct</c>: no lobby server.</summary>
+    public MenuRoute Route { get => _route; set { _route = value; if (Model != null) Model.Route = _local ? MenuRoute.Direct : value; } }
 
     /// <summary>Host a direct lobby (OneLobby.Direct); see <see cref="MenuModel.HostDirect"/>.</summary>
     public Func<string?, System.Threading.Tasks.Task<Lobby>>? HostDirect { get => _hostDirect; set { _hostDirect = value; if (Model != null) Model.HostDirect = value; } }
@@ -111,24 +116,29 @@ public partial class OneLobbyMenu : Control
     {
         if (Texts.Count > 0) MenuText.Override(Texts.ToDictionary(kv => kv.Key, kv => kv.Value));
         Client ??= MakeClient();
+        var args = BootArgs.Length > 0 ? BootArgs : OS.GetCmdlineUserArgs();
+        _local = MenuModel.ArgsSayLocal(args);
         Model = new MenuModel(Client)
         {
-            HostOptions = _hostOptions, JoinOptions = _joinOptions, Route = _route, InviteBase = InviteBase,
+            HostOptions = _hostOptions, JoinOptions = _joinOptions, Route = _local ? MenuRoute.Direct : _route, InviteBase = InviteBase,
             HostDirect = _hostDirect, JoinDirect = _joinDirect,
             Clipboard = text => DisplayServer.ClipboardSet(text),
             LogsPath = ProjectSettings.GlobalizePath("user://onelobby-menu-log.txt"),
             CheckRunner = CheckRunner,
-            // `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
-            // Read here, not from BootFlags: a game that applies the boot flags itself later would be too late for the check on open.
-            LocalOnly = MenuModel.ArgsSayLocal(BootArgs.Length > 0 ? BootArgs : OS.GetCmdlineUserArgs()),
+            // `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does)
+            // and Host never goes to a lobby server (the direct route above). Read here, not from BootFlags: a game that applies the
+            // boot flags itself later would be too late for the check on open.
+            LocalOnly = _local,
         };
         Model.GameStarted += l => GameStarted?.Invoke(l);
         Model.ReturnedToLobby += l => ReturnedToLobby?.Invoke(l);
+        // Deferred: a parent's _Ready comes after this one, and that is where a game hands over HostDirect / JoinDirect (OneLobby.Direct).
+        // Queued before the first Refresh, so the check on open (deferred from there) still comes after the boot flags.
+        Callable.From(() => { if (IsInstanceValid(this) && IsInsideTree() && BootFlags) Model?.ApplyBootFlags(args); }).CallDeferred();
         Hook();
         Bind();
         ApplyStaticText();
         Refresh();
-        if (BootFlags) Model.ApplyBootFlags(BootArgs.Length > 0 ? BootArgs : OS.GetCmdlineUserArgs());
     }
 
     /// <summary>

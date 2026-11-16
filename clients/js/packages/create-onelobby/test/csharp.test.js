@@ -102,7 +102,8 @@ project/assembly_name="MyGame"
     expect(text("my-game/nuget.config")).toContain('<package pattern="OneLobby.*" />');
     expect(text("my-game/.gitignore")).toContain("addons/godot_webrtc/\n.godot/\n.onelobby/\nbin/\nobj/");
     expect(text("my-game/.gitattributes")).toContain("addons/onelobby_menu/** text eol=lf");
-    expect(text("my-game/Main.tscn")).toContain("BootFlags = false");
+    expect(text("my-game/Main.tscn")).not.toContain("BootFlags"); // on (the default): the menu applies the flags after Main._Ready has wired it
+    expect(text("my-game/Main.cs")).not.toContain("ApplyBootFlags");
     expect(text("my-game/Main.cs")).toContain("namespace MyGame;");
     expect(text("my-game/Main.cs")).toContain("OneLobbyNet.Wire(menu, args)");
     expect(text("my-game/tests/MultiplayerTest.cs")).toContain("MULTIPLAYER_OK");

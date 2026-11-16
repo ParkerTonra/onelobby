@@ -119,8 +119,8 @@ References already there are left as they are (a different version is a note: `u
 (`bad_csproj`, nothing written) a file that is not well-formed XML, whose root is not `<Project>`, that does not use `Godot.NET.Sdk`, that
 targets below net8.0, a folder under central package management (`Directory.Packages.props`), a folder with a `.sln` but no `.csproj`, and
 several `.csproj` files when `project.godot` does not name the game's (`dotnet/project/assembly_name`). The output prints the lines that add
-`OneLobbyMenu.tscn` to your main scene and wire it (`OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs())`, then `menu.Model!.ApplyBootFlags(...)`);
-the menu's `BootFlags` goes off in the inspector so the wiring comes first.
+`OneLobbyMenu.tscn` to your main scene and wire it (`OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs())` in the scene script's `_Ready`). The
+menu applies its boot flags right after the scene's `_Ready` calls, so the wiring is in time, and it reads `--local` itself.
 
 | Flag | Meaning |
 |---|---|
