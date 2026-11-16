@@ -223,10 +223,14 @@ export class Lockstep extends Emitter<LockstepEvents> {
     this.lastFrameRx = this.hub.clock.now();
   }
 
-  /** A joiner just learned the session is in game (first frame, snapshot, or phase from the server). */
+  /**
+   * A joiner just learned the session is in game (first frame, snapshot, or phase from the server). The 3 s silent-host
+   * clock starts now: it must not count the time spent waiting in the lobby, where no frames flow.
+   */
   markStarted(): void {
     if (this._started) return;
     this._started = true;
+    this.lastFrameRx = this.hub.clock.now();
     this.emit("started");
   }
 
