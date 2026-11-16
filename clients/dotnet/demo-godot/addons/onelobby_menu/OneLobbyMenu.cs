@@ -27,7 +27,8 @@ namespace OneLobby;
 ///   error:      ErrorPage ErrorTitle ErrorMessage ErrorHint ErrorCode CopyLogsButton SaveLogsButton LogNote ErrorBackButton
 ///   settings:   SettingsPage SettingsTitle RelayLabel RelayStatus RelayEdit RelaySaveButton RelayClearButton RelayNote ServerLabel
 ///               ServerEdit ServerSaveButton ServerNote ConnectionCheckButton CheckVerdict CheckFacts SettingsCopyLogsButton SettingsBackButton
-///   browse:     BrowsePage BrowseTitle BrowseStatus BrowseList BrowseRefreshButton BrowseBackButton
+///   browse:     BrowsePage BrowseTitle BrowseTabs BrowseTabOnlineButton BrowseTabLanButton BrowseStatus BrowseLanPasswordEdit
+///               BrowseList BrowseRefreshButton BrowseBackButton
 /// (The roster, ban, request and browse rows are built at run time inside RosterList, BansList, RequestsList and BrowseList.)
 /// </summary>
 public partial class OneLobbyMenu : Control
@@ -65,6 +66,16 @@ public partial class OneLobbyMenu : Control
 
     /// <summary>Rewording: {text key: new text}, keys as in <see cref="MenuText.Table"/>.</summary>
     [Export] public global::Godot.Collections.Dictionary<string, string> Texts { get; set; } = new();
+
+    /// <summary>
+    /// LAN games list for a game with no onelobby.json (with one, <c>hosting.lan</c> decides): the Browse screen shows a "LAN games" list.
+    /// The menu looks for LAN games only while that list is on screen. A lobby hosted from the menu answers LAN questions when the
+    /// <see cref="HostDirect"/> you pass hosts with <c>DirectHostOptions.Lan</c> on (<c>client.HostDirectAsync()</c> takes it from the blueprint).
+    /// </summary>
+    [Export] public bool Lan { get; set; }
+
+    /// <summary>Makes the LAN finder instead of the client's own (a test passes one on an in-memory network; see <see cref="MenuModel.FinderFactory"/>). Set it before the menu enters the tree.</summary>
+    public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
 
     /// <summary>The client the menu drives. Set it before the menu enters the tree to use your own; default: one made from <see cref="ConfigPath"/>.</summary>
     public LobbyClient? Client { get; set; }
@@ -126,6 +137,7 @@ public partial class OneLobbyMenu : Control
             Clipboard = text => DisplayServer.ClipboardSet(text),
             LogsPath = ProjectSettings.GlobalizePath("user://onelobby-menu-log.txt"),
             CheckRunner = CheckRunner,
+            Lan = Lan, FinderFactory = FinderFactory,
             // `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does)
             // and Host never goes to a lobby server (the direct route above). Read here, not from BootFlags: a game that applies the
             // boot flags itself later would be too late for the check on open.
@@ -171,11 +183,27 @@ public partial class OneLobbyMenu : Control
     {
         if (Model == null) return;
         Hook();
+        Model.Resume(); // back in the tree with the LAN list on screen: look again
         Refresh();
     }
 
-    /// <summary>Out of the tree, or about to be freed: stop listening to the model.</summary>
-    public override void _ExitTree() => Unhook();
+    /// <summary>Out of the tree, or about to be freed: stop listening to the model, and close the LAN finder's socket.</summary>
+    public override void _ExitTree()
+    {
+        Unhook();
+        Model?.Shutdown();
+    }
+
+    public override void _Notification(int what)
+    {
+        if (Model == null) return;
+        if (what == NotificationWMCloseRequest) Model.Shutdown();
+        else if (what == NotificationVisibilityChanged)
+        {
+            if (IsVisibleInTree()) Model.Resume();
+            else Model.Shutdown();
+        }
+    }
 
     /// <summary>A client from the blueprint file, over the Godot transport, with the player's settings kept under <c>user://</c>.</summary>
     private LobbyClient MakeClient()
@@ -193,6 +221,7 @@ public partial class OneLobbyMenu : Control
     public override void _Process(double delta)
     {
         if (Pump && Client != null) Client.Pump();
+        Model?.Pump(); // reads the LAN finder's answers (only while the LAN list is on screen) and lets "nothing found" appear after 3 seconds
         if (Model == null || Model.Screen != MenuScreen.Lobby) return;
         U<Label>("CountdownLabel").Text = Model.CountdownText();
         U<Label>("CountdownLabel").Visible = Model.CountingDown;
@@ -266,6 +295,9 @@ public partial class OneLobbyMenu : Control
         U<Button>("SettingsCopyLogsButton").Pressed += m.CopyLogs;
         U<Button>("SettingsBackButton").Pressed += () => m.Back();
         U<Button>("BrowseRefreshButton").Pressed += () => _ = m.RefreshBrowseAsync();
+        U<Button>("BrowseTabOnlineButton").Pressed += () => _ = m.SetBrowseTabAsync("online");
+        U<Button>("BrowseTabLanButton").Pressed += () => _ = m.SetBrowseTabAsync("lan");
+        U<LineEdit>("BrowseLanPasswordEdit").TextChanged += t => m.SetLanPassword(t);
         U<Button>("BrowseBackButton").Pressed += () => m.Back();
         var auto = U<OptionButton>("AutoStartOption");
         auto.Clear();
@@ -363,7 +395,9 @@ public partial class OneLobbyMenu : Control
         U<Button>("ConnectionCheckButton").Text = T("check");
         U<Button>("SettingsCopyLogsButton").Text = T("copy_logs");
         U<Button>("SettingsBackButton").Text = T("back");
-        U<Label>("BrowseTitle").Text = T("browse_title");
+        U<Button>("BrowseTabOnlineButton").Text = T("browse_tab_online");
+        U<Button>("BrowseTabLanButton").Text = T("browse_tab_lan");
+        U<LineEdit>("BrowseLanPasswordEdit").PlaceholderText = T("password_placeholder");
         U<Button>("BrowseRefreshButton").Text = T("browse_refresh");
         U<Button>("BrowseBackButton").Text = T("back");
         var auto = U<OptionButton>("AutoStartOption");
@@ -421,7 +455,7 @@ public partial class OneLobbyMenu : Control
         var m = Model!;
         U<Label>("NameLabel").Visible = m.NamesAllowed;
         U<LineEdit>("NameEdit").Visible = m.NamesAllowed;
-        U<Button>("BrowseButton").Visible = m.CanBrowse();
+        U<Button>("BrowseButton").Visible = m.BrowseAvailable;
         U<Label>("StartNote").Text = m.StartNote;
         U<Label>("StartNote").Visible = m.StartNote != "";
         U<Label>("StartCheckLine").Text = m.StartCheckLine;
@@ -640,13 +674,28 @@ public partial class OneLobbyMenu : Control
     private void DrawBrowse()
     {
         var m = Model!;
-        U<Label>("BrowseStatus").Text = m.BrowseStatus;
-        U<Label>("BrowseStatus").Visible = m.BrowseStatus != "";
-        var sig = string.Join("|", m.BrowseItems.Select(i => i.Code + "," + i.Name + "," + i.HostName + "," + i.Players + "," + i.MaxPlayers));
+        var lan = m.ShownList == "lan";
+        U<Label>("BrowseTitle").Text = m.BrowseTitle;
+        U<Control>("BrowseTabs").Visible = m.BrowseTabsShown;
+        U<Button>("BrowseTabOnlineButton").SetPressedNoSignal(!lan);
+        U<Button>("BrowseTabLanButton").SetPressedNoSignal(lan);
+        U<Control>("BrowseLanPasswordEdit").Visible = lan;
+        var list = U<Control>("BrowseList");
+        U<Label>("BrowseStatus").Text = m.ListStatus;
+        U<Label>("BrowseStatus").Visible = m.ListStatus != "";
+        var lanRows = lan ? m.LanRows() : (IReadOnlyList<MenuLanRow>)Array.Empty<MenuLanRow>();
+        var sig = lan ? "lan" + string.Join("|", lanRows.Select(r => r.Address + ":" + r.Port + "," + r.Text + "," + r.Lock + "," + r.CanJoin))
+                      : "online" + string.Join("|", m.BrowseItems.Select(i => i.Code + "," + i.Name + "," + i.HostName + "," + i.Players + "," + i.MaxPlayers));
         if (sig == _browseSig) return;
         _browseSig = sig;
-        var list = U<Control>("BrowseList");
         Clear(list);
+        if (lan)
+        {
+            DrawLanRows(m, list, lanRows);
+            list.Visible = list.GetChildCount() > 0;
+            return;
+        }
+        list.Visible = true;
         foreach (var it in m.BrowseItems)
         {
             var code = it.Code;
@@ -658,6 +707,33 @@ public partial class OneLobbyMenu : Control
             list.AddChild(row);
         }
         if (_shown == (int)MenuScreen.Browse && list.GetChildCount() > 0) FocusFirst(MenuScreen.Browse);
+    }
+
+    /// <summary>One row per LAN game: the line, a password mark, why it cannot be joined (greyed), and a Join button. Text only, never markup.</summary>
+    private void DrawLanRows(MenuModel m, Control list, IReadOnlyList<MenuLanRow> rows)
+    {
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            var index = i;
+            var row = new HFlowContainer();
+            row.AddThemeConstantOverride("h_separation", 12);
+            var line = new Label { Text = r.Text };
+            row.AddChild(line);
+            if (r.Lock != "") row.AddChild(new Label { Text = r.Lock });
+            if (!r.CanJoin)
+            {
+                line.Modulate = new Color(1, 1, 1, 0.5f);
+                row.AddChild(new Label { Text = r.Note, AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(200, 0), Modulate = new Color(1, 1, 1, 0.5f) });
+            }
+            var join = new Button { Text = MenuText.T("browse_join"), Disabled = !r.CanJoin };
+            join.Pressed += () => _ = m.JoinLanAsync(index);
+            row.AddChild(join);
+            list.AddChild(row);
+        }
+        // keep a player's focus (the password field) unless it was on a row that is gone
+        var f = GetViewport().GuiGetFocusOwner();
+        if (_shown == (int)MenuScreen.Browse && (f == null || !f.IsVisibleInTree() || !IsAncestorOf(f))) FocusFirst(MenuScreen.Browse);
     }
 
     // ---- focus ----------------------------------------------------------------------------------------------------------

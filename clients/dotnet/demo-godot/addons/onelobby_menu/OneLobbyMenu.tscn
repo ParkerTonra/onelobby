@@ -577,12 +577,34 @@ unique_name_in_owner = true
 layout_mode = 2
 horizontal_alignment = 1
 
+[node name="BrowseTabs" type="HFlowContainer" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="BrowseTabOnlineButton" type="Button" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn/BrowseTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+
+[node name="BrowseTabLanButton" type="Button" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn/BrowseTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+
 [node name="BrowseStatus" type="Label" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
 unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 3
 size_flags_horizontal = 3
 horizontal_alignment = 1
+
+[node name="BrowseLanPasswordEdit" type="LineEdit" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+secret = true
+max_length = 64
 
 [node name="BrowseList" type="VBoxContainer" parent="Margin/Pages/BrowsePage/BrowseRow/BrowseColumn"]
 unique_name_in_owner = true

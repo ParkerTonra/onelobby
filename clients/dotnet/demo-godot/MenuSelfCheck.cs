@@ -22,6 +22,8 @@ public partial class MenuSelfCheck : Node
     private const string ControllerPath = "res://addons/onelobby_menu/OneLobbyMenu.cs";
 
     private readonly InMemoryNetwork _net = new();
+    private readonly InMemoryLanNet _lanNet = new();
+    private long _lanClock = 1000; // the LAN finder's clock: 33 ms a frame, so a row's 4 s timeout takes about 120 frames
     private readonly List<string> _failures = new();
     private int _checks;
     private ulong _startedAt;
@@ -39,6 +41,7 @@ public partial class MenuSelfCheck : Node
     public override void _Process(double delta)
     {
         _net.Advance(33); // simulated time: the menus pump their clients themselves
+        _lanClock += 33;
         if (!_done && Time.GetTicksMsec() - _startedAt > 180_000)
         {
             Check(false, "timed out");
@@ -53,7 +56,11 @@ public partial class MenuSelfCheck : Node
         try
         {
             foreach (var size in new[] { new Vector2I(1280, 720), new Vector2I(640, 360) })
+            {
                 await Layouts(size);
+                await LanLayouts(size);
+            }
+            await LanLifetime();
             await OnOpen();
             await BootFlagsOn();
         }
@@ -119,6 +126,156 @@ public partial class MenuSelfCheck : Node
         GetTree().Root.AddChild(menu);
         p.M.SetName(name);
         return p;
+    }
+
+    /// <summary>A menu whose LAN finder runs on the in-memory UDP network (no OS socket), `--local`, with the blueprint's LAN switch on.</summary>
+    private Player NewLanPlayer(string name, bool server = false)
+    {
+        var json = @"{""game"":{""id"":""menu-selfcheck""},""hosting"":{""direct"":true,""server"":" + (server ? "true" : "false") + @",""lan"":true,""lobbyServer"":""ws://mem/ws""},""diagnostics"":{""checkOnOpen"":false}}";
+        var p = NewPlayer(name, blueprint: json, bootArgs: new[] { "--local" });
+        return p;
+    }
+
+    private LanHost LanHostOnNet(string version = "1", string lobby = "Sam's game", string host = "Sam", bool password = false)
+    {
+        var h = new LanHost("menu-selfcheck", version, () => new LanHostInfo(lobby, host, 2, 4, password, 47811), 47840, System.Net.IPAddress.Loopback, _lanNet.Factory);
+        Check(h.Start(), "the in-memory LAN host starts");
+        return h;
+    }
+
+    /// <summary>Wires a menu's finder to the in-memory network and the frame clock. Set before the menu opens its list.</summary>
+    private void OnLanNet(Player p) => p.Menu.Model!.FinderFactory = o => { o.Udp = _lanNet.Factory; o.NowMs = () => _lanClock; return p.Menu.Client!.CreateLanFinder(o); };
+
+    private static List<string> LabelTexts(Control list) => list.FindChildren("*", "Label", true, false).Cast<Label>().Select(l => l.Text).ToList();
+
+    /// <summary>The LAN list in the real scene at one size: rows, a long name, a password mark, another version greyed, the empty state.</summary>
+    private async Task LanLayouts(Vector2I size)
+    {
+        GetTree().Root.Size = size;
+        var tag = $"{size.X}x{size.Y}";
+        var view = new Vector2(size.X, size.Y);
+        var p = NewLanPlayer("Sam");
+        OnLanNet(p);
+        await Frames(2);
+        var menu = p.Menu;
+        var m = p.M;
+        Check(_lanNet.BoundCount == 0 && !m.FinderRunning, $"{tag}: before Browse no LAN socket exists ({_lanNet.BoundCount})");
+        Check(menu.GetNode<Button>("%BrowseButton").Visible, $"{tag}: Browse shows with only the LAN list");
+        menu.GetNode<Button>("%BrowseButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(2);
+        Check(m.Screen == MenuScreen.Browse && _lanNet.BoundCount == 1 && !menu.GetNode<Control>("%BrowseTabs").Visible && menu.GetNode<Label>("%BrowseTitle").Text == "LAN games",
+            $"{tag}: Browse opens the LAN list with one socket, no tab bar, the title says LAN games ({_lanNet.BoundCount})");
+        Check(menu.GetNode<Label>("%BrowseStatus").Text.StartsWith("Looking for games"), $"{tag}: the looking sentence shows");
+        await Audit(p, tag + " LAN list, looking", view, true);
+        using (var host = LanHostOnNet(lobby: "A lobby with a long name", password: true))
+        {
+            Check(await Until(() => m.LanRows().Count == 1), $"{tag}: the host shows in the LAN list");
+            await Frames(2);
+            var r = m.LanRows()[0];
+            Check(r.Name == "A lobby with a long name" && r.HostName == "Sam" && r.Players == 2 && r.MaxPlayers == 4 && r.HasPassword && r.Port == 47811,
+                $"{tag}: the row's fields ({r.Text})");
+            var texts = LabelTexts(menu.GetNode<Control>("%BrowseList"));
+            Check(texts.Contains("A lobby with a long name (Sam) 2/4") && texts.Contains("Needs a password"), $"{tag}: the scene draws the row and the password mark: {string.Join(" | ", texts)}");
+            Check(menu.GetNode<Control>("%BrowseLanPasswordEdit").Visible, $"{tag}: the password field shows above the rows");
+            await Audit(p, tag + " LAN list, a row", view);
+        }
+        Check(await Until(() => m.LanRows().Count == 0), $"{tag}: the row goes after the host leaves");
+        using (var old = LanHostOnNet(version: "0", lobby: "<b>Old</b>", host: "Bob"))
+        {
+            Check(await Until(() => m.LanRows().Count == 1), $"{tag}: a host of another version shows too");
+            await Frames(2);
+            var texts = LabelTexts(menu.GetNode<Control>("%BrowseList"));
+            var join = menu.GetNode<Control>("%BrowseList").FindChildren("*", "Button", true, false).Cast<Button>().ToList();
+            Check(texts.Contains("<b>Old</b> (Bob) 2/4") && texts.Contains("You and the host are running different versions of the game.") && join.Count == 1 && join[0].Disabled,
+                $"{tag}: the other-version row is greyed with its reason and a disabled Join: {string.Join(" | ", texts)}");
+            await Audit(p, tag + " LAN list, another version", view);
+        }
+        Check(await Until(() => m.LanRows().Count == 0), $"{tag}: that row goes too");
+        await Audit(p, tag + " LAN list, empty", view, true);
+        Cancel();
+        await Frames(2);
+        Check(m.Screen == MenuScreen.Start && _lanNet.BoundCount == 0 && !m.FinderRunning, $"{tag}: ui_cancel leaves the list and closes the socket ({_lanNet.BoundCount})");
+        menu.QueueFree();
+        await Frames(2);
+    }
+
+    /// <summary>Every way out of the LAN list closes the finder's socket; a join from a row asks the join path with address:port; the tab bar.</summary>
+    private async Task LanLifetime()
+    {
+        GetTree().Root.Size = new Vector2I(1280, 720);
+        var p = NewLanPlayer("Sam");
+        OnLanNet(p);
+        var joined = new List<(string, string?)>();
+        p.Menu.JoinDirect = (text, pw) => { joined.Add((text, pw)); return Task.FromException<Lobby>(new OneLobbyException("bad_address", "selfcheck: no lobby")); };
+        await Frames(2);
+        var m = p.M;
+        var open = () => p.Menu.GetNode<Button>("%BrowseButton").EmitSignal(BaseButton.SignalName.Pressed);
+        // a join from a row
+        using (var host = LanHostOnNet(password: true))
+        {
+            open();
+            Check(await Until(() => m.LanRows().Count == 1), "lifetime: a row shows");
+            p.Menu.GetNode<LineEdit>("%BrowseLanPasswordEdit").Text = "pw1";
+            p.Menu.GetNode<LineEdit>("%BrowseLanPasswordEdit").EmitSignal(LineEdit.SignalName.TextChanged, "pw1");
+            await Frames(1);
+            var join = (Button)p.Menu.GetNode<Control>("%BrowseList").FindChildren("*", "Button", true, false)[0];
+            join.EmitSignal(BaseButton.SignalName.Pressed);
+            await Frames(3);
+            Check(joined.Count == 1 && joined[0].Item1 == "127.0.0.1:47811" && joined[0].Item2 == "pw1", $"lifetime: a click joins through the join path with address:port and the password ({string.Join(",", joined)})");
+            Check(!m.FinderRunning && _lanNet.BoundCount == 1, $"lifetime: the join closed the finder (sockets: {_lanNet.BoundCount}, the host's own)");
+        }
+        Check(await Until(() => m.Screen != MenuScreen.Connecting), "lifetime: the failed join ends");
+        m.Back();
+        await Frames(2);
+        // the menu hidden: no socket; shown again: it looks again
+        open();
+        await Frames(2);
+        Check(_lanNet.BoundCount == 1, $"lifetime: the list is open again (sockets {_lanNet.BoundCount})");
+        p.Menu.Visible = false;
+        await Frames(2);
+        Check(_lanNet.BoundCount == 0 && !m.FinderRunning, $"lifetime: hiding the menu closes the socket ({_lanNet.BoundCount})");
+        p.Menu.Visible = true;
+        await Frames(2);
+        Check(_lanNet.BoundCount == 1, $"lifetime: showing it looks again ({_lanNet.BoundCount})");
+        // out of the tree
+        var parent = p.Menu.GetParent();
+        parent.RemoveChild(p.Menu);
+        Check(_lanNet.BoundCount == 0, $"lifetime: a menu taken out of the tree closes the socket ({_lanNet.BoundCount})");
+        parent.AddChild(p.Menu);
+        await Frames(2);
+        Check(_lanNet.BoundCount == 1, $"lifetime: put back, it looks again ({_lanNet.BoundCount})");
+        // freed while the list is open
+        p.Menu.QueueFree();
+        await Frames(3);
+        Check(_lanNet.BoundCount == 0, $"lifetime: a menu freed while the list is open leaves no socket ({_lanNet.BoundCount})");
+
+        // both lists: the tab bar (no --local: the lobby server list is available too)
+        var json = @"{""game"":{""id"":""menu-selfcheck""},""hosting"":{""direct"":true,""server"":true,""lan"":true,""lobbyServer"":""ws://mem/ws""},""diagnostics"":{""checkOnOpen"":false}}";
+        var b = NewPlayer("Bea", blueprint: json);
+        OnLanNet(b);
+        b.M.LocalOnly = true; // the finder asks 127.0.0.1 only (a --local game does the same; its route stays Auto here so the Online tab exists)
+        await Frames(2);
+        b.Menu.GetNode<Button>("%BrowseButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(3);
+        Check(b.Menu.GetNode<Control>("%BrowseTabs").Visible && b.M.ShownList == "online" && _lanNet.BoundCount == 0 && b.Menu.GetNode<Label>("%BrowseTitle").Text == "Games to join",
+            $"lifetime: both lists: tab bar shown, opens on Online with no socket ({_lanNet.BoundCount})");
+        b.Menu.GetNode<Button>("%BrowseTabLanButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(2);
+        Check(b.M.ShownList == "lan" && _lanNet.BoundCount == 1, $"lifetime: the LAN tab opens one socket ({_lanNet.BoundCount})");
+        b.Menu.GetNode<Button>("%BrowseTabOnlineButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(3);
+        Check(b.M.ShownList == "online" && _lanNet.BoundCount == 0, $"lifetime: the Online tab closes it ({_lanNet.BoundCount})");
+        b.Menu.GetNode<Button>("%BrowseTabLanButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(2);
+        b.M.Back();
+        await Frames(2);
+        Check(_lanNet.BoundCount == 0, $"lifetime: Back from the LAN tab closes it ({_lanNet.BoundCount})");
+        b.Menu.GetNode<Button>("%BrowseButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(3);
+        Check(b.M.ShownList == "lan" && _lanNet.BoundCount == 1, $"lifetime: Browse opens on the tab used last ({_lanNet.BoundCount})");
+        b.Menu.QueueFree();
+        await Frames(3);
+        Check(_lanNet.BoundCount == 0, $"lifetime: freed on the LAN tab: no socket ({_lanNet.BoundCount})");
     }
 
     private static string[] ControllerNodeNames()
