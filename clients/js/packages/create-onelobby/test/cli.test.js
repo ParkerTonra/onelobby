@@ -182,7 +182,8 @@ describe("a new project", () => {
     expect(pkg).toMatchObject({ name: "proj", type: "module", dependencies: { onelobby: "file:../client" }, scripts: { start: expect.any(String), test: expect.any(String) } });
     expect(bp.game.id).toBe("com.example.proj");
     const agents = readFileSync(join(cwd, "proj/AGENTS.md"), "utf8");
-    expect(agents.trim().split("\n")).toHaveLength(3);
+    expect(agents.trim().split("\n")).toHaveLength(4);
+    expect(agents).toContain("npx create-onelobby verify");
     expect(agents).toContain("https://unpkg.com/onelobby@0.7.2/blueprint.schema.json");
     expect(readFileSync(join(cwd, "proj/test/multiplayer.mjs"), "utf8")).not.toContain("//#");
     expect(readFileSync(join(cwd, "proj/test/multiplayer.mjs"), "utf8")).toContain("realServer");

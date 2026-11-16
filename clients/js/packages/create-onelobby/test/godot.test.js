@@ -333,3 +333,13 @@ describe("templates still planned", () => {
     });
   }
 });
+
+describe("godot-gdscript: AGENTS.md names verify as the test command", () => {
+  it("npx create-onelobby verify comes first, the direct godot line stays as the quick one", async () => {
+    await cli(["game", "--template", "godot-gdscript", ...FROM, "--no-natives"]);
+    const t = text("game/AGENTS.md");
+    expect(t).toContain("npx create-onelobby verify");
+    expect(t.indexOf("npx create-onelobby verify")).toBeLessThan(t.indexOf("-s res://tests/multiplayer.gd"));
+    expect(t).toContain("-- --host --local --name=Sam");
+  });
+});

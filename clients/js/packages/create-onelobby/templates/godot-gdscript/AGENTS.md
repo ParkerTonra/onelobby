@@ -25,6 +25,12 @@ godot --path . -- --join=127.0.0.1:47810 --local --name=Ann   # a second window 
 
 ## Test it (headless, loopback only)
 
+The test command is `npx create-onelobby verify` (Godot from `--godot <exe>`, else `$GODOT`, else `godot` on PATH). It checks the add-on against `PIN.json`, the WebRTC natives, `onelobby.json`, and
+proves two peers on 127.0.0.1 directly, through a local Nostr relay and relay-only through a local TURN server, then prints one last line: `VERIFY_OK` or `VERIFY_FAIL <check>: <what to do>` (exit 0 / 1).
+The TURN check needs the helper once: add `--fetch-helpers` (an anonymous npm download into `.onelobby/`, gitignored). `npx create-onelobby update` brings the add-on up to date.
+
+The quick one (direct route only):
+
 ```
 godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd
 ```
