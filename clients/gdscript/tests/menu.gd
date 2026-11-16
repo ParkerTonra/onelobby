@@ -59,6 +59,9 @@ class Rig:
 	var left := 0
 
 
+var _real_headless_default := OneLobbyMenuModel.headless_default
+
+
 func _init() -> void:
 	process_frame.connect(func() -> void:
 		if Time.get_ticks_msec() > 240000:
@@ -170,6 +173,7 @@ func _run() -> void:
 		await _extras()
 	if only == "" or only == "onopen":
 		await _on_open()
+		await _headless_and_start_on_host()
 	if only == "" or only == "lan":
 		await _lan()
 	print("menu: %d passed, %d failed" % [_pass, _fail])
@@ -178,6 +182,51 @@ func _run() -> void:
 			r.model.lobby.leave()
 	await _frames(5)
 	quit(1 if _fail > 0 else 0)
+
+
+## The check on open stays off in a headless run (a game's own headless tests that build the menu must not reach public STUN), and
+## start_on_host presses Start by itself once after Host.
+func _headless_and_start_on_host() -> void:
+	_check(_real_headless_default == (DisplayServer.get_name() == "headless"), "a new model's headless default is the display server's name (%s)" % DisplayServer.get_name())
+	# negative control first: with a display the check runs on open
+	OneLobbyMenuModel.headless_default = false
+	var shown := _open_rig({})
+	_check(not shown["model"].headless and shown["model"].check_on_open_enabled(), "with a display the check on open is on")
+	await shown["model"].start_shown()
+	_check(shown["state"]["runs"] == 1, "with a display the check ran once on open (%d)" % shown["state"]["runs"])
+	shown["client"].queue_free()
+	# headless: nothing runs on open, the button still does
+	OneLobbyMenuModel.headless_default = true
+	var hl := _open_rig({})
+	_check(hl["model"].headless and not hl["model"].check_on_open_enabled() and hl["model"].connection_check_shown(), "headless: the check on open is off, the button stays")
+	await hl["model"].start_shown()
+	_check(hl["state"]["runs"] == 0, "headless: no check ran on open (%d runs)" % hl["state"]["runs"])
+	await hl["model"].run_check()
+	_check(hl["state"]["runs"] == 1, "headless: the button still runs the check")
+	hl["model"].headless = false
+	_check(hl["model"].check_on_open_enabled(), "headless false on the model turns the check on open back on")
+	hl["client"].queue_free()
+	OneLobbyMenuModel.headless_default = _real_headless_default
+	# start_on_host: off by default (the host waits in the room), on: Start is pressed once, game_started fires
+	var wait := _rig()
+	await wait.model.host()
+	await _frames(40)
+	_check(wait.model.screen == Screen.LOBBY and wait.started == 0, "start_on_host off: the host waits in the room, nothing started")
+	var auto := _rig()
+	auto.model.start_on_host = true
+	await auto.model.host()
+	_check(await _until(func() -> bool: return auto.started == 1, 10000), "start_on_host: game_started fired after host()")
+	await _frames(40)
+	_check(auto.started == 1 and auto.model.screen == Screen.PLAYING, "start_on_host: started exactly once (%d)" % auto.started)
+	# a joiner is not started by it
+	var host2 := _rig()
+	await host2.model.host()
+	var joiner := _rig()
+	joiner.model.start_on_host = true
+	joiner.model.set_join_text(host2.model.lobby.ip_code)
+	await joiner.model.join()
+	await _frames(40)
+	_check(joiner.model.screen == Screen.LOBBY and joiner.started == 0 and host2.started == 0, "start_on_host does nothing for a joiner")
 
 
 # ---- parsing and defaults -----------------------------------------------------------------------------------------------
@@ -505,6 +554,7 @@ func _open_rig(cfg: Dictionary, answer := "cone", gate: Array = []) -> Dictionar
 
 
 func _on_open() -> void:
+	OneLobbyMenuModel.headless_default = false # these tests turn the check on with a counted fake runner; _headless_and_start_on_host covers the real default
 	# the default: once, when the start screen is first shown
 	var d := _open_rig({})
 	var m: OneLobbyMenuModel = d["model"]

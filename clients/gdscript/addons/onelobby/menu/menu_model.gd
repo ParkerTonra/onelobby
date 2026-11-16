@@ -83,6 +83,15 @@ var log_note := ""
 ## command line in its `_ready`, and `apply_local` sets it too (with the direct route and loopback host options). While it is set
 ## the connection check never runs on its own; the button still works.
 var local_only := false
+## True when the engine runs with no display (`DisplayServer` named "headless": tests, servers, `--headless`). The connection check does not
+## run on its own there (a game's own headless tests that build the menu must not reach public STUN); the button still works. A test of the
+## check sets it false.
+var headless: bool = headless_default
+## What a new model's `headless` starts as: the display server's name. A test that turns the check on in a headless run sets this false first.
+static var headless_default: bool = DisplayServer.get_name() == "headless"
+## A game that hosts from its running world (no room, no Start button): after a successful host() the menu presses Start itself, once, so
+## `game_started` fires after the room's countdown. Off by default (the host sees the room and presses Start). A joiner is unaffected.
+var start_on_host := false
 ## True after `--autostart` (see `apply_boot_flags`): the host starts the match by itself, once, as soon as a second player is in the room.
 var autostart := false
 
@@ -171,10 +180,10 @@ func connection_check_shown() -> bool:
 
 
 ## The menu runs the connection check once when it opens: on unless the blueprint says `diagnostics.checkOnOpen: false`
-## ("button only"), hides the check (`showConnectionCheck: false`), or the menu is `local_only`.
+## ("button only"), hides the check (`showConnectionCheck: false`), or the menu is `local_only` (`--local`) or `headless`.
 func check_on_open_enabled() -> bool:
 	var c := _cfg()
-	return connection_check_shown() and not local_only and (c == null or bool(c.diagnostics.get("check_on_open", true)))
+	return connection_check_shown() and not local_only and not headless and (c == null or bool(c.diagnostics.get("check_on_open", true)))
 
 
 ## The UI calls this whenever it shows the start screen. The first call that finds the start screen up starts the check
@@ -432,6 +441,8 @@ func _connected(ticket: int, l: OneLobbyLobby) -> void:
 	_set_screen(Screen.LOBBY)
 	if l.phase == "in_game":
 		_start_playing()
+	elif start_on_host and l.is_host:
+		start_game()
 
 
 # ---- the lobby ------------------------------------------------------------------------------------------------------

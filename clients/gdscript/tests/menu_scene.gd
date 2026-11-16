@@ -146,8 +146,10 @@ func _cancel() -> void:
 
 
 func _run() -> void:
+	OneLobbyMenuModel.headless_default = false # the check on open is counted below with a fake runner; the headless rule is tested in menu.gd
 	await _layouts()
 	await _smoke()
+	await _one_shot_flags()
 	await _on_open_scene()
 	await _lan_scene()
 	await _lan_layouts()
@@ -263,6 +265,49 @@ func _smoke() -> void:
 	_check(await _until(func() -> bool: return am.visible and bm.visible and not a.get_node("InGame").visible), "smoke: back to the lobby shows the menu again")
 	a.queue_free()
 	b.queue_free()
+
+
+## Process flags are one-shot: two menus in one process with `--host --local`, only the first hosts (the second is still local); boot_args is never consumed.
+func _one_shot_flags() -> void:
+	var packed: PackedScene = load("res://addons/onelobby/menu/menu.tscn")
+	OneLobbyMenu.process_args_override = PackedStringArray(["--host", "--local", "--name=Sam"])
+	OneLobbyMenu.reset_process_flags()
+	var make := func(boot: PackedStringArray) -> OneLobbyMenu:
+		var menu: OneLobbyMenu = packed.instantiate()
+		var c := OneLobbyClient.from_config({"game": {"id": "menu-scene"}, "engine": "godot-gdscript", "diagnostics": {"checkOnOpen": false}})
+		c.store = OneLobbyStore.memory()
+		c.settings_env = {}
+		c.log_path = ""
+		c.lobby_server = "ws://127.0.0.1:1/ws"
+		menu.client = c
+		menu.boot_args = boot
+		menu.host_options = _host_opts()
+		root.add_child(menu)
+		return menu
+	var first: OneLobbyMenu = make.call(PackedStringArray())
+	_check(await _until(func() -> bool: return first.model.screen == Screen.LOBBY and first.model.lobby != null and first.model.lobby.is_host), "one-shot: the first menu hosted from the process flags")
+	var second: OneLobbyMenu = make.call(PackedStringArray())
+	await _frames(30)
+	_check(second.model.screen == Screen.START and second.model.lobby == null, "one-shot: the second menu did not host again (screen %d)" % second.model.screen)
+	_check(second.model.local_only and second.model.route == "direct", "one-shot: the second menu still reads --local")
+	_check(second.model.name_text != "Sam", "one-shot: the second menu did not take --name again")
+	# negative control: after reset the flags are readable again
+	OneLobbyMenu.reset_process_flags()
+	var third: OneLobbyMenu = make.call(PackedStringArray())
+	_check(await _until(func() -> bool: return third.model.screen == Screen.LOBBY), "one-shot control: after reset_process_flags a new menu hosts")
+	# boot_args is never consumed: two menus with the same boot_args both act on it
+	var args_a: OneLobbyMenu = make.call(PackedStringArray(["--name=Ann"]))
+	var args_b: OneLobbyMenu = make.call(PackedStringArray(["--name=Ann"]))
+	await _frames(3)
+	_check(args_a.model.name_text == "Ann" and args_b.model.name_text == "Ann", "boot_args is acted on by every menu that has it")
+	OneLobbyMenu.process_args_override = null
+	OneLobbyMenu.reset_process_flags()
+	for n: OneLobbyMenu in [first, second, third, args_a, args_b]:
+		if n.model.lobby != null and not n.model.lobby.is_closed():
+			n.model.lobby.leave()
+		n.client.queue_free()
+		n.queue_free()
+	await _frames(3)
 
 
 ## The check on open, in the real scene (menu.tscn), with a counted fake runner: once on open and the start-screen line; never with

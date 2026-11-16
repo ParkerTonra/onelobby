@@ -59,7 +59,12 @@ signal left
 ## `--local`: the direct route, host and join on 127.0.0.1 only, no Nostr (a game that sets route or host_options itself keeps them without it).
 ## `--autostart` (tests only, no clicks): the host starts the match as soon as a second player is in the room, so `game_started` fires on both copies.
 ## The menu's own `--local` reading (the check on open stays off) is independent of this switch.
+## The process command line is read once per process: the first menu that acts on `--host`, `--join=<code>`, `--name=<name>` and `--autostart` consumes
+## them, so a game that builds a menu in every world (title, the match, the next) hosts or joins once, with no flag of its own. `--local` is read by
+## every menu. `boot_args` (a test, a game) is never consumed: the menu that has it acts on it.
 @export var boot_flags := true
+## For a game that hosts from its running world (no room step wanted): after Host the menu presses Start itself, once.
+@export var start_on_host := false
 ## Base address of an invite link ("https://game.example/play"); with it the lobby shows Copy invite for a lobby-server code.
 @export var invite_base := ""
 ## Rewording: {text key: new text}, keys as in OneLobbyMenuText.TABLE.
@@ -73,6 +78,10 @@ var client: OneLobbyClient
 var model: OneLobbyMenuModel
 ## The command line the boot flags are read from (default: OS.get_cmdline_user_args()).
 var boot_args := PackedStringArray()
+## True once a menu has read the process flags (`--host`, `--join=`, `--name=`, `--autostart`); later menus act on none of them.
+static var _process_flags_spent := false
+## A test's stand-in for the process command line (null: OS.get_cmdline_user_args()).
+static var process_args_override: Variant = null
 ## Options for host() / join() and the route ("auto", "direct", "server"); see OneLobbyMenuModel.
 var host_options := {}:
 	set(v):
@@ -134,7 +143,8 @@ func _ready() -> void:
 	model.check_runner = check_runner
 	# `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
 	# Read here, not from boot_flags: a game that applies the boot flags itself later would be too late for the check on open.
-	model.local_only = OneLobbyMenuModel.args_say_local(boot_args if not boot_args.is_empty() else OS.get_cmdline_user_args())
+	model.start_on_host = start_on_host
+	model.local_only = OneLobbyMenuModel.args_say_local(boot_args if not boot_args.is_empty() else _process_args())
 	model.changed.connect(_refresh)
 	model.game_started.connect(func(l: OneLobbyLobby) -> void: game_started.emit(l))
 	model.returned_to_lobby.connect(func(l: OneLobbyLobby) -> void: returned_to_lobby.emit(l))
@@ -143,8 +153,31 @@ func _ready() -> void:
 	_apply_static_text()
 	_refresh()
 	if boot_flags:
-		var args := boot_args if not boot_args.is_empty() else OS.get_cmdline_user_args()
-		model.apply_boot_flags(args)
+		model.apply_boot_flags(_take_boot_args())
+
+
+## The process command line after `--` (`process_args_override` in a test).
+static func _process_args() -> PackedStringArray:
+	if process_args_override != null:
+		return process_args_override
+	return OS.get_cmdline_user_args()
+
+
+## The flags this menu acts on: its own `boot_args`, else the process command line the first time; later only `--local` (the one-shot flags are
+## gone, so a second menu in the process does not host or join again).
+func _take_boot_args() -> PackedStringArray:
+	if not boot_args.is_empty():
+		return boot_args
+	var args := _process_args()
+	if not _process_flags_spent:
+		_process_flags_spent = true
+		return args
+	return PackedStringArray(["--local"]) if OneLobbyMenuModel.args_say_local(args) else PackedStringArray()
+
+
+## Makes the process flags readable again (tests).
+static func reset_process_flags() -> void:
+	_process_flags_spent = false
 
 
 func _process(_delta: float) -> void:
