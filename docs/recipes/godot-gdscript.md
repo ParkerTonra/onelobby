@@ -235,8 +235,8 @@ func join(code: String) -> bool:
 ```
 
 - Add `*.json` (or `onelobby.json`) to the export preset's "Filters to export non-resource files", or the exported game has no file.
-- GDScript speaks `sync.mode` `"raw"` and `"lockstep"` (`sync.tickRate`, `sync.hashEveryTicks`); `replication` fails `from_config`
-  with `bad_config`, rule `gdscript_raw_only` (C# reads the same file fully). `chat.text` false and `session.pause` `"off"` (the
+- GDScript speaks `sync.mode` `"raw"`, `"lockstep"` (`sync.tickRate`, `sync.hashEveryTicks`) and `"replication"` (`from_config` gives a raw
+  lobby; build `OneLobbyReplicationSession.new(lobby)` on it, see docs/recipes/replication.md). `chat.text` false and `session.pause` `"off"` (the
   default) make `lobby.chat.send()` / `lobby.pause.request()` raise the client error `chat_disabled` / `pause_disabled`.
 - `OneLobbyConfig.load_file()` gives the validated fields (`cfg.lobby["max_players"]`, `cfg.hosting["lobby_server"]`, ...) and
   `ok` / `error` without making a client; `OneLobbyFriendly.describe_error(...)` and `OneLobbyInvite.make(code, base_url)` /

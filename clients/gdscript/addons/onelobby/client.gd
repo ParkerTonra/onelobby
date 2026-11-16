@@ -119,7 +119,7 @@ func _exit_tree() -> void:
 ## `LobbyClient.FromBlueprint`). `source` is an OneLobbyConfig, a path to the file (default res://onelobby.json) or a
 ## parsed Dictionary. `overrides`: `display_name` (checked against `players.*`), `lobby_server` (wins over
 ## `hosting.lobbyServer`; the file is the bottom layer, so a settings screen or an environment variable goes here).
-## Always returns a client: when the file is invalid (or asks for a sync mode GDScript lacks: "replication"),
+## Always returns a client: when the file is invalid (`check_gdscript` finds nothing to refuse today),
 ## `config_error` is set and its first host / join / list fails with it. `sync.mode`, `sync.tickRate` and
 ## `sync.hashEveryTicks` set `sync_mode`, `tick_rate` and `hash_every_ticks`; `diagnostics.reportToHost`, `logSize` and `relayProbe` set `report_to_host`,
 ## `log_size` and `relay_probe`; `chat.text` and `session.pause` switch the
@@ -151,7 +151,7 @@ static func from_config(source: Variant = OneLobbyConfig.DEFAULT_PATH, overrides
 	c.lobby_server = str(overrides.get("lobby_server", cfg.hosting["lobby_server"]))
 	c.display_name = who
 	c.tick_rate = cfg.sync["tick_rate"]
-	c.sync_mode = cfg.sync["mode"]
+	c.sync_mode = "raw" if cfg.sync["mode"] == "replication" else cfg.sync["mode"] # replication runs on a raw lobby (the game adds the session)
 	c.hash_every_ticks = cfg.sync["hash_every_ticks"]
 	c.relay_only = cfg.hosting["relay_only"]
 	c.ready_timeout_ms = cfg.session["ready_timeout_ms"]

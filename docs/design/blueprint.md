@@ -220,8 +220,8 @@ window, per-player data. All keys are optional; the host can override each in co
 | `sync.hashEveryTicks` | int | `tickRate` | R | exists (`hashEveryTicks`) | 1500 Archers checksums; Factorio desync detection |
 
 The agent chooses `lockstep` only when the survey finds a fixed-tick loop, seeded RNG and no wall clock or unordered
-iteration (AGENTS.md rule 3); otherwise `raw`, or `replication` for a real-time C# game with host-owned physics or AI.
-`replication` on `godot-gdscript` (or with no engine) is a schema error (`replication_not_gdscript`) until the GDScript port exists.
+iteration (AGENTS.md rule 3); otherwise `raw`, or `replication` for a real-time game with host-owned physics or AI.
+`replication` is valid for every engine and for a file with no engine (C#, JS and GDScript all speak it).
 
 ### 4f. `players`
 
@@ -506,8 +506,8 @@ if (bp.Chat.Voice) voiceButton.Visible = true;
   sections as snake_case dictionaries (`cfg.lobby["max_players"]`) and `cfg.data` as in the file.
   `OneLobbyClient.from_config(cfg or path, {display_name, lobby_server})` is `fromConfig` / `FromBlueprint`; `host()` then
   defaults from the file (a direct lobby when `hosting.server` is false) and `join()` sends a lobby code to the server and a
-  direct code or address to `join_direct`. GDScript runs `sync.mode` `raw` and `lockstep` (`tickRate`, `hashEveryTicks`); `replication` parses (other
-  engines read the file) but fails `from_config` with `bad_config`, rule `gdscript_raw_only`. `chat.text` and `session.pause`
+  direct code or address to `join_direct`. GDScript runs `sync.mode` `raw`, `lockstep` (`tickRate`, `hashEveryTicks`) and `replication` (`from_config` builds a raw
+  lobby; the game builds an `OneLobbyReplicationSession` on it, as in JS and C#). `chat.text` and `session.pause`
   are enforced (`lobby.chat.send` / `lobby.pause.request` raise the client error `chat_disabled` / `pause_disabled`); voice and
   host-migration keys are read, not enforced (GDScript has no voice).
 - Enforcement mirrors JS with the same error codes (`LobbyErrorCodes.VoiceDisabled`, ...), tested by the shared

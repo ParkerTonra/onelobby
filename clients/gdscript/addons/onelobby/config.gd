@@ -18,14 +18,14 @@ extends RefCounted
 ## the same tree with the file's own camelCase keys. Optional keys that are absent in the file are absent (`title`,
 ## `engine`, `session["rate_limit"]`, `ui["entry"]`); `title` and `engine` read as "" here.
 ##
-## GDScript runs "raw" and "lockstep" (`lobby.lockstep`); it has no replication (C# only): a file whose `sync.mode` is
-## "replication" parses fine (other engines read the same file) but `check_gdscript()` and `OneLobbyClient.from_config` fail
-## with the stable rule `gdscript_raw_only` (the name is from when lockstep was missing too; kept so games can match it).
+## GDScript runs "raw", "lockstep" (`lobby.lockstep`) and "replication" (a raw lobby plus an OneLobbyReplicationSession the game
+## builds), so `check_gdscript()` finds nothing to refuse in a valid file. `gdscript_raw_only` is the rule name from when
+## lockstep and replication were missing; the constant stays so games that matched it still compile.
 
 const DEFAULT_PATH := "res://onelobby.json"
 ## `error["code"]` of every failure here (JS and C#: `bad_config`).
 const BAD_CONFIG := "bad_config"
-## `error["rule"]` of the unsupported sync mode "replication" (see check_gdscript).
+## `error["rule"]` check_gdscript uses for a sync mode GDScript cannot run (none today: the schema allows raw, lockstep and replication).
 const RULE_RAW_ONLY := "gdscript_raw_only"
 
 ## Default public Nostr relays: the same list, in the same order, as the JS `DEFAULT_NOSTR_RELAYS` and C# `Blueprint.DefaultNostrRelays`.
@@ -95,13 +95,13 @@ static func parse(source: Variant) -> OneLobbyConfig:
 	return cfg
 
 
-## {} when this client can run the file, else the failure ({code, path, rule: "gdscript_raw_only", message}): the GDScript
-## client speaks "raw" and "lockstep"; "replication" is in the C# client (OneLobby.Replication).
+## {} when this client can run the file, else the failure ({code, path, rule: "gdscript_raw_only", message}). The GDScript
+## client speaks "raw", "lockstep" and "replication", so a valid file always passes.
 func check_gdscript() -> Dictionary:
 	var m := str(sync.get("mode", "raw"))
-	if not ok or m == "raw" or m == "lockstep":
+	if not ok or m == "raw" or m == "lockstep" or m == "replication":
 		return {}
-	return _error("sync.mode", RULE_RAW_ONLY, "the GDScript client supports \"raw\" and \"lockstep\", not \"%s\" (replication is in the C# client)" % m)
+	return _error("sync.mode", RULE_RAW_ONLY, "the GDScript client supports \"raw\", \"lockstep\" and \"replication\", not \"%s\"" % m)
 
 
 ## {} when `display_name` is allowed by `players.*`, else the failure: `identity_anonymous` (a name for an anonymous game)
@@ -541,8 +541,6 @@ static func _cross_rules(d: Dictionary, input: Dictionary) -> Dictionary:
 		return _fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true")
 	if eng == "web" and h["direct"]:
 		return _fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)")
-	if s["mode"] == "replication" and (eng == null or eng == "godot-gdscript"):
-		return _fail("sync.mode", "replication_not_gdscript", "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)")
 	if s["mode"] == "replication" and ses["hostLeaves"] == "migrate":
 		return _fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end")
 	var late_given := _sect(input.get("lobby")).has("lateJoin")

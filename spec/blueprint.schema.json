@@ -267,11 +267,6 @@
       "then": { "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct"], "properties": { "direct": { "const": true } } } } } }
     },
     {
-      "$comment": "rule replication_not_gdscript (path sync.mode): replication needs an explicit engine, any but godot-gdscript",
-      "if": { "required": ["sync"], "properties": { "sync": { "required": ["mode"], "properties": { "mode": { "const": "replication" } } } } },
-      "then": { "required": ["engine"], "properties": { "engine": { "enum": ["web", "node-browser", "godot-csharp", "unity", "dotnet"] } } }
-    },
-    {
       "$comment": "rule migrate_with_replication (path session.hostLeaves): replication has no host migration",
       "not": {
         "required": ["sync", "session"],
@@ -287,7 +282,6 @@
     "hosting_none": { "path": "hosting", "message": "at least one of direct, server must be true" },
     "listed_and_approve": { "path": "lobby", "message": "listed and approveJoins cannot both be true" },
     "direct_needs_listener": { "path": "hosting.direct", "message": "engine web cannot host direct (a browser cannot listen on a port)" },
-    "replication_not_gdscript": { "path": "sync.mode", "message": "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)" },
     "migrate_with_replication": { "path": "session.hostLeaves", "message": "replication has no host migration; use end" },
     "migrate_needs_server": { "path": "session.hostLeaves", "message": "migrate needs hosting.server (direct lobbies always end)" },
     "late_join_conflict": { "path": "room.lateJoin", "message": "lobby.lateJoin false needs room.lateJoin refuse (or none); lobby.lateJoin true cannot go with refuse" },

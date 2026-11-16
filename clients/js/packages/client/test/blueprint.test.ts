@@ -164,6 +164,12 @@ describe("OneLobby.fromConfig", () => {
     expect(fill(OneLobby.fromConfig({ game: { id: "a" }, diagnostics: { logSize: 50 } }))).toBe(50);
   });
 
+  it("replication is valid for every engine and for a file with no engine", () => {
+    for (const engine of ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet", undefined])
+      expect(parseBlueprint({ game: { id: "a" }, ...(engine ? { engine } : {}), sync: { mode: "replication" } }).sync.mode, String(engine)).toBe("replication");
+    expect(OneLobby.fromConfig({ game: { id: "a" }, engine: "web", sync: { mode: "replication", tickRate: 30 } }).options.mode).toBe("raw");
+  });
+
   it("kits built with new OneLobby have no blueprint", () => {
     expect(new OneLobby({ gameId: "a", netVersion: "1", lobbyServer: "" }).blueprint).toBeUndefined();
   });

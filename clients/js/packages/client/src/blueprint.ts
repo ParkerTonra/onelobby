@@ -444,7 +444,6 @@ function crossRules(b: Blueprint, input: Record<string, unknown>): void {
   if (!b.hosting.direct && !b.hosting.server) throw new Fail("hosting", "hosting_none", "at least one of direct, server must be true");
   if (b.lobby.listed && b.lobby.approveJoins) throw new Fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
   if (b.engine === "web" && b.hosting.direct) throw new Fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
-  if (b.sync.mode === "replication" && (b.engine === undefined || b.engine === "godot-gdscript")) throw new Fail("sync.mode", "replication_not_gdscript", "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)");
   if (b.sync.mode === "replication" && b.session.hostLeaves === "migrate") throw new Fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
   const lateJoinGiven = sect(input.lobby).lateJoin !== undefined;
   const roomLate = sect(input.room).lateJoin;

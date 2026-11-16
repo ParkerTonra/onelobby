@@ -137,7 +137,7 @@ func _extras() -> void:
 	_check(e.get("code") == "bad_config" and e.get("path") == "displayName" and e.get("rule") == "length", "name too long: bad_config displayName length")
 	var anon := OneLobbyConfig.parse({"game": {"id": "a"}, "players": {"identity": "anonymous"}})
 	_check(anon.check_display_name("Sam").get("code") == "identity_anonymous" and anon.check_display_name("").is_empty(), "anonymous game takes no name")
-	# raw and lockstep run; replication is the mode GDScript lacks
+	# raw, lockstep and replication all run
 	_check(cfg.check_gdscript().is_empty(), "raw is supported")
 	var ls := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "godot-gdscript", "sync": {"mode": "lockstep", "tickRate": 25}})
 	_check(ls.ok and ls.check_gdscript().is_empty() and ls.sync["mode"] == "lockstep" and ls.sync["tick_rate"] == 25 and ls.sync["hash_every_ticks"] == 25, "lockstep is supported (hashEveryTicks defaults to the tick rate)")
@@ -146,9 +146,9 @@ func _extras() -> void:
 	var web_rep := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "web", "sync": {"mode": "replication"}})
 	_check(web_rep.ok, "replication is valid for engine web")
 	var gd_rep := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": "godot-gdscript", "sync": {"mode": "replication"}})
-	_check(not gd_rep.ok, "replication on godot-gdscript is refused by the schema rule")
-	var ge := m.check_gdscript()
-	_check(ge.get("code") == "bad_config" and ge.get("rule") == "gdscript_raw_only" and ge.get("path") == "sync.mode" and str(ge.get("message")).contains("replication"), "replication: stable gdscript_raw_only failure")
+	_check(gd_rep.ok and gd_rep.check_gdscript().is_empty(), "replication on godot-gdscript is valid")
+	var no_eng := OneLobbyConfig.parse({"game": {"id": "a"}, "sync": {"mode": "replication"}})
+	_check(no_eng.ok and no_eng.check_gdscript().is_empty() and m.check_gdscript().is_empty(), "replication with no engine is valid and GDScript runs it")
 	# every engine value of the schema loads
 	for eng: String in ["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]:
 		var ok_cfg := OneLobbyConfig.parse({"game": {"id": "a"}, "engine": eng, "hosting": {"direct": eng != "web", "server": true}})
@@ -173,21 +173,14 @@ func _wiring() -> void:
 	_check(c.sync_mode == "raw" and c.hash_every_ticks == 20, "raw file: sync_mode raw, hash interval defaults to the tick rate")
 	c.free()
 
-	# failures are stable and come out of the usual last_error (replication is the one mode GDScript lacks)
-	c = OneLobbyClient.from_config({"game": {"id": "a"}, "engine": "dotnet", "sync": {"mode": "replication"}})
-	root.add_child(c)
-	var errs: Array = []
-	c.error.connect(func(code: String, _msg: String) -> void: errs.append(code))
-	_check(c.config_error.get("rule") == "gdscript_raw_only", "replication file: config_error")
-	var l: OneLobbyLobby = await c.host()
-	_check(l == null and c.last_error.get("code") == "bad_config" and str(c.last_error.get("message")).contains("replication"), "replication file: host() fails with bad_config")
-	l = await c.join("7HQ 4K2")
-	_check(l == null and c.last_error.get("code") == "bad_config" and errs == ["bad_config", "bad_config"], "replication file: join() fails too and the error signal fires")
-	_check((await c.list()).is_empty() and c.last_error.get("code") == "bad_config", "replication file: list() fails")
-	c.queue_free()
+	# a replication file builds a raw client (the game adds the session on the lobby)
+	c = OneLobbyClient.from_config({"game": {"id": "a"}, "engine": "godot-gdscript", "sync": {"mode": "replication", "tickRate": 30}})
+	_check(c.config_error.is_empty() and c.sync_mode == "raw", "replication file: no config_error, a raw lobby")
+	c.free()
+	# failures are stable and come out of the usual last_error
 	c = OneLobbyClient.from_config({"game": {"id": "a", "extra": 1}})
 	root.add_child(c)
-	l = await c.host()
+	var l: OneLobbyLobby = await c.host()
 	_check(l == null and c.last_error.get("code") == "bad_config" and c.config_error.get("path") == "game.extra" and c.config_error.get("rule") == "unknown_key", "invalid file: host() fails with the path and rule")
 	c.queue_free()
 	c = OneLobbyClient.from_config("user://missing-onelobby.json")

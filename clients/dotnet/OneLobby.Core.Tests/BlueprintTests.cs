@@ -147,14 +147,11 @@ namespace OneLobby.Tests
         }
 
         [Fact]
-        public void ReplicationIsValidForEveryEngineButGdscript()
+        public void ReplicationIsValidForEveryEngineAndForNoEngine()
         {
-            foreach (var e in new[] { "web", "node-browser", "godot-csharp", "unity", "dotnet" })
+            foreach (var e in new[] { "web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet" })
                 Assert.Equal("replication", Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""" + e + @""",""sync"":{""mode"":""replication""}}").Sync.Mode);
-            var ex1 = Assert.Throws<BlueprintException>(() => Blueprint.Parse(@"{""game"":{""id"":""a""},""engine"":""godot-gdscript"",""sync"":{""mode"":""replication""}}"));
-            Assert.Equal("replication_not_gdscript", ex1.Rule);
-            var ex2 = Assert.Throws<BlueprintException>(() => Blueprint.Parse(@"{""game"":{""id"":""a""},""sync"":{""mode"":""replication""}}"));
-            Assert.Equal("replication_not_gdscript", ex2.Rule);
+            Assert.Equal("replication", Blueprint.Parse(@"{""game"":{""id"":""a""},""sync"":{""mode"":""replication""}}").Sync.Mode);
         }
 
         [Fact]

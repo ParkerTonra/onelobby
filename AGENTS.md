@@ -283,7 +283,7 @@ var lobby := await client.host()                           # from the file; a di
 var lobby := await client.join(code)                       # a lobby code to the server, a direct code or "ip:port" to join_direct
 ```
 
-A bad file throws `bad_config` with the key's path (GDScript never throws: `cfg.error` / `client.config_error` hold `{code, path, rule, message}`; a file that asks GDScript for `replication` fails with rule `gdscript_raw_only`; `chat.text` false and `session.pause` "off" make `lobby.chat.send` / `lobby.pause.request` raise the client error `chat_disabled` / `pause_disabled` instead of throwing). Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
+A bad file throws `bad_config` with the key's path (GDScript never throws: `cfg.error` / `client.config_error` hold `{code, path, rule, message}`; `chat.text` false and `session.pause` "off" make `lobby.chat.send` / `lobby.pause.request` raise the client error `chat_disabled` / `pause_disabled` instead of throwing). Switched-off features throw: `voice_disabled` (`lobby.voice.enabled = true`
 with `chat.voice` false), `chat_disabled` (`lobby.chat.send` with `chat.text` false), `listing_disabled` (`list()` with
 `hosting.server` false) and `identity_anonymous`. No lobby server address at all (empty `hosting.lobbyServer`, no
 `lobbyServer` override) makes `host()` / `join()` fail with `no_server`. Browser wiring with the player's server

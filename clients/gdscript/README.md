@@ -40,8 +40,7 @@ failures are the shared ones (`spec/vectors/blueprint.json`), with these GDScrip
 
 - `from_config` overrides: `display_name` (checked against `players.identity` / `players.maxNameLength`), `lobby_server` (wins over the file).
 - `sync.mode` `raw` and `lockstep` run (`sync.tickRate` and `sync.hashEveryTicks` set `client.tick_rate` and `hash_every_ticks`). `replication`
-  parses, but `from_config` records `config_error` with `bad_config`, rule `gdscript_raw_only` (the name is kept from when lockstep
-  was missing too), and the first `host()` / `join()` / `list()` fails with it. `chat.text` false makes `lobby.chat.send()` raise the
+  builds a raw lobby (`from_config` sets `sync_mode` raw); you build an `OneLobbyReplicationSession` on it (docs/recipes/replication.md). `chat.text` false makes `lobby.chat.send()` raise the
   client error `chat_disabled`; `session.pause` is `"off"` (the default: `lobby.pause.request()` raises `pause_disabled`), `"host"` or
   `"anyone"`. `chat.voice` and `session.hostLeaves` are read but not enforced (no voice in GDScript).
 - `list()` with `hosting.server` false fails `listing_disabled`; a lobby code with no server fails `no_server`; a name for an

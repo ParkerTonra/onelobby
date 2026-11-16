@@ -617,8 +617,6 @@ namespace OneLobby
                 throw Err("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
             if (web && bp.Hosting.Direct)
                 throw Err("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
-            if (bp.Sync.Mode == "replication" && (engine == "godot-gdscript" || engine == null))
-                throw Err("sync.mode", "replication_not_gdscript", "replication needs an explicit engine other than godot-gdscript (GDScript speaks raw and lockstep)");
             if (bp.Sync.Mode == "replication" && bp.Session.HostLeaves == "migrate")
                 throw Err("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
             var lateJoinGiven = lobby is { } lg && lg.TryGetProperty("lateJoin", out _);
