@@ -73,7 +73,7 @@ godot --path . -- --join=D1PB-1X9S-FPV --name=Ann           # a real code: the i
 
 The flags are read only after `--` (user args): a game that took a plain `--host` before now needs `-- --host`. A headless GDScript host prints one line, `OneLobby: hosting, join code <code>` (a Unity player logs `direct host listening ...; code <code>`), so a second headless copy joins by that code; start each with `timeout <seconds>` (`--quit-after` counts frames, not time) and `--log-file <path>` (redirected stdout is lost when a process is killed).
 
-`--autostart` (the GDScript menu; the C# menu and Unity have it for the player layer only; Unity has no `StartOnHost` either: set `room.autoStart` to `"players"` in `onelobby.json` to start with no click) is for tests with no clicks: the host does what its Start button does, once, as soon as a second player is in the room, so `game_started` fires on both copies
+`--autostart` (the GDScript menu; the C# menu and Unity have it for the player layer only; Unity has `StartOnHost` (the host's Host click goes straight to Start) but no `--autostart`: set `room.autoStart` to `"players"` in `onelobby.json` to start both copies with no click) is for tests with no clicks: the host does what its Start button does, once, as soon as a second player is in the room, so `game_started` fires on both copies
 (`OneLobbyMenuModel.apply_autostart()`; it works in every sync mode and needs no player layer). Start both copies with `--local --autostart` and read what the game prints from
 its `game_started` handler.
 
@@ -340,6 +340,8 @@ listens on 127.0.0.1 only with Nostr and the router request off.
 |---|---|
 | `GameStarted(lobby)`, `ReturnedToLobby(lobby)`, `Left` | C# events; the menu hides itself on `GameStarted` when `AutoHideOnStart` is true (default) |
 | `Blueprint` (TextAsset), `Pump`, `AutoHideOnStart`, `BootFlags`, `InviteBase` | fields (Inspector or code), as in the Godot C# table; `BootFlags` covers `--host`, `--join=<code>`, `--name=<name>`; `--local` is always read |
+| `StartOnHost` (bool, default false) | after a successful Host the menu presses Start itself, once (the countdown still runs, then `GameStarted`): for a game with its own room screen or one that hosts from a running world; a joiner is unaffected (the GDScript `start_on_host`) |
+| `BeforeHost` (`Func<Task<bool>>?`) | asked before every Host (the button and `--host`): complete with `false` to cancel (a game's own "end the run in progress?" dialog); a throw counts as false; a second press while it waits is ignored |
 | `Texts` (`Dictionary<string,string>`), `TextOverrides` (Inspector list) | rewording, `MenuText` keys |
 | `StyleSheets`, `PanelSettings`, `SortingOrder` | restyling (below) |
 | `Client`, `Runner`, `Model` | the `LobbyClient` the menu drives (default the runner's; set `Client` before the first frame to use your own, then set `HostDirect` / `JoinDirect` too if you want direct lobbies), the runner, and the `MenuModel` being drawn |

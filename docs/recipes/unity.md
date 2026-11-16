@@ -33,7 +33,7 @@ npx create-onelobby verify                       # opens the project in batchmod
   (`OneLobbyBuild.Windows`), `.olc/<name>.json` (builds the player, then opens a host and a joiner window with `--local`), `AGENTS.md`, and the managed
   `.gitignore` / `.gitattributes` blocks.
 - `--into` adds the same except the boot script and `AGENTS.md`: your scenes and settings are not touched, `Packages/manifest.json` is edited in place (only the
-  dependencies it adds; a game that already references `com.onelobby.unity` keeps its line), and the tool prints the lines that put the menu into your own start-up.
+  dependencies it adds; a game that already references `com.onelobby.unity` keeps its line: it never moves, see "an older package line" below), and the tool prints the lines that put the menu into your own start-up.
 - The package is not on a registry yet. `--package-from <tgz>` writes a `file:` line (relative to `Packages/`); without it the line is
   `file:com.onelobby.unity-<version>.tgz` and the tarball goes next to `manifest.json` (build one with `clients/unity/build-unity-package.sh --pack`, or take the
   `unity-dev-package` CI artifact, which has the natives). `npx create-onelobby update` moves that line to the tool's version (a `file:` line you wrote is kept
@@ -54,25 +54,155 @@ npx create-onelobby verify                       # opens the project in batchmod
 - Never run a player or the editor without `-batchmode` in tests, and never run a player with `--host` without `--local` (127.0.0.1 only, no Nostr, no router request).
 - `clients/unity/scaffold-test.sh` runs all of this end to end on a machine with Unity; it is local only (CI has no Unity licence).
 
-### `--into` a game that already has its own multiplayer (runner, replication, own build)
+### `--into` a game that already has its own multiplayer (runner, Setup page, Room screen, replication, own build)
 
-- **Runner first.** `OneLobbyRunner` builds its `LobbyClient` the first time `Client` is read, and `Blueprint`, `ConfigureConfig` (for example
-  `c => c with { NetVersion = <your wire constant> }`) and `BindAddress` are read then. Add the runner yourself, set them, and only then add
-  the menu: it takes the runner it finds in the scene (or set `menu.Runner`). A menu added first adds a runner of its own and builds the client at once.
-- **No `StartOnHost`, no `--autostart`.** The Unity menu has `Pump`, `AutoHideOnStart`, `BootFlags`, `Runner` and `Client`. To start with no click (a game that hosts from
-  its running world, a headless two-copy run) set `room.autoStart` to `"players"` and `room.autoStartPlayers` to `2` in `onelobby.json`; the room's countdown runs and
-  `GameStarted` fires on both copies. Otherwise the host clicks Start.
-- **`menu.BootFlags = false`** when the game's own code reads `--host` / `--join`: the menu reads them too (default on), and both copies would act.
-- **Event order.** `GameStarted` runs with the menu's screen already `Playing`: set your own role and "line is live" state first, then attach the lobby.
-  `ReturnedToLobby` (back to the room) and `Left` (the player left) end the match. A direct lobby has no host migration.
+For a game with its own runner or client, its own Setup (menu) page and its own Room screen, on its own sync (`--mode raw`). The agent skill
+(`.claude/skills/onelobby/SKILL.md`, "Unity, a game that already has multiplayer") gives the ordered steps; this section is the reference it opens for
+the exact names and one code skeleton. Nothing here needs the package source: every member a game wires is listed.
+
+**0. An older package line.** `--into` and a rerun never move the `com.onelobby.unity` line of `Packages/manifest.json`. A game on an older tarball
+(`file:com.onelobby.unity-0.7.2-ci.30.tgz`): put the new tarball in `Packages/`, run `npx create-onelobby update --package-from Packages/<new>.tgz` (it moves
+only that line), delete the old tarball, then open the project in Unity once so it rewrites `Packages/packages-lock.json` and commit both. The run's note and
+its Next line say this whenever the line differs from the one this run would write.
+
+**1. Fill the blueprint from the game's own constants.** The proposal answers from the sentence; the game's constants win. Grep for each row, pass the flag
+(or `--set <key>=<value>`) and write the file and line in the report. A constant left in code beside a blueprint key is a drift bug.
+
+| the game's constant | blueprint key | flag |
+|---|---|---|
+| game id, wire version, title | `game.id`, `game.netVersion`, `game.title` | `--game-id`, `--net-version` (a run-time suffix stays in code, see 2), `--title` |
+| seats / max players | `lobby.maxPlayers` | `--max-players` |
+| own snapshot or command code | `sync.mode` `raw` | `--mode raw` (it leaves out `sync.tickRate` and `sync.player.*` by itself) |
+| who may pause (own pause menu, a `lobby.Pause` policy) | `session.pause` `off` / `host` / `anyone` | `--pause` |
+| longest name | `players.maxNameLength` (default 24) | `--set players.maxNameLength=16` |
+| names off | `players.identity` | `--identity anonymous` |
+| join timeout (a joiner gives up) | `session.readyTimeoutMs` (default 15000; 0 waits forever) | `--set session.readyTimeoutMs=20000` |
+| silent-peer timeout, heartbeat | `session.peerTimeoutMs` (0 = about 30 s; else at least 6000) | `--set session.peerTimeoutMs=8000` |
+| message rate limit per joiner | `session.rateLimit.messages` and `.perMs` (set both) | `--set session.rateLimit.messages=60 --set session.rateLimit.perMs=1000` |
+| host leaves | `session.hostLeaves` (`end` only without a lobby server) | `--host-leaves` |
+| own rejoin or seat holding | `lobby.rejoin`, `room.rejoinWindowSeconds` | `--no-rejoin` |
+| late join | `lobby.lateJoin`, `room.lateJoin` | `--no-late-join` |
+| countdown, minimum players, auto start | `room.countdownSeconds`, `room.minPlayers`, `room.autoStart`, `room.autoStartPlayers` | `--set room.countdownSeconds=0` |
+| port, router request | `hosting.directPort`, `hosting.openPort` | `--port`, `--no-open-port` |
+| Nostr on or off, its relay list | `hosting.nostr`, `hosting.nostrRelays` | `--set hosting.nostr=false`, `--set hosting.nostrRelays=[...]` |
+| lobby server (a hand-coded URL) | `hosting.lobbyServer`, `hosting.server` | `--lobby-server`, `--hosting direct\|server\|both` |
+| chat | `chat.text`, `chat.voice` | `--no-chat`, `--voice` |
+| keep running unfocused | `session.runInBackground` | `--set session.runInBackground=false` |
+
+**2. Load the file and build the runner FIRST.** The file is `Assets/Resources/onelobby.json`; the runner takes it as a `TextAsset`:
+
+```csharp unity
+using System.Threading.Tasks;
+using OneLobby;                 // Blueprint, LobbyClient, Lobby, PlayerSettings, Friendly
+using OneLobby.Direct;          // DirectHostOptions, JoinDirectOptions, and the Blueprint.ToDirectHostOptions extension
+using OneLobby.Unity;           // OneLobbyRunner, OneLobbyMenu, PlayerPrefsStore
+using UnityEngine;
+
+public sealed class MyGameNet : MonoBehaviour
+{
+    public const string WireVersion = "25";   // the game's own constant: the only value of onelobby.json that stays in code
+
+    OneLobbyRunner runner;
+    OneLobbyMenu menu;
+
+    public TextAsset BlueprintAsset() => Resources.Load<TextAsset>(OneLobbyMenu.BlueprintResourceName);   // "onelobby"
+
+    OneLobbyRunner Runner()
+    {
+        if (runner) return runner;
+        runner = gameObject.AddComponent<OneLobbyRunner>();
+        runner.Blueprint = BlueprintAsset();                       // the blueprint wins: the GameId, NetVersion and Mode fields are ignored
+        runner.DisplayName = "Player";                             // the saved name takes over while this is empty or "Player"
+        runner.ConfigureConfig = c => c with { NetVersion = WireVersion };   // read when the client is built, on the first runner.Client
+        return runner;
+    }
+
+    // host options from the file: maxPlayers, port (with 9 fallback ports), Nostr and its relays, LAN, password; the library adds the player's saved relay
+    DirectHostOptions HostOptions(string playerName)
+    {
+        var options = OneLobby.Blueprint.Parse(BlueprintAsset().text).ToDirectHostOptions(null, playerName);
+        // options.Port = 47811; options.FallbackPorts = 0;        // a fixed port; without FallbackPorts = 0 a busy port moves to the next free one
+        return options;
+    }
+
+    public void OpenMenu()   // only while solo: a menu built on a live line starts on its start page
+    {
+        if (menu) return;
+        Runner();
+        var go = new GameObject("OneLobbyMenu");
+        go.SetActive(false);                       // every property is set before the menu's Start runs
+        go.transform.SetParent(transform, false);
+        menu = go.AddComponent<OneLobbyMenu>();
+        menu.Runner = runner;                      // the runner built above: the menu takes it instead of adding its own
+        menu.BootFlags = false;                    // the game reads its own --host / --join
+        menu.Pump = false;                         // the menu is destroyed when the match starts; the runner keeps pumping the client
+        menu.StartOnHost = true;                   // the game has its own room screen: the host does not press Start twice
+        menu.BeforeHost = ConfirmHostAsync;        // false cancels the host (a "run in progress" dialog)
+        menu.GameStarted += OnGameStarted;
+        go.SetActive(true);
+    }
+
+    Task<bool> ConfirmHostAsync() => Task.FromResult(true);   // show your dialog, complete with the answer
+
+    void OnGameStarted(Lobby lobby)
+    {
+        // YOUR role and "line is live" state FIRST, then attach: GameStarted runs with the menu's screen already Playing
+        // role = lobby.IsHost ? Role.Host : Role.Client;
+        var m = menu;
+        menu = null;
+        if (m) { m.GameStarted -= OnGameStarted; Destroy(m.gameObject); }
+        // Attach(lobby);   // your session on lobby.Send / lobby.Broadcast / lobby.MessageReceived (or ReplicationSession)
+    }
+}
+```
+
+**3. The members a game wires** (everything else the menu does by itself):
+
+| member | signature and meaning |
+|---|---|
+| `OneLobbyRunner.Blueprint` | `TextAsset?`; set before the first `Client` read |
+| `OneLobbyRunner.ConfigureConfig` | `Func<OneLobbyConfig, OneLobbyConfig>?`, e.g. `c => c with { NetVersion = "25" }`; applied when the client is built |
+| `OneLobbyRunner.Client`, `.Lobby` | `LobbyClient` (built on first read), `Lobby?` (null when solo); events `LobbyChanged` `Action<Lobby?>`, `Error` `Action<LobbyError>` |
+| `OneLobbyRunner` calls | `Task<Lobby> HostDirectAsync(DirectHostOptions? options = null)`, `Task<Lobby> JoinDirectAsync(string codeOrAddress, string? password = null)` or `(string, JoinDirectOptions)`, `Task LeaveAsync()` |
+| `OneLobbyMenu.BlueprintResourceName` | `const string` = `"onelobby"`: `Resources.Load<TextAsset>(OneLobbyMenu.BlueprintResourceName)` |
+| `OneLobbyMenu.Runner`, `.Client` | `OneLobbyRunner?`, `LobbyClient?`: set `Runner` before the first frame (the menu builds itself in `Start`); a menu added with none adds a runner and builds the client at once |
+| `OneLobbyMenu.GameStarted` / `ReturnedToLobby` / `Left` | `event Action<Lobby>`, `event Action<Lobby>`, `event Action`. `GameStarted` fires on every copy when the match starts (host: after Start and the countdown; joiner: when the host's phase turns `in_game`, a late joiner too) |
+| `OneLobbyMenu.Pump` | `bool`, default true: pumps a lobby the runner does not hold; with a runner the menu never pumps twice, and `false` is right when the menu is destroyed at match start |
+| `OneLobbyMenu.BootFlags` | `bool`, default true: acts on `--host`, `--join=<code>`, `--name=<name>`; `--local` is always read |
+| `OneLobbyMenu.AutoHideOnStart` | `bool`, default true: hides on `GameStarted`, shows on `ReturnedToLobby` |
+| `OneLobbyMenu.StartOnHost` | `bool`, default false: after a successful Host the menu presses Start itself, once; a joiner is unaffected; the countdown still runs (`room.countdownSeconds`, 0 = at once) |
+| `OneLobbyMenu.BeforeHost` | `Func<Task<bool>>?`: asked before every Host (the button and `--host`); `false` cancels, a throw counts as false, a second press while it waits is ignored; null = no question |
+| `OneLobbyMenu.LeaveAsync()`, `.SortingOrder`, `.Model` | `Task`; `int` draw order (default 1000: above your uGUI); the `MenuModel` (`StartOnHost` and `BeforeHost` are on it too) |
+| `PlayerSettings` | `new PlayerSettings(IKeyValueStore? store, string gameId, Func<string,string?>? env = null)`; `static string Key(string gameId)` (STATIC: `PlayerSettings.Key(id)`, not on an instance); `SettingsValues Load()` (`Name`, `Relay`, `LastCode`, `Server`); `SaveResult Save(string? name = null, string? relay = null, string? lastCode = null, string? server = null)` (null leaves a field alone, `""` removes it; `SaveResult.Ok`, `.Rejected` lists the fields that did not clean); `Clear()`. Without a client: `new PlayerSettings(new PlayerPrefsStore(), gameId)`; a client's own is `client.Settings` |
+| `Friendly.DescribeError` | `static FriendlyError DescribeError(Exception? error)`, `(LobbyError error)`, `(string? codeOrText)`; `FriendlyError` has `Code`, `Message`, `Hint` (nullable), `Cause`, `Stage` |
+| `Blueprint` | `static Blueprint Parse(string json)`, `static Blueprint Load(string path)`; extension `DirectHostOptions ToDirectHostOptions(string? name = null, string? displayName = null)` (`using OneLobby.Direct;`); `LobbyOptions ToLobbyOptions(string? name = null, string? displayName = null)`; `LobbyClient.FromBlueprint(Blueprint, ITransport, string? displayName = null, string? lobbyServerOverride = null, Func<OneLobbyConfig,OneLobbyConfig>? configure = null)`. In a class that has a `Blueprint` member write `OneLobby.Blueprint` |
+
+**4. Replace in this order, deleting a hand-built piece only after the menu works.**
+1. The runner's setup: blueprint from the file, `ConfigureConfig` for the wire version only (delete the `GameId`, `NetVersion`, `Mode` and `ReadyTimeout` lines and a hand-written blueprint string built from constants).
+2. The Setup page's name field, code field, Paste, Join, Host and server buttons: the menu over the page (the page keeps its frame: title, status, Back). The menu panel is above uGUI (`SortingOrder` 1000), so a Back button under it cannot be clicked, and the menu has no Back on its start screen (`MenuModel.Back()` is false there): close it from your own Esc or Back handling by destroying `menu.gameObject`.
+3. The relay (TURN) paste field and its parser, and the saved name and relay in `PlayerPrefs`: `PlayerSettings` and the menu's settings page (step 5).
+4. The hand-built `DirectHostOptions` and the relay applied to joiners: `Blueprint.ToDirectHostOptions` and `JoinDirectOptions` (the library adds the saved relay); `ONELOBBY_RELAY` sets one for a run.
+5. The error strings of join and host: `Friendly.DescribeError(ex)` (the menu shows them itself).
+6. Tests of the deleted pieces go with them (list them in the report); a test that builds a client from the game's code blueprint reads the file instead: `LobbyClient.FromBlueprint(OneLobby.Blueprint.Load(path), transport, name, null, c => c with { NetVersion = "25" })`, or `Resources.Load` in play mode.
+
+**5. Old saved settings, once.** `PlayerSettings` keeps name and relay in one `PlayerPrefs` key, `onelobby.settings.<gameId>`: decide the game id first. At start, only when the old
+keys exist and `settings.Load().Name` is empty or `"Player"`: `settings.Save(name: oldName, relay: oldRelay)` (a relay that does not parse comes back in `Rejected`: say so in the report); in every case then
+`PlayerPrefs.DeleteKey` the old keys, so a later launch never overwrites a name the player chose in the menu.
+
+**6. Your own Room screen after the menu.** The menu has a room step (roster, Ready, the host's Start). A game with its own pre-match screen (a class pick) keeps it: set `menu.StartOnHost = true`
+so the host's Host click goes straight on (countdown, then `GameStarted`) and the game's own Start is the only one the host presses; joiners see the menu's room until the host's phase turns
+`in_game`. Without it the host presses Start twice. Set `room.countdownSeconds` to `0` to skip the countdown.
+
+**7. Tests and tools.** The game's own two-copy tool, its own flags and sessions stay (they drive the game's own netcode); only a test of lobby linking goes. Run the scaffolder's assembly alone
+(`-assemblyNames OneLobbyGame.Tests`) and the game's own PlayMode assembly as a separate run. A game's own Unity tooling may write to the system temp folder: where that is not allowed, set `TEMP` and `TMP` for the run.
+
+- **Runner first.** `OneLobbyRunner` builds its `LobbyClient` the first time `Client` is read, and `Blueprint`, `ConfigureConfig` and `BindAddress` are read then. A menu added first adds a runner of its own and builds the client at once.
+- **`menu.BootFlags = false`** when the game's own code reads `--host` / `--join`: the menu reads them too (default on), and both copies would act. There is no `--autostart` on Unity: `room.autoStart` `"players"` with `room.autoStartPlayers` 2 starts both copies of a headless test with no click.
+- **Event order.** `GameStarted` runs with the menu's screen already `Playing`: set your own role and "line is live" state first, then attach the lobby. `ReturnedToLobby` (back to the room) and `Left` (the player left) end the match. A direct lobby has no host migration.
 - **Your own player build stays yours.** If a script outside `Assets/OneLobby/` calls `BuildPipeline.BuildPlayer`, `--into` writes no
   `Assets/OneLobby/Editor/BuildPlayer.cs`, adds a note saying so, and prints no "build the Windows player" line; point your `.olc` entry at your own exe. Without such a
   call it writes `BuildPlayer.cs`, which builds the scenes enabled in File > Build Profiles into `Builds/Windows/Game.exe`. `verify` never builds a player.
-- **Tests.** Run the scaffolder's assembly alone (`-assemblyNames OneLobbyGame.Tests`) and your own PlayMode assembly as a separate run (`-assemblyNames <name>`): the
-  `--local --route=...` flags are for the first only. Close the Unity editor before `verify` or any batchmode run: a project open in the editor cannot be opened
-  again (`Temp/UnityLockfile`), and `verify` says so instead of blaming the tarball.
-- **Saved settings.** `PlayerSettings` keeps the name and relay under the PlayerPrefs key `onelobby.settings.<gameId>`: pick the game id before you import the old keys, and
-  import only while `Load().Name` is empty or "Player".
+- **Close the Unity editor** before `verify` or any batchmode run: a project open in the editor cannot be opened again (`Temp/UnityLockfile`), and `verify` says so instead of blaming the tarball.
 - `lobby.joinLink` is `false` for a Unity player: a join link is the share URL of a web page, which a player build does not have (the default is `true` for `web` and `node-browser` only).
 
 The rest of this page is the hand-written way.
