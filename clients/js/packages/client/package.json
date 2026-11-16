@@ -92,6 +92,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
     "node-datachannel": "^0.33.4"
   }
 }

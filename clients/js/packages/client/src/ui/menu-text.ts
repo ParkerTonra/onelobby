@@ -162,17 +162,13 @@ export const MENU_TEXT_WEB: Readonly<Record<string, string>> = Object.freeze({
   start_need_players: "Wait for at least one more player",
   back_to_lobby: "Back to lobby",
   chat_label: "Chat",
-  chat_off_note: "Chat is turned off in this game.",
-  host_name: "Host",
   // error
   retry: "Try again",
-  error_code_label: "Code: %s",
   logs_downloaded: "Logs downloaded (addresses are hidden).",
   no_server_status: "This page is missing its lobby server address.",
   no_server_hint: "Put your lobby server address in server=\"…\" on the <one-lobby> tag (it looks like https://your-name.onrender.com). The guide shows how to get one.",
   // settings
   server_page_note: "This page sets its own lobby server, so the one you save here is used only on pages that set none.",
-  relay_hidden_note: "The relay line is never shown again after you save it.",
 });
 
 /** The table in use by default: shared plus web-only keys. */

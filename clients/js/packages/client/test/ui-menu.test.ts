@@ -97,8 +97,7 @@ function readGdTable(source: string): Record<string, string> {
 const WEB_ONLY_KEYS = [
   "status_idle", "status_joining", "status_resuming", "status_creating", "status_error", "status_waiting", "status_players_here", "status_linking",
   "status_connected", "status_playing", "status_host_fallback", "start_invited_noname", "join_or", "copy_link", "link_copied", "start_need_players",
-  "back_to_lobby", "chat_label", "chat_off_note", "host_name", "retry", "error_code_label", "logs_downloaded", "no_server_status", "no_server_hint",
-  "server_page_note", "relay_hidden_note",
+  "back_to_lobby", "chat_label", "retry", "logs_downloaded", "no_server_status", "no_server_hint", "server_page_note",
 ];
 
 describe("menu text table", () => {

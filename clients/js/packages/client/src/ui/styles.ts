@@ -40,11 +40,11 @@ export const LOBBY_CSS = `
 .status.error { color: var(--onelobby-danger); font-weight: 600; }
 .hint { margin: 0; color: var(--onelobby-muted); }
 label { display: grid; gap: 0.25rem; font-size: 0.9rem; color: var(--onelobby-muted); }
-input {
+input:not([type=checkbox]), select {
   font: inherit; font-size: 1rem; color: var(--onelobby-fg); background: var(--onelobby-field);
   border: 1px solid var(--onelobby-border); border-radius: 8px; padding: 0.6rem 0.7rem; min-height: 44px; box-sizing: border-box; width: 100%;
 }
-#code { text-transform: uppercase; letter-spacing: 0.15em; font-family: ui-monospace, Consolas, monospace; }
+#code:not(.plain) { text-transform: uppercase; letter-spacing: 0.15em; font-family: ui-monospace, Consolas, monospace; }
 button {
   font: inherit; font-size: 1rem; min-height: 44px; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--onelobby-border); background: var(--onelobby-field); color: var(--onelobby-fg);
@@ -62,8 +62,25 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--onelobby-ac
 }
 h3 { margin: 0; font-size: 0.9rem; color: var(--onelobby-muted); font-weight: 600; }
 ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
-li { display: flex; gap: 0.5rem; align-items: center; }
+li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; min-width: 0; }
+.name { overflow-wrap: anywhere; min-width: 0; }
+li button { min-height: 36px; padding: 0.25rem 0.75rem; }
 .tag { font-size: 0.75rem; border: 1px solid var(--onelobby-border); border-radius: 999px; padding: 0 0.5rem; color: var(--onelobby-muted); }
 .bar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.title { margin: 0; font-size: 1.1rem; }
+.countdown { margin: 0.5rem 0 0; font-weight: 600; }
+.box { border: 1px solid var(--onelobby-border); border-radius: 8px; padding: 0.75rem; display: grid; gap: 0.5rem; }
+.fields { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
+label.check { display: flex; align-items: center; gap: 0.5rem; }
+label.check input { width: auto; min-height: 0; }
+.grow { flex: 1 1 10rem; }
+summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+#chatLog { max-height: 12rem; overflow-y: auto; display: block; overflow-wrap: anywhere; }
+#chatLog li { display: block; }
+@media (max-width: 400px) {
+  .card { padding: 0.75rem; }
+  .row > label { flex-basis: 100%; }
+  .bar button, .row > button { flex: 1 1 auto; }
+}
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 `;
