@@ -88,6 +88,30 @@ export const NET_PLAYER_DIR = "addons/onelobby_net_player";
 
 const sortKeys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortKeys(o[k])])) : o);
 
+/**
+ * The WebRTC natives version a game's folder already has, when they are there and this run will not replace them: the `webrtcNative.version`
+ * a PIN.json of ours recorded, else "unknown" (natives put there by hand, or by a build with no record). null when there are none, or this run
+ * installs them. `pinPaths`: the pin files to ask, in order.
+ */
+export function existingNativesVersion(target, { present, replacing }, pinPaths = [PIN_PATH]) {
+  if (!present || replacing) return null;
+  for (const p of pinPaths) {
+    try {
+      const v = JSON.parse(readFileSync(join(target, ...p.split("/")), "utf8"))?.webrtcNative?.version;
+      if (typeof v === "string" && v) return v;
+    } catch {
+      /* no pin, or not JSON */
+    }
+  }
+  return "unknown";
+}
+
+/** The sentence for natives that stay: says when their version is not the pin (null when it is). */
+export function nativesDifferLine(found) {
+  if (found === null || found === WEBRTC_NATIVE_VERSION) return null;
+  return `the WebRTC natives already in addons/godot_webrtc/ stay as they are, but their version is ${found === "unknown" ? "unknown (nothing records it)" : found}, not the pinned ${WEBRTC_NATIVE_VERSION}: rerun with --force to replace them with the pinned release (PIN.json records ${found})`;
+}
+
 /** PIN.json for these add-on files, deterministic (sorted keys, LF, trailing newline). */
 export function buildPin({ files, commit, version = packageVersion(), webrtcNative = { version: WEBRTC_NATIVE_VERSION, zipSha256: WEBRTC_NATIVE_ZIP_SHA256 } }) {
   const hashes = {};

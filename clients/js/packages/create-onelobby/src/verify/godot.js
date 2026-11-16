@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate } from "../blueprint.js";
-import { LEGACY_PIN, NATIVES_MARKER, verifyPin } from "../vendor.js";
+import { LEGACY_PIN, NATIVES_MARKER, WEBRTC_NATIVE_VERSION, existingNativesVersion, verifyPin } from "../vendor.js";
 import { run } from "./procs.js";
 import { startRelay } from "./relay.js";
 import { fetchCommand, fetchTurnHelper, findTurnHelper, startTurn } from "./turn.js";
@@ -108,10 +108,12 @@ export function godotChecks() {
           const cache = join(dir, ".godot/global_script_class_cache.cfg");
           return nonEmpty(join(dir, ".godot/extension_list.cfg")) && existsSync(cache) && /OneLobbyClient/.test(readFileSync(cache, "utf8"));
         };
-        if (registered()) return { status: "ok", detail: "extension registered" };
+        const found = existingNativesVersion(dir, { present: true, replacing: false });
+        const differ = found !== WEBRTC_NATIVE_VERSION ? { warning: `the natives' version is ${found === "unknown" ? "unknown (nothing records it)" : found}, the pin is ${WEBRTC_NATIVE_VERSION}: run npx create-onelobby update to install the pinned release` } : {};
+        if (registered()) return { status: "ok", detail: "extension registered", ...differ };
         // --import can crash on exit after a good import (harmless): the registered files decide, not the exit code
         const r = await g(ctx, ["--import"], { timeoutMs: 240000 });
-        if (registered()) return { status: "ok", detail: "extension registered; ran the headless import first" };
+        if (registered()) return { status: "ok", detail: "extension registered; ran the headless import first", ...differ };
         return { status: "fail", detail: `the headless import did not register the WebRTC extension and the add-on classes (${r.timedOut ? "it timed out" : lastError(r.out)}).`, next: "Run: godot --headless --audio-driver Dummy --import --path . and read its output." };
       },
     },

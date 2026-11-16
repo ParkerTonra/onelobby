@@ -20,6 +20,8 @@ import {
   addonSource,
   applyBlock,
   buildPin,
+  existingNativesVersion,
+  nativesDifferLine,
   loadNatives,
   planAddonReplace,
 } from "./vendor.js";
@@ -141,7 +143,9 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
     { path: "tests/multiplayer.gd", content: withPlayers ? multiplayerWithPlayer(multiplayerTest, read("net-player", "multiplayer_part.gd"), netPlayer) : multiplayerTest },
   );
   for (const f of addon.files) wanted.push({ path: `addons/onelobby/${f.path}`, content: f.content });
-  wanted.push({ path: PIN_PATH, content: buildPin({ files: addon.files, commit: addon.commit }) });
+  // natives that are already there stay: the pin records their version (or "unknown"), never the pinned one they may not be
+  const foundNatives = existingNativesVersion(target, { present: existsSync(join(target, ...NATIVES_MARKER.split("/"))), replacing: !!opts.force || !!opts.noNatives });
+  wanted.push({ path: PIN_PATH, content: buildPin({ files: addon.files, commit: addon.commit, ...(foundNatives !== null && foundNatives !== WEBRTC_NATIVE_VERSION ? { webrtcNative: { version: foundNatives } } : {}) }) });
   const olcRepo = into ? repoAbove(target) : null;
   if (!olcRepo) wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
 
@@ -205,7 +209,7 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
   const present = existsSync(abs(NATIVES_MARKER));
   let natives;
   if (opts.noNatives) natives = { status: "skipped", reason: "--no-natives" };
-  else if (present && !opts.force) natives = { status: "present" };
+  else if (present && !opts.force) natives = { status: "present", ...(foundNatives !== null && foundNatives !== WEBRTC_NATIVE_VERSION ? { found: foundNatives } : {}) };
   else natives = { status: "install", source: opts.webrtcDir ? "dir" : opts.webrtcZip ? "zip" : "download" };
   natives.version = WEBRTC_NATIVE_VERSION;
   natives.zipSha256 = WEBRTC_NATIVE_ZIP_SHA256;
@@ -283,6 +287,7 @@ export function godotNext({ into, rel, plan }) {
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (plan.olcRepo) next.push(olcSkippedLine(plan.olcRepo));
+  if (plan.natives.found) next.push(nativesDifferLine(plan.natives.found));
   if (plan.natives.status === "skipped")
     next.push(`fetch the WebRTC natives (not installed yet): npx create-onelobby --into . --template godot-gdscript   (changes nothing else)`);
   next.push(`godot --headless --audio-driver Dummy --import --path .   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension and the add-on's classes`);
@@ -359,7 +364,7 @@ export async function runGodot(ctx) {
     }
     if (natives.status === "install") out.push(`  ${natives.folder} (webrtc-native ${natives.version}, from ${natives.source === "download" ? "a checked download" : natives.source === "zip" ? "--webrtc-zip" : "--webrtc-dir"})`);
     if (natives.status === "skipped") out.push("WebRTC natives not installed (--no-natives).");
-    if (natives.status === "present") out.push(`${natives.folder} is already there; natives left as they are.`);
+    if (natives.status === "present") out.push(natives.found ? nativesDifferLine(natives.found) : `${natives.folder} is already there; natives left as they are.`);
     if (plan.collisions.length) out.push("Collides with files already in your game:", ...plan.collisions.map((c) => collisionLine(c)));
     for (const n of plan.notes) out.push(`Note: ${n}`);
     return out.join("\n");
