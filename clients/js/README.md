@@ -67,6 +67,16 @@ it in `welcome.ice`) or to `kit.joinDirect(code, { iceServers })` (added to the 
 secret, `turnLogin(secret, id, ttlSeconds)` mints a short-lived login (spec/turn-rest.md). `relayOnly` sends and accepts only
 relay candidates. Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
+## LAN games (opt-in)
+
+Players on one local network can find a direct host with no code (`spec/lan-discovery.md`; recipe `docs/recipes/direct-ip.md`
+section 7b). Off unless `hosting.lan` is true in `onelobby.json` (it needs `hosting.direct`) or you pass `lan: true` to
+`hostDirect`; then the host answers a broadcast question on UDP 47840 while its lobby is open, and `kit.lanFinder()` lists the hosts.
+`finder.start()` opens one UDP socket, `finder.games` is the list (`name`, `hostName`, `players`, `maxPlayers`, `hasPassword`,
+`sameVersion`, `address`, `port`), `finder.on("changed", ...)` fires on changes, `finder.askNow()` asks again, `finder.stop()`
+closes the socket. Node only: in a browser `start()` resolves with status `"browser"`. Tests pass `targets: ["127.0.0.1"]` and a host
+with `bindHost: "127.0.0.1"`, so nothing leaves the machine. Proven on one machine only, not yet on a real network.
+
 ## Saved player settings
 
 `kit.settings` keeps the player's name, TURN relay line, last join code and lobby server in `localStorage` (Node: pass

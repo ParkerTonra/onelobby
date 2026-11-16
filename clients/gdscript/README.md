@@ -125,6 +125,15 @@ var lobby := await client.host({"password": "tulip", "room": {"spectators": 2, "
 var lobby := await client.join(code, {"password": "tulip", "role": "spectator"})
 ```
 
+## LAN games (opt-in)
+
+`hosting.lan` (blueprint) or `host_direct({"lan": true})` makes a direct host answer a broadcast question on UDP 47840 while its lobby is open
+(`spec/lan-discovery.md`, recipe `docs/recipes/direct-ip.md` section 7b; `lan_port` changes the port). `client.lan_finder()` returns an
+`OneLobbyLanFinder` (a child node that polls itself): `start()`, `games` (Dictionaries with `name`, `host_name`, `players`, `max_players`,
+`has_password`, `same_version`, `address`, `port`), signal `changed(games)`, `ask_now()`, `stop()`. It stays `"off"` when the blueprint has
+`hosting.lan` false and opens nothing; a web export reports `"browser"`. It asks the limited broadcast only (Godot gives no netmask).
+Tests: `tests/lan.gd` (all on 127.0.0.1). Proven on one machine only, not yet on a real network.
+
 ## Direct mode (no lobby server)
 
 `host_direct` runs the whole lobby inside the host's game (the hub is ported from the JS one); joiners find it through

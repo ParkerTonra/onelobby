@@ -84,7 +84,7 @@ public sealed class BlueprintException : OneLobbyException
     public string Rule { get; }
     public BlueprintException(string path, string rule, string message) : base(LobbyErrorCodes.BadConfig, (path.Length == 0 ? "onelobby.json" : path) + ": " + message);
 public sealed record GameSection(string Id, string NetVersion, string? Title);
-public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly, IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
+public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly, IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null, bool Lan = false)
     /// The hosting.nostrRelays list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).
     public IReadOnlyList<string> Relays;
 public sealed record LobbySection(int MaxPlayers, bool Listed, bool ApproveJoins, bool Password, bool LateJoin, bool Rejoin, bool JoinLink, IReadOnlyDictionary<string, string> Meta);
@@ -459,6 +459,123 @@ public static class JoinCode
     public static bool TryDecode(string? input, out string ip, out int port, out string? error);
     /// True when the input is shaped like a join code (11 alphabet characters once separators go, no dots or colons), so a failed decode should say bad_code rather than be tried as a host name.
     public static bool LooksLikeCode(string? input);
+```
+
+## OneLobby.Core/LanDiscovery.cs
+
+```csharp
+/// The two datagrams of spec/lan-discovery.md, and the limits every client shares.
+public static class LanWire
+    public const int DefaultPort;
+    public const int WireVersion;
+    public const int MaxDatagram;
+    public const int NameUnits;
+    /// Finder timers.
+    public const int AskIntervalMs;
+    /// Host limits: answers per source address and in total per RateWindowMs; duplicate memory.
+    public const int RatePerSource;
+    /// Byte limits (min, max) per string field.
+    public static (int Min, int Max) GameIdLimit;
+    public static (int Min, int Max) NetVersionLimit;
+    public static (int Min, int Max) NameLimit;
+    public static bool Fits(string s, (int Min, int Max) limit);
+    public static byte[] EncodeQuestion(byte[] nonce, string gameId);
+    public static byte[] EncodeAnswer(LanAnswerMessage a);
+    public static bool TryDecodeQuestion(byte[] b, out LanQuestion q);
+    public static bool TryDecodeAnswer(byte[] b, out LanAnswerMessage a);
+    /// "loopback", "private" or "link_local" for an IPv4 address; null for a public (or non-IPv4) one.
+    public static string? SourceClass(string ip);
+    /// Control characters and bidi overrides out, at most 24 UTF-16 units without splitting a pair (the hub's name rule).
+    public static string CleanName(string s);
+    /// Where a finder asks by default: the limited broadcast 255.255.255.255 plus the directed broadcast of every network card that has a private or link-local IPv4 address (a PC with several cards sends the limited one out of one card only).
+    public static IReadOnlyList<string> BroadcastTargets();
+public readonly struct LanQuestion
+    public LanQuestion(byte[] nonce, string gameId);
+    public byte[] Nonce { get; }
+    public string GameId { get; }
+public readonly struct LanAnswerMessage
+    public LanAnswerMessage(byte[] nonce, int port, int players, int maxPlayers, bool password, string gameId, string netVersion, string lobbyName, string hostName);
+    public byte[] Nonce { get; }
+    public int Port { get; }
+    public int Players { get; }
+    public int MaxPlayers { get; }
+    public bool Password { get; }
+    public string GameId { get; }
+    public string NetVersion { get; }
+    public string LobbyName { get; }
+    public string HostName { get; }
+/// What a host tells a finder (spec s.2). Port is the direct TCP port a joiner connects to.
+public sealed record LanHostInfo(string LobbyName, string HostName, int Players, int MaxPlayers, bool Password, int Port);
+/// A UDP socket as the LAN code uses it: a seam so tests run with no socket. Receiving is polled (no events).
+public interface ILanUdp : IDisposable
+    /// Binds address:port (port 0: the system picks); throws a SocketException when it cannot. Returns the bound port.
+    int Bind(IPAddress address, int port, bool broadcast);
+    void Send(byte[] data, IPAddress to, int port);
+    /// Waits up to waitMs for one datagram; false when none came or the socket is closed.
+    bool TryReceive(int waitMs, out byte[] data, out IPAddress from, out int fromPort);
+/// ILanUdp over a System.Net.Sockets.Socket. The bind is exclusive: a taken port throws.
+public sealed class SystemLanUdp : ILanUdp
+    public int Bind(IPAddress address, int port, bool broadcast);
+    public void Send(byte[] data, IPAddress to, int port);
+    public bool TryReceive(int waitMs, out byte[] data, out IPAddress from, out int fromPort);
+    public void Dispose();
+/// The host's answering rules (spec s.3), with no socket: Handle gets a datagram and the address it came from.
+public sealed class LanAnswerer
+    /// Counters: answered, bad_source, malformed, wrong_game, duplicate, rate_limited.
+    public IReadOnlyDictionary<string, int> Stats { get; }
+    public LanAnswerer(string gameId, string netVersion, Func<LanHostInfo?> info, Action<byte[], string, int> reply, Func<long>? nowMs = null);
+    /// "answer" when an answer was sent, the drop counter's name when the datagram was dropped, "no_lobby" when none is open.
+    public string Handle(byte[] bytes, string address, int port);
+/// The host's answering socket. Start returns true when it listens; false (with a log line) when it cannot, and the host goes on without LAN discovery. A background thread reads the socket; Dispose closes it.
+public sealed class LanHost : IDisposable
+    public LanAnswerer Answerer { get; }
+    public bool Listening;
+    public int Port { get; private set; }
+    /// A loopback bindAddress makes the socket bind 127.0.0.1 only; anything else (or null) binds every interface.
+    public LanHost(string gameId, string netVersion, Func<LanHostInfo?> info, int port = LanWire.DefaultPort, IPAddress? bindAddress = null, Func<ILanUdp>? udp = null, Action<string>? log = null, Func<long>? nowMs = null);
+    public bool Start();
+    public void Dispose();
+/// One row of the list a menu draws (one per host), as LobbySummary is for the lobby browser.
+public sealed record LanGame(string Address, int Port, string Name, string HostName, int Players, int MaxPlayers, bool HasPassword, bool SameVersion, string NetVersion, long LastSeenMs);
+public enum LanFinderStatus { Idle, Running, Off, SocketFailed }
+public sealed class LanFinderOptions
+    /// Where to ask; null = LanWire.BroadcastTargets. A test or a --local game passes 127.0.0.1.
+    public IReadOnlyList<string>? Targets { get; set; }
+    /// The hosts' answering port (default 47840).
+    public int Port { get; set; }
+    /// False: LanFinder.Start does nothing (hosting.lan is false in the blueprint).
+    public bool Enabled { get; set; }
+    public int AskIntervalMs { get; set; }
+    public int MinGapMs { get; set; }
+    public int RowTimeoutMs { get; set; }
+    public Func<ILanUdp>? Udp { get; set; }
+    public Func<long>? NowMs { get; set; }
+    public Action<string>? Log { get; set; }
+/// Finds LAN hosts. Start opens one UDP socket on a port the system picks; call Pump every frame (it reads answers, asks on its timer, drops stale rows and raises Changed on the calling thread); Stop closes the socket and empties the list. Games is the list.
+public sealed class LanFinder : IDisposable
+    /// Counters: kept, malformed, bad_source, wrong_nonce, wrong_game, full.
+    public Dictionary<string, int> Stats { get; }
+    public LanFinderStatus Status { get; private set; }
+    public string StatusReason { get; private set; }
+    public IReadOnlyList<LanGame> Games;
+    public bool Running;
+    /// Fires inside Pump (and Stop) when a row appears, goes or changes.
+    public event Action<IReadOnlyList<LanGame>>? Changed;
+    public LanFinder(string gameId, string netVersion, LanFinderOptions? options = null);
+    public LanFinderStatus Start();
+    public void Stop();
+    public void Dispose();
+    /// Asks at once (held until MinGapMs after the last question when that is sooner).
+    public void AskNow();
+    /// Test seam: treat this nonce (16 hex characters) as one this finder sent.
+    public void RememberNonce(string hex);
+    /// Reads answers, asks on the timer, drops stale rows. Events fire here.
+    public void Pump();
+    /// The finder's rules for one datagram (spec s.4): "ok", "other_version" or the drop reason.
+    public string Receive(byte[] bytes, string address, int port);
+public static class LanClientExtensions
+    /// A finder for LAN games with this client's game id, net version and net log. With a blueprint whose hosting.lan is false it stays off. Nothing is opened before LanFinder.Start.
+    public static LanFinder CreateLanFinder(this LobbyClient client, LanFinderOptions? options = null);
 ```
 
 ## OneLobby.Core/Lobby.cs

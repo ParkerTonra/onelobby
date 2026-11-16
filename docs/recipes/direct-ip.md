@@ -365,6 +365,70 @@ Facts a game can run into with `hostDirect` / `hostNostr` (same numbers in C# an
   `OneLobby.Direct`; Unity: `OneLobbyRunner.HostDirectAsync` / `JoinDirectAsync` / `RejoinDirectAsync`; Node:
   `hostDirect(kit)` from `onelobby/direct`; JS joiners: `kit.joinDirect(code)`, `kit.rejoinDirect(code, token)`.
 
+## 7b. LAN games (opt-in)
+
+Players on one local network can find a direct host without typing a code: the host answers a broadcast question and each
+player's game lists the answers. Typing the host's `ip:port` (or a join code) keeps working in every game. Wire, limits and
+timers: [spec/lan-discovery.md](../../spec/lan-discovery.md). The menu tab that draws the list is not part of the library
+yet; the finder gives a menu its rows.
+
+**Turn it on.** Off unless the game asks: `"hosting": { "direct": true, "lan": true }` in `onelobby.json` (it needs
+`hosting.direct`), or the host option `lan` in code (C# `DirectHostOptions.Lan`, Node `hostDirect(kit, { lan: true })`,
+GDScript `host_direct({"lan": true})`). With it off nothing runs: no socket, no packet.
+
+**What a host does.** While a direct lobby is open and the switch is on, the host listens on one UDP port (47840; every host
+of one game must use the same one, so it is not a blueprint key; the code option `port` / `LanPort` / `lan_port` changes
+it). It sends nothing on its own. It answers a question only if it is well formed, for its own game id, from a loopback,
+private or link-local address (never a public one), not already answered, and within 3 answers per second per asking
+address and 50 per second in total; everything else is dropped silently and counted. The answer carries the game id and
+net version, the lobby name, the host's player name, players now and the maximum, whether a password is needed and the
+direct port, in at most 263 bytes. It carries no IP address: the finder takes the address the answer came from. If the UDP
+port is taken (a second host on the same PC), hosting goes on and the net log says `LAN discovery is off for this lobby:
+UDP port 47840 is taken`: the first host is found, the second is not (joining it by `ip:port` still works).
+
+**What a player's game does.** Only while the finder runs (between `start` and `stop`, which a menu calls when a "LAN games"
+tab opens and closes) it opens one UDP socket on a port the system picks and sends one small question to the broadcast
+address about once a second (never faster than every 400 ms). It listens only for answers to its own questions. `stop`
+closes the socket and empties the list. A game that is not hosting and not looking has no LAN socket at all. IPv4 only:
+broadcast does not exist in IPv6, so a player on an IPv6-only network sees an empty list and types the address.
+
+```csharp
+// C#: any client; rows are LanGame (Name, HostName, Players, MaxPlayers, HasPassword, SameVersion, Address, Port)
+var finder = client.CreateLanFinder();      // stays off when the blueprint has hosting.lan false
+finder.Changed += games => { /* redraw */ };
+finder.Start(); /* every frame: */ finder.Pump(); /* tab closed: */ finder.Stop();
+await client.JoinDirectAsync($"{row.Address}:{row.Port}", password);
+```
+
+```ts
+// JS (Node): rows are LanGame (name, hostName, players, maxPlayers, hasPassword, sameVersion, address, port)
+const finder = kit.lanFinder();             // in a browser start() says status "browser": it has no UDP sockets
+finder.on("changed", (games) => { /* redraw */ });
+await finder.start(); /* tab closed: */ finder.stop();
+await kit.joinDirect(`${row.address}:${row.port}`, { password });
+```
+
+```gdscript
+# GDScript: rows are Dictionaries {address, port, name, host_name, players, max_players, has_password, same_version, ...}
+var finder := client.lan_finder()          # a child of the client; polls itself; stays off when hosting.lan is false
+finder.changed.connect(func(games: Array) -> void: pass)
+finder.start()                              # tab closed: finder.stop()
+```
+
+A row whose host runs another `netVersion` is kept with `SameVersion` / `sameVersion` / `same_version` false, so a menu can
+say why it cannot be joined. `AskNow()` / `askNow()` / `ask_now()` asks again at once. The default targets are the limited
+broadcast `255.255.255.255` and, in C# and Node, the directed broadcast of each network card with a private address (a PC with
+a VPN or virtual adapter sends the limited one out of one card only); GDScript asks the limited broadcast only, because
+Godot does not give a card's netmask. A test or a `--local` game passes `127.0.0.1` as the only target: the finder then binds
+`127.0.0.1` and a host with `listen_address` / `BindAddress` / `bindHost` `127.0.0.1` answers on `127.0.0.1` only, so
+nothing leaves the machine.
+
+**Firewall (known by design, not measured).** The finder opens no fixed port and receives only answers to its own
+questions; a host already listens for direct joins (section 6). Whether Windows shows an "allow this app?" prompt for the
+finder or for the answering socket in a shipped game has not been measured. The library has also not been run on a real
+network with two machines: a real router, a real broadcast and a network that blocks broadcast between clients (many guest
+Wi-Fi networks do) are untested.
+
 ## Done when
 
 1. Build the smoke tools: `dotnet build clients/dotnet/OneLobby.DataChannel.Smoke -c Release`, and in `clients/js`

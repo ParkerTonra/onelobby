@@ -72,6 +72,15 @@ Players behind a symmetric or carrier-grade NAT cannot open a direct link; a TUR
 login (spec/turn-rest.md). `RelayOnly` sends and accepts only relay candidates in `OneLobby.DataChannel` and `OneLobby.Godot` (one shared filter in `OneLobby.Core`,
 because webrtc-native ignores Godot's `iceTransportPolicy`). Setup, coturn and hosted options, expiring logins: `docs/recipes/turn.md`. Keep TURN passwords out of your repo.
 
+## LAN games (opt-in)
+
+`hosting.lan` (blueprint) or `DirectHostOptions.Lan` makes a direct host answer a broadcast question on UDP 47840 while its lobby is
+open (`spec/lan-discovery.md`, recipe `docs/recipes/direct-ip.md` section 7b). `client.CreateLanFinder()` (in `OneLobby.Core`) lists the hosts:
+`finder.Start()`, `finder.Pump()` every frame (events fire there, on the calling thread), `finder.Games` (`LanGame`: `Name`, `HostName`,
+`Players`, `MaxPlayers`, `HasPassword`, `SameVersion`, `Address`, `Port`), `finder.Changed`, `finder.AskNow()`, `finder.Stop()`. Off means no socket:
+a finder from a blueprint with `hosting.lan` false stays `LanFinderStatus.Off`. The socket code (`SystemLanUdp`) sits behind `ILanUdp`; its tests
+that bind a socket (127.0.0.1 only) run when the environment variable `CI` is `true`. Proven on one machine only, not yet on a real network.
+
 ## Saved player settings
 
 `client.Settings` (`PlayerSettings`) keeps the player's name, TURN relay line, last join code and lobby server in an

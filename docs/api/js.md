@@ -60,6 +60,8 @@ export type { Cause, Stage, Reached, RelayState, CandidateType, NatFact, Diagnos
 export { NetLog } from "./netlog.js";
 export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
 export { checkConnection } from "./connection-check.js";
+export { LanFinder, LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets } from "./lan.js";
+export type { LanGame, LanFinderOptions, LanFinderStatus, LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
 export { ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication, DEFAULT_REPLICATION_CONFIG, } from "./replication/index.js";
 export type { EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates, ReplicationEvents, ReplicationErrorCode, } from "./replication/index.js";
@@ -81,6 +83,7 @@ import { type RelayConnect } from "./nostr/relays.js";
 import { type Blueprint } from "./blueprint.js";
 import { type BrowserHostOptions } from "./direct/browser-host.js";
 import { NetLog } from "./netlog.js";
+import { LanFinder, type LanFinderOptions } from "./lan.js";
 import { type CheckOptions, type CheckResult } from "./connection-check.js";
 import { PlayerSettings, type EnvSource, type SettingsUse } from "./settings.js";
 export declare const LIB_NAME = "onelobby";
@@ -316,6 +319,13 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     /** @internal Saves the code of a lobby this player hosted or joined as `lastCode` (a code that does not clean is not saved). */
     rememberCode(code: string): void;
     /**
+     * A finder for LAN games (spec/lan-discovery.md): `start()` asks the local network, `games` is the list, `on("changed")`
+     * fires when it changes, `stop()` closes its socket. Nothing is opened before `start()`. With a blueprint whose
+     * `hosting.lan` is false the finder stays off (`status` "off"); in a browser `status` is "browser". Options: `targets`
+     * (default: the broadcast addresses; a test passes `["127.0.0.1"]`), `port`.
+     */
+    lanFinder(options?: Partial<Omit<LanFinderOptions, "gameId" | "netVersion">>): LanFinder;
+    /**
      * Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
      * one socket), and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the
      * client connects with) and the TURN entry in `iceServers`. A menu runs it on demand; the library never does. The
@@ -403,6 +413,7 @@ export interface Blueprint {
         readonly server: boolean;
         readonly lobbyServer: string;
         readonly directPort: number;
+        readonly lan: boolean;
         readonly openPort: boolean;
         readonly nostr: boolean;
         readonly nostrRelays: readonly string[];
@@ -497,6 +508,7 @@ export interface BlueprintInput {
         server?: boolean;
         lobbyServer?: string;
         directPort?: number;
+        lan?: boolean;
         openPort?: boolean;
         nostr?: boolean;
         nostrRelays?: string[];
@@ -2856,6 +2868,202 @@ export declare function probeRelay(s: IceServer, udp?: () => UdpSocketLike | nul
  * TURN entry. Run it from a menu; the library never runs it by itself.
  */
 export declare function checkConnection(options?: CheckOptions): Promise<CheckResult>;
+```
+
+## lan
+
+```ts
+/**
+ * LAN discovery (spec/lan-discovery.md): a host answers a broadcast question on the local network, and the player's game
+ * (the finder) lists the answers. Question and answer only; a host never announces. Opt-in: nothing here opens a socket
+ * unless the game turned it on (`hosting.lan` in onelobby.json, or the `lan` option of `hostDirect`).
+ *
+ * The codec, the host's answering rules and the finder's list are plain code over a small UDP seam (`LanUdp`), so a test
+ * drives them with no socket at all; `nodeLanUdp()` is the Node implementation, found without a static import so a
+ * browser bundle never pulls in `node:dgram`.
+ */
+import { Emitter } from "./emitter.js";
+export declare const LAN_DEFAULT_PORT = 47840;
+export declare const LAN_WIRE_VERSION = 1;
+export declare const LAN_MAX_DATAGRAM = 512;
+export declare const LAN_LIMITS: {
+    readonly gameId: readonly [1, 64];
+    readonly netVersion: readonly [1, 32];
+    readonly lobbyName: readonly [0, 72];
+    readonly hostName: readonly [0, 72];
+};
+export declare const LAN_NAME_UNITS = 24;
+/** Finder timers (spec s.4/s.6). */
+export declare const LAN_ASK_INTERVAL_MS = 1000;
+export declare const LAN_MIN_GAP_MS = 400;
+export declare const LAN_ROW_TIMEOUT_MS = 4000;
+export declare const LAN_MAX_ROWS = 64;
+export declare const LAN_NONCES_KEPT = 8;
+/** Host limits (spec s.3). */
+export declare const LAN_RATE_PER_SOURCE = 3;
+export declare const LAN_RATE_TOTAL = 50;
+export declare const LAN_RATE_WINDOW_MS = 1000;
+export declare const LAN_DUPLICATE_MS = 5000;
+export declare const LAN_DUPLICATES_KEPT = 32;
+export interface LanQuestion {
+    nonce: Uint8Array;
+    gameId: string;
+}
+export interface LanAnswer {
+    nonce: Uint8Array;
+    port: number;
+    players: number;
+    maxPlayers: number;
+    password: boolean;
+    gameId: string;
+    netVersion: string;
+    lobbyName: string;
+    hostName: string;
+}
+export declare function encodeLanQuestion(nonce: Uint8Array, gameId: string): Uint8Array;
+export declare function encodeLanAnswer(a: LanAnswer): Uint8Array;
+export declare function decodeLanQuestion(b: Uint8Array): LanQuestion | null;
+export declare function decodeLanAnswer(b: Uint8Array): LanAnswer | null;
+export type LanSourceClass = "loopback" | "private" | "link_local";
+/** The class of an IPv4 source address, or null for a public (or non-IPv4) one. */
+export declare function lanSourceClass(ip: string): LanSourceClass | null;
+/** Control characters and bidi overrides out, at most 24 UTF-16 units without splitting a pair (the hub's name rule). */
+export declare function cleanLanName(s: string): string;
+/** True when a string fits its wire limit (bytes). */
+export declare function lanFits(s: string, limit: readonly [number, number]): boolean;
+export interface LanUdp {
+    /** Binds `address:port` (port 0 = the system picks) and resolves with the bound port. Rejects when it cannot. */
+    bind(port: number, address: string, broadcast: boolean): Promise<number>;
+    send(bytes: Uint8Array, host: string, port: number): void;
+    onMessage: ((bytes: Uint8Array, fromAddress: string, fromPort: number) => void) | null;
+    close(): void;
+}
+/** A UDP socket over node:dgram, or null where there is none (a browser). The bind is exclusive: a taken port rejects. */
+export declare function nodeLanUdp(): LanUdp | null;
+/**
+ * The addresses a finder asks by default: the limited broadcast 255.255.255.255, plus the directed broadcast of every
+ * network card that has a private or link-local IPv4 address (a PC with several cards sends the limited one out of one
+ * card only). Empty-handed Node (no `os`) gives the limited one alone.
+ */
+export declare function lanBroadcastTargets(): string[];
+export interface LanHostInfo {
+    lobbyName: string;
+    hostName: string;
+    players: number;
+    maxPlayers: number;
+    password: boolean;
+    /** The direct (TCP) port a joiner connects to. */
+    port: number;
+}
+export type LanDrop = "bad_source" | "malformed" | "wrong_game" | "duplicate" | "rate_limited";
+export interface LanHostStats {
+    answered: number;
+    bad_source: number;
+    malformed: number;
+    wrong_game: number;
+    duplicate: number;
+    rate_limited: number;
+}
+/** The answering rules (spec s.3), with no socket: `handle` gets a datagram and the address it came from. */
+export declare class LanAnswerer {
+    readonly stats: LanHostStats;
+    constructor(o: {
+        gameId: string;
+        netVersion: string;
+        /** The lobby now, or null when none is open (nothing is answered). */
+        info: () => LanHostInfo | null;
+        /** Sends the answer to where the question came from. */
+        reply: (bytes: Uint8Array, address: string, port: number) => void;
+        now?: () => number;
+    });
+    /** Returns "answer" when an answer was sent, the drop counter name when the datagram was dropped, or "no_lobby". */
+    handle(bytes: Uint8Array, address: string, port: number): "answer" | LanDrop | "no_lobby";
+}
+export interface LanHostOptions {
+    gameId: string;
+    netVersion: string;
+    info: () => LanHostInfo | null;
+    /** UDP port to answer on (default 47840). */
+    port?: number;
+    /** "127.0.0.1" for a host that listens on the loopback only; default "0.0.0.0". */
+    bindHost?: string;
+    udp?: () => LanUdp | null;
+    now?: () => number;
+    /** Net log lines. */
+    log?: (line: string) => void;
+}
+/** The host's answering socket. `start()` resolves true when it listens; false (with a log line) when it cannot. */
+export declare class LanHost {
+    readonly answerer: LanAnswerer;
+    port: number;
+    constructor(o: LanHostOptions);
+    get listening(): boolean;
+    start(): Promise<boolean>;
+    close(): void;
+}
+/** One row of the list a menu draws (one per host). */
+export interface LanGame {
+    address: string;
+    port: number;
+    /** The lobby's name (`LobbySummary.name`). */
+    name: string;
+    hostName: string;
+    players: number;
+    maxPlayers: number;
+    hasPassword: boolean;
+    /** False: another `netVersion` (the row shows why it cannot be joined). */
+    sameVersion: boolean;
+    netVersion: string;
+    lastSeenMs: number;
+}
+export type LanFinderStatus = "idle" | "running" | "off" | "browser" | "socket_failed";
+export type LanFinderDrop = "malformed" | "bad_source" | "wrong_nonce" | "wrong_game";
+export interface LanFinderOptions {
+    gameId: string;
+    netVersion: string;
+    /** Where to ask. Default: lanBroadcastTargets(). A test or a `--local` game passes `["127.0.0.1"]`. */
+    targets?: string[];
+    /** The hosts' answering port (default 47840). */
+    port?: number;
+    /** False: `start()` does nothing and `status` is "off" (the blueprint's `hosting.lan` is false). Default true. */
+    enabled?: boolean;
+    askIntervalMs?: number;
+    minGapMs?: number;
+    rowTimeoutMs?: number;
+    udp?: () => LanUdp | null;
+    now?: () => number;
+    log?: (line: string) => void;
+}
+/**
+ * Finds LAN hosts. `start()` opens one UDP socket on a port the system picks and asks now and then; `stop()` closes it,
+ * empties the list and drops any late datagram. `games` is the list; `on("changed")` fires when it changes.
+ */
+export declare class LanFinder extends Emitter<{
+    changed: [games: LanGame[]];
+    status: [status: LanFinderStatus, reason: string];
+}> {
+    readonly stats: {
+        kept: number;
+        malformed: number;
+        bad_source: number;
+        wrong_nonce: number;
+        wrong_game: number;
+        full: number;
+    };
+    status: LanFinderStatus;
+    statusReason: string;
+    constructor(o: LanFinderOptions);
+    get games(): LanGame[];
+    get running(): boolean;
+    start(): Promise<LanFinderStatus>;
+    stop(): void;
+    /** Test seam: treat this nonce (16 hex characters) as one this finder sent. */
+    rememberNonce(hex: string): void;
+    /** Asks at once (held until `minGapMs` after the last question when that is sooner). */
+    askNow(): void;
+    /** The finder's rules for one datagram (spec s.4). Returns "ok", "other_version" or the drop reason. */
+    receive(bytes: Uint8Array, address: string, port: number): "ok" | "other_version" | LanFinderDrop;
+}
 ```
 
 ## ui/index

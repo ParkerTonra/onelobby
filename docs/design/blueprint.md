@@ -168,11 +168,19 @@ the transport (`DataChannelTransport`, `GodotTransport`, `UnityTransport`, brows
 | `hosting.server` | bool | `true` for `web`; `false` otherwise | both | exists (`HostAsync`, `kit.host`) | Photon / Nakama hosted rooms |
 | `hosting.lobbyServer` | URL string | `""` | R | exists (`lobbyServer`) | AGENTS.md rule 5: a setting, never a constant |
 | `hosting.directPort` | int 1024-65535 | 47810 | R | exists (`DirectPort`, `port`) | Godot `create_server(port, ...)`; Factorio documents its port |
+| `hosting.lan` | bool | `false` | R | exists (`DirectHostOptions.Lan`, `hostDirect` `lan`, `host_direct` `lan`; `LanFinder` / `kit.lanFinder()` / `client.lan_finder()`; spec/lan-discovery.md) | Minecraft Open to LAN, Factorio "Browse LAN games"; opt-in because it adds a UDP socket |
 | `hosting.openPort` | bool | `true` | R | exists (`OpenPort`) | direct-ip recipe s.5 toggle |
 | `hosting.nostr` | bool | `true` | R | exists (`nostr` option of `hostDirect` / `DirectHostOptions.Nostr`) | Trystero-style signaling over public relays (docs/design/no-server-fallback.md); off = IP codes only |
 | `hosting.nostrRelays` | string[] of `wss://` URLs | the library's seven (probed 2026-10-26) | R | exists (`nostr.relays` / `NostrOptions.Relays`; JS `checkNostrRelays` probes them) | public Nostr relays that accept ephemeral kind 25050; the `onelobby` skill re-probes and writes the working ones |
 | `hosting.relayOnly` | bool | `false` | R | exists (`relayOnly`) | Steam SDR's IP-hiding rationale (DESIGN.md s.10) |
 | `hosting.allowedOrigins` | string[] | `[]` | R | exists (`AllowedOrigins`) | direct host origin check (0.4.1) |
+
+`hosting.lan` turns on LAN discovery (`spec/lan-discovery.md`): a direct host answers a question that a player's game
+broadcasts on the local network, and the game's menu (a "LAN games" tab, the next piece of work) lists the answers. Off by
+default; with it off no socket is opened and no packet is sent. It needs `hosting.direct` (rule `lan_needs_direct`, path
+`hosting.lan`; a `web` blueprint has no direct hosting, so `lan: true` there fails the same way). The UDP port is not a
+blueprint key: every host of one game must use the same port to be found, so it is the library constant 47840, changed
+only by the host and finder code option `port` (a game that must move it, or a test).
 
 At least one of `direct` / `server` must be true (schema `anyOf`). `both` is the shutdown-safe default the vision asks
 for: codes from the hosted server while it runs, direct codes forever.
@@ -294,7 +302,7 @@ what makes the hand-edit path real: the file wins even over code that still call
   "version": 1,
   "game": { "id": "com.example.antcolony", "netVersion": "1", "title": "Ant Colony" },
   "engine": "node-browser",
-  "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47810, "openPort": true, "nostr": true },
+  "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47810, "lan": false, "openPort": true, "nostr": true },
   "lobby": { "maxPlayers": 4, "listed": false, "approveJoins": false, "password": false, "lateJoin": true, "rejoin": true, "joinLink": true },
   "sync": { "mode": "lockstep", "tickRate": 20, "hashEveryTicks": 20 },
   "players": { "identity": "name" },
@@ -312,7 +320,7 @@ The scaffolder and the skill write the full file anyway: a file you can read bea
 
 - `spec/blueprint.schema.json`, draft 2020-12, next to the existing `spec/signaling.schema.json`. Every key has
   `description` (the one-line "why" the agent shows) and `default`. Cross-key rules as `allOf`/`if`/`then`: at least one
-  hosting mode; `listed` and `approveJoins` not both; `migrate` needs `server`; `replication` needs an explicit engine other than `godot-gdscript`.
+  hosting mode; `listed` and `approveJoins` not both; `lan` needs `direct`; `migrate` needs `server`; `replication` needs an explicit engine other than `godot-gdscript`.
 - Shipped three ways: in the npm package (`onelobby/blueprint.schema.json`, so the `$schema` URL above works from
   unpkg or jsDelivr with a pinned version), as an embedded resource in `OneLobby.Core` (C# validates with the same
   file), and in the repo for the test vectors.

@@ -48,6 +48,9 @@ call that walks the whole route chain (lobby server, then Nostr code, then direc
 retry), player-pasted relay line, LAN discovery (same-network broadcast), rejoin after a drop with the token saved.
 LAN discovery is built in this release as opt-in: off unless the game maker turns it on in `onelobby.json`; then the menu gets a
 "LAN games" tab and the game listens only while that tab is open. Typing the host's IP and port keeps working in every game.
+Status (2026-11-16): the library half is built in JS (Node), C# and GDScript (`spec/lan-discovery.md`, `hosting.lan`, the host's
+answering socket, the finder and its rows; proven on one machine over 127.0.0.1 only). The "LAN games" menu tab is the next
+lane; a two-PC run on a real network is still owed.
 
 **Lobby.** Player names (default name, length clamp, sanitise, dedupe as "Name 2", rename), per-player data (colour,
 avatar index, team or seat), ready toggle, host settings (max players, password on every route, listed or private),
