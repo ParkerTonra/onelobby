@@ -11,8 +11,8 @@ namespace OneLobby.Replication
     /// input with <see cref="TryGetInput"/>, then <see cref="SendSnapshot"/>. Each client gets a delta against the last
     /// snapshot it acknowledged, on the fast channel.</para>
     /// <para>Client: <see cref="SubmitInput"/> once per <see cref="Clock"/> tick, render remote entities with
-    /// <see cref="TrySample{T}"/> at <see cref="RenderTick"/> (100 ms behind the host), and reconcile the local player with
-    /// <see cref="TryGetLatest{T}"/> + <see cref="LastProcessedInput"/>.</para>
+    /// <see cref="TrySample{T}(NetId, out T)"/> at <see cref="RenderTick"/> (100 ms behind the host), and reconcile the local player with
+    /// <see cref="TryGetLatest{T}(NetId, out T, out uint)"/> + <see cref="LastProcessedInput"/>.</para>
     /// Call <see cref="Pump"/> once per frame instead of <c>lobby.Pump()</c>; events fire inside it.
     /// </summary>
     public sealed class ReplicationSession : IDisposable
@@ -79,6 +79,15 @@ namespace OneLobby.Replication
         private long _lastPumpMs;
         private long _lastInputSendMs = long.MinValue / 2;
         private long _newestAtMs = -1;
+        private double _delayMs;
+        private double _jitterMs;
+        private long _lastArriveMs = -1;
+        private uint _lastArriveTick;
+        private readonly Dictionary<int, long[]> _traffic = new();   // peer -> { sent, received } payload bytes
+        private readonly Dictionary<byte, ExtensionHandler> _extensions = new();
+
+        /// <summary>Handler of an add-on message kind (<see cref="RegisterKind"/>): sender, the whole payload, the channel.</summary>
+        public delegate void ExtensionHandler(int from, ReadOnlyMemory<byte> payload, Channel channel);
 
         public ReplicationSession(Lobby lobby, ReplicationConfig? config = null)
         {
@@ -100,9 +109,51 @@ namespace OneLobby.Replication
                         else _joining.Add(p.PeerId);
                     }
             _lastPumpMs = lobby.NowMs;
+            _delayMs = Config.InterpolationDelayMs;
         }
 
         public ReplicationConfig Config { get; }
+
+        /// <summary>
+        /// Client: the render delay in ms right now: <see cref="ReplicationConfig.InterpolationDelayMs"/>, or the adaptive value
+        /// when <see cref="ReplicationConfig.AdaptiveDelay"/> is on.
+        /// </summary>
+        public double InterpolationDelayMs => _delayMs;
+        /// <summary>Client: smoothed snapshot arrival jitter in ms (always measured; only <see cref="ReplicationConfig.AdaptiveDelay"/> acts on it).</summary>
+        public double JitterMs => _jitterMs;
+
+        /// <summary>Replication payload bytes sent to and received from one peer since it was first seen (all kinds, no lobby header).</summary>
+        public (long Sent, long Received) TrafficWith(int peerId) => _traffic.TryGetValue(peerId, out var t) ? (t[0], t[1]) : (0, 0);
+
+        private void CountTraffic(int peer, int dir, int bytes)
+        {
+            if (!_traffic.TryGetValue(peer, out var t)) _traffic[peer] = t = new long[2];
+            t[dir] += bytes;
+        }
+
+        /// <summary>
+        /// Add-on layers (the player layer): handle every message of replication kind <paramref name="kind"/> (5 and up, additive
+        /// per spec/replication.md "Versioning"). A handler that finds bad bytes calls <see cref="CountMalformed"/>.
+        /// </summary>
+        public void RegisterKind(byte kind, ExtensionHandler handler)
+        {
+            if (kind < 5) throw new ArgumentOutOfRangeException(nameof(kind), "kind must be 5..255");
+            _extensions[kind] = handler ?? throw new ArgumentNullException(nameof(handler));
+        }
+
+        /// <summary>Send a payload of an add-on kind to one peer on a channel, counted as event bytes in <see cref="Rates"/>.</summary>
+        public void SendExtension(int peerId, ReadOnlySpan<byte> payload, Channel channel)
+        {
+            var bytes = payload.ToArray();
+            _lobby.Send(peerId, bytes, channel);
+            _rates.Add(_lobby.NowMs, RateMeter.Event, bytes.Length);
+            CountTraffic(peerId, 0, bytes.Length);
+            LogPacket("out", peerId, channel, bytes, null);
+            Stats.EventsSent++;
+        }
+
+        /// <summary>Count one add-on message as malformed.</summary>
+        public void CountMalformed() => Stats.Malformed++;
         public bool IsHost { get; }
         public Lobby Lobby => _lobby;
 
@@ -334,6 +385,7 @@ namespace OneLobby.Replication
                 var ch = keyframe ? Channel.Reliable : Channel.Fast;
                 _lobby.Send(c.Peer, bytes, ch);
                 _rates.Add(nowMs, RateMeter.Snapshot, bytes.Length);
+                CountTraffic(c.Peer, 0, bytes.Length);
                 LogPacket("out", c.Peer, ch, bytes, baseline);
                 c.BytesSent += bytes.Length;
                 Stats.SnapshotsSent++;
@@ -375,6 +427,7 @@ namespace OneLobby.Replication
             }
             _lobby.Send(peer, bytes, channel);
             _rates.Add(_lobby.NowMs, RateMeter.Event, bytes.Length);
+            CountTraffic(peer, 0, bytes.Length);
             LogPacket("out", peer, channel, bytes, null);
             if (channel == Channel.Reliable) { _eventBytes.TryGetValue(peer, out var n); _eventBytes[peer] = n + bytes.Length; }
         }
@@ -467,6 +520,7 @@ namespace OneLobby.Replication
             var bytes = Proto.EncodeInput(_ack, _inputSeq, _recentInputs, n, _w);
             _lobby.Send(_lobby.HostPeerId, bytes, Channel.Fast);
             _rates.Add(_lobby.NowMs, RateMeter.Input, bytes.Length);
+            CountTraffic(_lobby.HostPeerId, 0, bytes.Length);
             LogPacket("out", _lobby.HostPeerId, Channel.Fast, bytes, null);
             _lastInputSendMs = _lobby.NowMs;
             Stats.InputsSent += n > 0 ? 1 : 0;
@@ -502,6 +556,56 @@ namespace OneLobby.Replication
             }
             state = sa; // newest known (or despawning next): hold, never extrapolate
             return true;
+        }
+
+        /// <summary>Client: <see cref="TrySample{T}(NetId, out T)"/> for a state whose layout comes from a <see cref="IStateSchema{T}"/> instance.</summary>
+        public bool TrySample<T>(NetId id, IStateSchema<T> schema, out T state) => TrySampleAt(id, _renderTick, schema, out state);
+
+        /// <summary>Client: <see cref="TrySampleAt{T}(NetId, double, out T)"/> for a state read and blended by a <see cref="IStateSchema{T}"/>.</summary>
+        public bool TrySampleAt<T>(NetId id, double tick, IStateSchema<T> schema, out T state)
+        {
+            state = default!;
+            if (_ring.Count == 0) return false;
+            var keys = _ring.Keys;
+            var ai = FloorIndex(tick);
+            if (ai < 0) return false;
+            var a = _ring.Values[ai];
+            var ia = a.IndexOf(id.Value);
+            if (ia < 0) return false;
+            var sa = DecodeWith(schema, a.Ents[ia].State);
+            if (ai + 1 < _ring.Count && tick > keys[ai])
+            {
+                var b = _ring.Values[ai + 1];
+                var ib = b.IndexOf(id.Value);
+                if (ib >= 0 && b.Ents[ib].Type == a.Ents[ia].Type)
+                {
+                    var sb = DecodeWith(schema, b.Ents[ib].State);
+                    var t = (tick - keys[ai]) / ((double)keys[ai + 1] - keys[ai]);
+                    state = schema.Lerp(sa, sb, t);
+                    return true;
+                }
+            }
+            state = sa; // newest known (or despawning next): hold, never extrapolate
+            return true;
+        }
+
+        /// <summary>Client: <see cref="TryGetLatest{T}(NetId, out T, out uint)"/> for a state read by a <see cref="IStateSchema{T}"/>.</summary>
+        public bool TryGetLatest<T>(NetId id, IStateSchema<T> schema, out T state, out uint tick)
+        {
+            state = default!; tick = 0;
+            if (_ring.Count == 0) return false;
+            var w = _ring.Values[_ring.Count - 1];
+            var i = w.IndexOf(id.Value);
+            if (i < 0) return false;
+            state = DecodeWith(schema, w.Ents[i].State);
+            tick = w.Tick;
+            return true;
+        }
+
+        private T DecodeWith<T>(IStateSchema<T> schema, byte[] bytes)
+        {
+            _nr.Reset(bytes, bytes.Length);
+            return schema.Read(_nr);
         }
 
         /// <summary>Client: the entity's state in the newest snapshot (not interpolated), e.g. the local player's authoritative state.</summary>
@@ -558,6 +662,7 @@ namespace OneLobby.Replication
             var now = _lobby.NowMs;
             if (h.Tick > _newestTick)
             {
+                MeasureJitter(h.Tick, now);
                 _newestTick = h.Tick;
                 _newestAtMs = now;
                 _ack = h.Tick;
@@ -572,10 +677,34 @@ namespace OneLobby.Replication
             _lastSampleMs = now;
         }
 
+        // Jitter: how far a snapshot's spacing in time is from its spacing in ticks (RFC 3550 style, grows fast, shrinks slowly).
+        private void MeasureJitter(uint tick, long now)
+        {
+            if (_lastArriveMs >= 0)
+            {
+                var d = Math.Abs(now - _lastArriveMs - ((double)tick - _lastArriveTick) * Config.TickMs);
+                _jitterMs += (d - _jitterMs) * (d > _jitterMs ? 0.25 : 1.0 / 32);
+            }
+            _lastArriveMs = now;
+            _lastArriveTick = tick;
+        }
+
+        private void AdaptDelay(long elapsedMs)
+        {
+            var interval = Config.TickMs * Math.Max(1, Config.SnapshotEveryTicks);
+            var lo = 2 * interval;
+            var hi = Math.Max(lo, Config.MaxInterpolationDelayMs);
+            var target = Math.Min(hi, Math.Max(lo, 2 * interval + 4 * _jitterMs));
+            if (target > _delayMs) _delayMs += (target - _delayMs) * Math.Min(1, elapsedMs / 100.0); // grows within ~100 ms
+            else _delayMs = Math.Max(target, _delayMs - elapsedMs * 0.02);                            // shrinks at most 20 ms per second
+            _delayMs = Math.Min(hi, Math.Max(lo, _delayMs));
+        }
+
         private void UpdateRenderTick(long elapsedMs)
         {
             if (!_haveOffset) return;
-            var target = ServerTick - Config.InterpolationDelayMs / Config.TickMs;
+            if (Config.AdaptiveDelay) AdaptDelay(elapsedMs);
+            var target = ServerTick - _delayMs / Config.TickMs;
             if (!_haveRender || Math.Abs(target - _renderTick) > 10) { _renderTick = target; _haveRender = true; return; }
             // advance with the local clock and close 10% of the error per pump; never run backwards
             var next = _renderTick + elapsedMs / Config.TickMs;
@@ -615,6 +744,15 @@ namespace OneLobby.Replication
             var span = payload.Span;
             if (!Proto.IsReplication(span)) { OtherMessage?.Invoke(from, payload, channel); return; }
             if (span[1] != Proto.Version) { Stats.Malformed++; return; }
+            if (span[2] >= 1) CountTraffic(from, 1, span.Length);
+            if (span[2] >= 5 && _extensions.TryGetValue(span[2], out var ext))
+            {
+                _rates.Add(_lobby.NowMs, RateMeter.Received + RateMeter.Event, span.Length);
+                if (PacketLog != null) LogPacket("in", from, channel, span, null);
+                try { ext(from, payload, channel); }
+                catch (MalformedException) { Stats.Malformed++; }
+                return;
+            }
             if (span[2] >= 1 && span[2] <= 4)
             {
                 _rates.Add(_lobby.NowMs, RateMeter.Received + (span[2] == Proto.KindSnapshot ? RateMeter.Snapshot : span[2] == Proto.KindInput ? RateMeter.Input : RateMeter.Event), span.Length);

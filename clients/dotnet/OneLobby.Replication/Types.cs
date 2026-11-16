@@ -57,8 +57,14 @@ namespace OneLobby.Replication
         int SnapshotWarnBytes = 1200,
         int HoldEventsForTicks = 0,
         double KeyframeSeconds = 5,
-        int PacketLogPerSecond = 20)
+        int PacketLogPerSecond = 20,
+        bool AdaptiveDelay = false,
+        double MaxInterpolationDelayMs = 250)
     {
+        // AdaptiveDelay (client, default off): grow and shrink the render delay with the link (spec/replication.md "Clock and
+        // render time"): clamp(2 I + 4 J, 2 I, MaxInterpolationDelayMs), I = the snapshot interval, J = the smoothed arrival
+        // jitter. Off keeps the fixed InterpolationDelayMs. The player layer (NetPlayers) turns it on for a session it makes.
+
         // KeyframeSeconds (host, 0 = off): a client gets a full snapshot on the reliable channel when its link comes up and
         // then every this many seconds (spec/replication.md "Keyframes"). PacketLogPerSecond caps ReplicationSession.PacketLog.
 
@@ -66,6 +72,19 @@ namespace OneLobby.Replication
         // kept) until that snapshot is in, or for at most this many ticks, so the event and the state it refers to line up.
 
         public double TickMs => 1000.0 / TickRate;
+    }
+
+    /// <summary>
+    /// How a session reads and blends one entity's state when the state type cannot know its own configuration (the player
+    /// preset: its layout depends on the game's settings). The generic <see cref="IReplicatedState{T}"/> path is for state types
+    /// with a fixed layout.
+    /// </summary>
+    public interface IStateSchema<T>
+    {
+        /// <summary>Read one state; mirrors what the host wrote.</summary>
+        T Read(NetReader reader);
+        /// <summary>The state between <paramref name="a"/> (older) and <paramref name="b"/> (newer), t in [0, 1].</summary>
+        T Lerp(in T a, in T b, double t);
     }
 
     /// <summary>
