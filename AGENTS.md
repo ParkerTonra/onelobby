@@ -6,7 +6,7 @@ client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneL
 the server never sees game data.
 Pick a mode (or run `npx create-onelobby --recommend "<one line about the game>" --json` for a proposal with reasons): `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
-`OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# and JS also have prediction and lag-compensation helpers; JS, C# and GDScript have the networked player layer, `NetPlayers` / `OneLobbyNetPlayers` plus the Godot `OneLobbyNetPlayer` node, `docs/recipes/net-player.md`: players in the world with no player sync of your own).
+`OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# and JS also have prediction and lag-compensation helpers; JS, C# and GDScript have the networked player layer, `NetPlayers` / `OneLobbyNetPlayers` plus the Godot `OneLobbyNetPlayer` node and the Unity `OneLobbyNetPlayer` component, `docs/recipes/net-player.md`: players in the world with no player sync of your own).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
 
 ## API surface (same shape in both languages)
@@ -329,7 +329,7 @@ per non-default key, build with the scaffolder's template and the drop-in menu (
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Replicated state (host-authoritative real-time: shooters, physics, AI), C#, JS and GDScript: `docs/recipes/replication.md`
-- Networked players (position, facing, jump, shoot, melee; the player's own PC or the host places them), JS, C# (the layer), GDScript and Godot C# (the node, a spawner, a sample; the C# node is the add-on folder `clients/dotnet/demo-godot/addons/onelobby_net_player/`), not yet a Unity component: `docs/recipes/net-player.md`
+- Networked players (position, facing, jump, shoot, melee; the player's own PC or the host places them), JS, C# (the layer), GDScript (the Godot node, a spawner, a sample) and Unity (the `OneLobbyNetPlayer` component, `OneLobbyNetPlayerSpawner`, a sample), not yet a Godot C# node: `docs/recipes/net-player.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

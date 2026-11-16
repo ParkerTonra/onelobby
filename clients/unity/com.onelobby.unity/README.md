@@ -10,6 +10,7 @@ package only adds:
 | `UnityTransport : ITransport` | `OneLobby.DataChannel.DataChannelTransport` (three negotiated data channels, DESIGN s.8, + `ClientWebSocket` signaling), native log to the console |
 | `UnityVoiceAudio : IVoiceAudio` | `Microphone` capture to 48 kHz mono 20 ms frames, one `AudioSource` per speaker (`OnAudioFilterRead`) |
 | `OneLobbyMenu` | the drop-in multiplayer menu: add it to an empty GameObject (UI Toolkit controls built in code, no asset or event system; `docs/recipes/menu.md`, "Unity"). Blueprint at `Assets/Resources/onelobby.json` or its `Blueprint` field; `GameStarted(lobby)`, `ReturnedToLobby`, `Left`; reword with `Texts`, restyle with `StyleSheets`. Sample: Menu |
+| `OneLobbyNetPlayer`, `OneLobbyNetPlayerSpawner` | networked players: one component per character (owner or host authority, a `CharacterController` / `Rigidbody` / bare transform, C# events per action, an `Animator` map by name) and a spawner that makes one character per player; `docs/recipes/net-player.md`, section 12; sample `Samples~/NetPlayer` |
 | `OneLobbyRunner` | MonoBehaviour that owns a `LobbyClient` and pumps it every `Update` (events fire on the main thread); `HostDirectAsync` / `JoinDirectAsync` (also with `JoinDirectOptions`: TURN, Nostr) / `RejoinDirectAsync` host by IP with a join code and no server (`OneLobby.Direct`, `docs/recipes/direct-ip.md`) |
 
 Platforms: whatever natives `Runtime/Plugins` holds. Built and tested here: Windows x64 and Linux x64. The CI workflow

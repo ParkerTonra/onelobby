@@ -261,6 +261,10 @@ principle). Mobile needs the microphone permission (iOS: Microphone Usage Descri
 `Permission.Microphone`). Voice on Unity has not been verified on real audio hardware yet; data channels are the
 tested path.
 
+## Players in the world
+
+`OneLobbyNetPlayer` and `OneLobbyNetPlayerSpawner` put the players of a replication-mode lobby in the world (position, facing, movement state, jump, shoot, melee, smooth on the other screens) with no player sync of your own: `docs/recipes/net-player.md`, section 12, and the package's `NetPlayer` sample. Two built players of that sample on one PC are run by `clients/unity/net-player-test.sh` (local only: Unity is not in CI).
+
 ## Shared pause
 
 `runner.Lobby.Pause` needs nothing from the runner: call `Pause.Request(true)` from your pause button and set `Time.timeScale` in 

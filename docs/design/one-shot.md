@@ -281,6 +281,7 @@ The game can add its own fields and events in `onelobby.json`, and remove any it
   action event (`shot`, `melee`, ...) so the game plays its own sounds and effects.
 - **Unity:** a `NetPlayer` component that does the same with a `CharacterController` or `Rigidbody` and an `Animator`
   (parameters mapped by name), built on Replication.
+  *Landed (Unity):* `OneLobbyNetPlayer` and `OneLobbyNetPlayerSpawner` in `com.onelobby.unity` (`docs/recipes/net-player.md` section 12): C# events per action event, a `CharacterController` switched off and a `Rigidbody` made kinematic on a character the component places, an `Animator` map by name, 2D by `sync.player.space`, a sample that moves (`Samples~/NetPlayer`). Proven in one editor process on an in-memory network and by two built players on one PC (`clients/unity/net-player-test.sh`, local only: Unity is not in CI).
 - **Web:** the same preset in JS, with an adapter for the common engines added as games need them.
 - Host authority stays: the host checks movement speed and fire rate against the game's limits and corrects the player,
   and hits are judged on the host with the existing rewind.
