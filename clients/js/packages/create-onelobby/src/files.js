@@ -77,7 +77,7 @@ export function intoFiles({ blueprint, packageJson, glueName = "session.js", sta
  * The "Next:" lines of a web `--into` run, in the order the work happens. `pkg`: { created, hasOnelobby, isModule } (the folder's
  * package.json as it is after this run).
  */
-export function intoNext({ rel, pkg, glueName = "session.js", standIn = true, nodeHost = false, mode = "lockstep", onelobbyVersion = DEFAULT_DEPENDENCY }) {
+export function intoNext({ rel, pkg, glueName = "session.js", standIn = true, nodeHost = false, mode = "lockstep", titleFromFolder = false, onelobbyVersion = DEFAULT_DEPENDENCY }) {
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (pkg.created) next.push('npm install   # package.json was missing, so a minimal one was written (private, "type": "module", the onelobby dependency)');
@@ -85,7 +85,7 @@ export function intoNext({ rel, pkg, glueName = "session.js", standIn = true, no
     if (!pkg.isModule) next.push(`your package.json has no "type": "module" and was left as it is (a CommonJS game keeps working): the glue is named multiplayer/${glueName}, and a .mjs file is an ES module whatever the package says; do not add "type": "module"`);
     next.push(pkg.hasOnelobby ? "npm install" : `npm install onelobby@${onelobbyVersion}   # your package.json was left as it is and does not list onelobby`);
   }
-  next.push("game.title in onelobby.json came from the folder name: set it to the game's name (--title, or edit the file)");
+  if (titleFromFolder) next.push("game.title in onelobby.json came from the folder name: set it to the game's name (--title, or edit the file)");
   if (nodeHost)
     next.push(
       'a Node process hosts this game: build the kit with OneLobby.fromConfig(onelobby.json) and call hostDirect(kit, { http }) from "onelobby/direct"; hostDirect and hostNostr take seats, late join, port and nostr from kit.blueprint (explicit options win). To test on this PC only: hostDirect(kit, { bindHost: "127.0.0.1", openPort: false, nostr: false })',

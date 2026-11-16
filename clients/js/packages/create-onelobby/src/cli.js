@@ -337,7 +337,7 @@ export async function run(argv, io) {
       if (blueprint.hosting.server && !blueprint.hosting.lobbyServer) next.push("set hosting.lobbyServer in onelobby.json (or open the page with ?lobby=ws://HOST:8080/ws)");
     } else {
       const deps = { ...existingPkg?.dependencies, ...existingPkg?.devDependencies };
-      next.push(...intoNext({ rel, glueName, standIn, nodeHost: template === "node-browser", mode: blueprint.sync.mode, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
+      next.push(...intoNext({ rel, glueName, standIn, titleFromFolder: blueprint.game.title === dirName, nodeHost: template === "node-browser", mode: blueprint.sync.mode, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
     }
 
     const result = { ok: true, dir: target, template, blueprint, files: files.map((f) => f.path), next };

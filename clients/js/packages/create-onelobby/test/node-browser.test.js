@@ -64,6 +64,9 @@ describe("--into --template node-browser", () => {
     expect(next).toContain("no lockstep stand-in test was written");
     expect(next).toContain("importmap");
     expect(next).toContain("game.title");
+    put("g2/package.json", "{}");
+    const titled = await cli(["--into", "g2", "--template", "node-browser", "--mode", "raw", "--yes", "--json", "--dry-run", "--title", "Real Name"]);
+    expect(titled.json.next.join("\n")).not.toContain("game.title in onelobby.json came from");
     expect(next).not.toContain("node test/multiplayer.mjs");
     expect(readFileSync(at("g/package.json"), "utf8")).toBe('{ "name": "g", "main": "server.js" }');
   });
