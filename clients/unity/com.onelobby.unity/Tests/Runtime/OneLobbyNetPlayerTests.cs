@@ -453,6 +453,53 @@ namespace OneLobby.Unity.PlayTests
         }
 
         [UnityTest]
+        public IEnumerator Spawner_ASpectatorsLocalCharacterIsTakenBackWhenTheRosterSaysSpectator()
+        {
+            var host = new Peer { Name = "host" };
+            host.Client = new LobbyClient(Config("host"), _net.CreateTransport());
+            _peers.Add(host);
+            var t = host.Client.HostAsync(new LobbyOptions("room", 8) { Room = new RoomOptions { Spectators = 2 } });
+            yield return Wait(t);
+            host.Lobby = t.Result;
+            BeginSpawner(host, null);
+            var s = new Peer { Name = "spectator" };
+            s.Client = new LobbyClient(Config("spectator"), _net.CreateTransport());
+            _peers.Add(s);
+            var tj = s.Client.JoinAsync(host.Lobby.Code, new RoomJoinOptions { Role = RoomRole.Spectator });
+            yield return Wait(tj);
+            s.Lobby = tj.Result;
+            BeginSpawner(s, null);
+            var atOnce = s.Spawner.CharacterOf(s.Id) != null;
+            yield return Frames(60);
+            Report("spectator: local character at once " + atOnce + ", after 60 frames " + (s.Spawner.CharacterOf(s.Id) != null) + ", roster role " + s.Lobby.Room.Player(s.Id)?.Role);
+            Check(s.Spawner.CharacterOf(s.Id) == null, "the spectator has no local character once the roster says spectator");
+            Check(host.Spawner.CharacterOf(s.Id) == null, "the host never made one for it");
+            Check(host.Spawner.CharacterOf(host.Id) != null, "the host's own stays");
+            if (atOnce) Check(s.Removed.Contains(s.Id), "the early character was taken back with PlayerRemoved");
+        }
+
+        [UnityTest]
+        public IEnumerator HostAuthority_SpawnerWithoutAStepLogsOneErrorAndNeverThrows()
+        {
+            var p = new Peer { Name = "host" };
+            p.Client = new LobbyClient(Config("host"), _net.CreateTransport());
+            _peers.Add(p);
+            var t = p.Client.HostAsync(new LobbyOptions("room", 4));
+            yield return Wait(t);
+            p.Lobby = t.Result;
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("give the component a Step"));
+            BeginSpawner(p, new NetPlayersOptions { Authority = PlayerAuthority.Host });
+            _logged.Clear();
+            yield return Frames(60);
+            var bad = _logged.FindAll(l => l.StartsWith("Error", StringComparison.Ordinal) || l.StartsWith("Exception", StringComparison.Ordinal));
+            Check(bad.Count == 0, "no throw per frame: " + string.Join(" | ", bad));
+            // a step arrives later: the layer runs
+            p.Spawner.Players!.Step = (st, i, dt) => st;
+            yield return Frames(30);
+            Check(!_logged.Exists(l => l.StartsWith("Exception", StringComparison.Ordinal) || l.StartsWith("Error", StringComparison.Ordinal)), "and runs once a Step is set");
+        }
+
+        [UnityTest]
         public IEnumerator Animator_ValuesFollowTheMapAndAMissingParameterIsSkipped()
         {
             Floor();
