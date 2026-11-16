@@ -29,7 +29,7 @@ npx create-onelobby verify                       # opens the project in batchmod
 
 - New project: `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json` (the package, the test framework and the built-in modules the menu needs),
   `Assets/Resources/onelobby.json`, `Assets/Scripts/Boot.cs` (adds the menu in every scene from `[RuntimeInitializeOnLoadMethod]`: no scene file;
-  shows an "In game" line on `GameStarted`), `Assets/OneLobby/Tests/` (the two-peer play-mode test and its `.asmdef`), `Assets/OneLobby/Editor/BuildPlayer.cs`
+  shows an "In game" line on `GameStarted`, logs `Lobby: 2 players: Host, Joiner` each time the roster changes, adds no menu while a play-mode test plays), `Assets/OneLobby/Tests/` (the two-peer play-mode test and its `.asmdef`), `Assets/OneLobby/Editor/BuildPlayer.cs`
   (`OneLobbyBuild.Windows`), `.olc/<name>.json` (builds the player, then opens a host and a joiner window with `--local`), `AGENTS.md`, and the managed
   `.gitignore` / `.gitattributes` blocks.
 - `--into` adds the same except the boot script and `AGENTS.md`: your scenes and settings are not touched, `Packages/manifest.json` is edited in place (only the
@@ -38,9 +38,13 @@ npx create-onelobby verify                       # opens the project in batchmod
   `file:com.onelobby.unity-<version>.tgz` and the tarball goes next to `manifest.json` (build one with `clients/unity/build-unity-package.sh --pack`, or take the
   `unity-dev-package` CI artifact, which has the natives). `npx create-onelobby update` moves that line to the tool's version (a `file:` line you wrote is kept
   unless `--package-from` is given).
-- The test runs headless: `Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults <abs>.xml -logFile <abs>.log`
-  and logs `MULTIPLAYER_OK` (or `MULTIPLAYER_FAIL <what>`). The first run imports the project (a minute or two). `verify` runs the other routes through the same test with
-  arguments after Unity's own (`--route=nostr --relay=...`), against a local Nostr relay and TURN server that it starts on 127.0.0.1.
+- The test runs headless: `Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults <abs>.xml -logFile <abs>.log --local`
+  and logs `MULTIPLAYER_OK` (or `MULTIPLAYER_FAIL <what>`). The first run also imports the project. `verify` runs the other routes through the same test with
+  arguments after Unity's own (`--route=nostr --relay=...`), against a local Nostr relay and TURN server that it starts on 127.0.0.1. `--hold=5` keeps the two
+  peers connected for 5 seconds before the result line (time to look at the open sockets).
+- Read the result line, not Unity's exit code: on Windows the editor ends with exit code 0xC0000005 while it closes after a test that used the WebRTC
+  library (the open finding in `tools/engine-smoke/README.md`); the test has passed and its results file is written by then.
+- The Unity editor opens its own ports in every run, whether or not OneLobby is in the project: it listens on TCP and UDP ports on all interfaces (0.0.0.0) and connects out to Unity's own licence, package and services hosts. OneLobby's own sockets in the test and in `--local` players are on 127.0.0.1 (and ::1).
 - Never run a player or the editor without `-batchmode` in tests, and never run a player with `--host` without `--local` (127.0.0.1 only, no Nostr, no router request).
 - `clients/unity/scaffold-test.sh` runs all of this end to end on a machine with Unity; it is local only (CI has no Unity licence).
 

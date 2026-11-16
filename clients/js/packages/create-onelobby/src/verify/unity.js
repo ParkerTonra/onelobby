@@ -29,11 +29,16 @@ const MISSING_TEST_NEXT = "Run: npx create-onelobby --into . (it writes the test
 const hasTest = (dir) => TEST_FILES.every((f) => existsSync(join(dir, ...f.split("/"))));
 const read = (p) => readFileSync(p, "utf8");
 const secs = (ms) => (ms / 1000).toFixed(0);
+/** The note for a test run that passed and then ended with a non-zero exit code (Windows codes also in hex: 3221225477 is 0xC0000005). */
+export const exitWarning = (code) =>
+  `the test passed, then Unity ended with exit code ${code}${code > 255 ? ` (0x${code.toString(16).toUpperCase()})` : ""} while it closed${code === 3221225477 ? " (known on Windows after a process used the WebRTC library; the result stands)" : ""}`;
 
-/** The last line of a Unity log that names an error (a compiler error as `Assets/x.cs(3,4): error CS...`), shortened. */
+/** The line of a Unity log that names the error: the first compiler error (`Assets/x.cs(3,4): error CS...`), else the last line that names one; shortened. */
 export function lastError(log) {
-  const lines = log.split(/\r?\n/).filter((l) => /error CS\d+|^error |Exception:|An error occurred|Scripts have compiler errors|Unable to resolve|Failed to resolve/i.test(l));
-  return (lines.slice(-1)[0] ?? "no error text").trim().slice(0, 220);
+  const all = log.split(/\r?\n/);
+  const compiler = all.find((l) => /error CS\d+/.test(l));
+  const lines = all.filter((l) => /^error |Exception:|An error occurred|Scripts have compiler errors|Unable to resolve|Failed to resolve/i.test(l));
+  return (compiler ?? lines.slice(-1)[0] ?? "no error text").trim().replace(/\.$/, "").slice(0, 220);
 }
 
 /** The project's editor version from ProjectSettings/ProjectVersion.txt, or undefined. */
@@ -60,17 +65,22 @@ export function unityChecks() {
     const r = await exec(ctx, ctx.unity.exe, [...UNITY_FLAGS, "-projectPath", ctx.dir, "-logFile", log, ...extra], { cwd: ctx.dir, ...o });
     return { r, log: ctx.readLog ? ctx.readLog(log) : logText(log) };
   };
-  const routeByHand = (route, more = "") => `Rerun that route by hand: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>.xml -logFile <abs>.log --route=${route}${more}`;
+  const routeByHand = (route, more = "") => `Rerun that route by hand: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>.xml -logFile <abs>.log --local --route=${route}${more}`;
+  // `--local` rides along on every test run: a menu the game's own start-up opens while the test plays reads it and stays on 127.0.0.1
+  // (no connection check against the internet). The test's own two clients are loopback-only whatever the flags say.
   const runRoute = async (ctx, route, args, timeoutMs = 300000) => {
     const results = join(logDir(ctx), `tests-${route}.xml`);
-    const { r, log } = await u(ctx, route, ["-runTests", "-testPlatform", "PlayMode", "-assemblyNames", TEST_ASSEMBLY, "-testResults", results, `--route=${route}`, ...args], { timeoutMs });
+    const { r, log } = await u(ctx, route, ["-runTests", "-testPlatform", "PlayMode", "-assemblyNames", TEST_ASSEMBLY, "-testResults", results, "--local", `--route=${route}`, ...args], { timeoutMs });
     return { r, log, line: testLine(log, route) };
   };
   const routeResult = ({ r, log, line }, next) => {
-    if (line?.ok && !r.timedOut) return { status: "ok", detail: line.detail || undefined };
+    // the result line decides. Unity's exit code is only reported: on Windows a process that used the WebRTC library ends with 0xC0000005 while it
+    // closes (tools/engine-smoke/README.md, "Findings": the library's threads are still alive), after the test passed and its results file was written
+    if (line?.ok && !r.timedOut) return { status: "ok", detail: line.detail || undefined, ...(r.code ? { warning: exitWarning(r.code) } : {}) };
     const why = r.timedOut ? "the Unity process did not finish in time" : line ? line.why : `Unity exited ${r.code} without a result line (${lastError(log)})`;
     return { status: "fail", detail: why, next };
   };
+  const warn = (res) => (res.warning ? { warning: res.warning } : {});
   const needTest = (ctx) => (hasTest(ctx.dir) ? null : { status: "fail", detail: MISSING_TEST, next: MISSING_TEST_NEXT });
 
   return [
@@ -116,7 +126,7 @@ export function unityChecks() {
         }
         const compile = /error CS\d+/.test(log);
         if (r.code === 0 && !r.timedOut && resolved && !compile)
-          return { status: "ok", detail: `${ref}; Unity resolved ${PACKAGE_NAME} ${resolved.version ?? ""} (${resolved.source ?? "unknown source"}) and opened the project in ${secs(Date.now() - t0)} s`.replace(/\s+/g, " ") };
+          return { status: "ok", detail: `${ref}; Unity resolved ${PACKAGE_NAME}${resolved.version && resolved.version !== ref ? ` ${resolved.version}` : ""} (${resolved.source ?? "unknown source"}) and opened the project in ${secs(Date.now() - t0)} s` };
         const registry = /Unable to resolve|Failed to resolve|An error occurred while resolving packages/i.test(log) || !resolved;
         return {
           status: "fail",
@@ -147,7 +157,7 @@ export function unityChecks() {
         // the same file through the game's own C# loader (Blueprint.Parse), which adds the rules only C# has
         const res = routeResult(await runRoute(ctx, "config", []), "Fix onelobby.json so the C# loader accepts it (the message names the key).");
         if (res.status !== "ok") return { ...res, detail: `the C# loader refused onelobby.json: ${res.detail}.` };
-        return { status: "ok", detail: `${base}; loads in JS and in C#` };
+        return { status: "ok", detail: `${base}; loads in JS and in C#`, ...warn(res) };
       },
     },
     wiringCheck(),
@@ -159,7 +169,7 @@ export function unityChecks() {
         const missing = needTest(ctx);
         if (missing) return missing;
         const res = routeResult(await runRoute(ctx, "direct", []), `Run the test by hand (${routeByHand("direct")}) and read its log; check that nothing blocks Unity on 127.0.0.1.`);
-        return res.status === "ok" ? { status: "ok", detail: "two peers on 127.0.0.1, host and join by address, one message each way: the game's MultiplayerTests" } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
+        return res.status === "ok" ? { status: "ok", detail: "two peers on 127.0.0.1, host and join by address, one message each way: the game's MultiplayerTests", ...warn(res) } : { ...res, detail: `two peers on 127.0.0.1 did not connect: ${res.detail}.` };
       },
     },
     {
@@ -175,7 +185,7 @@ export function unityChecks() {
         const res = routeResult(await runRoute(ctx, "nostr", [`--relay=${relay.url}`]), `Check hosting.nostr and hosting.nostrRelays in onelobby.json, and that nothing blocks Unity on 127.0.0.1. ${routeByHand("nostr", " --relay=<a local relay>")}`);
         if (res.status !== "ok") return { ...res, detail: `two peers through a local Nostr relay on 127.0.0.1 did not connect: ${res.detail}.` };
         if (relay.stats.events <= before) return { status: "fail", detail: "the peers connected but the local Nostr relay saw no signaling events, so the Nostr path was not used.", next: "Check that hosting.nostr is on and the game does not pin hosting.nostrRelays elsewhere." };
-        return { status: "ok", detail: `two peers through a local Nostr relay on ${relay.url.replace("ws://", "")}: ${relay.stats.events - before} signaling events` };
+        return { status: "ok", detail: `two peers through a local Nostr relay on ${relay.url.replace("ws://", "")}: ${relay.stats.events - before} signaling events`, ...warn(res) };
       },
     },
     {
@@ -207,7 +217,7 @@ export function unityChecks() {
               next: "Check that the game builds its client over UnityTransport from a current com.onelobby.unity (run: npx create-onelobby update) and that no other transport carries the game's traffic. " + routeByHand("turn", " --turn=<login line>"),
             };
           }
-          return { status: "ok", detail: `relay-only through a local TURN server on 127.0.0.1:${turn.port}, login pasted as one line: ${turn.stats.allocations} allocations, ${turn.stats.relayed} relayed packets` };
+          return { status: "ok", detail: `relay-only through a local TURN server on 127.0.0.1:${turn.port}, login pasted as one line: ${turn.stats.allocations} allocations, ${turn.stats.relayed} relayed packets`, ...warn(res) };
         } finally {
           await turn.close();
         }
@@ -238,7 +248,7 @@ export function unityChecks() {
         if (missing) return missing;
         const wsUrl = `ws://127.0.0.1:${port}${uu.pathname.length > 1 ? uu.pathname : "/ws"}`;
         const res = routeResult(await runRoute(ctx, "server", [`--server=${wsUrl}`]), `Check hosting.lobbyServer and netVersion, and the server's log. ${routeByHand("server", " --server=<ws url>")}`);
-        return res.status === "ok" ? { status: "ok", detail: `host and join by code through the lobby server at ${wsUrl}` } : { ...res, detail: `the lobby-server route failed: ${res.detail}.` };
+        return res.status === "ok" ? { status: "ok", detail: `host and join by code through the lobby server at ${wsUrl}`, ...warn(res) } : { ...res, detail: `the lobby-server route failed: ${res.detail}.` };
       },
     },
   ];

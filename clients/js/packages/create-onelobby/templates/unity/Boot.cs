@@ -2,6 +2,7 @@
 using System.Linq;
 using OneLobby.Unity;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Starts the OneLobby menu in every scene, with no scene object to add: Unity calls <see cref="Create"/> once after the first scene
@@ -15,10 +16,14 @@ public sealed class GameBoot : MonoBehaviour
 {
     OneLobbyMenu _menu = null!;
     string _status = "";
+    int _players;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Create()
     {
+        // not while a play-mode test runs (the Test Framework plays its own scene, "InitTestScene..."): a test makes its own clients, and a menu
+        // opened there would run its connection check against the internet
+        if (SceneManager.GetActiveScene().name.StartsWith("InitTestScene", System.StringComparison.Ordinal)) return;
         if (FindFirstObjectByType<GameBoot>() == null) new GameObject("GameBoot").AddComponent<GameBoot>();
     }
 
@@ -33,6 +38,16 @@ public sealed class GameBoot : MonoBehaviour
         };
         _menu.ReturnedToLobby += _ => { _status = ""; }; // end the match; the menu shows the lobby again
         _menu.Left += () => { _status = ""; };
+    }
+
+    // one log line each time the roster changes ("Lobby: 2 players: Host, Joiner"), so a log shows who is in the lobby
+    void Update()
+    {
+        var lobby = _menu.Model?.Lobby;
+        var count = lobby?.Room.Players.Count ?? 0;
+        if (count == _players) return;
+        _players = count;
+        if (lobby != null) Debug.Log("Lobby: " + count + " players: " + string.Join(", ", lobby.Room.Players.Select(p => p.Name)));
     }
 
     void OnGUI()

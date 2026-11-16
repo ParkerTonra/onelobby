@@ -10,7 +10,7 @@ import { addDependencies, inspectManifest, moveDependency, readDependency } from
 import { chooseEditor, compareEditors, editorIsNewEnough, hubEditors, parseEditorVersion, resolveUnity } from "../src/unity.js";
 import { decide } from "../src/unity-update.js";
 import { runChecks } from "../src/verify/core.js";
-import { unityChecks } from "../src/verify/unity.js";
+import { exitWarning, lastError, unityChecks } from "../src/verify/unity.js";
 import { wiringCheck } from "../src/verify/wiring.js";
 
 let cwd;
@@ -83,6 +83,10 @@ describe("unity: a new project", () => {
     expect(text("my-game/Assets/OneLobby/Tests/MultiplayerTests.cs")).toContain("MULTIPLAYER_OK");
     expect(tree(at("my-game")).filter((f) => f.endsWith(".unity"))).toEqual([]);
     expect(text("my-game/.gitignore")).toContain("/[Ll]ibrary/");
+    expect(text("my-game/.gitignore")).toMatch(/^\.onelobby\/$/m); // the line verify looks for (its scratch folder)
+    // the roster line a log can be searched for, and no menu while a play-mode test plays its own scene
+    expect(boot).toContain('Debug.Log("Lobby: " + count + " players: "');
+    expect(boot).toContain('StartsWith("InitTestScene"');
     expect(text("my-game/.gitattributes")).toMatch(/^\* text=auto\n/);
   });
 
@@ -362,6 +366,36 @@ describe("unity verify: the checks", () => {
     expect(routes).toEqual(["--route=config", "--route=direct", "--route=nostr"]);
     expect(seen[0]).toEqual(expect.arrayContaining(["-batchmode", "-nographics", "-quit"]));
     expect(seen[1]).toEqual(expect.arrayContaining(["-runTests", "-testPlatform", "PlayMode", "-assemblyNames", "OneLobbyGame.Tests"]));
+    for (const a of seen.slice(1)) expect(a).toContain("--local"); // every test run: a menu the game's own start-up opens stays on 127.0.0.1
+    expect(seen[0]).not.toContain("--local");
+    expect(out.results.filter((r) => r.name === "direct" || r.name === "nostr").some((r) => r.warning)).toBe(false); // exit code 0: nothing to say
+  });
+
+  it("a test that passed in a Unity that then ended with a crash code is ok with a warning, not a failure", async () => {
+    const dir = await scaffold();
+    writeFileSync(join(dir, "Packages/packages-lock.json"), JSON.stringify({ dependencies: { "com.onelobby.unity": { version: "x", source: "local-tarball" } } }));
+    const run = async (cmd, args) => {
+      const route = args.find((a) => a.startsWith("--route="))?.slice(8);
+      const log = args[args.indexOf("-logFile") + 1];
+      mkdirSync(join(log, ".."), { recursive: true });
+      writeFileSync(log, route ? (route === "config" ? "MULTIPLAYER_OK config sync=raw direct=true nostr=true server=false relay_only=false\n" : route === "direct" ? "MULTIPLAYER_OK\n" : `MULTIPLAYER_OK ${route} code=1\n`) : "ok\n");
+      return { code: route === "direct" ? 3221225477 : 0, out: "" };
+    };
+    const relay = { url: "ws://127.0.0.1:1", stats: new Proxy({ events: 0 }, { get: (t, k) => (k === "events" ? t.events++ : t[k]) }), close: async () => {} };
+    const out = await runChecks(unityChecks(), ctxFor(dir, { resolveUnity: () => ({ exe: "unity.exe", version: "6000.2.7f2", from: "$UNITY" }), run, services: { relay } }));
+    expect(out.verdict).toBe("VERIFY_OK");
+    const direct = out.results.find((r) => r.name === "direct");
+    expect(direct).toMatchObject({ status: "ok", warning: exitWarning(3221225477) });
+    expect(direct.warning).toContain("exit code 3221225477 (0xC0000005)");
+    expect(out.results.find((r) => r.name === "nostr")).not.toHaveProperty("warning");
+    expect(exitWarning(1)).toBe("the test passed, then Unity ended with exit code 1 while it closed");
+  });
+
+  it("a compile error is named by its own line, not by Unity's summary line", () => {
+    const log = "x\nAssets\\Scripts\\Boot.cs(19,20): error CS0029: Cannot implicitly convert type 'string' to 'int'\nmore\nScripts have compiler errors.\n";
+    expect(lastError(log)).toBe("Assets\\Scripts\\Boot.cs(19,20): error CS0029: Cannot implicitly convert type 'string' to 'int'");
+    expect(lastError("a\nScripts have compiler errors.\n")).toBe("Scripts have compiler errors");
+    expect(lastError("nothing")).toBe("no error text");
   });
 
   it("a failing route names the check and the reason; a missing test file fails with the --into command", async () => {

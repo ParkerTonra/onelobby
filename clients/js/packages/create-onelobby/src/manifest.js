@@ -64,7 +64,7 @@ function members(t, open) {
 export function inspectManifest(text, file = "Packages/manifest.json") {
   let parsed;
   try {
-    parsed = JSON.parse(text.replace(/^﻿/, ""));
+    parsed = JSON.parse(text.replace(/^\uFEFF/, ""));
   } catch (e) {
     throw bad(file, `it is not valid JSON: ${e.message}`);
   }

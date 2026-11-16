@@ -21,14 +21,16 @@ namespace OneLobbyGame.Tests
     /// Two OneLobby clients in this one process, on 127.0.0.1 only (a direct host that listens on loopback, the WebRTC sockets bound to
     /// loopback, no Nostr, no public server): one hosts, the other joins by its address, and each sends the other one message. The test
     /// logs <c>MULTIPLAYER_OK</c> or <c>MULTIPLAYER_FAIL &lt;what&gt;</c>. Written by create-onelobby.
-    ///   Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults R.xml -logFile L.log
+    ///   Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults R.xml -logFile L.log --local
+    /// (<c>--local</c> is for a menu the game's own start-up opens while the test plays: it stays on 127.0.0.1; these two clients are loopback-only anyway.)
     /// <c>create-onelobby verify</c> runs its other routes through this same test, with arguments after the Unity ones (Unity ignores them):
     ///   --route=config   load Assets/Resources/onelobby.json and print what verify needs
     ///   --route=direct   (default) two peers on 127.0.0.1
     ///   --route=nostr    through the local Nostr relay at --relay=ws://127.0.0.1:PORT
     ///   --route=turn     relay-only through the TURN login in --turn="turn:127.0.0.1:PORT user pass" (and --relay=... when Nostr is on)
     ///   --route=server   host and join by code on the lobby server --server=ws://127.0.0.1:PORT/ws
-    /// A route other than direct logs <c>MULTIPLAYER_OK &lt;route&gt; ...</c> or <c>MULTIPLAYER_FAIL &lt;route&gt; &lt;what&gt;</c>.
+    /// <c>--hold=SECONDS</c> keeps the two peers connected that long before the result line (time to look at the open sockets); <c>--timeout=SECONDS</c>
+    /// changes the 60 s limit. A route other than direct logs <c>MULTIPLAYER_OK &lt;route&gt; ...</c> or <c>MULTIPLAYER_FAIL &lt;route&gt; &lt;what&gt;</c>.
     /// </summary>
     public sealed class MultiplayerTests
     {
@@ -204,7 +206,13 @@ namespace OneLobbyGame.Tests
             _guest.Send(_host.LocalPeerId, Encoding.UTF8.GetBytes("hello host"));
             if (!await Until(() => atHost.Count > 0 && atGuest.Count > 0)) { Finish(false, $"messages did not arrive (host got {atHost.Count}, guest got {atGuest.Count})"); return; }
             if (atHost[0] != (_guest.LocalPeerId, "hello host") || atGuest[0] != (_host.LocalPeerId, "hello guest")) { Finish(false, $"wrong message: host got {atHost[0]}, guest got {atGuest[0]}"); return; }
-            var code = _host.JoinCode;
+            // --hold=SECONDS: stay connected that long before the result line (time to look at the open sockets, for example with netstat)
+            if (args.TryGetValue("hold", out var hv) && int.TryParse(hv, out var hold) && hold > 0)
+            {
+                Debug.Log("MULTIPLAYER_HOLD " + hold);
+                await Until(() => false, hold * 1000);
+            }
+            var code = _route == "server" ? _host.Code : _host.JoinCode;
             Finish(true, $"code={code}");
         }
     }

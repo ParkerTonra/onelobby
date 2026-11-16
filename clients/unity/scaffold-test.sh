@@ -3,13 +3,13 @@
 # not run by any workflow. Loopback only: the editor runs with -batchmode -nographics, every player with -batchmode and --local.
 #   1. scaffold a new project (--package-from a tarball), run its own play-mode test (expect MULTIPLAYER_OK in the Unity log)
 #   2. build the Windows player with the scaffolded editor script, then run two players the way the .olc entry does
-#      (--host --local --name=Host, --join=127.0.0.1:47810 --local --name=Joiner) and check both logs say they bound 127.0.0.1 only
-#      (the menu does not log a roster, so reaching a two-player lobby is NOT asserted here)
+#      (--host --local --name=Host, --join=127.0.0.1:47810 --local --name=Joiner): both logs must say they bound 127.0.0.1 only and
+#      must hold the roster line the scaffolded Boot.cs logs, "Lobby: 2 players: Host, Joiner"
 #   3. `create-onelobby verify` must end in VERIFY_OK, and in VERIFY_FAIL blueprint: on a copy with a broken onelobby.json
 #   4. scaffold --into an empty Unity project (ProjectVersion.txt and a manifest only), the test again; a second --into run changes nothing
 #   usage: PACKAGE_TGZ=<com.onelobby.unity-*.tgz with the natives> UNITY=<Unity.exe> clients/unity/scaffold-test.sh
-#          (the unity-dev-package CI artifact has the natives; SCAFFOLD_TMP=<folder> chooses where projects are made, default: a temp folder.
-#           No folder in a Unity project path may start with a dot.)
+#          (the unity-dev-package CI artifact has the natives; SCAFFOLD_TMP=<folder> chooses where projects are made, default: a temp folder)
+# The editor has been seen to end with exit code 0xC0000005 while it closes after a test run that passed, so the result line decides, not the exit code.
 set -uo pipefail
 PACKAGE_TGZ="${PACKAGE_TGZ:?set PACKAGE_TGZ to a com.onelobby.unity tarball that has the native libraries}"
 UNITY="${UNITY:?set UNITY to the Unity 6 editor (Unity.exe)}"
@@ -26,9 +26,10 @@ U=("$UNITY" -batchmode -nographics)
 
 run_test() { # run_test <name> <project dir>
   local name="$1" dir="$2"
-  "${U[@]}" -projectPath "$dir" -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults "$WORK/$name.tests.xml" -logFile "$WORK/$name.tests.log"
+  "${U[@]}" -projectPath "$dir" -runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests -testResults "$WORK/$name.tests.xml" -logFile "$WORK/$name.tests.log" --local
+  local rc=$?
   local line; line="$(grep -a -E '^MULTIPLAYER_(OK|FAIL)' "$WORK/$name.tests.log" | tail -n 1 | tr -d '\r')"
-  echo "$name: ${line:-no result line}"
+  echo "$name: ${line:-no result line} (Unity exit $rc)"
   if [ "$line" != "MULTIPLAYER_OK" ]; then echo "FAIL $name"; grep -a -E 'error CS|Exception' "$WORK/$name.tests.log" | head -n 5; FAILS=$((FAILS + 1)); fi
 }
 
@@ -49,7 +50,11 @@ if [ -f "$GAME" ]; then
   sleep 6
   timeout 25 "$GAME" -batchmode -nographics -logFile "$WORK/join.log" --join=127.0.0.1:47810 --local --name=Joiner
   kill $HPID 2>/dev/null; wait $HPID 2>/dev/null
-  for l in host join; do grep -a -q "bound to 127.0.0.1 only" "$WORK/$l.log" || { echo "FAIL players: the $l log never says it bound 127.0.0.1 only"; FAILS=$((FAILS + 1)); }; done
+  for l in host join; do
+    grep -a -q "bound to 127.0.0.1 only" "$WORK/$l.log" || { echo "FAIL players: the $l log never says it bound 127.0.0.1 only"; FAILS=$((FAILS + 1)); }
+    grep -a -q "^Lobby: 2 players: Host, Joiner" "$WORK/$l.log" || { echo "FAIL players: the $l log never shows the two-player lobby (Lobby: 2 players: Host, Joiner)"; FAILS=$((FAILS + 1)); }
+    echo "$l: $(grep -a -E '^Lobby: ' "$WORK/$l.log" | tail -n 1 | tr -d '\r')"
+  done
 fi
 echo "::endgroup::"
 

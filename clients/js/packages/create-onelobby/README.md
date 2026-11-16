@@ -408,7 +408,8 @@ and there is no pin. The package is not on a registry yet: `--package-from <tgz>
 picks the editor a new project is made for (`ProjectSettings/ProjectVersion.txt`); with none found it says so and uses 6000.2.7f2, the version the package was tested with.
 
 - New project: `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json`, `Assets/Resources/onelobby.json` (engine `unity`, `ui.kind` `drop-in`),
-  `Assets/Scripts/Boot.cs` (adds the menu from `[RuntimeInitializeOnLoadMethod]`, so there is no scene file; shows "In game" on `GameStarted`),
+  `Assets/Scripts/Boot.cs` (adds the menu from `[RuntimeInitializeOnLoadMethod]`, so there is no scene file; shows "In game" on `GameStarted`; logs
+  `Lobby: 2 players: Host, Joiner` each time the roster changes; adds no menu while a play-mode test plays),
   `Assets/OneLobby/Tests/MultiplayerTests.cs` + `OneLobbyGame.Tests.asmdef` (the two-peer play-mode test: two peers on 127.0.0.1, host and join by address, a message each way,
   logs `MULTIPLAYER_OK`), `Assets/OneLobby/Editor/BuildPlayer.cs` (`OneLobbyBuild.Windows`, `-executeMethod`), `.olc/<name>.json` (builds the player, then a host window and a
   small joiner window with `--local`), `AGENTS.md`, and managed `.gitignore` / `.gitattributes` blocks.
@@ -417,7 +418,7 @@ picks the editor a new project is made for (`ProjectSettings/ProjectVersion.txt`
   already references the package keeps its line (the run says so). The "Next:" lines print the one line that puts the menu into your own start-up.
 - `update`: moves only the package line. A plain version moves to this tool's; `file:com.onelobby.unity-<version>.tgz` (the line this tool writes) moves to the new name; any other `file:` line
   is left alone unless `--package-from` is given. `--dry-run` shows the edit.
-- `verify` runs Unity with `-batchmode -nographics`, one process at a time (the first run imports the project: a minute or two; the editor must not have the project open):
+- `verify` runs Unity with `-batchmode -nographics`, one process at a time (the first run also imports the project; the editor must not have the project open):
 
 | Check (unity) | What it proves |
 |---|---|
@@ -425,13 +426,15 @@ picks the editor a new project is made for (`ProjectSettings/ProjectVersion.txt`
 | `package` | the manifest references `com.onelobby.unity` (a `file:` tarball must exist) and Unity opened the project, resolved it (`Packages/packages-lock.json`) and compiled with no errors |
 | `blueprint` | `Assets/Resources/onelobby.json` loads through the JS loader and through the game's C# loader (`--route=config` of the test) |
 | `wiring` | a `.cs` file outside `Packages/` and `Assets/OneLobby/` uses `OneLobbyMenu`, `OneLobbyRunner` or the client (a bare `--into` fails until the menu is added) |
-| `direct`, `nostr`, `turn`, `server` | as for Godot C#: the test run with `--route=...` against a local relay or TURN server on 127.0.0.1; `server` needs `--server` |
+| `direct`, `nostr`, `turn`, `server` | as for Godot C#: the test run with `--route=...` against a local relay or TURN server on 127.0.0.1; `turn` needs the helper (`--fetch-helpers`), `server` needs `--server` |
 
 The routes run through the test (`-runTests -testPlatform PlayMode -assemblyNames OneLobbyGame.Tests`, route arguments after Unity's own, which Unity ignores) because Unity code
-runs only inside the game's own project and the menu and transport need a player loop. A game without the test files fails the route checks with `npx create-onelobby --into .`
+runs only inside the game's own project and the menu and transport need a player loop. Every test run also carries `--local`, so a menu that the game's own start-up opens while the
+test plays stays on 127.0.0.1 and skips its connection check. The result line decides, not Unity's exit code: on Windows the editor ends with exit code 0xC0000005 while it closes
+after a test that used the WebRTC library (the open finding in `tools/engine-smoke/README.md`), and `verify` then prints `ok` with a `WARNING:` that names the code. A game without the test files fails the route checks with `npx create-onelobby --into .`
 as the next step. `verify` writes `.onelobby/` (Unity logs and results; gitignored) and what Unity itself writes into a project it opens (`Library/`, `Temp/`, `Logs/`,
 `UserSettings/`, `obj/`, `Packages/packages-lock.json`, `.meta` files). Unity is not in CI (no licence): `clients/unity/scaffold-test.sh` is the end-to-end check, run locally.
-Note: the Unity editor opens listeners on all interfaces by itself (its profiler ports), so Windows may show a firewall prompt the first time it runs.
+The Unity editor opens its own ports in every run, whether or not OneLobby is in the project: it listens on TCP and UDP ports on all interfaces (0.0.0.0) and connects out to Unity's own licence, package and services hosts. OneLobby's own sockets in the test and in `--local` players are on 127.0.0.1 (and ::1).
 
 ## All templates
 

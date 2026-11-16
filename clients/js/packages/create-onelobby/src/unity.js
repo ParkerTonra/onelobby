@@ -31,7 +31,7 @@ export const BUILD_FILE = "Assets/OneLobby/Editor/BuildPlayer.cs";
 export const TEST_ASSEMBLY = "OneLobbyGame.Tests";
 export const BUILD_METHOD = "OneLobbyBuild.Windows";
 export const PLAYER_EXE = "Builds/Windows/Game.exe";
-export const UNITY_GITIGNORE_LINES = ["/[Ll]ibrary/", "/[Tt]emp/", "/[Ll]ogs/", "/[Uu]serSettings/", "/[Oo]bj/", "/[Bb]uilds/", "/.onelobby/", "*.csproj", "*.sln", "*.slnx"];
+export const UNITY_GITIGNORE_LINES = ["/[Ll]ibrary/", "/[Tt]emp/", "/[Ll]ogs/", "/[Uu]serSettings/", "/[Oo]bj/", "/[Bb]uilds/", ".onelobby/", "*.csproj", "*.sln", "*.slnx"];
 export const UNITY_GITATTRIBUTES_LINES = ["Assets/OneLobby/** text eol=lf"];
 
 const slugOf = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "game";
@@ -315,7 +315,7 @@ export function unityNext({ into, rel, plan }) {
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
       `the blueprint is ${BLUEPRINT_PATH}: change choices there`,
-      `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults .onelobby/tests.xml -logFile .onelobby/tests.log   # expect MULTIPLAYER_OK in the log`,
+      `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log`,
       `build the Windows player: Unity -batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}   # ${PLAYER_EXE}`,
       `try it on this PC only: ${PLAYER_EXE} --host --local --name=Sam   (a second window: --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Ann); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
       `check it: npx create-onelobby verify   # one VERIFY_OK or VERIFY_FAIL line`,
@@ -323,7 +323,7 @@ export function unityNext({ into, rel, plan }) {
     );
   } else {
     next.push(
-      `npx create-onelobby verify   # opens the project once in batchmode (the first time imports the project: a minute or two), then VERIFY_OK`,
+      `npx create-onelobby verify   # opens the project in batchmode (the first time also imports it), then VERIFY_OK`,
       `play: ${PLAYER_EXE} --host --local --name=Sam   # after building it (see AGENTS.md), or run the .olc entry`,
       `recipe: ${UNITY_RECIPE_URL}`,
     );
@@ -372,7 +372,7 @@ export async function runUnity(ctx) {
     const out = [];
     if (!wouldChange) out.push(`Nothing changed: ${target} already has everything (${unchanged.length} files unchanged).`);
     else out.push(`${verb} ${target}`, ...listed.map((f) => `  ${f.path}${f.action === "create" ? "" : ` (${f.action})`}`));
-    if (plan.manifest.added.length) out.push(`  ${plan.manifest.file}: dependencies ${into ? "added" : "written"}: ${plan.manifest.added.join(", ")}`);
+    if (plan.manifest.added.length && listed.some((f) => f.path === plan.manifest.file)) out.push(`  ${plan.manifest.file}: dependencies ${into ? "added" : "written"}: ${plan.manifest.added.join(", ")}`);
     if (skipped.length) out.push("Skipped (already exist and differ; use --force to overwrite):", ...skipped.map((p) => `  ${p}`));
     if (!into) out.push(`Unity ${plan.editor.version} (${plan.editor.from === "default" ? `the default: ${plan.editor.why}` : `from the editor at ${plan.editor.from}`}); package ${plan.package.value} (${plan.package.from === "tarball" ? "the tarball named by --package-from" : "the release tarball, to be put in Packages/"}).`);
     for (const n of plan.notes) out.push(`Note: ${n}`);
