@@ -22,9 +22,25 @@ func _init(game_id: String, net_version: String, info: Callable, options: Dictio
 	_game_id = game_id
 	_net_version = net_version
 	_port = int(options.get("port", OneLobbyLan.DEFAULT_PORT))
-	_bind = "127.0.0.1" if str(options.get("bind_address", "*")) == "127.0.0.1" else "0.0.0.0"
+	_bind = "127.0.0.1" if is_loopback(str(options.get("bind_address", "*"))) else "0.0.0.0"
 	_log = options.get("log", Callable())
 	answerer = OneLobbyLanAnswerer.new(game_id, net_version, info, _send, options.get("now_fn", Callable()))
+
+
+## True for an address or name that means this PC only: 127.x.x.x, "localhost", "::1" (also IPv4-mapped). Such a bind_address opens
+## the answering socket on 127.0.0.1 only; anything else (including "*" and "0.0.0.0") opens it on every network card.
+static func is_loopback(address: String) -> bool:
+	var a := address.strip_edges().to_lower().lstrip("[").rstrip("]")
+	if a == "localhost" or a == "::1":
+		return true
+	if a.begins_with("::ffff:"):
+		a = a.substr(7)
+	return a.begins_with("127.") and OneLobbyLan.source_class(a) == "loopback"
+
+
+## The address the answering socket binds: "127.0.0.1" or "0.0.0.0".
+func bind_host() -> String:
+	return _bind
 
 
 func start() -> bool:

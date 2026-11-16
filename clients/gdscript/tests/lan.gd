@@ -72,6 +72,7 @@ func _run() -> void:
 	_limits()
 	await _sockets()
 	await _switch()
+	await _loopback()
 	print("lan: %d passed, %d failed" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -356,3 +357,28 @@ func _switch() -> void:
 	_check(f4.start() == "running" and f4.local_port > 0, "blueprint hosting.lan true: the finder runs")
 	f4.stop()
 	c4.queue_free()
+
+
+## Any loopback bind_address keeps the answering socket on 127.0.0.1; a real address opens it on every network card.
+func _loopback() -> void:
+	for a in ["127.0.0.1", "127.0.0.2", "127.255.0.1", "localhost", "LOCALHOST", "::1", "[::1]", "::ffff:127.0.0.1"]:
+		_check(OneLobbyLanHost.is_loopback(a), "'%s' is a loopback address" % a)
+		var h := OneLobbyLanHost.new("g", "1", func() -> Dictionary: return {}, {"bind_address": a})
+		_check(h.bind_host() == "127.0.0.1", "bind_address '%s' binds 127.0.0.1" % a)
+	for a in ["", "*", "0.0.0.0", "192.168.1.20", "128.0.0.1", "1127.0.0.1", "127.0.0", "example.com"]:
+		_check(not OneLobbyLanHost.is_loopback(a), "'%s' is not a loopback address" % a)
+		var h2 := OneLobbyLanHost.new("g", "1", func() -> Dictionary: return {}, {"bind_address": a})
+		_check(h2.bind_host() == "0.0.0.0", "bind_address '%s' binds every card" % a)
+	# and for real, on a loopback name: the socket opens and a finder on 127.0.0.1 gets its answer
+	var port := _free_udp_port()
+	var host := OneLobbyLanHost.new("g", "1", func() -> Dictionary: return _info(), {"port": port, "bind_address": "127.0.0.2"})
+	_check(host.start() and host.listening, "a host with bind_address 127.0.0.2 opens its socket")
+	var finder := OneLobbyLanFinder.new("g", "1", {"targets": PackedStringArray(["127.0.0.1"]), "port": port, "ask_interval_ms": 100, "min_gap_ms": 40})
+	root.add_child(finder)
+	finder.start()
+	_check(await _wait_until(func() -> bool:
+		host.poll()
+		return finder.games.size() == 1, finder), "and a finder on 127.0.0.1 finds it")
+	finder.stop()
+	finder.queue_free()
+	host.close()

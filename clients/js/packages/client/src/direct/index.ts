@@ -142,6 +142,14 @@ export type DirectLobby = Lobby & {
 /** With `port` left out, how many ports after the default `hostDirect` tries when it is busy. */
 export const DEFAULT_FALLBACK_PORTS = 9;
 
+
+/** True for a host that names this PC only: 127.x.x.x, "localhost", "::1" (also in its IPv4-mapped form). LAN discovery then answers on 127.0.0.1 only. */
+export function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "localhost" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) || /^::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
 export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): Promise<DirectLobby> {
   const bp = kit.blueprint;
   const defined = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) as DirectHostOptions;
@@ -222,7 +230,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
       gameId: kit.options.gameId,
       netVersion: kit.options.netVersion,
       port: cfg.port,
-      bindHost: o.bindHost === "127.0.0.1" ? "127.0.0.1" : "0.0.0.0",
+      bindHost: isLoopbackHost(o.bindHost) ? "127.0.0.1" : "0.0.0.0",
       udp: cfg.udp,
       log: (line) => kit.netLog.add("info", line),
       info: () => {

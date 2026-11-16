@@ -3,7 +3,7 @@ import dgram from "node:dgram";
 import { RTCPeerConnection } from "node-datachannel/polyfill";
 import { OneLobby } from "../src/onelobby.js";
 import { webRtcLinkFactoryFor } from "../src/webrtc.js";
-import { hostDirect } from "../src/direct/index.js";
+import { hostDirect, isLoopbackHost } from "../src/direct/index.js";
 import {
   LanAnswerer, LanFinder, LanHost, LAN_DEFAULT_PORT, LAN_MAX_DATAGRAM, LAN_RATE_PER_SOURCE, LAN_RATE_TOTAL,
   decodeLanAnswer, decodeLanQuestion, encodeLanAnswer, encodeLanQuestion, lanSourceClass, type LanHostInfo, type LanUdp,
@@ -304,6 +304,18 @@ describe("the switch", () => {
     expect(finder.games[0]).toMatchObject({ address: "127.0.0.1", port: on.directHub.port, hostName: "Sam", players: 1, maxPlayers: 4, hasPassword: false, sameVersion: true });
     await on.leave();
     await until(() => finder.games.length === 0, "row gone after the lobby closed");
+  });
+
+  it("any loopback bindHost keeps the answering socket on 127.0.0.1; a real address opens it on every card", async () => {
+    for (const h of ["127.0.0.1", "127.0.0.2", "127.255.0.1", "localhost", "LOCALHOST", "::1", "[::1]", "::ffff:127.0.0.1"]) expect(isLoopbackHost(h), h).toBe(true);
+    for (const h of [undefined, "", "0.0.0.0", "*", "192.168.1.20", "128.0.0.1", "1127.0.0.1", "example.com"]) expect(isLoopbackHost(h), String(h)).toBe(false);
+    // the real path: the address the LAN socket asks to bind (a fake socket, nothing is opened)
+    const kit = OneLobby.fromConfig({ game: { id: "com.example.lantest" }, engine: "dotnet", hosting: { nostr: false, openPort: false, lan: true } }, { displayName: "Sam", advanced: { linkFactory: links } });
+    const bound: string[] = [];
+    const fake: LanUdp = { onMessage: null, bind: async (_p, a) => { bound.push(a); return 40000; }, send: () => {}, close: () => {} };
+    const host = await hostDirect(kit, { bindHost: "127.0.0.2", port: await freePort(), lan: { port: 40001, udp: () => fake }, log: false });
+    cleanup.push(() => host.leave());
+    expect(bound).toEqual(["127.0.0.1"]);
   });
 
   it("the default port is 47840", () => {
