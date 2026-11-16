@@ -69,6 +69,7 @@ const thaw = (o) => JSON.parse(JSON.stringify(o));
  */
 export function templateDefaults(template, { title }) {
   if (template === "godot-gdscript" || template === "godot-csharp" || template === "unity") return { game: { title }, hosting: { direct: true, server: false }, ui: { kind: "drop-in" }, chat: { text: true } };
+  if (template === "node-browser") return { game: { title }, ui: { kind: "generated", entry: "Main page" }, hosting: { direct: true, server: false } }; // a Node process listens, so it hosts direct
   if (template !== "web") return {};
   return {
     game: { title },

@@ -9,7 +9,7 @@ import { Gridpaint as Game, paintCmd } from "../src/game.js";
 import { bindSession, features, makeKit } from "../src/session.js";
 //#endif
 //#if into
-import { bindSession, features, makeKit } from "../multiplayer/session.js";
+import { bindSession, features, makeKit } from "{{glue}}";
 //#endif
 
 const bp = JSON.parse(readFileSync(new URL("../onelobby.json", import.meta.url), "utf8"));

@@ -333,7 +333,7 @@ describe("templates still planned", () => {
       expect(r.code).toBe(1);
       expect(r.json.error.code).toBe("template_planned");
       expect(r.json.error.message).toContain("planned for v2");
-      expect(r.json.error.message).toContain('"web", "godot-gdscript", "godot-csharp" and "unity"');
+      expect(r.json.error.message).toContain('"web", "node-browser", "godot-gdscript", "godot-csharp" and "unity"');
       expect(r.json.error.message).not.toContain("only");
     });
   }

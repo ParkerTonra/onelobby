@@ -108,7 +108,7 @@ describe("web --into", () => {
     put("w/package.json", '{ "type": "module", "dependencies": { "onelobby": "^0.7.0" } }');
     const r = await cli(["--into", "w", "--yes", "--json"]);
     expect(r.json.next).toContain("npm install");
-    expect(r.json.next.join("\n")).not.toContain("type");
+    expect(r.json.next.join("\n")).not.toContain('"type": "module"');
   });
 
   it("the Next lines come in the order the work happens and use the glue's real names", async () => {
@@ -139,7 +139,7 @@ describe("web --into", () => {
 describe("--help", () => {
   it("names the built templates from the list, godot-csharp included", async () => {
     const r = await cli(["--help"]);
-    expect(r.out).toContain('"web", "godot-gdscript", "godot-csharp" and "unity" exist; the rest are planned for v2');
+    expect(r.out).toContain('"web", "node-browser", "godot-gdscript", "godot-csharp" and "unity" exist; the rest are planned for v2');
   });
 });
 

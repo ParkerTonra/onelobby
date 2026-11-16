@@ -61,7 +61,7 @@ export function wiringCheck() {
       if (ctx.kind === "web") {
         const glue = WEB_GLUE_PATHS.find((p) => existsSync(join(dir, ...p.split("/")))) ?? "multiplayer/session.js";
         const files = gameFiles(dir, WEB_FILES, SKIP_DIRS).filter((f) => f !== glue);
-        const uses = /["'](?:[^"'\s]*\/)?session\.js["']|["']onelobby(?:\/[^"']*)?["']|onelobby\.(?:global|bundle)/;
+        const uses = /["'](?:[^"'\s]*\/)?session\.m?js["']|["']onelobby(?:\/[^"']*)?["']|onelobby\.(?:global|bundle)/;
         const hits = allMatches(dir, files, uses);
         if (hits.length) return { status: "ok", detail: wiringDetail(hits, "imports the OneLobby glue") };
         return {

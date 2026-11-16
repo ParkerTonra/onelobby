@@ -71,6 +71,11 @@ export function webChecks() {
     {
       name: "project-test",
       async run(ctx) {
+        if (!existsSync(join(ctx.dir, "test/multiplayer.mjs"))) {
+          const mode = syncModeOf(ctx.dir);
+          if (mode !== null && mode !== "lockstep")
+            return { status: "skipped", detail: `no test/multiplayer.mjs: sync.mode is ${mode}, so the game keeps its own sync and the scaffolder writes no lockstep stand-in test for it; the proof of this game's netcode is its own two-player test (run it and name it in the report)` };
+        }
         if (!existsSync(join(ctx.dir, "test/multiplayer.mjs")))
           return { status: "fail", detail: "test/multiplayer.mjs is missing.", next: "Run: npx create-onelobby --into . (it writes the two-player test)." };
         if (!existsSync(join(ctx.dir, "node_modules/onelobby/package.json")))

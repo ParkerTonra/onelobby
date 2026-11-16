@@ -59,12 +59,12 @@ export function webProjectFiles({ blueprint, dirName, onelobbyVersion = DEFAULT_
 }
 
 /** The files `--into` adds to an existing project: onelobby.json, multiplayer/ glue and the test. */
-export function intoFiles({ blueprint, packageJson }) {
+export function intoFiles({ blueprint, packageJson, glueName = "session.js", standIn = true }) {
   const files = [
     { path: "onelobby.json", content: json(blueprint) },
-    { path: "multiplayer/session.js", content: read("glue", "session.js") },
-    { path: "test/multiplayer.mjs", content: conditional(read("glue", "multiplayer-test.mjs"), "into") },
+    { path: `multiplayer/${glueName}`, content: read("glue", "session.js") },
   ];
+  if (standIn) files.push({ path: "test/multiplayer.mjs", content: fill(conditional(read("glue", "multiplayer-test.mjs"), "into"), { glue: `../multiplayer/${glueName}` }) });
   // no package.json in the folder: a minimal one; an existing package.json is never edited
   if (packageJson) {
     const pkg = { name: slug(packageJson.dirName) || "onelobby-game", version: "0.1.0", private: true, type: "module", dependencies: { onelobby: packageJson.onelobbyVersion ?? DEFAULT_DEPENDENCY } };
@@ -77,20 +77,27 @@ export function intoFiles({ blueprint, packageJson }) {
  * The "Next:" lines of a web `--into` run, in the order the work happens. `pkg`: { created, hasOnelobby, isModule } (the folder's
  * package.json as it is after this run).
  */
-export function intoNext({ rel, pkg, onelobbyVersion = DEFAULT_DEPENDENCY }) {
+export function intoNext({ rel, pkg, glueName = "session.js", standIn = true, nodeHost = false, mode = "lockstep", onelobbyVersion = DEFAULT_DEPENDENCY }) {
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
   if (pkg.created) next.push('npm install   # package.json was missing, so a minimal one was written (private, "type": "module", the onelobby dependency)');
   else {
-    if (!pkg.isModule) next.push('your package.json has no "type": "module" and was left as it is: add it (multiplayer/session.js and test/multiplayer.mjs are ES modules)');
+    if (!pkg.isModule) next.push(`your package.json has no "type": "module" and was left as it is (a CommonJS game keeps working): the glue is named multiplayer/${glueName}, and a .mjs file is an ES module whatever the package says; do not add "type": "module"`);
     next.push(pkg.hasOnelobby ? "npm install" : `npm install onelobby@${onelobbyVersion}   # your package.json was left as it is and does not list onelobby`);
   }
+  next.push("game.title in onelobby.json came from the folder name: set it to the game's name (--title, or edit the file)");
+  if (nodeHost)
+    next.push(
+      'a Node process hosts this game: build the kit with OneLobby.fromConfig(onelobby.json) and call hostDirect(kit, { http }) from "onelobby/direct"; hostDirect and hostNostr take seats, late join, port and nostr from kit.blueprint (explicit options win). To test on this PC only: hostDirect(kit, { bindHost: "127.0.0.1", openPort: false, nostr: false })',
+    );
+  if (standIn) next.push("put your game behind step(tick, commands) -> hash, snapshot() -> bytes, restore(tick, bytes) and hash(), and swap it for the stand-in Game in test/multiplayer.mjs");
+  else next.push(`sync.mode is ${mode}: your own sync stays, so no lockstep stand-in test was written; \`verify\` skips its project-test and the proof of your netcode is your own two-player test`);
   next.push(
-    "put your game behind step(tick, commands) -> hash, snapshot() -> bytes, restore(tick, bytes) and hash(), and swap it for the stand-in Game in test/multiplayer.mjs",
-    'in the page: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/session.js"; const bp = await loadBlueprint(); const kit = makeKit(bp, { displayName }); const lobby = await kit.host() (or await kit.join(code)); const s = bindSession(lobby, kit.blueprint, game) before lobby.start(); call s.pump(performance.now()) every frame and s.send(bytes) when the player acts',
-    "node test/multiplayer.mjs   # expect every check to PASS",
-    `follow ${RECIPE_URL}`,
+    `in the page: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/${glueName}"; const bp = await loadBlueprint(); const kit = makeKit(bp, { displayName }); const lobby = await kit.host() (or await kit.join(code)); const s = bindSession(lobby, kit.blueprint, game) before lobby.start(); call s.pump(performance.now()) every frame and s.send(bytes) when the player acts`,
+    'a page with no bundler cannot resolve the bare "onelobby" import in that glue: serve node_modules/onelobby/dist/onelobby.bundle.mjs (one file; require.resolve("onelobby/bundle") in Node) at a URL of your server and put <script type="importmap">{ "imports": { "onelobby": "/onelobby.bundle.js" } }</script> before your module script',
   );
+  if (standIn) next.push("node test/multiplayer.mjs   # expect every check to PASS");
+  next.push(`follow ${RECIPE_URL}`);
   return next;
 }
 

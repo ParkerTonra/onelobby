@@ -217,12 +217,14 @@ export const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6
  * Engine names in a description (single words). The first row that matches wins, so the specific ones come first.
  * `anyOf`: any of these words; `allOf`: one word from every group; `settledBy`: if one of these words is also there, the language is
  * settled (otherwise the answer is the assumed one and the "godotLanguage" question is asked); `notBefore`: a word does not name the
- * engine when one of these follows it ("web socket" is a transport, not the browser).
+ * engine when one of these follows it ("web socket" is a transport, not the browser; "node graph" is not a Node host). "node" and "nodejs" name
+ * node-browser (a Node process hosts and serves the page); it sits after the Godot rows, whose games talk about nodes too.
  */
 export const ENGINE_TERMS = [
   { engine: "unity", anyOf: ["unity", "unity3d"] },
   { engine: "godot-csharp", allOf: [["godot"], ["c#", "csharp", "mono", "dotnet"]] },
   { engine: "godot-gdscript", anyOf: ["gdscript", "godot"], settledBy: ["gdscript"] },
+  { engine: "node-browser", anyOf: ["node", "nodejs"], notBefore: { node: ["graph", "graphs", "tree", "trees", "based", "editor"] } },
   { engine: "web", anyOf: ["browser", "web", "html5", "javascript", "typescript", "webgl", "phaser", "js"], notBefore: { web: ["socket", "sockets"] } },
   { engine: "dotnet", anyOf: ["dotnet", "monogame", "csharp", "c#"] },
 ];
@@ -245,7 +247,7 @@ export const ENGINES = {
   },
   "node-browser": {
     label: "node-browser (a Node host serving a browser page)",
-    template: "planned",
+    template: "built", // --into only: it writes the blueprint and the glue into the game that already has the Node server
     recipe: "docs/recipes/browser-game.md",
     canListen: true,
     modes: ["lockstep", "raw", "replication"],

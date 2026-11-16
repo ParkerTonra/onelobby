@@ -396,7 +396,7 @@ function finish(rec, eng) {
     // without an engine the scaffolder would build its default (web), which refuses some of these answers: name the engine first
     rec.runCommand = null;
     rec.notes.push("no engine is known, so there is no command to run yet: add the engine to the description (see the first question), or pass --template <engine>; the flags list says which flags apply the answers.");
-  } else rec.runCommand = ["npx", "create-onelobby", "my-game", ...(built ? ["--template", eng.id] : []), ...rec.flags, "--yes"].map(shell).join(" ");
+  } else rec.runCommand = ["npx", "create-onelobby", ...(eng.id === "node-browser" ? ["--into", "."] : ["my-game"]), ...(built ? ["--template", eng.id] : []), ...rec.flags, "--yes"].map(shell).join(" ");
 }
 
 /** The rows a scaffold run uses as answers: [[key, value, why]]. */

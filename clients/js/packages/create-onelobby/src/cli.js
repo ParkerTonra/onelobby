@@ -40,7 +40,7 @@ export function buildLine(pkgDir, version) {
 
 const packageVersion = () => JSON.parse(readFileSync(join(here, "../package.json"), "utf8")).version;
 /** The hand recipe for each template that is not built yet. */
-const PLANNED_RECIPES = { dotnet: "dotnet-generic.md", "node-browser": "js-web.md" };
+const PLANNED_RECIPES = { dotnet: "dotnet-generic.md" };
 
 function defaultIo() {
   return {
@@ -157,7 +157,15 @@ export async function run(argv, io) {
         `template "${template}" is planned for v2; this release builds ${builtList()}. Use the onelobby agent skill or the recipe docs/recipes/${PLANNED_RECIPES[template]} for now.`,
       );
   };
-  if (template !== undefined) checkTemplate();
+  // node-browser is a Node process that already serves the game: there is no new project to write, only the blueprint and the glue
+  const needInto = () => {
+    if (template === "node-browser" && opts.into === undefined)
+      throw new CliError("unsupported", 'template node-browser works with --into <your game folder> only (the game already has the Node server that hosts): run create-onelobby --into <folder> --template node-browser ...; it writes onelobby.json (engine "node-browser", hosting.direct true) and the glue, and test/multiplayer.mjs only for sync.mode lockstep', "template");
+  };
+  if (template !== undefined) {
+    checkTemplate();
+    needInto();
+  }
   if (opts.recommend !== undefined) recommend({ description: opts.recommend }); // an empty description is bad_flag before anything is asked
 
   const interactive = io.stdinIsTTY && !opts.yes && !opts.noInput && !isCi(io.env);
@@ -181,6 +189,7 @@ export async function run(argv, io) {
       if (template === undefined)
         throw new CliError("engine_unknown", `cannot tell what kind of game ${intoDir} holds (no project.godot, ProjectSettings/, .csproj or .sln, .html, .js, .ts or package.json): pass --template <${TEMPLATES.join("|")}>`, "template");
       checkTemplate();
+      needInto();
     }
     const rec = description ? recommend({ description, engine: engineFrom === "text" ? undefined : { id: template, from: engineFrom } }) : null;
     const recRows = new Map(rec ? rec.answers.map((r) => [r[0], r]) : []);
@@ -297,7 +306,10 @@ export async function run(argv, io) {
         existingPkg = {};
       }
     }
-    const files = into ? intoFiles({ blueprint, packageJson: existingPkg !== null ? undefined : { dirName, onelobbyVersion: opts.onelobbyVersion } }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
+    // the glue is an ES module: an existing package.json without "type": "module" (a CommonJS game) gets the .mjs name, which Node reads as ESM whatever the package says
+    const glueName = existingPkg !== null && existingPkg.type !== "module" ? "session.mjs" : "session.js";
+    const standIn = template !== "node-browser" || blueprint.sync.mode === "lockstep"; // a raw or replication game has its own sync: no lockstep stand-in test for it
+    const files = into ? intoFiles({ blueprint, packageJson: existingPkg !== null ? undefined : { dirName, onelobbyVersion: opts.onelobbyVersion }, glueName, standIn }) : webProjectFiles({ blueprint, dirName, onelobbyVersion: opts.onelobbyVersion });
     if (!into) {
       const state = targetState(target);
       if (state === "file") throw new CliError("exists", `${target} is a file`);
@@ -325,7 +337,7 @@ export async function run(argv, io) {
       if (blueprint.hosting.server && !blueprint.hosting.lobbyServer) next.push("set hosting.lobbyServer in onelobby.json (or open the page with ?lobby=ws://HOST:8080/ws)");
     } else {
       const deps = { ...existingPkg?.dependencies, ...existingPkg?.devDependencies };
-      next.push(...intoNext({ rel, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
+      next.push(...intoNext({ rel, glueName, standIn, nodeHost: template === "node-browser", mode: blueprint.sync.mode, pkg: { created: existingPkg === null, hasOnelobby: "onelobby" in deps, isModule: existingPkg?.type === "module" }, onelobbyVersion: opts.onelobbyVersion ?? `^${ONELOBBY_VERSION}` }));
     }
 
     const result = { ok: true, dir: target, template, blueprint, files: files.map((f) => f.path), next };

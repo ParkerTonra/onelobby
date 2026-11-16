@@ -243,10 +243,19 @@ describe("--into", () => {
     writeFileSync(join(cwd, "game", "package.json"), "{}");
     const r = await cli(["--into", "game", "--yes", "--json"]);
     const j = JSON.parse(r.out);
-    expect(j.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]); // an existing package.json is never edited
+    expect(j.files).toEqual(["onelobby.json", "multiplayer/session.mjs", "test/multiplayer.mjs"]); // an existing package.json is never edited; no "type": "module" -> the glue is .mjs
     expect(readFileSync(join(cwd, "game/package.json"), "utf8")).toBe("{}");
     expect(existsSync(join(cwd, "game/index.html"))).toBe(false);
-    expect(readFileSync(join(cwd, "game/test/multiplayer.mjs"), "utf8")).toContain("../multiplayer/session.js");
+    expect(readFileSync(join(cwd, "game/test/multiplayer.mjs"), "utf8")).toContain('"../multiplayer/session.mjs"');
+    expect(j.next.join("\n")).toContain('do not add "type": "module"');
+  });
+
+  it("a package.json with \"type\": \"module\" keeps the .js glue name", async () => {
+    mkdirSync(join(cwd, "game"));
+    writeFileSync(join(cwd, "game", "package.json"), '{ "type": "module" }');
+    const j = JSON.parse((await cli(["--into", "game", "--yes", "--json"])).out);
+    expect(j.files).toEqual(["onelobby.json", "multiplayer/session.js", "test/multiplayer.mjs"]);
+    expect(readFileSync(join(cwd, "game/test/multiplayer.mjs"), "utf8")).toContain('"../multiplayer/session.js"');
     expect(j.blueprint.game.id).toBe(deriveGameId("game"));
   });
 
@@ -270,7 +279,7 @@ describe("--into", () => {
 });
 
 describe("templates", () => {
-  for (const t of ["node-browser", "dotnet"]) { // godot-gdscript is built: test/godot.test.js; godot-csharp: test/csharp.test.js; unity: test/unity.test.js
+  for (const t of ["dotnet"]) { // godot-gdscript is built: test/godot.test.js; godot-csharp: test/csharp.test.js; unity: test/unity.test.js
     it(`${t} exits 1 with a planned-for-v2 message`, async () => {
       const r = await cli(["g", "--template", t, "--yes", ...NO]);
       expect(r.code).toBe(1);

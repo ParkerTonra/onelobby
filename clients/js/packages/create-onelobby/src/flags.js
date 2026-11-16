@@ -10,7 +10,7 @@ export class CliError extends Error {
 }
 
 /** The templates this release builds (the rest throw template_planned). Lives here so --help and blueprint.js share one list. */
-export const IMPLEMENTED_TEMPLATES = ["web", "godot-gdscript", "godot-csharp", "unity"];
+export const IMPLEMENTED_TEMPLATES = ["web", "node-browser", "godot-gdscript", "godot-csharp", "unity"];
 const quoted = (list) => list.map((t) => `"${t}"`).join(", ").replace(/, ([^,]*)$/, " and $1");
 export const builtList = () => quoted(IMPLEMENTED_TEMPLATES);
 
@@ -267,8 +267,10 @@ Usage: create-onelobby [dir] [options]
        create-onelobby verify [dir] [options]   prove the game's multiplayer on 127.0.0.1: one line, VERIFY_OK or VERIFY_FAIL ... (see "verify" below)
 
   --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   ${builtList()} exist; the rest are planned for v2
+                               (node-browser, a Node process that hosts and serves the page, works with --into only: it writes onelobby.json
+                               with engine "node-browser" and the glue, and the lockstep test only for sync.mode lockstep)
   --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ (and a minimal package.json when
-                               there is none); a Godot folder (project.godot) gets the add-on, the natives, the autoload and a test. With no
+                               there is none; the glue is multiplayer/session.mjs when an existing package.json has no "type": "module"); a Godot folder (project.godot) gets the add-on, the natives, the autoload and a test. With no
                                --template the folder is read (Godot, Unity, .NET, web files); a folder that tells nothing needs --template
   --from <onelobby.json>       take every answer from this file (flags still override it)
   --recommend "<one line>"     describe the game in a sentence: alone (no folder, nothing written) it prints the proposed multiplayer setup

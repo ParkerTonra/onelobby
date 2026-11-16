@@ -5,7 +5,7 @@ import { CliError } from "./flags.js";
 import { isCSharpProject } from "./godot-project.js";
 
 /** Where the web glue lives: a scaffolded project (src/session.js) or an `--into` project (multiplayer/session.js). */
-export const WEB_GLUE_PATHS = ["src/session.js", "multiplayer/session.js"];
+export const WEB_GLUE_PATHS = ["src/session.js", "multiplayer/session.js", "multiplayer/session.mjs"];
 
 /** The folder a command works on: the positional directory, else --into, else the current folder. Must exist. */
 export function projectDir({ dir, opts, cwd }) {
@@ -33,7 +33,7 @@ export function detectProject(dir, { requireBlueprint = false } = {}) {
   if (has("onelobby.json")) {
     const glue = WEB_GLUE_PATHS.find(has);
     if (glue) return { kind: "web", dir, glue };
-    return { kind: null, dir, why: "onelobby.json but no web glue (src/session.js or multiplayer/session.js)" };
+    return { kind: null, dir, why: "onelobby.json but no web glue (src/session.js, multiplayer/session.js or multiplayer/session.mjs)" };
   }
   return { kind: null, dir, why: "no project.godot and no onelobby.json" };
 }
