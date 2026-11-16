@@ -148,7 +148,9 @@ describe("unity --into", () => {
   it("adds the pieces, edits only what it adds in the manifest, and writes no boot script, scene or AGENTS.md", async () => {
     const r = await into();
     expect(r.code).toBe(0);
-    expect(r.json.files.sort()).toEqual(["Assets/OneLobby/Editor/BuildPlayer.cs", "Assets/OneLobby/Tests/MultiplayerTests.cs", "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", "Assets/Resources/onelobby.json", ".olc/game.json", "Packages/manifest.json", ".gitignore", ".gitattributes"].sort());
+    expect(r.json.files.sort()).toEqual(["Assets/OneLobby/Editor/BuildPlayer.cs", "Assets/OneLobby/Tests/MultiplayerTests.cs", "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", "Assets/Resources/onelobby.json", "Packages/manifest.json", ".gitignore", ".gitattributes"].sort());
+    expect(r.json.files.some((f) => f.startsWith(".olc"))).toBe(false); // an existing project has its own build: no entry that assumes OneLobbyBuild.Windows
+    expect(r.json.next.join("\n")).toContain("no .olc entry was written");
     expect(r.json.manifest.added).toEqual(["com.onelobby.unity", "com.unity.test-framework", ...["imgui", "uielements", "audio", "jsonserialize", "unitywebrequest", "physics", "imageconversion", "screencapture"].map((m) => `com.unity.modules.${m}`)]);
     const after = text("game/Packages/manifest.json");
     // every old line is still there, byte for byte, in order

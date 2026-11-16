@@ -308,6 +308,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
 
   const files = [];
   let manifestPlan;
+  let existingRef = null; // --into: the package line the manifest already has, { value, exists } (exists: null for a non-file: reference)
   if (into) {
     const p = abs(MANIFEST_PATH);
     if (!existsSync(p)) throw new CliError("bad_manifest", `--into: ${target} has no ${MANIFEST_PATH}; open the project in Unity once (it writes that file), then run this again`);
@@ -316,6 +317,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
     const mine = r.present.find((d) => d.name === PACKAGE_NAME);
     if (mine) notes.push(`${MANIFEST_PATH} already references ${PACKAGE_NAME} (${mine.value}); that line was left alone. To move it to this version run: npx create-onelobby update${mine.value.startsWith("file:") ? " --package-from <tarball>" : ""}`);
     manifestPlan = { file: MANIFEST_PATH, content: Buffer.from(r.text, "utf8"), action: r.changed ? "update" : "unchanged", added: r.added, present: r.present };
+    if (mine) existingRef = { value: mine.value, exists: mine.value.startsWith("file:") ? existsSync(resolve(target, "Packages", mine.value.slice(5))) : null };
   } else {
     const content = Buffer.from(newManifest(wanted), "utf8");
     manifestPlan = { file: MANIFEST_PATH, content, action: existsSync(abs(MANIFEST_PATH)) ? (readFileSync(abs(MANIFEST_PATH)).equals(content) ? "unchanged" : opts.force ? "overwrite" : "skip") : "create", added: wanted.map((w) => w.name), present: [] };
@@ -336,8 +338,9 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
     { path: "Assets/OneLobby/Tests/MultiplayerTests.cs", content: withPlayers ? multiplayerWithPlayer(read("tests/MultiplayerTests.cs"), read("net-player", "multiplayer_part.cs"), netPlayer) : read("tests/MultiplayerTests.cs") },
     { path: "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", content: withPlayers ? testAsmdefWithPlayer(read("tests/OneLobbyGame.Tests.asmdef")) : read("tests/OneLobbyGame.Tests.asmdef") },
     { path: BUILD_FILE, content: read("editor/BuildPlayer.cs") },
-    { path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) },
   );
+  // the play entry builds OneLobbyBuild.Windows and runs Builds/Windows/Game.exe: right for a new project, a guess for a game that already has its own build
+  if (!into) list.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
   for (const f of list) {
     const content = bytes(f.content);
     const p = abs(f.path);
@@ -366,7 +369,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
     files,
     notes,
     manifest: { file: manifestPlan.file, added: manifestPlan.added, present: manifestPlan.present },
-    package: { value: ref.value, from: ref.from, version: ref.version },
+    package: { value: ref.value, from: ref.from, version: ref.version, existing: existingRef },
     editor,
     slug,
     netPlayer,
@@ -384,13 +387,17 @@ export function applyUnity(plan, { target }) {
 }
 
 /** The `next` lines for the printed result. */
-export function unityNext({ into, rel, plan }) {
+export function unityNext({ into, rel, plan, titleFromFolder = false }) {
   const players = plan.netPlayer ?? null;
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
-  if (plan.package.from === "default") next.push(`put the package tarball next to the manifest: Packages/${defaultTarball()} (the package is not on a registry yet: build it with clients/unity/build-unity-package.sh --pack, or take the unity-dev-package CI artifact; or rerun with --package-from <tarball>)`);
+  const existing = plan.package.existing;
+  if (existing && existing.exists === false) next.push(`the manifest already references ${existing.value} but no such file is in Packages/: put the tarball there or run: npx create-onelobby update --package-from <tarball>`);
+  else if (plan.package.from === "default" && !existing) next.push(`put the package tarball next to the manifest: Packages/${defaultTarball()} (the package is not on a registry yet: build it with clients/unity/build-unity-package.sh --pack, or take the unity-dev-package CI artifact; or rerun with --package-from <tarball>)`);
+  if (titleFromFolder) next.push(`game.title in ${BLUEPRINT_PATH} came from the folder name: set the game's own name (rerun with --title "<name>" and --force, or edit the file)`);
   if (into) {
     next.push(
+      `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local / --join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local to its command`,
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
       `the blueprint is ${BLUEPRINT_PATH}: change choices there`,
@@ -430,7 +437,7 @@ export async function runUnity(ctx) {
   const skipped = plan.files.filter((f) => f.action === "skip").map((f) => f.path);
   const unchanged = plan.files.filter((f) => f.action === "unchanged").map((f) => f.path);
   const wouldChange = listed.length > 0;
-  const next = unityNext({ into, rel, plan });
+  const next = unityNext({ into, rel, plan, titleFromFolder: blueprint.game.title === dirName });
   const result = {
     ok: true,
     dir: target,
