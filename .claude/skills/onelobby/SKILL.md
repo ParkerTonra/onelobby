@@ -90,7 +90,7 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    advice. Room (ready, countdown, kick, ban, rematch), saved settings, the connection check and plain-language errors already
    live in the menu and the library.
 5. **By hand** (`template_planned`, planned engine, `runCommand: null`): ask the tool, do not assume; its `template_planned` refusal
-   names what it builds today. Follow the engine's recipe (`docs/recipes/unity.md`, `dotnet-generic.md`, `browser-game.md`), write
+   names what it builds today. Follow the engine's recipe (`dotnet-generic.md`, `browser-game.md`; Unity is built now: `docs/recipes/unity.md` "One command"), write
    `onelobby.json` yourself against the schema, and say in the report that this path was by hand.
 6. Rules that stay: read `onelobby.json` at run time, never copy its values into code (`OneLobby.fromConfig`,
    `OneLobbyClient.from_config`, `Blueprint.Load`); the game plays offline and every lobby call can fail (show `describeError`);
