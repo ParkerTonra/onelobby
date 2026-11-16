@@ -30,6 +30,7 @@ step vectors "${G[@]}" -s res://tests/vectors.gd
 step blueprint "${G[@]}" -s res://tests/blueprint.gd
 step sync "${G[@]}" -s res://tests/sync.gd
 step replication_vectors "${G[@]}" -s res://tests/replication_vectors.gd
+step replication "${G[@]}" -s res://tests/replication.gd
 step room_vectors "${G[@]}" -s res://tests/room_vectors.gd
 step room "${G[@]}" -s res://tests/room.gd
 step menu "${G[@]}" -s res://tests/menu.gd

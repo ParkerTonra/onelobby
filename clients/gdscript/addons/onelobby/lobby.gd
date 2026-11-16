@@ -191,6 +191,11 @@ func now_ms() -> int:
 	return _c.transport.now_ms()
 
 
+## The client's net log (spec/diagnostics.md): where a replication session writes its packet log.
+func get_net_log() -> OneLobbyNetLog:
+	return _c.get_net_log()
+
+
 ## Everyone in the lobby, you included.
 func peers() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
