@@ -18,7 +18,7 @@ namespace OneLobby.Tests
         public int Port => ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
         public readonly List<byte[]> Received = new();
 
-        public FakeUdpServer(Func<byte[], IPEndPoint, byte[]?> answer)
+        public FakeUdpServer(Func<byte[], IPEndPoint, byte[]?> answer, int replyDelayMs = 0)
         {
             _ = Task.Run(async () =>
             {
@@ -28,7 +28,10 @@ namespace OneLobby.Tests
                     try { r = await _udp.ReceiveAsync(); } catch (Exception) { return; }
                     lock (Received) Received.Add(r.Buffer);
                     var reply = answer(r.Buffer, r.RemoteEndPoint);
-                    if (reply != null) try { await _udp.SendAsync(reply, reply.Length, r.RemoteEndPoint); } catch (Exception) { return; }
+                    if (reply == null) continue;
+                    if (replyDelayMs <= 0) { try { await _udp.SendAsync(reply, reply.Length, r.RemoteEndPoint); } catch (Exception) { return; } continue; }
+                    var to = r.RemoteEndPoint; // a slow server: every reply leaves after its own delay, requests are not queued behind each other
+                    _ = Task.Delay(replyDelayMs).ContinueWith(_ => { try { _udp.Send(reply, reply.Length, to); } catch (Exception) { /* closed */ } }, TaskScheduler.Default);
                 }
             });
         }
@@ -65,7 +68,7 @@ namespace OneLobby.Tests
         }
 
         /// <summary>A TURN server: the first Allocate gets 401 with a realm and nonce; the authenticated one gets success (<paramref name="login"/> true) or 401 again (false: a rejected login).</summary>
-        public static FakeUdpServer Turn(bool login) => new FakeUdpServer((b, _) =>
+        public static FakeUdpServer Turn(bool login, int replyDelayMs = 0) => new FakeUdpServer((b, _) =>
         {
             var tid = StunMessages.TransactionId(b);
             if (tid == null || StunMessages.TypeOf(b) != 0x0003) return null;
@@ -76,7 +79,7 @@ namespace OneLobby.Tests
             ok[0] = 0x01; ok[1] = 0x03; ok[4] = 0x21; ok[5] = 0x12; ok[6] = 0xa4; ok[7] = 0x42;
             Array.Copy(tid, 0, ok, 8, 12);
             return ok;
-        });
+        }, replyDelayMs);
     }
 
     internal static class Wait
@@ -291,7 +294,25 @@ namespace OneLobby.Tests
             RunRelay(turn, "relay_unreachable", "Sam: the relay did not answer, stopped at the connection check after ");
         }
 
-        private static void RunRelay(FakeUdpServer turn, string cause, string linePrefix)
+        // Every answer of this relay takes 1.6 s (slow, but it answers): the probe needs about 3.2 s (two answers), longer than the
+        // 2.5 s the joiner used to wait for it, so the refused login was reported as something else.
+        [Fact]
+        public void ASlowRelayThatRejectsTheLoginIsStillRelayRefused()
+        {
+            using var turn = FakeUdpServer.Turn(false, replyDelayMs: 1600);
+            RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", precisePacing: true);
+        }
+
+        // 2 ms of real time per step. Thread.Sleep(2) takes about 15 ms on Windows, which stretches the real time between the probe's
+        // start and the give-up; the forced-slow test spins instead so that gap is the same everywhere
+        private static void Pace(bool precise)
+        {
+            if (!precise) { Thread.Sleep(2); return; }
+            var t = System.Diagnostics.Stopwatch.StartNew();
+            while (t.Elapsed < TimeSpan.FromMilliseconds(2)) Thread.SpinWait(50);
+        }
+
+        private static void RunRelay(FakeUdpServer turn, string cause, string linePrefix, bool precisePacing = false)
         {
             var rig = new Rig();
             rig.Net.IceServers.Add(new IceServer(new[] { "turn:127.0.0.1:" + turn.Port }, "sam", "secret"));
@@ -305,9 +326,11 @@ namespace OneLobby.Tests
             rig.Clients.Add(jc);
             var jl = rig.Await(jc.JoinAsync(hl.Code));
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20)) { rig.Step(1, 100); Thread.Sleep(2); }
+            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20)) { rig.Step(1, 100); Pace(precisePacing); }
             Assert.True(jl.ReadyAsync.IsFaulted);
             rig.Step(8);
+            sw.Restart();
+            while (reports.Count == 0 && sw.Elapsed < TimeSpan.FromSeconds(5)) { rig.Step(1); Pace(precisePacing); } // the report reaches the host a moment later
             var e = (OneLobbyException)jl.ReadyAsync.Exception!.InnerException!;
             Assert.Equal("ice_failed", e.Code);
             Assert.Equal(cause, e.Diagnosis!.Cause);

@@ -606,7 +606,9 @@ namespace OneLobby
             FinishGivingUp();
         }
 
-        private const int RelayProbeWaitMs = 2500;
+        // the probe's own worst case: two exchanges (the login is asked for twice), each up to a retransmit plus the server timeout
+        // when it answers late, plus a margin; a shorter wait told a slow relay's refused login apart from silence wrongly
+        private const int RelayProbeWaitMs = 2 * (ConnectionCheck.ServerMs + ConnectionCheck.RetransmitMs) + 500;
 
         private void CheckGiveUpWait()
         {
