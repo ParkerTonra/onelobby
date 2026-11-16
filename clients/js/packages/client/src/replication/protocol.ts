@@ -17,7 +17,9 @@ const OP_DESPAWN = 2;
 
 /** The error names of spec/replication.md; `message` and `code` are the name. */
 export type ReplicationErrorCode =
-  | "too_short" | "trailing" | "varint" | "range" | "tick" | "baseline" | "id" | "op" | "delta" | "despawn" | "full" | "seq" | "stream_0" | "seq_0";
+  | "too_short" | "trailing" | "varint" | "range" | "tick" | "baseline" | "id" | "op" | "delta" | "despawn" | "full" | "seq" | "stream_0" | "seq_0"
+  // kind 5 (player events, spec/net-player.md)
+  | "count_0" | "event_id" | "player_0";
 
 /** A malformed replication message. */
 export class ReplicationError extends Error {

@@ -75,6 +75,14 @@ export interface ReplicationConfig {
   keyframeSeconds: number;
   /** Cap for `packetLog`. */
   packetLogPerSecond: number;
+  /**
+   * Client, default false: grow and shrink the render delay with the link (spec/replication.md "Clock and render time"):
+   * `clamp(2 x snapshot interval + 4 x jitter, 2 x snapshot interval, maxInterpolationDelayMs)`. Off keeps the fixed
+   * `interpolationDelayMs`. The player layer turns it on.
+   */
+  adaptiveDelay: boolean;
+  /** Upper bound of the adaptive delay in ms (default 250). */
+  maxInterpolationDelayMs: number;
 }
 
 export const DEFAULT_REPLICATION_CONFIG: Readonly<ReplicationConfig> = {
@@ -89,6 +97,8 @@ export const DEFAULT_REPLICATION_CONFIG: Readonly<ReplicationConfig> = {
   holdEventsForTicks: 0,
   keyframeSeconds: 5,
   packetLogPerSecond: 20,
+  adaptiveDelay: false,
+  maxInterpolationDelayMs: 250,
 };
 
 /** A hole in a numbered stream that was given up on: events `firstMissing` up to (not including) `nextDelivered` never arrived. */
@@ -334,6 +344,12 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
   private lastPumpMs: number;
   private lastInputSendMs = -1e15;
   private newestAtMs = -1;
+  private delayMs: number;
+  private jitterValue = 0;
+  private lastArriveMs = -1;
+  private lastArriveTick = 0;
+  private readonly traffic = new Map<number, { sent: number; received: number }>();
+  private readonly extensions = new Map<number, (from: number, payload: Uint8Array, channel: ChannelName) => void>();
 
   constructor(lobby: Lobby, config: Partial<ReplicationConfig> = {}) {
     super();
@@ -371,6 +387,58 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
       }
     }
     this.lastPumpMs = lobby.nowMs;
+    this.delayMs = this.config.interpolationDelayMs;
+  }
+
+  /** Replication payload bytes sent to and received from one peer since it was first seen (all kinds, no lobby header). */
+  trafficWith(peerId: number): { sent: number; received: number } {
+    const t = this.traffic.get(peerId);
+    return t ? { sent: t.sent, received: t.received } : { sent: 0, received: 0 };
+  }
+
+  private count(peer: number, dir: "sent" | "received", bytes: number): void {
+    let t = this.traffic.get(peer);
+    if (!t) this.traffic.set(peer, (t = { sent: 0, received: 0 }));
+    t[dir] += bytes;
+  }
+
+  /** The lobby this session runs on (for add-on layers). @internal */
+  get lobbyHandle(): Lobby {
+    return this.lobby;
+  }
+
+  /** Client: the render delay in ms right now (`interpolationDelayMs`, or the adaptive value when `adaptiveDelay` is on). */
+  get interpolationDelayMs(): number {
+    return this.delayMs;
+  }
+  /** Client: smoothed snapshot arrival jitter in ms (always measured; only `adaptiveDelay` acts on it). */
+  get jitterMs(): number {
+    return this.jitterValue;
+  }
+
+  /**
+   * Add-on layers (the player layer): handle every message of replication `kind` (5 and up, additive per
+   * spec/replication.md "Versioning"). The handler gets the sender, the whole payload and the channel; a throw of
+   * `ReplicationError` is counted as malformed.
+   * @internal
+   */
+  registerKind(kind: number, handler: (from: number, payload: Uint8Array, channel: ChannelName) => void): void {
+    if (!(kind >= 5 && kind <= 255)) throw new RangeError("kind must be 5..255");
+    this.extensions.set(kind, handler);
+  }
+
+  /** Send a payload of an add-on kind to one peer on a channel, counted as event bytes in `trafficRates`. @internal */
+  sendExtension(peer: number, bytes: Uint8Array, channel: "reliable" | "fast"): void {
+    this.lobby.send(peer, bytes, { channel });
+    this.rates.add(this.lobby.nowMs, EVENT, bytes.length);
+    this.count(peer, "sent", bytes.length);
+    this.logPacket("out", peer, channel, bytes, null);
+    this.stats.eventsSent++;
+  }
+
+  /** Count one add-on message as malformed. @internal */
+  countMalformed(): void {
+    this.stats.malformed++;
   }
 
   get localPeerId(): number {
@@ -561,6 +629,7 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
       const channel: "reliable" | "fast" = keyframe ? "reliable" : "fast";
       this.lobby.send(c.peer, bytes, { channel });
       this.rates.add(nowMs, SNAPSHOT, bytes.length);
+      this.count(c.peer, "sent", bytes.length);
       this.logPacket("out", c.peer, channel, bytes, baseline);
       c.bytesSent += bytes.length;
       this.stats.snapshotsSent++;
@@ -609,6 +678,7 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     }
     this.lobby.send(peer, bytes, { channel });
     this.rates.add(this.lobby.nowMs, EVENT, bytes.length);
+    this.count(peer, "sent", bytes.length);
     this.logPacket("out", peer, channel, bytes, null);
     if (channel === "reliable") this.eventBytes.set(peer, (this.eventBytes.get(peer) ?? 0) + bytes.length);
   }
@@ -712,6 +782,7 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     this.lobby.send(this.lobby.hostPeerId, bytes, { channel: "fast" });
     const now = this.lobby.nowMs;
     this.rates.add(now, INPUT, bytes.length);
+    this.count(this.lobby.hostPeerId, "sent", bytes.length);
     this.logPacket("out", this.lobby.hostPeerId, "fast", bytes, null);
     this.lastInputSendMs = now;
     if (n > 0) this.stats.inputsSent++;
@@ -802,6 +873,7 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     this.stats.snapshotsReceived++;
     const now = this.lobby.nowMs;
     if (h.tick > this.newestTick) {
+      this.measureJitter(h.tick, now);
       this.newestTick = h.tick;
       this.newestAtMs = now;
       this.ackTick = h.tick;
@@ -816,10 +888,31 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
     this.lastSampleMs = now;
   }
 
+  // Jitter: how far a snapshot's spacing in time is from its spacing in ticks (RFC 3550 style, grows fast, shrinks slowly).
+  private measureJitter(tick: number, now: number): void {
+    if (this.lastArriveMs >= 0) {
+      const d = Math.abs(now - this.lastArriveMs - (tick - this.lastArriveTick) * this.clock.tickMs);
+      this.jitterValue += (d - this.jitterValue) * (d > this.jitterValue ? 0.25 : 1 / 32);
+    }
+    this.lastArriveMs = now;
+    this.lastArriveTick = tick;
+  }
+
+  private adaptDelay(elapsedMs: number): void {
+    const interval = this.clock.tickMs * Math.max(1, this.config.snapshotEveryTicks);
+    const lo = 2 * interval;
+    const hi = Math.max(lo, this.config.maxInterpolationDelayMs);
+    const target = Math.min(hi, Math.max(lo, 2 * interval + 4 * this.jitterValue));
+    if (target > this.delayMs) this.delayMs += (target - this.delayMs) * Math.min(1, elapsedMs / 100); // grows within ~100 ms
+    else this.delayMs = Math.max(target, this.delayMs - elapsedMs * 0.02); // shrinks at most 20 ms per second
+    this.delayMs = Math.min(hi, Math.max(lo, this.delayMs));
+  }
+
   private updateRenderTick(elapsedMs: number): void {
     if (!this.haveOffset) return;
     const tickMs = this.clock.tickMs;
-    const target = this.serverTick - this.config.interpolationDelayMs / tickMs;
+    if (this.config.adaptiveDelay) this.adaptDelay(elapsedMs);
+    const target = this.serverTick - this.delayMs / tickMs;
     if (!this.haveRender || Math.abs(target - this.renderTickValue) > 10) {
       this.renderTickValue = target;
       this.haveRender = true;
@@ -869,6 +962,19 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
       return;
     }
     const kind = payload[2];
+    if (kind >= 1) this.count(from, "received", payload.length);
+    const ext = kind >= 5 ? this.extensions.get(kind) : undefined;
+    if (ext) {
+      this.rates.add(this.lobby.nowMs, RECEIVED + EVENT, payload.length);
+      if (this.packetLog) this.logPacket("in", from, channel, payload, null);
+      try {
+        ext(from, payload, channel);
+      } catch (e) {
+        if (e instanceof ReplicationError) this.stats.malformed++;
+        else throw e;
+      }
+      return;
+    }
     if (kind >= 1 && kind <= 4) {
       this.rates.add(this.lobby.nowMs, RECEIVED + (kind === KIND_SNAPSHOT ? SNAPSHOT : kind === KIND_INPUT ? INPUT : EVENT), payload.length);
       if (this.packetLog) this.logPacket("in", from, channel, payload, this.incomingBaseline(payload));
