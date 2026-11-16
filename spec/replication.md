@@ -89,11 +89,39 @@ identical; else op 0 with the changed bytes. An entity with an empty state (`len
   game (the host throws).
 - **Baselines.** The host keeps the worlds it sent for the last 64 ticks (`HistoryTicks`: a world is dropped when
   `its tick + 64 < the current tick`). It encodes against the newest tick the client acknowledged (`ack` in its
-  `input`) if it still has that world; else it sends a full snapshot. A new client (no ack yet) gets full snapshots.
+  `input`) if it still has that world; else it sends a full snapshot. A new client (no ack yet) gets full snapshots. An `ack` of 0
+  from a client that had acked is a request for a full snapshot (see Resync).
   An `ack` counts only if it is `<=` the host's current tick, `>` the one it holds, `>` the client's resync floor (below)
   and a tick the host sent.
 - **Resync.** The game may force a client back to full snapshots (`SendFullSnapshot(peer)`): the stored ack is cleared
   and the floor set to the current tick, so only an ack of a snapshot sent after the call restores deltas.
+  A client can ask for the same thing itself, with no new byte: an `input` with `ack` 0 from a client whose stored ack is
+  above 0 means "this client holds no baseline" (its session started over: a second session made on a lobby that is
+  already playing, a scene reload). The host then does what `SendFullSnapshot(peer)` does, and starts that client's input
+  bookkeeping over (below). The rules:
+  - *Late packets.* `input` travels on `fast`, so one the client sent before its first snapshot arrived (`ack` 0) can
+    arrive after a later one. The fields cannot tell it from a new session's first message: both carry `ack` 0, a small
+    `newest` and `n >= 1`. So the host uses time: it acts only when the current tick is at least 500 ms
+    (`ceil(500 / TickMs)` ticks) after the tick at which it accepted this client's current first ack (the ack that took the
+    stored ack from 0 to above 0; `SendFullSnapshot` clears it again). A late packet of the same session can only arrive
+    within that time of the first ack (it was sent before it). A new session that starts within 500 ms of the first ack of
+    the one before it is not recognised (the wait of an old host, nothing worse).
+  - *Bound.* At most one such restart per client per `HistoryTicks` host ticks (default 64, about 2.1 s); an `ack` 0 inside
+    that is ignored like any other `ack` that does not count. A client that alternates `ack` 0 and real acks gets one
+    full snapshot per history length at most.
+  - *After a restart*, until the client acks a snapshot sent after it, an `input` whose `ack` is above 0 and at most the
+    floor was sent by the old session (a new one acks nothing, or a tick above the floor): the host ignores it whole, inputs
+    included.
+  - *Input bookkeeping.* The new session numbers its inputs from 1 again, which the host would drop as old (`seq <=` the
+    last handed out). So at the restart the host clears the client's queued inputs, sets its last handed out number to 0
+    (the `lastInput` of its snapshots is then 0 until the first new input is handed out) and forgets the last input it
+    handed out (`TryGetInput` returns nothing until a new input arrives, not a repeat of the old session's last one). It
+    keeps the client's counters (`Repeated`, `Skipped`, `Lost`), the totals in the session stats, the bytes sent and the
+    keyframe timer.
+  - *Compatibility.* No byte and no message kind changes. An old host ignores such an `ack` 0 (the wait stays: until its
+    stored baseline leaves the history, about 2 s, or the keyframe). An old client never sends `ack` 0 after it decoded a
+    snapshot, so nothing changes for it. A session that has nothing to send stays silent until its first snapshot (the
+    ack-only `input` below starts with it): the host cannot learn that it started over, and for it the wait stays.
 - **Clients.** A peer becomes a snapshot client when its data link is up (`peerReady`), not when the server announces
   it; before that nothing is sent to it (reliable events are queued by the lobby). It is removed when it leaves, and
   its streams are forgotten.
@@ -161,7 +189,7 @@ applies and every number above is unchanged. Only the JS client has it (the netw
 ## kind 2: `input` (client -> host, `fast`)
 
 ```
-ack:varuint             newest snapshot tick this client decoded (0 = none)
+ack:varuint             newest snapshot tick this client decoded (0 = none; from a client that had acked before: it holds no snapshot and wants a full one, see Resync)
 newest:varuint          sequence number of the first input below (the client's last sequence number, also when n = 0)
 n:u8                    number of inputs, newest first: seq newest, newest-1, ... (n <= newest)
 n x ( view:varuint      host tick the client was rendering when it made this input, in 1/256 tick (render tick x 256)

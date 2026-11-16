@@ -523,6 +523,11 @@ tests are `tests/replication.gd`. The session only needs a lobby with `mode`, `l
   `Lost`, `BufferDepth` per client), `rep.BytesSentTo(peer)`. RTT comes from OneLobby's own 1 s pings.
 - A client that reports a gap or asks to resync: `rep.SendFullSnapshot(peer)` on the host; its next snapshot is full and
   deltas resume after it acknowledges one.
+- A second session made on the same lobby (a scene reload, a layer made again) needs no call of yours: it sends `ack` 0 with
+  its first input, and the host sends it a full snapshot at once and takes its input numbers from 1 again (at most one such
+  resync per client per 64 ticks, and not within 500 ms of the first ack of the session before). A host from before this
+  change ignores that and the new session waits about 2 s. A session that has nothing to send stays silent until its first
+  snapshot: submit an input at once or call `SendFullSnapshot(peer)` yourself when it starts.
 
 ## Done when
 
