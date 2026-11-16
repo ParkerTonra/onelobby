@@ -4,6 +4,10 @@
   "displayName": "OneLobby",
   "description": "OneLobby for Unity: lobbies with join codes, WebRTC peer-to-peer data channels, lockstep or raw netcode, text chat and voice, and hosting by IP with a join code (no server). Thin Unity plumbing (UnityTransport, UnityVoiceAudio, OneLobbyRunner) and the drop-in multiplayer menu (OneLobbyMenu) over the engine-agnostic OneLobby.Core, OneLobby.DataChannel (libdatachannel) and OneLobby.Direct.",
   "unity": "6000.0",
+  "dependencies": {
+    "com.unity.modules.animation": "1.0.0",
+    "com.unity.modules.physics": "1.0.0"
+  },
   "license": "MIT",
   "author": { "name": "OneLobby contributors" },
   "keywords": ["multiplayer", "webrtc", "lobby", "netcode", "p2p"],
@@ -17,6 +21,11 @@
       "displayName": "Menu",
       "description": "The drop-in multiplayer menu: one script, one component on an empty GameObject. Shows \"In game\" when the host starts; works with --host and --join=<code>.",
       "path": "Samples~/Menu"
+    },
+    {
+      "displayName": "Net Player",
+      "description": "Players in the world with no player sync of your own: the menu, then one capsule per player that walks and jumps and shows on every screen (OneLobbyNetPlayer and OneLobbyNetPlayerSpawner, built in code). Works with --host --local and --join=127.0.0.1:47810 --local.",
+      "path": "Samples~/NetPlayer"
     },
     {
       "displayName": "Mic Check",
