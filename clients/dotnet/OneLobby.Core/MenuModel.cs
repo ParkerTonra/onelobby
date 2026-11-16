@@ -147,6 +147,13 @@ namespace OneLobby
         /// <summary>Three lines (UDP, network type, relay), empty before a check.</summary>
         public IReadOnlyList<string> CheckFacts { get; private set; } = Array.Empty<string>();
         public bool CheckRunning { get; private set; }
+        /// <summary>The verdict word of the last finished check ("good", "blocked", ...); "" before one and while it runs.</summary>
+        public string CheckVerdictId { get; private set; } = "";
+        /// <summary>True when nothing may leave this PC (the templates' <c>--local</c> flag, see <see cref="ArgsSayLocal"/>): the check never runs on its own; the button still works.</summary>
+        public bool LocalOnly { get; set; }
+        private bool _opened;
+        /// <summary>The check verdicts (spec/diagnostics.md s.8) that put a line on the start screen.</summary>
+        private static readonly string[] WarningVerdicts = { "likely_fail", "blocked", "relay_refused", "relay_unreachable" };
         public string LogNote { get; private set; } = "";
 
         /// <summary>Reads the saved name, the last code and the lobby server into the start and settings screens.</summary>
@@ -177,6 +184,27 @@ namespace OneLobby
             (_client.Blueprint == null || _client.Blueprint.Hosting.Server) && Route != MenuRoute.Direct && _client.EffectiveServer.Length > 0;
 
         public bool ConnectionCheckShown => _client.Blueprint == null || _client.Blueprint.Diagnostics.ShowConnectionCheck;
+
+        /// <summary>The menu runs the connection check once when it opens: on unless <c>diagnostics.checkOnOpen</c> is false ("button only"), the check is hidden (<c>showConnectionCheck</c> false), or the menu is <see cref="LocalOnly"/>.</summary>
+        public bool CheckOnOpenEnabled => ConnectionCheckShown && !LocalOnly && (_client.Blueprint == null || _client.Blueprint.Diagnostics.CheckOnOpen);
+
+        /// <summary>
+        /// The UI calls this whenever it shows the start screen. The first call that finds the start screen up starts the check (when
+        /// <see cref="CheckOnOpenEnabled"/>); later calls (the way back from a lobby or from Settings) change nothing. A check that is
+        /// running is never started twice. Hosting and joining never wait for it. The task ends when the check does.
+        /// </summary>
+        public Task StartShown()
+        {
+            if (_opened || Screen != MenuScreen.Start) return Task.CompletedTask;
+            _opened = true;
+            return CheckOnOpenEnabled && !CheckRunning ? RunCheckAsync() : Task.CompletedTask;
+        }
+
+        /// <summary>The one line the start screen shows: the verdict sentence when the check found a problem (direct connections likely to fail, UDP blocked, a relay that refuses the login or does not answer), else "" (while it runs, before it, and when all is well).</summary>
+        public string StartCheckLine => !CheckRunning && Array.IndexOf(WarningVerdicts, CheckVerdictId) >= 0 ? CheckVerdict : "";
+
+        /// <summary>True when <c>--local</c> is among the command-line arguments (host and join on 127.0.0.1 only, nothing leaves this PC).</summary>
+        public static bool ArgsSayLocal(IEnumerable<string>? args) => args != null && System.Linq.Enumerable.Contains(args, "--local");
 
         public bool ChatShown => Lobby != null && (_client.Blueprint == null || _client.Blueprint.Chat.Text);
 
@@ -895,6 +923,7 @@ namespace OneLobby
             if (CheckRunning) return;
             CheckRunning = true;
             CheckVerdict = MenuText.T("check_running");
+            CheckVerdictId = "";
             CheckFacts = Array.Empty<string>();
             Changed?.Invoke();
             CheckResult? r = null;
@@ -910,6 +939,7 @@ namespace OneLobby
             else
             {
                 CheckVerdict = r.Message;
+                CheckVerdictId = Diagnose.CheckVerdict(new CheckFindings(r.Udp ?? "unknown", r.NatType ?? "unknown", r.Relay ?? "none")).Verdict;
                 var relay = r.Relay ?? "none";
                 CheckFacts = new[]
                 {

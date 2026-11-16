@@ -30,7 +30,7 @@ public partial class MenuSelfCheck : Node
     private sealed class Player
     {
         public OneLobbyMenu Menu = null!;
-        public int Started, Back, Left;
+        public int Started, Back, Left, Runs;
         public MenuModel M => Menu.Model!;
     }
 
@@ -54,6 +54,7 @@ public partial class MenuSelfCheck : Node
         {
             foreach (var size in new[] { new Vector2I(1280, 720), new Vector2I(640, 360) })
                 await Layouts(size);
+            await OnOpen();
         }
         catch (Exception e)
         {
@@ -88,14 +89,29 @@ public partial class MenuSelfCheck : Node
         return cond();
     }
 
-    private Player NewPlayer(string name)
+    /// <summary>
+    /// A menu on the in-memory network. Its connection check is always a counted fake (<c>Runs</c>): this check never sends a packet
+    /// to the internet. <paramref name="answer"/> is the fake's NAT type; <paramref name="gate"/> holds it until set.
+    /// </summary>
+    private Player NewPlayer(string name, string answer = "cone", TaskCompletionSource<bool>? gate = null, string[]? bootArgs = null, string? blueprint = null)
     {
         var config = new OneLobbyConfig("menu-selfcheck", "1", new Uri("ws://mem/ws"), SyncMode.Raw, 20, 20, "") { SettingsEnv = PlayerSettings.NoEnvironment };
         var menu = GD.Load<PackedScene>("res://addons/onelobby_menu/OneLobbyMenu.tscn").Instantiate<OneLobbyMenu>();
-        menu.Client = new LobbyClient(config, _net.CreateTransport());
+        menu.Client = blueprint == null
+            ? new LobbyClient(config, _net.CreateTransport())
+            : LobbyClient.FromBlueprint(Blueprint.Parse(blueprint), _net.CreateTransport(), "", configure: c => c with { SettingsEnv = PlayerSettings.NoEnvironment });
+        var player = new Player { Menu = menu };
+        menu.CheckRunner = async _ =>
+        {
+            player.Runs++;
+            if (gate != null) await gate.Task;
+            var v = Diagnose.CheckVerdict(new CheckFindings("ok", answer, "none"));
+            return new CheckResult("ok", answer, "none", v.Verdict, v.Message);
+        };
+        if (bootArgs != null) menu.BootArgs = bootArgs;
         menu.BootFlags = false;
         menu.HostOptions = new LobbyOptions("selfcheck", 4) { Room = new RoomOptions { CountdownSeconds = 1 } };
-        var p = new Player { Menu = menu };
+        var p = player;
         menu.GameStarted += _ => p.Started++;
         menu.ReturnedToLobby += _ => p.Back++;
         menu.Left += () => p.Left++;
@@ -134,6 +150,56 @@ public partial class MenuSelfCheck : Node
     }
 
     /// <summary>Everything visible has a size and unclipped text, the relay line is nowhere, the page fits, and focus is on a visible control of the menu.</summary>
+    /// <summary>The connection check on open, in the real scene with counted fakes (see NewPlayer).</summary>
+    private async Task OnOpen()
+    {
+        var gate = new TaskCompletionSource<bool>();
+        var p = NewPlayer("Sam", "symmetric", gate);
+        await Frames(3);
+        var line = p.Menu.GetNode<Label>("%StartCheckLine");
+        Check(p.Runs == 1 && p.M.CheckRunning && !line.Visible, "on open: the check runs once and the start screen says nothing while it runs");
+        gate.SetResult(true);
+        await Frames(3);
+        Check(!p.M.CheckRunning && line.Visible && line.Text == "Direct connections: likely to fail. A relay is recommended.", $"on open: the start screen shows the warning sentence: '{line.Text}'");
+        p.M.OpenSettings();
+        await Frames(2);
+        Check(p.Menu.GetNode<Label>("%CheckVerdict").Text == line.Text && p.Menu.GetNode<Label>("%CheckFacts").Text.Count(c => c == (char)10) == 2, "on open: Settings already shows the verdict and three facts");
+        p.M.Back();
+        await Frames(2);
+        Check(p.Runs == 1, "on open: coming back from Settings does not run it again");
+        p.Menu.QueueFree();
+
+        var local = NewPlayer("Ann", bootArgs: new[] { "--local" });
+        await Frames(4);
+        Check(local.Runs == 0, "--local: the check does not run by itself");
+        local.Menu.QueueFree();
+
+        var off = NewPlayer("Bo", blueprint: @"{""game"":{""id"":""menu-selfcheck""},""diagnostics"":{""checkOnOpen"":false}}");
+        await Frames(4);
+        Check(off.Runs == 0, "checkOnOpen false: nothing runs on open");
+        off.Menu.GetNode<Button>("%ConnectionCheckButton").EmitSignal(BaseButton.SignalName.Pressed);
+        await Frames(2);
+        Check(off.Runs == 1, "checkOnOpen false: the button runs it");
+        off.Menu.QueueFree();
+
+        var hidden = NewPlayer("Cy", blueprint: @"{""game"":{""id"":""menu-selfcheck""},""diagnostics"":{""showConnectionCheck"":false}}");
+        await Frames(4);
+        Check(hidden.Runs == 0, "showConnectionCheck false: nothing runs on open");
+        hidden.Menu.QueueFree();
+
+        // the menu freed while the check runs: the late answer reaches a model nobody draws from, and nothing is called on the dead node
+        var gate2 = new TaskCompletionSource<bool>();
+        var q = NewPlayer("Di", "symmetric", gate2);
+        await Frames(3);
+        var model = q.M;
+        Check(q.Runs == 1 && model.CheckRunning, "freed mid-check: the check is running");
+        q.Menu.QueueFree();
+        await Frames(3);
+        gate2.SetResult(true);
+        await Frames(5);
+        Check(!GodotObject.IsInstanceValid(q.Menu) && !model.CheckRunning && model.CheckVerdictId == "likely_fail", "freed mid-check: the late answer ended quietly");
+    }
+
     private async Task Audit(Player p, string label, Vector2 viewport, bool expectFocus = false)
     {
         await Frames(3);

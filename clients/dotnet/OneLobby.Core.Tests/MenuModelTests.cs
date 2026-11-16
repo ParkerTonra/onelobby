@@ -613,5 +613,128 @@ namespace OneLobby.Tests
             Assert.Equal(MenuScreen.Error, p.M.Screen);
             Assert.NotEqual("", p.M.Error.Message);
         }
+
+        // ---- the connection check when the menu opens (every runner here is a counted fake: nothing touches the network) ----------
+
+        private static CheckResult Found(string kind) => kind switch
+        {
+            "symmetric" => new CheckResult("ok", "symmetric", "none", "x", "x"),
+            "blocked" => new CheckResult("blocked", "unknown", "none", "x", "x"),
+            "relay_refused" => new CheckResult("ok", "cone", "refused", "x", "x"),
+            "relay_works" => new CheckResult("blocked", "unknown", "ok", "x", "x"),
+            _ => new CheckResult("ok", "cone", "none", "x", "x"),
+        };
+
+        private static (P P, int[] Runs) OpenRig(World w, string? diagnostics, string answer = "cone", TaskCompletionSource<bool>? gate = null)
+        {
+            var json = diagnostics == null ? @"{""game"":{""id"":""menu-test""}}" : @"{""game"":{""id"":""menu-test""},""diagnostics"":" + diagnostics + "}";
+            var p = w.FromBlueprint(json);
+            p.M.HostOptions = new LobbyOptions("menu", 4) { Room = new RoomOptions { CountdownSeconds = 1 } };
+            var runs = new[] { 0 };
+            p.M.CheckRunner = async _ =>
+            {
+                runs[0]++;
+                if (gate != null) await gate.Task.ConfigureAwait(true);
+                return Found(answer);
+            };
+            return (p, runs);
+        }
+
+        [Fact]
+        public void TheDefaultRunsTheCheckOnceWhenTheStartScreenFirstShowsAndNotAgainOnTheWayBack()
+        {
+            var w = new World();
+            var (p, runs) = OpenRig(w, null);
+            var m = p.M;
+            Assert.True(m.CheckOnOpenEnabled);
+            Assert.Equal(0, runs[0]);
+            w.Run(m.StartShown());
+            Assert.Equal((1, "good", false), (runs[0], m.CheckVerdictId, m.CheckRunning));
+            Assert.Equal(3, m.CheckFacts.Count);
+            Assert.Equal("", m.StartCheckLine);
+            m.OpenSettings();
+            m.Back();
+            w.Run(m.StartShown());
+            m.SetName("Sam");
+            w.Run(m.HostAsync());
+            Assert.True(w.Until(() => m.RoomActive));
+            w.Run(m.LeaveAsync());
+            w.Run(m.StartShown());
+            Assert.Equal(1, runs[0]);
+            w.Run(m.RunCheckAsync());
+            Assert.Equal(2, runs[0]);
+        }
+
+        [Theory]
+        [InlineData("symmetric", "likely_fail", true)]
+        [InlineData("blocked", "blocked", true)]
+        [InlineData("relay_refused", "relay_refused", true)]
+        [InlineData("cone", "good", false)]
+        [InlineData("relay_works", "relay_works", false)]
+        public void TheStartScreenLineIsTheVerdictSentenceForAWarningAndNothingElse(string answer, string verdict, bool warns)
+        {
+            var w = new World();
+            var (p, _) = OpenRig(w, null, answer);
+            w.Run(p.M.StartShown());
+            Assert.Equal(verdict, p.M.CheckVerdictId);
+            Assert.Equal(warns ? p.M.CheckVerdict : "", p.M.StartCheckLine);
+            if (answer == "symmetric") Assert.Equal("Direct connections: likely to fail. A relay is recommended.", p.M.StartCheckLine);
+        }
+
+        [Fact]
+        public void CheckOnOpenFalseShowFalseAndLocalRunNothingUntilTheButton()
+        {
+            var w = new World();
+            var (off, offRuns) = OpenRig(w, @"{""checkOnOpen"":false}");
+            w.Run(off.M.StartShown());
+            Assert.False(off.M.CheckOnOpenEnabled);
+            Assert.True(off.M.ConnectionCheckShown);
+            Assert.Equal(0, offRuns[0]);
+            w.Run(off.M.RunCheckAsync());
+            Assert.Equal(1, offRuns[0]);
+
+            var (hidden, hiddenRuns) = OpenRig(w, @"{""showConnectionCheck"":false}");
+            w.Run(hidden.M.StartShown());
+            Assert.Equal((0, false), (hiddenRuns[0], hidden.M.CheckOnOpenEnabled));
+
+            var (local, localRuns) = OpenRig(w, null);
+            local.M.LocalOnly = MenuModel.ArgsSayLocal(new[] { "--host", "--local" });
+            Assert.False(MenuModel.ArgsSayLocal(new[] { "--host" }));
+            w.Run(local.M.StartShown());
+            Assert.Equal(0, localRuns[0]);
+
+            var (late, lateRuns) = OpenRig(w, null);
+            late.M.OpenSettings();
+            w.Run(late.M.StartShown());
+            Assert.Equal(0, lateRuns[0]);
+            late.M.Back();
+            w.Run(late.M.StartShown());
+            Assert.Equal(1, lateRuns[0]);
+        }
+
+        [Fact]
+        public void ARunInProgressIsNeverStartedTwiceAndHostWorksWhileItRuns()
+        {
+            var w = new World();
+            var gate = new TaskCompletionSource<bool>();
+            var (p, runs) = OpenRig(w, null, "symmetric", gate);
+            var m = p.M;
+            var first = m.RunCheckAsync();
+            var open = m.StartShown();
+            var again = m.RunCheckAsync();
+            Assert.Equal(1, runs[0]);
+            Assert.True(m.CheckRunning);
+            Assert.Equal("", m.StartCheckLine);
+            m.SetName("Sam");
+            w.Run(m.HostAsync());
+            Assert.True(w.Until(() => m.RoomActive));
+            Assert.True(m.CheckRunning, "the check is still running while the lobby is open");
+            gate.SetResult(true);
+            w.Run(Task.WhenAll(first, open, again));
+            Assert.Equal((MenuScreen.Lobby, "likely_fail", 1), (m.Screen, m.CheckVerdictId, runs[0]));
+            Assert.Equal("", m.Error.Message);
+            w.Run(m.LeaveAsync());
+            Assert.Equal(m.CheckVerdict, m.StartCheckLine);
+        }
     }
 }

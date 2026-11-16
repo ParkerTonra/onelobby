@@ -18,7 +18,7 @@ namespace OneLobby;
 /// </code>
 /// Nodes a controller may touch, all with unique names (<c>%Name</c>); the same list as the GDScript menu's header:
 ///   Pages
-///   start:      StartPage StartTitle StartNote NameLabel NameEdit HostButton JoinLabel JoinEdit JoinButton PasswordEdit BrowseButton SettingsButton
+///   start:      StartPage StartTitle StartNote NameLabel NameEdit HostButton JoinLabel JoinEdit JoinButton PasswordEdit BrowseButton SettingsButton StartCheckLine
 ///   connecting: ConnectingPage ConnectingLabel ConnectingCancel
 ///   lobby:      LobbyPage CodeCaption CodeLabel CopyCodeButton CopyInviteButton PlayersHeader RosterList RosterNote CountdownLabel
 ///               ReadyButton StartButton CancelStartButton LeaveButton LobbyNote RequestsHeader RequestsList ReasonEdit BansHeader BansList
@@ -71,6 +71,9 @@ public partial class OneLobbyMenu : Control
     /// <summary>The command line the boot flags are read from (default: <c>OS.GetCmdlineUserArgs()</c>).</summary>
     public string[] BootArgs { get; set; } = Array.Empty<string>();
 
+    /// <summary>Runs the connection check instead of <c>Client.CheckConnectionAsync</c> (a test gives a fake; see <see cref="MenuModel.CheckRunner"/>). Set it before the menu enters the tree.</summary>
+    public Func<CheckOptions?, System.Threading.Tasks.Task<CheckResult>>? CheckRunner { get; set; }
+
     private LobbyOptions? _hostOptions;
     private RoomJoinOptions? _joinOptions;
     private MenuRoute _route = MenuRoute.Auto;
@@ -114,6 +117,10 @@ public partial class OneLobbyMenu : Control
             HostDirect = _hostDirect, JoinDirect = _joinDirect,
             Clipboard = text => DisplayServer.ClipboardSet(text),
             LogsPath = ProjectSettings.GlobalizePath("user://onelobby-menu-log.txt"),
+            CheckRunner = CheckRunner,
+            // `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
+            // Read here, not from BootFlags: a game that applies the boot flags itself later would be too late for the check on open.
+            LocalOnly = MenuModel.ArgsSayLocal(BootArgs.Length > 0 ? BootArgs : OS.GetCmdlineUserArgs()),
         };
         Model.GameStarted += l => GameStarted?.Invoke(l);
         Model.ReturnedToLobby += l => ReturnedToLobby?.Invoke(l);
@@ -143,6 +150,8 @@ public partial class OneLobbyMenu : Control
         Model.Changed -= Refresh;
         Model.Left -= EmitLeft;
     }
+
+    private void OpenCheck() => _ = Model?.StartShown();
 
     private void EmitLeft() => EmitSignal(SignalName.Left);
 
@@ -402,8 +411,11 @@ public partial class OneLobbyMenu : Control
         U<Button>("BrowseButton").Visible = m.CanBrowse();
         U<Label>("StartNote").Text = m.StartNote;
         U<Label>("StartNote").Visible = m.StartNote != "";
+        U<Label>("StartCheckLine").Text = m.StartCheckLine;
+        U<Label>("StartCheckLine").Visible = m.StartCheckLine != "";
         if (entering)
         {
+            CallDeferred(MethodName.OpenCheck); // not before a boot flag has had its say; the model runs the check once
             SetText(U<LineEdit>("NameEdit"), m.NameText);
             SetText(U<LineEdit>("JoinEdit"), m.JoinText);
             SetText(U<LineEdit>("PasswordEdit"), "");

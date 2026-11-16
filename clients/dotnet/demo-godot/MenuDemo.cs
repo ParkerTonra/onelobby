@@ -17,6 +17,7 @@ public partial class MenuDemo : Control
         if (System.Array.IndexOf(OS.GetCmdlineUserArgs(), "--menu-selfcheck") >= 0)
         {
             menu.Visible = false; // the check builds its own menus on an in-memory network
+            menu.Model!.LocalOnly = true; // and this one must not run the connection check on open (nothing may leave this PC)
             AddChild(new MenuSelfCheck());
             return;
         }
