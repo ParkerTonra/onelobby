@@ -101,37 +101,67 @@ describe("D7 the host's limits", () => {
   });
 });
 
+/**
+ * B shoots 30 times at A (strafing) on a 60 ms one-way link and the host judges each shot with `rewound`. Returns the error of
+ * every shot, split by whether the shooter's view was within the rewind limit when the shot reached the host.
+ */
+async function shootAtStrafer(mode: "owner" | "host", maxRewindMs: number | undefined) {
+  const s = await scene(mode, { latencyMs: 60, ...(maxRewindMs === undefined ? {} : { session: { maxRewindMs } }) });
+  drive(s); // A is the target, strafing
+  await s.rig.run(4);
+  const limitMs = s.hl.session.config.maxRewindMs;
+  // B shoots at what it renders this frame
+  let seen: { x: number; z: number } | null = null;
+  const errors: number[] = [];
+  const inside: number[] = []; // the shots whose view was within the rewind limit
+  const plain: number[] = [];
+  let past = 0;
+  s.hl.onAction("shoot", (e) => {
+    if (e.player !== s.b.peerId || !seen) return;
+    const then = s.hl.rewound(s.a.peerId, e.args.view)!;
+    const now = s.hl.latest(s.a.peerId)!;
+    const err = Math.hypot(then.x - seen.x, then.z - seen.z);
+    errors.push(err);
+    plain.push(Math.hypot(now.x - seen.x, now.z - seen.z));
+    const ageMs = (s.hl.session.clock.tick - e.args.view / 256) * s.hl.session.clock.tickMs;
+    if (ageMs <= limitMs) inside.push(err);
+    else past++;
+    seen = null;
+  });
+  for (let i = 0; i < 30; i++) {
+    await s.rig.run(0.7);
+    const v = s.bl.get(s.a.peerId)!;
+    seen = { x: v.x, z: v.z };
+    s.bl.action("shoot", { yaw: 0, pitch: 0 }); // `view` is the tick B is rendering
+    await s.rig.run(0.5);
+  }
+  return { errors, inside, plain, past, limitMs };
+}
+
 describe("D8 hits are judged on the host with rewind", () => {
   for (const mode of ["owner", "host"] as const) {
     it(`${mode}: the host finds the target where the shooter saw it`, async () => {
-      // 60 ms one way like the C# twin: the default rewind of 250 ms covers a shooter's view age plus its shot's flight only up to about that
-      const s = await scene(mode, { latencyMs: 60 });
-      drive(s); // A is the target, strafing
-      await s.rig.run(4);
-      // B shoots at what it renders this frame
-      let seen: { x: number; z: number } | null = null;
-      const errors: number[] = [];
-      const plain: number[] = [];
-      s.hl.onAction("shoot", (e) => {
-        if (e.player !== s.b.peerId || !seen) return;
-        const then = s.hl.rewound(s.a.peerId, e.args.view)!;
-        const now = s.hl.latest(s.a.peerId)!;
-        errors.push(Math.hypot(then.x - seen.x, then.z - seen.z));
-        plain.push(Math.hypot(now.x - seen.x, now.z - seen.z));
-        seen = null;
-      });
-      for (let i = 0; i < 30; i++) {
-        await s.rig.run(0.7);
-        const v = s.bl.get(s.a.peerId)!;
-        seen = { x: v.x, z: v.z };
-        s.bl.action("shoot", { yaw: 0, pitch: 0 }); // `view` is the tick B is rendering
-        await s.rig.run(0.5);
-      }
+      // 60 ms one way: the default rewind of 250 ms covers a shooter's view age plus its shot's flight only up to about that, with
+      // almost no room (spec/net-player.md section 8), so some shots are past the limit and are judged at the oldest allowed state
+      const { errors, inside, plain, past, limitMs } = await shootAtStrafer(mode, undefined);
       const worst = Math.max(...errors);
+      const worstInside = inside.length > 0 ? Math.max(...inside) : 0;
       console.log(`D8 ${mode}: ${errors.length} shots, error with rewind at most ${worst.toFixed(3)} m, without rewind ${Math.min(...plain).toFixed(2)} to ${Math.max(...plain).toFixed(2)} m`);
+      console.log(`D8 ${mode}: ${past} of the shots were older than the ${limitMs} ms rewind limit (the clamp cuts in); the others are off by at most ${worstInside.toFixed(3)} m`);
       expect(errors.length).toBe(30);
-      expect(worst).toBeLessThan(0.1);
+      expect(inside.length).toBeGreaterThanOrEqual(15);
+      expect(worstInside).toBeLessThan(0.1); // inside the limit: where the shooter saw it
+      expect(worst).toBeLessThan(0.3); // even the clamped ones
       expect(Math.max(...plain)).toBeGreaterThan(1);
+    });
+
+    it(`${mode}: with maxRewindMs 400 on the same link every shot finds the target`, async () => {
+      const { errors, past, limitMs } = await shootAtStrafer(mode, 400);
+      const worst = Math.max(...errors);
+      console.log(`D8 ${mode} maxRewindMs ${limitMs}: ${errors.length} shots, ${past} past the limit, error at most ${worst.toFixed(3)} m`);
+      expect(errors.length).toBe(30);
+      expect(past).toBe(0);
+      expect(worst).toBeLessThan(0.1);
     });
   }
 

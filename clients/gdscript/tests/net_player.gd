@@ -43,7 +43,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients,
-		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -883,52 +883,80 @@ func _test_d7_shots() -> void:
 	_check(at_b.size() == at_host.size(), "D7 shots: the other client sees exactly the accepted ones")
 
 
+## B shoots 30 times at A (strafing) on a 60 ms one-way link and the host judges each shot with `rewound`. Returns `errors` (every
+## shot), `inside` (the shots whose view was within the rewind limit when the shot reached the host), `plain` (without rewind), `past`
+## (how many were past the limit) and `limit_ms`.
+func _shoot_at_strafer(mode: String, max_rewind_ms: float) -> Dictionary:
+	var o := {"latency_ms": 60.0}
+	if max_rewind_ms > 0.0:
+		o["session"] = {"max_rewind_ms": max_rewind_ms}
+	var s := _scene(mode, o)
+	_drive(s) # A is the target, strafing
+	var rig: Rig = s["rig"]
+	var hl: OneLobbyNetPlayers = s["hl"]
+	var bl: OneLobbyNetPlayers = s["bl"]
+	var apeer := _peer(s)
+	var bpeer := (s["b"] as Base.RepPlayer).peer_id()
+	rig.run(4.0)
+	# B shoots at what it renders this frame
+	var seen := [null]
+	var errors: Array[float] = []
+	var plain: Array[float] = []
+	var inside: Array[float] = []
+	var past := [0]
+	hl.on_action("shoot", func(e: Dictionary) -> void:
+		if e["player"] != bpeer or seen[0] == null:
+			return
+		var then: Dictionary = hl.rewound(apeer, int(e["args"]["view"]))
+		var now: Dictionary = hl.latest_state(apeer)
+		var sx: float = seen[0][0]
+		var sz: float = seen[0][1]
+		var err := sqrt((float(then["x"]) - sx) ** 2 + (float(then["z"]) - sz) ** 2)
+		errors.append(err)
+		var age_ms := (float(hl.session.clock.tick) - float(e["args"]["view"]) / 256.0) * hl.session.clock.tick_ms()
+		if age_ms <= float(hl.session.config["max_rewind_ms"]):
+			inside.append(err)
+		else:
+			past[0] += 1
+		plain.append(sqrt((float(now["x"]) - sx) ** 2 + (float(now["z"]) - sz) ** 2))
+		seen[0] = null)
+	for i in 30:
+		rig.run(0.7)
+		var v: Dictionary = bl.get_state(apeer)
+		seen[0] = [float(v["x"]), float(v["z"])]
+		bl.send_action("shoot", {"yaw": 0.0, "pitch": 0.0}) # `view` is the tick B is rendering
+		rig.run(0.5)
+	return {"errors": errors, "inside": inside, "plain": plain, "past": past[0], "limit_ms": float(hl.session.config["max_rewind_ms"])}
+
+
 func _test_d8() -> void:
 	for mode: String in MODES:
-		# 60 ms one way like the C# twin: the default rewind of 250 ms covers a shooter's view age plus its shot's flight only up to about that
-		var s := _scene(mode, {"latency_ms": 60.0})
-		_drive(s)
-		var rig: Rig = s["rig"]
-		var hl: OneLobbyNetPlayers = s["hl"]
-		var bl: OneLobbyNetPlayers = s["bl"]
-		var apeer := _peer(s)
-		var bpeer := (s["b"] as Base.RepPlayer).peer_id()
-		rig.run(4.0)
-		# B shoots at what it renders this frame
-		var seen := [null]
-		var errors: Array[float] = []
-		var plain: Array[float] = []
-		var inside: Array[float] = [] # the shots whose view was within the rewind limit (250 ms by default)
-		var clamped := [0]
-		hl.on_action("shoot", func(e: Dictionary) -> void:
-			if e["player"] != bpeer or seen[0] == null:
-				return
-			var then: Dictionary = hl.rewound(apeer, int(e["args"]["view"]))
-			var now: Dictionary = hl.latest_state(apeer)
-			var sx: float = seen[0][0]
-			var sz: float = seen[0][1]
-			var err := sqrt((float(then["x"]) - sx) ** 2 + (float(then["z"]) - sz) ** 2)
-			errors.append(err)
-			var age_ms := (float(hl.session.clock.tick) - float(e["args"]["view"]) / 256.0) * hl.session.clock.tick_ms()
-			if age_ms <= float(hl.session.config["max_rewind_ms"]):
-				inside.append(err)
-			else:
-				clamped[0] += 1
-			plain.append(sqrt((float(now["x"]) - sx) ** 2 + (float(now["z"]) - sz) ** 2))
-			seen[0] = null)
-		for i in 30:
-			rig.run(0.7)
-			var v: Dictionary = bl.get_state(apeer)
-			seen[0] = [float(v["x"]), float(v["z"])]
-			bl.send_action("shoot", {"yaw": 0.0, "pitch": 0.0}) # `view` is the tick B is rendering
-			rig.run(0.5)
+		# 60 ms one way: the default rewind of 250 ms covers a shooter's view age plus its shot's flight only up to about that, with almost
+		# no room (spec/net-player.md section 8), so some shots are past the limit and are judged at the oldest allowed state
+		var r := _shoot_at_strafer(mode, 0.0)
+		var errors: Array[float] = r["errors"]
+		var inside: Array[float] = r["inside"]
+		var plain: Array[float] = r["plain"]
 		var worst: float = errors.max()
+		var worst_inside: float = (inside.max() as float) if inside.size() > 0 else 0.0
 		print("D8 %s: %d shots, error with rewind at most %.3f m, without rewind %.2f to %.2f m" % [mode, errors.size(), worst, plain.min(), plain.max()])
+		print("D8 %s: %d of the shots were older than the %d ms rewind limit (the clamp cuts in); the others are off by at most %.3f m" % [mode, int(r["past"]), int(r["limit_ms"]), worst_inside])
 		_check(errors.size() == 30, "D8 %s: thirty shots reach the host (%d)" % [mode, errors.size()])
-		print("D8 %s: %d of the shots were older than the 250 ms rewind limit (the clamp cuts in); the others are off by at most %.3f m" % [mode, clamped[0], (inside.max() as float) if inside.size() > 0 else 0.0])
-		_check(inside.size() >= 15 and (inside.max() as float) < 0.1, "D8 %s: with rewind the host finds the target where the shooter saw it (shots inside the rewind limit)" % mode)
+		_check(inside.size() >= 15 and worst_inside < 0.1, "D8 %s: with rewind the host finds the target where the shooter saw it (shots inside the rewind limit)" % mode)
 		_check(worst < 0.3, "D8 %s: and even the clamped ones are off by under 0.3 m" % mode)
 		_check(plain.max() > 1.0, "D8 %s: without rewind it would miss" % mode)
+
+
+## The claim "raise maxRewindMs for slower links": the same link with a limit of 400 ms, where every shot must be found.
+func _test_d8_400() -> void:
+	for mode: String in MODES:
+		var r := _shoot_at_strafer(mode, 400.0)
+		var errors: Array[float] = r["errors"]
+		var worst: float = errors.max()
+		print("D8 %s max_rewind_ms %d: %d shots, %d past the limit, error at most %.3f m" % [mode, int(r["limit_ms"]), errors.size(), int(r["past"]), worst])
+		_check(errors.size() == 30, "D8 400 %s: thirty shots reach the host (%d)" % [mode, errors.size()])
+		_check(int(r["past"]) == 0, "D8 400 %s: no shot is past the limit" % mode)
+		_check(worst < 0.1, "D8 400 %s: every shot is found where the shooter saw it (%.3f m)" % [mode, worst])
 
 
 func _test_d8_clamp() -> void:
