@@ -1,0 +1,1846 @@
+{
+ "version": 1,
+ "causes": [
+  {
+   "code": "nat_blocked",
+   "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+   "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+   "hostHint": "A relay (TURN) set on your side, or a forwarded game port, would let this player in.",
+   "short": "strict NAT, no relay set"
+  },
+  {
+   "code": "relay_refused",
+   "message": "The relay rejected the login.",
+   "hint": "Check the relay line in the settings; it may have been typed wrong or expired.",
+   "hostHint": "Their relay line may be wrong or expired.",
+   "short": "the relay rejected the login"
+  },
+  {
+   "code": "relay_unreachable",
+   "message": "The relay could not be used: it did not answer.",
+   "hint": "Check the relay line for typos and that the relay is online; some networks block relays.",
+   "hostHint": "Their relay is down or their network blocks it.",
+   "short": "the relay did not answer"
+  },
+  {
+   "code": "udp_blocked",
+   "message": "Your network blocks UDP, the kind of traffic games use to connect.",
+   "hint": "Try another network, such as a phone hotspot, or a relay that can be reached from this network.",
+   "hostHint": "Their network blocks UDP. Ask them to try another network.",
+   "short": "UDP blocked"
+  },
+  {
+   "code": "firewall",
+   "message": "A firewall may be blocking the game on the host's computer: nothing from the player ever reached it.",
+   "hint": "Allow the game in the firewall (on Windows, tick Private networks when asked), then try again.",
+   "hostHint": "Allow the game in your firewall (on Windows, tick Private networks when asked), then ask them to try again.",
+   "short": "nothing reached the host (firewall?)"
+  },
+  {
+   "code": "version_mismatch",
+   "message": "You have version {mine}, the host has {theirs}.",
+   "hint": "Update the game on the older side, then try again.",
+   "hostHint": "Make sure you both have the same version of the game.",
+   "short": "different game version"
+  },
+  {
+   "code": "host_unreachable",
+   "message": "The host did not answer.",
+   "hint": "Check the code or address, and that the host is online with the game open.",
+   "hostHint": "They could not reach you. Check that your game is open and the code is current.",
+   "short": "the host did not answer"
+  },
+  {
+   "code": "signaling_unreachable",
+   "message": "Could not reach the lobby server or any relay that introduces players.",
+   "hint": "Check your internet connection; if it works elsewhere, try again in a few minutes.",
+   "hostHint": "Their internet connection or the lobby service may be down.",
+   "short": "no lobby server or relay reachable"
+  },
+  {
+   "code": "timeout_unknown",
+   "message": "The connection did not finish. It stopped at {stage_text} after {elapsed}.",
+   "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+   "hostHint": "Ask them to copy their log and send it to you.",
+   "short": "unknown cause"
+  }
+ ],
+ "stageText": {
+  "signaling": "reaching the lobby",
+  "join": "joining the lobby",
+  "offer": "waiting for the host to start the connection",
+  "ice": "the connection check",
+  "channels": "opening the game connection",
+  "handshake": "the final hello with the host"
+ },
+ "stageOf": {
+  "none": "signaling",
+  "signaling": "join",
+  "joined": "offer",
+  "offer": "ice",
+  "ice": "channels",
+  "channels": "handshake"
+ },
+ "diagnose": [
+  {
+   "name": "version mismatch with both versions",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "version_mismatch",
+    "reached": "signaling",
+    "elapsedMs": 300,
+    "versions": {
+     "mine": "1.4",
+     "theirs": "1.5"
+    },
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "version_mismatch",
+    "message": "You have version 1.4, the host has 1.5.",
+    "hint": "Update the game on the older side, then try again.",
+    "stage": "join"
+   }
+  },
+  {
+   "name": "version mismatch without versions",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "version_mismatch",
+    "reached": "signaling",
+    "elapsedMs": 300,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "version_mismatch",
+    "message": "You and the host have different versions of the game.",
+    "hint": "Update the game on the older side, then try again.",
+    "stage": "join"
+   }
+  },
+  {
+   "name": "lobby server address missing",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "no_server",
+    "reached": "none",
+    "elapsedMs": 0,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "signaling_unreachable",
+    "message": "Could not reach the lobby server or any relay that introduces players.",
+    "hint": "Check your internet connection; if it works elsewhere, try again in a few minutes.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "lobby server down",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "connect_failed",
+    "reached": "none",
+    "elapsedMs": 5000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "signaling_unreachable",
+    "message": "Could not reach the lobby server or any relay that introduces players.",
+    "hint": "Check your internet connection; if it works elsewhere, try again in a few minutes.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "lobby server dropped before the join finished",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "server_closed",
+    "reached": "signaling",
+    "elapsedMs": 900,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "signaling_unreachable",
+    "message": "Could not reach the lobby server or any relay that introduces players.",
+    "hint": "Check your internet connection; if it works elsewhere, try again in a few minutes.",
+    "stage": "join"
+   }
+  },
+  {
+   "name": "nostr with no relay up",
+   "facts": {
+    "side": "joiner",
+    "route": "nostr",
+    "error": "direct_unreachable",
+    "reached": "none",
+    "elapsedMs": 10000,
+    "versions": null,
+    "relaysUp": false,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "signaling_unreachable",
+    "message": "Could not reach the lobby server or any relay that introduces players.",
+    "hint": "Check your internet connection; if it works elsewhere, try again in a few minutes.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "nostr relays up but the host never answered",
+   "facts": {
+    "side": "joiner",
+    "route": "nostr",
+    "error": "direct_unreachable",
+    "reached": "none",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": true,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "host_unreachable",
+    "message": "The host did not answer.",
+    "hint": "Check the code or address, and that the host is online with the game open.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "nostr relay state unknown",
+   "facts": {
+    "side": "joiner",
+    "route": "nostr",
+    "error": "direct_unreachable",
+    "reached": "none",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "host_unreachable",
+    "message": "The host did not answer.",
+    "hint": "Check the code or address, and that the host is online with the game open.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "typed address did not answer",
+   "facts": {
+    "side": "joiner",
+    "route": "ip",
+    "error": "direct_unreachable",
+    "reached": "none",
+    "elapsedMs": 5000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": false,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "host_unreachable",
+    "message": "The host did not answer.",
+    "hint": "Check the code or address, and that the host is online with the game open.",
+    "stage": "signaling"
+   }
+  },
+  {
+   "name": "strict NAT: candidates both ways, no relay, nothing connected",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "nat_blocked",
+    "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+    "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "strict NAT over an IP code with no STUN",
+   "facts": {
+    "side": "joiner",
+    "route": "ip",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": false,
+    "relay": "none",
+    "local": [
+     "host"
+    ],
+    "remote": [
+     "host"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "nat_blocked",
+    "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+    "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "timeout code with the same facts",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "timeout",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "nat_blocked",
+    "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+    "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "symmetric NAT from the connection check, nothing seen from the host",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [],
+    "retried": false,
+    "nat": "symmetric",
+    "heard": null
+   },
+   "expect": {
+    "cause": "nat_blocked",
+    "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+    "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "relay login rejected",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "refused",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx",
+     "relay"
+    ],
+    "retried": true,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "relay_refused",
+    "message": "The relay rejected the login.",
+    "hint": "Check the relay line in the settings; it may have been typed wrong or expired.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "relay never answered",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "unreachable",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": true,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "relay_unreachable",
+    "message": "The relay could not be used: it did not answer.",
+    "hint": "Check the relay line for typos and that the relay is online; some networks block relays.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "relay failed, cannot tell why",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "failed",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": true,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "relay_unreachable",
+    "message": "The relay could not be used: it did not answer.",
+    "hint": "Check the relay line for typos and that the relay is online; some networks block relays.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "UDP blocked from the connection check",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "blocked",
+    "heard": null
+   },
+   "expect": {
+    "cause": "udp_blocked",
+    "message": "Your network blocks UDP, the kind of traffic games use to connect.",
+    "hint": "Try another network, such as a phone hotspot, or a relay that can be reached from this network.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "STUN asked, no reflexive candidate came back",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "udp_blocked",
+    "message": "Your network blocks UDP, the kind of traffic games use to connect.",
+    "hint": "Try another network, such as a phone hotspot, or a relay that can be reached from this network.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "host side: nothing reached the listener",
+   "facts": {
+    "side": "host",
+    "route": "ip",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": false,
+    "relay": "none",
+    "local": [
+     "host"
+    ],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": false
+   },
+   "expect": {
+    "cause": "firewall",
+    "message": "A firewall may be blocking the game on the host's computer: nothing from the player ever reached it.",
+    "hint": "Allow the game in the firewall (on Windows, tick Private networks when asked), then try again.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "host side: reachability unknown",
+   "facts": {
+    "side": "host",
+    "route": "ip",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": false,
+    "relay": "none",
+    "local": [
+     "host"
+    ],
+    "remote": [
+     "host"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the connection check after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "relay allocated, retried, still no pair",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "ok",
+    "local": [
+     "host",
+     "srflx",
+     "relay"
+    ],
+    "remote": [
+     "host",
+     "srflx",
+     "relay"
+    ],
+    "retried": true,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the connection check after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "relay allocation still pending",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "pending",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the connection check after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "the host never started the connection",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "joined",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at waiting for the host to start the connection after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "offer"
+   }
+  },
+  {
+   "name": "a pair was selected but the channels never opened",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "ice",
+    "elapsedMs": 3400,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at opening the game connection after 3 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "channels"
+   }
+  },
+  {
+   "name": "channels open, host never said hello",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "channels",
+    "elapsedMs": 500,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the final hello with the host after under 1 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "handshake"
+   }
+  },
+  {
+   "name": "no error code at all",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": null,
+    "reached": "offer",
+    "elapsedMs": 1499,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [
+     "host",
+     "srflx"
+    ],
+    "remote": [
+     "host",
+     "srflx"
+    ],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the connection check after 1 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "ice"
+   }
+  },
+  {
+   "name": "seconds round to nearest",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": null,
+    "reached": "joined",
+    "elapsedMs": 14500,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at waiting for the host to start the connection after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "offer"
+   }
+  }
+ ],
+ "hostLine": [
+  {
+   "input": {
+    "name": "Sam",
+    "cause": "nat_blocked",
+    "stage": "ice",
+    "elapsedMs": 15000
+   },
+   "expect": "Sam: strict NAT, no relay set, stopped at the connection check after 15 s."
+  },
+  {
+   "input": {
+    "name": "Alex",
+    "cause": "relay_refused",
+    "stage": "ice",
+    "elapsedMs": 15200
+   },
+   "expect": "Alex: the relay rejected the login, stopped at the connection check after 15 s."
+  },
+  {
+   "input": {
+    "name": "Kim",
+    "cause": "firewall",
+    "stage": "offer",
+    "elapsedMs": 9000
+   },
+   "expect": "Kim: nothing reached the host (firewall?), stopped at waiting for the host to start the connection after 9 s."
+  },
+  {
+   "input": {
+    "name": "Lee",
+    "cause": "future_cause",
+    "stage": "ice",
+    "elapsedMs": 800
+   },
+   "expect": "Lee: unknown cause, stopped at the connection check after under 1 s."
+  }
+ ],
+ "explain": [
+  {
+   "input": {
+    "cause": "timeout_unknown",
+    "stage": "ice",
+    "elapsedMs": 15000
+   },
+   "expect": {
+    "message": "The connection did not finish. It stopped at the connection check after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "hostHint": "Ask them to copy their log and send it to you."
+   }
+  },
+  {
+   "input": {
+    "cause": "version_mismatch",
+    "stage": "join",
+    "elapsedMs": 300
+   },
+   "expect": {
+    "message": "You and the host have different versions of the game.",
+    "hint": "Update the game on the older side, then try again.",
+    "hostHint": "Make sure you both have the same version of the game."
+   }
+  },
+  {
+   "input": {
+    "cause": "version_mismatch",
+    "stage": "join",
+    "elapsedMs": 300,
+    "mine": "1.4",
+    "theirs": "1.5"
+   },
+   "expect": {
+    "message": "You have version 1.4, the host has 1.5.",
+    "hint": "Update the game on the older side, then try again.",
+    "hostHint": "Make sure you both have the same version of the game."
+   }
+  },
+  {
+   "input": {
+    "cause": "from_the_future",
+    "stage": "join",
+    "elapsedMs": 2000
+   },
+   "expect": {
+    "message": "The connection did not finish. It stopped at joining the lobby after 2 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "hostHint": "Ask them to copy their log and send it to you."
+   }
+  },
+  {
+   "input": {
+    "cause": "nat_blocked",
+    "stage": "ice",
+    "elapsedMs": 15000
+   },
+   "expect": {
+    "message": "Your network blocks direct connections (strict NAT) and no relay is set.",
+    "hint": "Paste a relay line in the game's settings, ask the host for one, or try another network such as a phone hotspot.",
+    "hostHint": "A relay (TURN) set on your side, or a forwarded game port, would let this player in."
+   }
+  }
+ ],
+ "mask": [
+  {
+   "name": "an IPv4 address with a port",
+   "input": "cand out host 192.168.1.20:50000",
+   "masked": "cand out host <ip4>",
+   "included": "cand out host 192.168.1.20:50000"
+  },
+  {
+   "name": "an IPv4 address alone",
+   "input": "peer 203.0.113.9 gone",
+   "masked": "peer <ip4> gone",
+   "included": "peer 203.0.113.9 gone"
+  },
+  {
+   "name": "not an address: octet over 255",
+   "input": "server 10.0.0.256 slow",
+   "masked": "server 10.0.0.256 slow",
+   "included": "server 10.0.0.256 slow"
+  },
+  {
+   "name": "not an address: a version",
+   "input": "client onelobby-js 0.7.2",
+   "masked": "client onelobby-js 0.7.2",
+   "included": "client onelobby-js 0.7.2"
+  },
+  {
+   "name": "a bracketed IPv6 with a port",
+   "input": "peer [2001:db8::1]:4000 connected",
+   "masked": "peer <ip6> connected",
+   "included": "peer [2001:db8::1]:4000 connected"
+  },
+  {
+   "name": "a bare IPv6 with ::",
+   "input": "addr 2001:db8::8a2e:370:7334 ok",
+   "masked": "addr <ip6> ok",
+   "included": "addr 2001:db8::8a2e:370:7334 ok"
+  },
+  {
+   "name": "a full eight-group IPv6",
+   "input": "addr 2001:db8:85a3:0:0:8a2e:370:7334 ok",
+   "masked": "addr <ip6> ok",
+   "included": "addr 2001:db8:85a3:0:0:8a2e:370:7334 ok"
+  },
+  {
+   "name": "not an address: a time",
+   "input": "stalled at 12:30:45 local",
+   "masked": "stalled at 12:30:45 local",
+   "included": "stalled at 12:30:45 local"
+  },
+  {
+   "name": "an mDNS name",
+   "input": "cand in host 8f1c9a2e-52d0-4b0e-9a55-2c7b1fd7a1b0.local",
+   "masked": "cand in host <mdns>",
+   "included": "cand in host 8f1c9a2e-52d0-4b0e-9a55-2c7b1fd7a1b0.local"
+  },
+  {
+   "name": "credential key=value",
+   "input": "relay username=alice credential=s3cret retry",
+   "masked": "relay username=<hidden> credential=<hidden> retry",
+   "included": "relay username=<hidden> credential=<hidden> retry"
+  },
+  {
+   "name": "password key=value",
+   "input": "join password=hunter2 sent",
+   "masked": "join password=<hidden> sent",
+   "included": "join password=<hidden> sent"
+  },
+  {
+   "name": "credentials as JSON",
+   "input": "got {\"username\":\"bob\",\"credential\":\"x y\"} back",
+   "masked": "got {\"username\":\"<hidden>\",\"credential\":\"<hidden>\"} back",
+   "included": "got {\"username\":\"<hidden>\",\"credential\":\"<hidden>\"} back"
+  },
+  {
+   "name": "a pasted TURN line",
+   "input": "paste turn:relay.example.com:3478 alice s3cret done",
+   "masked": "paste turn:relay.example.com:3478 <hidden> <hidden> done",
+   "included": "paste turn:relay.example.com:3478 <hidden> <hidden> done"
+  },
+  {
+   "name": "a pasted TURN line on an address",
+   "input": "paste turn:203.0.113.5:3478 alice s3cret done",
+   "masked": "paste turn:<ip4> <hidden> <hidden> done",
+   "included": "paste turn:203.0.113.5:3478 <hidden> <hidden> done"
+  },
+  {
+   "name": "SDP ICE secrets",
+   "input": "a=ice-ufrag:abCd a=ice-pwd:8f1ca2b9c3d4e5f60718",
+   "masked": "a=ice-ufrag:<hidden> a=ice-pwd:<hidden>",
+   "included": "a=ice-ufrag:<hidden> a=ice-pwd:<hidden>"
+  },
+  {
+   "name": "two addresses and a secret",
+   "input": "192.168.1.5 -> 198.51.100.7:3478 token=abc123",
+   "masked": "<ip4> -> <ip4> token=<hidden>",
+   "included": "192.168.1.5 -> 198.51.100.7:3478 token=<hidden>"
+  }
+ ],
+ "export": {
+  "meta": {
+   "client": "onelobby-js 0.7.2",
+   "protocol": "lk1",
+   "platform": "node"
+  },
+  "entries": [
+   {
+    "t": 0,
+    "kind": "info",
+    "text": "client onelobby-js 0.7.2"
+   },
+   {
+    "t": 12,
+    "kind": "sig",
+    "text": "open route=server",
+    "addr": "203.0.113.9:8080"
+   },
+   {
+    "t": 40,
+    "kind": "cand",
+    "text": "out srflx",
+    "addr": "198.51.100.7:51000"
+   },
+   {
+    "t": 15012,
+    "kind": "error",
+    "text": "ice_failed",
+    "code": "ice_failed"
+   },
+   {
+    "t": 15013,
+    "kind": "info",
+    "text": "turn credential=hunter2 seen 192.168.1.5"
+   }
+  ],
+  "masked": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 5 dropped 0\n# addresses masked\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server\n#3 +40ms cand out srflx\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen <ip4>\n",
+  "included": "# onelobby netlog v1\n# client onelobby-js 0.7.2 protocol lk1 platform node\n# entries 5 dropped 0\n# addresses included\n#1 +0ms info client onelobby-js 0.7.2\n#2 +12ms sig open route=server addr=203.0.113.9:8080\n#3 +40ms cand out srflx addr=198.51.100.7:51000\n#4 +15012ms error ice_failed\n#5 +15013ms info turn credential=<hidden> seen 192.168.1.5\n"
+ },
+ "ring": {
+  "capacity": 50,
+  "add": {
+   "count": 52,
+   "kind": "info",
+   "text": "step {i}"
+  },
+  "expect": {
+   "kept": 50,
+   "dropped": 2,
+   "firstSeq": 3,
+   "lastSeq": 52,
+   "headerEntries": "# entries 50 dropped 2"
+  }
+ },
+ "report": {
+  "maxFrameBytes": 1024,
+  "perMinute": 3,
+  "valid": [
+   {
+    "name": "minimal",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    },
+    "output": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "with the NAT type",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2",
+     "natType": "symmetric"
+    },
+    "output": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "natType": "symmetric",
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "unknown fields are dropped",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2",
+     "address": "203.0.113.9",
+     "name": "Sam",
+     "note": "hi"
+    },
+    "output": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "empty candidate lists",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [],
+      "remote": []
+     },
+     "clientVersion": "0.7.2"
+    },
+    "output": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [],
+      "remote": []
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "a cause this client does not know",
+    "input": {
+     "cause": "from_the_future",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    },
+    "output": {
+     "cause": "from_the_future",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   }
+  ],
+  "invalid": [
+   {
+    "name": "not an object",
+    "input": [
+     1,
+     2
+    ]
+   },
+   {
+    "name": "missing cause",
+    "input": {
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "cause with capitals",
+    "input": {
+     "cause": "NatBlocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "cause too long",
+    "input": {
+     "cause": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "stage is a number",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": 3,
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "elapsedMs negative",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": -1,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "elapsedMs not an integer",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 1.5,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "elapsedMs over an hour",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 3600001,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "relaySet not a boolean",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": "yes",
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "natType unknown value",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7.2",
+     "natType": "weird"
+    }
+   },
+   {
+    "name": "candidate type unknown",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "lan"
+      ],
+      "remote": []
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "candidate types repeated",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "host"
+      ],
+      "remote": []
+     },
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "candidate types missing",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "clientVersion": "0.7.2"
+    }
+   },
+   {
+    "name": "clientVersion with a space",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "0.7 2"
+    }
+   },
+   {
+    "name": "clientVersion too long",
+    "input": {
+     "cause": "nat_blocked",
+     "stage": "ice",
+     "elapsedMs": 15000,
+     "relaySet": false,
+     "candidateTypes": {
+      "local": [
+       "host",
+       "srflx"
+      ],
+      "remote": [
+       "host",
+       "srflx"
+      ]
+     },
+     "clientVersion": "111111111111111111111111111111111"
+    }
+   }
+  ]
+ },
+ "check": {
+  "verdict": [
+   {
+    "name": "relay login rejected",
+    "input": {
+     "udp": "ok",
+     "natType": "cone",
+     "relay": "refused"
+    },
+    "verdict": "relay_refused",
+    "message": "The relay rejected the login. Check the relay line; it may have expired."
+   },
+   {
+    "name": "relay silent",
+    "input": {
+     "udp": "ok",
+     "natType": "symmetric",
+     "relay": "unreachable"
+    },
+    "verdict": "relay_unreachable",
+    "message": "The relay did not answer. Check the relay line and your network."
+   },
+   {
+    "name": "UDP blocked, relay works",
+    "input": {
+     "udp": "blocked",
+     "natType": "unknown",
+     "relay": "ok"
+    },
+    "verdict": "relay_works",
+    "message": "Direct connections will fail, but your relay works."
+   },
+   {
+    "name": "UDP blocked",
+    "input": {
+     "udp": "blocked",
+     "natType": "unknown",
+     "relay": "none"
+    },
+    "verdict": "blocked",
+    "message": "Direct connections: will fail. Your network blocks UDP (or the test servers could not be reached). A relay or another network is needed."
+   },
+   {
+    "name": "symmetric NAT, relay works",
+    "input": {
+     "udp": "ok",
+     "natType": "symmetric",
+     "relay": "ok"
+    },
+    "verdict": "relay_works",
+    "message": "Direct connections may fail, but your relay works."
+   },
+   {
+    "name": "symmetric NAT, no relay",
+    "input": {
+     "udp": "ok",
+     "natType": "symmetric",
+     "relay": "none"
+    },
+    "verdict": "likely_fail",
+    "message": "Direct connections: likely to fail. A relay is recommended."
+   },
+   {
+    "name": "cone NAT",
+    "input": {
+     "udp": "ok",
+     "natType": "cone",
+     "relay": "none"
+    },
+    "verdict": "good",
+    "message": "Direct connections: likely to work."
+   },
+   {
+    "name": "open",
+    "input": {
+     "udp": "ok",
+     "natType": "open",
+     "relay": "ok"
+    },
+    "verdict": "good",
+    "message": "Direct connections: likely to work."
+   },
+   {
+    "name": "relay not testable",
+    "input": {
+     "udp": "ok",
+     "natType": "cone",
+     "relay": "unknown"
+    },
+    "verdict": "good",
+    "message": "Direct connections: likely to work."
+   },
+   {
+    "name": "nothing known",
+    "input": {
+     "udp": "unknown",
+     "natType": "unknown",
+     "relay": "none"
+    },
+    "verdict": "unknown",
+    "message": "Could not tell how your network handles direct connections."
+   },
+   {
+    "name": "one STUN answer",
+    "input": {
+     "udp": "ok",
+     "natType": "unknown",
+     "relay": "none"
+    },
+    "verdict": "unknown",
+    "message": "Could not tell how your network handles direct connections."
+   }
+  ],
+  "classify": [
+   {
+    "name": "no server answered",
+    "asked": 2,
+    "answers": [],
+    "local": null,
+    "expect": {
+     "udp": "blocked",
+     "natType": "unknown"
+    }
+   },
+   {
+    "name": "one server answered",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "203.0.113.9",
+      "port": 40000
+     }
+    ],
+    "local": null,
+    "expect": {
+     "udp": "ok",
+     "natType": "unknown"
+    }
+   },
+   {
+    "name": "same mapping from two servers: cone",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "203.0.113.9",
+      "port": 40000
+     },
+     {
+      "ip": "203.0.113.9",
+      "port": 40000
+     }
+    ],
+    "local": {
+     "ip": "192.168.1.20",
+     "port": 50000
+    },
+    "expect": {
+     "udp": "ok",
+     "natType": "cone"
+    }
+   },
+   {
+    "name": "different ports: symmetric",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "203.0.113.9",
+      "port": 40000
+     },
+     {
+      "ip": "203.0.113.9",
+      "port": 40001
+     }
+    ],
+    "local": {
+     "ip": "192.168.1.20",
+     "port": 50000
+    },
+    "expect": {
+     "udp": "ok",
+     "natType": "symmetric"
+    }
+   },
+   {
+    "name": "different addresses: symmetric",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "203.0.113.9",
+      "port": 40000
+     },
+     {
+      "ip": "203.0.113.10",
+      "port": 40000
+     }
+    ],
+    "local": null,
+    "expect": {
+     "udp": "ok",
+     "natType": "symmetric"
+    }
+   },
+   {
+    "name": "mapped equals local: open",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "127.0.0.1",
+      "port": 50000
+     },
+     {
+      "ip": "127.0.0.1",
+      "port": 50000
+     }
+    ],
+    "local": {
+     "ip": "127.0.0.1",
+     "port": 50000
+    },
+    "expect": {
+     "udp": "ok",
+     "natType": "open"
+    }
+   },
+   {
+    "name": "same ip, other port than local: cone",
+    "asked": 2,
+    "answers": [
+     {
+      "ip": "127.0.0.1",
+      "port": 50001
+     },
+     {
+      "ip": "127.0.0.1",
+      "port": 50001
+     }
+    ],
+    "local": {
+     "ip": "127.0.0.1",
+     "port": 50000
+    },
+    "expect": {
+     "udp": "ok",
+     "natType": "cone"
+    }
+   }
+  ]
+ },
+ "stun": {
+  "request": {
+   "transactionId": "000102030405060708090a0b",
+   "bytes": "000100002112a442000102030405060708090a0b"
+  },
+  "responses": [
+   {
+    "name": "XOR-MAPPED-ADDRESS",
+    "transactionId": "000102030405060708090a0b",
+    "bytes": "0101000c2112a442000102030405060708090a0b002000080001a147e112a643",
+    "expect": {
+     "ip": "192.0.2.1",
+     "port": 32853
+    }
+   },
+   {
+    "name": "plain MAPPED-ADDRESS",
+    "transactionId": "000102030405060708090a0b",
+    "bytes": "0101000c2112a442000102030405060708090a0b0001000800018055c0000201",
+    "expect": {
+     "ip": "192.0.2.1",
+     "port": 32853
+    }
+   },
+   {
+    "name": "another transaction id",
+    "transactionId": "ffffffffffffffffffffffff",
+    "bytes": "0101000c2112a442000102030405060708090a0b002000080001a147e112a643",
+    "expect": null
+   },
+   {
+    "name": "an error response",
+    "transactionId": "000102030405060708090a0b",
+    "bytes": "0111000c2112a442000102030405060708090a0b002000080001a147e112a643",
+    "expect": null
+   }
+  ]
+ }
+}
