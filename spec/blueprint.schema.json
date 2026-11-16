@@ -54,6 +54,7 @@
           "default": ""
         },
         "directPort": { "description": "Port a direct host listens on (falls back up to +9 when taken).", "type": "integer", "minimum": 1024, "maximum": 65535, "default": 47810 },
+        "lan": { "description": "LAN discovery (spec/lan-discovery.md): a direct host answers questions from players on the same local network, and the game's menu can list those hosts. Off by default: with it off nothing runs and no socket is opened. Needs hosting.direct.", "type": "boolean", "default": false },
         "openPort": { "description": "Ask the router to open the direct port (UPnP / NAT-PMP / PCP).", "type": "boolean", "default": true },
         "nostr": { "description": "Direct host: also hand out a Nostr code (version 1) that works through public Nostr relays, no port forwarding needed. Off: IP codes only.", "type": "boolean", "default": true },
         "nostrRelays": {
@@ -268,6 +269,11 @@
       "then": { "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct"], "properties": { "direct": { "const": true } } } } } }
     },
     {
+      "$comment": "rule lan_needs_direct (path hosting.lan): hosting.lan needs hosting.direct",
+      "if": { "required": ["hosting"], "properties": { "hosting": { "required": ["lan"], "properties": { "lan": { "const": true } } } } },
+      "then": { "not": { "required": ["hosting"], "properties": { "hosting": { "required": ["direct"], "properties": { "direct": { "const": false } } } } } }
+    },
+    {
       "$comment": "rule migrate_with_replication (path session.hostLeaves): replication has no host migration",
       "not": {
         "required": ["sync", "session"],
@@ -283,6 +289,7 @@
     "hosting_none": { "path": "hosting", "message": "at least one of direct, server must be true" },
     "listed_and_approve": { "path": "lobby", "message": "listed and approveJoins cannot both be true" },
     "direct_needs_listener": { "path": "hosting.direct", "message": "engine web cannot host direct (a browser cannot listen on a port)" },
+    "lan_needs_direct": { "path": "hosting.lan", "message": "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)" },
     "migrate_with_replication": { "path": "session.hostLeaves", "message": "replication has no host migration; use end" },
     "migrate_needs_server": { "path": "session.hostLeaves", "message": "migrate needs hosting.server (direct lobbies always end)" },
     "late_join_conflict": { "path": "room.lateJoin", "message": "lobby.lateJoin false needs room.lateJoin refuse (or none); lobby.lateJoin true cannot go with refuse" },

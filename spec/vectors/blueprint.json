@@ -14,6 +14,7 @@
         "hosting.server": false,
         "hosting.lobbyServer": "",
         "hosting.directPort": 47810,
+        "hosting.lan": false,
         "hosting.openPort": true,
         "hosting.nostr": true,
         "hosting.nostrRelays": ["wss://nos.lol", "wss://relay.primal.net", "wss://nostr-pub.wellorder.net", "wss://nostr.oxtr.dev", "wss://nostr.bitcoiner.social", "wss://relay.nostr.net", "wss://nostr.sathoarder.com"],
@@ -115,6 +116,16 @@
       "expect": { "hosting.direct": true, "hosting.server": true, "hosting.lobbyServer": "wss://lobby.example.org/ws", "session.hostLeaves": "migrate" }
     },
     {
+      "name": "lan_on_with_direct",
+      "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "lan": true } },
+      "expect": { "hosting.lan": true, "hosting.direct": true }
+    },
+    {
+      "name": "lan_off_with_server_only",
+      "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "lan": false } },
+      "expect": { "hosting.lan": false, "hosting.direct": false }
+    },
+    {
       "name": "comments_and_schema_ignored",
       "input": {
         "$schema": "https://unpkg.com/onelobby/blueprint.schema.json",
@@ -130,7 +141,7 @@
         "version": 1,
         "game": { "id": "com.example.antcolony", "netVersion": "3", "title": "Ant Colony" },
         "engine": "node-browser",
-        "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47811, "openPort": false, "nostr": false, "nostrRelays": ["wss://relay.example.org"], "relayOnly": true, "allowedOrigins": ["https://ants.example.org"] },
+        "hosting": { "direct": true, "server": true, "lobbyServer": "wss://lobby.example.org/ws", "directPort": 47811, "lan": true, "openPort": false, "nostr": false, "nostrRelays": ["wss://relay.example.org"], "relayOnly": true, "allowedOrigins": ["https://ants.example.org"] },
         "lobby": { "maxPlayers": 8, "listed": true, "approveJoins": false, "password": true, "lateJoin": false, "rejoin": false, "joinLink": false, "meta": { "map": "forest" } },
         "sync": { "mode": "lockstep", "tickRate": 20, "hashEveryTicks": 40 },
         "players": { "identity": "anonymous", "maxNameLength": 12 },
@@ -143,6 +154,7 @@
         "game.netVersion": "3",
         "game.title": "Ant Colony",
         "hosting.directPort": 47811,
+        "hosting.lan": true,
         "hosting.openPort": false,
         "hosting.nostr": false,
         "hosting.nostrRelays": ["wss://relay.example.org"],
@@ -234,6 +246,9 @@
     { "name": "hosting_none_by_default", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "server": false } }, "error": { "path": "hosting", "rule": "hosting_none" } },
     { "name": "listed_and_approve", "input": { "game": { "id": "a" }, "lobby": { "listed": true, "approveJoins": true } }, "error": { "path": "lobby", "rule": "listed_and_approve" } },
     { "name": "web_direct", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "direct": true } }, "error": { "path": "hosting.direct", "rule": "direct_needs_listener" } },
+    { "name": "lan_needs_direct", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "direct": false, "server": true, "lan": true } }, "error": { "path": "hosting.lan", "rule": "lan_needs_direct" } },
+    { "name": "web_lan", "input": { "game": { "id": "a" }, "engine": "web", "hosting": { "lan": true } }, "error": { "path": "hosting.lan", "rule": "lan_needs_direct" } },
+    { "name": "lan_not_bool", "input": { "game": { "id": "a" }, "hosting": { "lan": "yes" } }, "error": { "path": "hosting.lan", "rule": "type" } },
     { "name": "migrate_with_replication", "input": { "game": { "id": "a" }, "engine": "dotnet", "hosting": { "server": true }, "sync": { "mode": "replication" }, "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_with_replication" } },
     { "name": "migrate_direct_only", "input": { "game": { "id": "a" }, "engine": "dotnet", "session": { "hostLeaves": "migrate" } }, "error": { "path": "session.hostLeaves", "rule": "migrate_needs_server" } }
   ],

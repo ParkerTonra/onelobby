@@ -18,6 +18,7 @@ export interface Blueprint {
     readonly server: boolean;
     readonly lobbyServer: string;
     readonly directPort: number;
+    readonly lan: boolean;
     readonly openPort: boolean;
     readonly nostr: boolean;
     readonly nostrRelays: readonly string[];
@@ -84,6 +85,7 @@ export interface BlueprintInput {
     server?: boolean;
     lobbyServer?: string;
     directPort?: number;
+    lan?: boolean;
     openPort?: boolean;
     nostr?: boolean;
     nostrRelays?: string[];
@@ -183,6 +185,7 @@ const ROOT: Node = obj(
       server: bool,
       lobbyServer: str(),
       directPort: int(1024, 65535),
+      lan: bool,
       openPort: bool,
       nostr: bool,
       nostrRelays: { k: "strarr" },
@@ -385,6 +388,7 @@ function fill(input: Record<string, unknown>): Blueprint {
       server: hosting.server ?? web,
       lobbyServer: hosting.lobbyServer ?? "",
       directPort: hosting.directPort ?? 47810,
+      lan: hosting.lan ?? false,
       openPort: hosting.openPort ?? true,
       nostr: hosting.nostr ?? true,
       nostrRelays: hosting.nostrRelays ?? [...DEFAULT_NOSTR_RELAYS],
@@ -445,6 +449,7 @@ function crossRules(b: Blueprint, input: Record<string, unknown>): void {
   if (!b.hosting.direct && !b.hosting.server) throw new Fail("hosting", "hosting_none", "at least one of direct, server must be true");
   if (b.lobby.listed && b.lobby.approveJoins) throw new Fail("lobby", "listed_and_approve", "listed and approveJoins cannot both be true");
   if (b.engine === "web" && b.hosting.direct) throw new Fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
+  if (b.hosting.lan && !b.hosting.direct) throw new Fail("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)");
   if (b.sync.mode === "replication" && b.session.hostLeaves === "migrate") throw new Fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
   const lateJoinGiven = sect(input.lobby).lateJoin !== undefined;
   const roomLate = sect(input.room).lateJoin;
