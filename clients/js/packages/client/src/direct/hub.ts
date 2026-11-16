@@ -8,6 +8,7 @@
  */
 
 import type { IceServer } from "../transport.js";
+import { REPORT_MAX_BYTES, REPORTS_PER_WINDOW, REPORT_WINDOW_MS, cleanReport } from "../diagnose.js";
 import { Metrics } from "./metrics.js";
 import { randomBelow, randomHex, shortHash, turnCredential } from "./sha1.js";
 
@@ -190,6 +191,8 @@ class Member {
   token = "";
   ip = "";
   renames: RateWindow | null = null;
+  /** Reports forwarded to the host (`diag`, spec/diagnostics.md s.7). */
+  diagRate: RateWindow | null = null;
 }
 
 class HubLobby {
@@ -233,7 +236,7 @@ interface IpState {
   sockets: number;
 }
 
-const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans"]);
+const KNOWN_TYPES = new Set(["hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans", "diag"]);
 
 const str = (o: Json, k: string): string | null => (typeof o[k] === "string" ? (o[k] as string) : null);
 const int = (o: Json, k: string): number | null => {
@@ -450,6 +453,7 @@ export class SignalingHub {
       case "path": return this.pathReport(s, msg);
       case "set_name": return this.setName(s, msg);
       case "bans": return this.hostBans(s, msg);
+      case "diag": return this.diag(s, msg);
       default: return; // unknown types are ignored
     }
   }
@@ -504,7 +508,7 @@ export class SignalingHub {
       ice: this.iceList(s),
       serverTime: this.now(),
       limits: { maxMsg: this.o.maxMessageBytes, maxPlayers: this.o.hardMaxPlayers },
-      features: ["set_name", "room"],
+      features: ["set_name", "room", "diag"],
     };
     if (resumed) w.peerId = resumed.peerId;
     this.send(s, w);
@@ -796,6 +800,24 @@ export class SignalingHub {
     s.member.name = name;
     s.name = name;
     this.broadcastLobby(s.lobby);
+  }
+
+  /**
+   * A joiner tells the host why its link failed (spec/diagnostics.md s.7). Rebuilt from the known fields (so nothing else
+   * crosses), at most 3 per minute per peer, forwarded to the host only with `from` stamped here.
+   */
+  private diag(s: Session, m: Json): void {
+    const lobby = s.lobby;
+    const me = s.member;
+    if (!lobby || !me) return this.error(s, "bad_request", "not in a lobby", field("report"));
+    if (me.peerId === lobby.hostId) return this.error(s, "bad_request", "the host has nobody to report to", field("report"));
+    const report = cleanReport(m.report);
+    if (!report || JSON.stringify(m).length > REPORT_MAX_BYTES) return this.error(s, "bad_request", "report must be a small diagnosis report", field("report"));
+    const now = this.now();
+    const rate = (me.diagRate ??= new RateWindow(REPORTS_PER_WINDOW, REPORT_WINDOW_MS));
+    if (!rate.tryHit(now)) return this.rateLimited(s, "diag", rate.retryAfterMs(now), null);
+    const host = lobby.find(lobby.hostId);
+    if (host?.session) this.send(host.session, { t: "diag", from: me.peerId, report });
   }
 
   private hostPhase(s: Session, m: Json): void {

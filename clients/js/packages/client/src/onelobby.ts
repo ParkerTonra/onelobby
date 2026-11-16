@@ -29,6 +29,9 @@ import { DEFAULT_NOSTR_STUN, type RelayConnect } from "./nostr/relays.js";
 import { DEFAULT_DIRECT_PORT, parseDirectAddress } from "./direct-address.js";
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
+import { diagnose, type DiagnoseFacts, type Reached } from "./diagnose.js";
+import { NetLog } from "./netlog.js";
+import { checkConnection, probeRelay, type CheckOptions, type CheckResult } from "./connection-check.js";
 
 export const LIB_NAME = "onelobby";
 export const LIB_VERSION = "0.7.2";
@@ -62,6 +65,24 @@ export interface AdvancedOptions {
   playerIdStore?: KeyValueStore | null;
   /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
   banStore?: KeyValueStore | null;
+}
+
+/** Diagnostics switches (spec/diagnostics.md): the net log, the report to the host, the relay probe. All have working defaults. */
+export interface DiagnosticsOptions {
+  /** Net log ring size, 50 to 5000 (default 500). */
+  logSize?: number;
+  /**
+   * Node: where the masked log is written when the process exits or dies from an uncaught error, and where
+   * `kit.netLog.save()` writes by default. Without it the log stays in memory.
+   */
+  logPath?: string;
+  /**
+   * A joiner whose link to the host fails tells that host why (cause, stage, how long, whether a relay was set; never an
+   * address) over the signaling path. Default true; false sends nothing.
+   */
+  reportToHost?: boolean;
+  /** Tells a refused relay login from a silent relay when ICE gathered no relay candidate (default: a raw TURN probe where UDP sockets exist; null: off). */
+  relayProbe?: ((entry: IceServer) => Promise<"ok" | "refused" | "unreachable" | "unknown">) | null;
 }
 
 export interface OneLobbyOptions {
@@ -103,6 +124,8 @@ export interface OneLobbyOptions {
   banFile?: string;
   /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
   room?: RoomOptions;
+  /** The net log, the report to the host and the relay probe (see DiagnosticsOptions). */
+  diagnostics?: DiagnosticsOptions;
   /** Test and runtime seams (see AdvancedOptions). */
   advanced?: AdvancedOptions;
 
@@ -221,6 +244,22 @@ function browserStorage(): SeatStorage | null {
   }
 }
 
+type Route = "server" | "ip" | "nostr";
+
+/** The error codes a connect failure carries a diagnosis for (spec/diagnostics.md s.9). */
+const DIAGNOSED_CODES = new Set(["connect_failed", "direct_unreachable", "version_mismatch", "server_closed", "closed"]);
+
+function errCode(e: unknown): string {
+  return e instanceof OneLobbyError ? e.code : "error";
+}
+
+/** `stun,turn` from an ICE list: the kinds only, never a URL or a login. */
+function iceKinds(ice: IceServer[]): string {
+  const kinds = new Set<string>();
+  for (const s of ice) for (const u of Array.isArray(s.urls) ? s.urls : [s.urls]) kinds.add(/^(stuns?|turns?):/i.exec(String(u))?.[1]?.toLowerCase() ?? "other");
+  return [...kinds].join(",") || "none";
+}
+
 interface Seat {
   code: string;
   token: string;
@@ -254,6 +293,14 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   private pid: string | null = null;
   private roomOpts: RoomOptions;
   private nostrConnectFn: RelayConnect | undefined;
+  private readonly diagOpts: Required<Pick<DiagnosticsOptions, "reportToHost">> & Pick<DiagnosticsOptions, "relayProbe">;
+  private lastCheck: CheckResult | null = null;
+  /**
+   * The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. `kit.netLog.export()` is the
+   * text to show under "Copy logs" (addresses masked; `export({ includeAddresses: true })` unmasks addresses only),
+   * `save(path?)` writes it (Node), `download()` offers it as a file (browsers). Stays on this machine.
+   */
+  readonly netLog: NetLog;
   /** The validated, frozen onelobby.json this kit was built from (`OneLobby.fromConfig`); undefined for `new OneLobby`. */
   readonly blueprint?: Blueprint;
 
@@ -355,6 +402,32 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     this.idStore = a.playerIdStore !== undefined ? a.playerIdStore : o.playerIdFile ? fileStore(o.playerIdFile) : fallback();
     this.banStore = a.banStore !== undefined ? a.banStore : o.banFile ? fileStore(o.banFile) : fallback();
     this.roomOpts = { ...(o.room ?? {}) };
+    const dg = o.diagnostics ?? {};
+    this.diagOpts = { reportToHost: dg.reportToHost !== false, relayProbe: dg.relayProbe === undefined ? (s) => probeRelay(s) : dg.relayProbe };
+    const proc = (globalThis as { process?: { platform?: string; arch?: string; versions?: { node?: string } } }).process;
+    this.netLog = new NetLog({
+      capacity: dg.logSize,
+      clock: this.clock,
+      path: dg.logPath,
+      storageKey: `onelobby.netlog.${o.gameId}`,
+      meta: { client: `${LIB_NAME}-js ${LIB_VERSION}`, protocol: PROTO_ID, platform: proc?.versions?.node ? `node ${proc.platform ?? ""} ${proc.arch ?? ""}`.trim() : "browser" },
+    });
+    if (dg.logPath) this.netLog.flushOnExit(dg.logPath);
+    this.netLog.add("info", `client ${LIB_NAME}-js ${LIB_VERSION} protocol ${PROTO_ID} game version ${o.netVersion}`);
+  }
+
+  /**
+   * Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
+   * one socket), and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the
+   * client connects with) and the TURN entry in `iceServers`. A menu runs it on demand; the library never does. The
+   * result's `message` is one plain line ("Direct connections: likely to fail. A relay is recommended."); the kit
+   * remembers it so a later failure diagnosis and the report to the host use the NAT type.
+   */
+  async checkConnection(options: CheckOptions = {}): Promise<CheckResult> {
+    const r = await checkConnection(options);
+    this.lastCheck = r;
+    this.netLog.add("info", `connection check udp=${r.udp} nat=${r.natType} relay=${r.relay} verdict=${r.verdict}`);
+    return r;
   }
 
   // ---- remembered seat -------------------------------------------------------------------------------------------
@@ -436,15 +509,54 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     };
   }
 
-  private async connect(url = this.options.lobbyServer, factory = this.socketFactory, timeoutMs = 0): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
-    const sig = await this.open(url, factory, timeoutMs);
+  private async connect(url = this.options.lobbyServer, factory = this.socketFactory, timeoutMs = 0, route: Route = "server"): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
+    const t0 = this.clock.now();
+    this.netLog.add("sig", `open route=${route}`, { addr: url });
+    let sig: SignalingClient;
+    try {
+      sig = await this.open(url, factory, timeoutMs);
+    } catch (e) {
+      this.netLog.add("error", errCode(e), { code: errCode(e) });
+      throw this.diagnosed(e, route, "none", t0);
+    }
+    this.netLog.add("sig", "socket open, hello sent");
     try {
       const welcome = await sig.request<WelcomeMsg & { t: string }>(this.helloMsg(), "welcome");
+      this.netLog.add("sig", `welcome features=${(welcome.features ?? []).join(",") || "none"} ice=${iceKinds(welcome.ice ?? [])}`);
       return { sig, welcome };
     } catch (e) {
       sig.close();
-      throw e;
+      this.netLog.add("error", errCode(e), { code: errCode(e) });
+      throw this.diagnosed(e, route, "signaling", t0);
     }
+  }
+
+  /**
+   * Puts the diagnosis on a connect failure (`error.diagnosis`; the code is unchanged), logs it, and returns the same
+   * error. Errors that are not about reaching or matching the host pass through untouched.
+   */
+  private diagnosed(e: unknown, route: Route, reached: Reached, t0: number, extra: { relaysUp?: boolean | null; versions?: { mine: string; theirs: string } | null } = {}): unknown {
+    if (!(e instanceof OneLobbyError) || e.diagnosis || !DIAGNOSED_CODES.has(e.code)) return e;
+    const facts: DiagnoseFacts = {
+      side: "joiner", route, error: e.code, reached,
+      elapsedMs: Math.max(0, Math.round(this.clock.now() - t0)),
+      versions: extra.versions ?? null, relaysUp: extra.relaysUp ?? null,
+      stun: false, relay: "none", local: [], remote: [], retried: false, nat: "unknown", heard: null,
+    };
+    e.diagnosis = diagnose(facts);
+    this.netLog.add("diag", `cause ${e.diagnosis.cause} stage ${e.diagnosis.stage} after ${facts.elapsedMs} ms`);
+    return e;
+  }
+
+  /** `diagnosed` for a refused join: a version mismatch names both versions. */
+  private diagnosedJoin(e: unknown, route: Route, t0: number): unknown {
+    if (e instanceof OneLobbyError && e.code === "version_mismatch") {
+      const d = e.data ?? {};
+      const mine = typeof d.yourNetVersion === "string" ? d.yourNetVersion : this.options.netVersion;
+      const theirs = typeof d.hostNetVersion === "string" ? d.hostNetVersion : "";
+      return this.diagnosed(e, route, "signaling", t0, { versions: theirs ? { mine, theirs } : null });
+    }
+    return e;
   }
 
   /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
@@ -469,7 +581,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     return sig;
   }
 
-  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit, room?: RoomSetup): Lobby {
+  private makeLobby(sig: SignalingClient, welcome: WelcomeMsg, state: LobbyState, direct?: { links: LinkFactory }, rateLimit?: RateLimit, room?: RoomSetup, route: Route = "server"): Lobby {
     const lobby = new Lobby({
       signaling: sig,
       state,
@@ -487,6 +599,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
       peerTimeoutMs: this.options.peerTimeoutMs,
       rateLimit,
       gameId: this.options.gameId,
+      diag: { log: this.netLog, route, reportToHost: this.diagOpts.reportToHost, clientVersion: LIB_VERSION, lastCheck: () => this.lastCheck, probeRelay: this.diagOpts.relayProbe ?? null },
       room: { pid: this.playerId, bans: this.bans, ...(state.you === state.hostId ? { options: this.roomOptionsFor() } : {}), ...room },
     });
     lobby.errorSink = (e) => this.emit("error", e);
@@ -558,13 +671,15 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
         if (!(e instanceof OneLobbyError && e.code === "invalid_token")) throw e;
       }
     }
+    const t0 = this.clock.now();
     const { sig, welcome } = await this.connect();
     try {
       const state = await sig.request<LobbyState>({ t: "join", code: norm, ...(opts.password ? { password: opts.password } : {}) }, "lobby");
       return this.makeLobby(sig, welcome, state, undefined, undefined, { join: joinSetup(opts) });
     } catch (e) {
       sig.close();
-      throw e;
+      this.netLog.add("error", errCode(e), { code: errCode(e) });
+      throw this.diagnosedJoin(e, "server", t0);
     }
   }
 
@@ -576,16 +691,18 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
    */
   async joinDirect(codeOrAddress: string, opts: JoinDirectOptions = {}): Promise<Lobby> {
     const t = this.directTarget(codeOrAddress, opts);
+    const t0 = this.clock.now();
     const { sig, welcome } = await this.connectDirect(t, opts);
     try {
       const state = await sig.request<LobbyState>({ t: "join", ...(opts.password ? { password: opts.password } : {}) }, "lobby");
-      const lobby = this.makeLobby(sig, this.withStun(welcome, t, opts), state, { links: t.links }, undefined, { join: joinSetup(opts) });
+      const lobby = this.makeLobby(sig, this.withStun(welcome, t, opts), state, { links: t.links }, undefined, { join: joinSetup(opts) }, t.nostr ? "nostr" : "ip");
       // a joiner's joinCode is what it joined with (normalized), so a HUD can show it on both sides
       lobby.joinCode = t.joinedWith;
       return lobby;
     } catch (e) {
       sig.close();
-      throw e;
+      this.netLog.add("error", errCode(e), { code: errCode(e) });
+      throw this.diagnosedJoin(e, t.nostr ? "nostr" : "ip", t0);
     }
   }
 
@@ -609,16 +726,20 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
 
   /** Opens the signaling socket of a direct target: TCP to the host's address, or Nostr relays for a version 1 code. */
   private async connectDirect(t: DirectTarget, opts: JoinDirectOptions): Promise<{ sig: SignalingClient; welcome: WelcomeMsg }> {
-    if (!t.nostr) return this.connect(t.url, this.socketFactory, opts.connectTimeoutMs ?? 5000);
+    if (!t.nostr) return this.connect(t.url, this.socketFactory, opts.connectTimeoutMs ?? 5000, "ip");
     // the socket enforces its own deadlines (10 s to reach a relay, 15 s for the host to answer)
     let sock: NostrSocket | null = null;
     const factory = this.nostrFactory(t, opts);
+    const t0 = this.clock.now();
     try {
-      return await this.connect(t.url, (u) => (sock = factory(u) as NostrSocket), 0);
+      return await this.connect(t.url, (u) => (sock = factory(u) as NostrSocket), 0, "nostr");
     } catch (e) {
       const why = (sock as NostrSocket | null)?.failure;
       // same code as an IP host that does not answer, so a game handles one "could not reach the host" error
-      if (e instanceof OneLobbyError && e.code === "connect_failed") throw new OneLobbyError("direct_unreachable", why || "no answer through the Nostr relays");
+      if (e instanceof OneLobbyError && e.code === "connect_failed") {
+        const out = new OneLobbyError("direct_unreachable", why || "no answer through the Nostr relays");
+        throw this.diagnosed(out, "nostr", "none", t0, { relaysUp: !/no Nostr relay/i.test(why ?? "") });
+      }
       throw e;
     }
   }
@@ -667,7 +788,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
   async hostDirectWith(h: HostOptions, hooks: DirectLobbyHooks): Promise<Lobby> {
     const room = this.checkRoomHost(h);
     const spectators = room.spectators ?? 0;
-    const { sig, welcome } = await this.connect("onelobby-direct://host/", hooks.socketFactory);
+    const { sig, welcome } = await this.connect("onelobby-direct://host/", hooks.socketFactory, 0, "ip");
     try {
       // the hub's own password option guards joins; the host's room layer checks it too (spec/room.md s.6)
       const state = await sig.request<LobbyState>(
@@ -676,7 +797,7 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
           ...(this.options.relayOnly ? { relayOnly: true } : {}), ...(spectators > 0 ? { spectators } : {}) },
         "lobby",
       );
-      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers });
+      return this.makeLobby(sig, welcome, state, { links: hooks.wrapLinks(this.linkFactory) }, h.rateLimit, { options: room, password: h.password ?? "", maxPlayers: h.maxPlayers }, "ip");
     } catch (e) {
       sig.close();
       throw e;

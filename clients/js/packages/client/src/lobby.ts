@@ -21,6 +21,9 @@ import { BanList } from "./bans.js";
 import { Room, resolveSettings, type RemovalInfo, type RoomJoinOptions, type RoomOptions } from "./room.js";
 import { CODE_PATTERN, applyFilter, removalReason } from "./room-rules.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
+import { diagnose, cleanReport, explainCause, hostLine, natFact, REPORT_HOST_GAP_MS, type CandidateType, type DiagnoseFacts, type Diagnosis, type DiagnosisReport, type Reached, type RelayState } from "./diagnose.js";
+import type { CheckResult } from "./connection-check.js";
+import type { NetLog } from "./netlog.js";
 import { hasTurn, type ChannelName, type IceServer, type LinkFactory, type PeerLink, type SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 import { hostConnections, joinerSocket, type LobbySocket, type LobbySocketOptions } from "./socket.js";
@@ -41,6 +44,34 @@ export interface KickOptions {
   reason?: string;
 }
 export type Peer = PeerInfo;
+
+/** What a host learns when a joiner it dialed could not connect (`lobby.on("peerDiagnosis")`, spec/diagnostics.md s.7.3). */
+export interface PeerDiagnosis extends DiagnosisReport {
+  peer: Peer;
+  /** The joiner's name in the roster. */
+  name: string;
+  /** The same sentence the joiner saw. */
+  message: string;
+  /** What the host can do about it. */
+  hint: string;
+  /** One line for a host screen: "Sam: strict NAT, no relay set, stopped at the connection check after 15 s." */
+  line: string;
+}
+
+/** What the kit hands a lobby for diagnostics (spec/diagnostics.md): the log, the route, and the switches. */
+export interface LobbyDiag {
+  log: NetLog;
+  /** How this lobby was reached: the lobby server's code, an IP / IP code, or a Nostr code. */
+  route: "server" | "ip" | "nostr";
+  /** Send the joiner's diagnosis to the host when the link fails (default true). */
+  reportToHost: boolean;
+  /** `0.7.2`: sent in the report. */
+  clientVersion: string;
+  /** The last connection check this kit ran, if any (its NAT reading joins the facts and the report). */
+  lastCheck: () => CheckResult | null;
+  /** Tells a refused relay login from a silent relay after ICE gathered no relay candidate (Node: a raw TURN probe). */
+  probeRelay: ((s: IceServer) => Promise<"ok" | "refused" | "unreachable" | "unknown">) | null;
+}
 
 /** What the kit hands a lobby for its room layer (spec/room.md). */
 export interface RoomSetup {
@@ -76,6 +107,12 @@ export type LobbyEvents = {
    * per peer, just before that `peerLeft`; not for peers the host kicks or disconnects.
    */
   peerFailed: [Peer, reason: string];
+  /**
+   * Host only: a joiner it dialed could not connect and tells why (cause, stage, how long, whether it had a relay): the
+   * same plain sentence the joiner saw, plus a one-line `line` for a host screen. Sent over the signaling path, so it
+   * arrives when the direct link failed. Nothing in it is an address. Old clients and hubs send none.
+   */
+  peerDiagnosis: [PeerDiagnosis];
   joinRequested: [Peer];
   hostChanged: [hostId: number];
   /** A member (you included) changed its display name mid-session (`rename`): the peer with its new name, and the old name. */
@@ -136,6 +173,8 @@ export interface LobbyConfig {
   room?: RoomSetup;
   /** The game id, for the ban list key. */
   gameId?: string;
+  /** Diagnostics: the net log, route and switches (absent: a lobby with no log, as before). */
+  diag?: LobbyDiag;
 }
 
 /** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
@@ -280,6 +319,13 @@ export class Lobby extends Emitter<LobbyEvents> {
   private isReady = false;
   private cancelReadyTimer: (() => void) | null = null;
   private relayRetry = false;
+  /** Diagnostics: candidate types that crossed the wire on the host link (joiner view), and how far the attempt got. */
+  private readonly seen = { local: new Set<CandidateType>(), remote: new Set<CandidateType>() };
+  private negotiated = false;
+  private readonly startedAt: number;
+  private relayProbe: Promise<RelayState> | null = null;
+  /** Host: when each joiner's last diagnosis was accepted. */
+  private readonly diagAt = new Map<number, number>();
   /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
   private readonly everOpen = new WeakSet<PeerLink>();
   /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
@@ -315,6 +361,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   constructor(cfg: LobbyConfig) {
     super();
     this.cfg = cfg;
+    this.startedAt = cfg.clock.now();
     this.signaling = cfg.signaling;
     const st = cfg.state;
     this.code = st.code;
@@ -386,6 +433,7 @@ export class Lobby extends Emitter<LobbyEvents> {
 
     this.signaling.onMessage = (m) => this.onSignaling(m);
     this.signaling.onClose = () => this.onServerClosed();
+    this.log("lobby", `${this.isHost ? "hosting" : "joined"} as peer ${this.localPeerId}, host is peer ${this.hostPeerId}, ${this.roster.size} in the roster`);
 
     if (this.isHost) this.markReady();
     else this.armReadyTimer();
@@ -656,13 +704,18 @@ export class Lobby extends Emitter<LobbyEvents> {
     this.cancelReadyTimer = this.cfg.clock.setTimeout(() => {
       if (this.isReady || this.ended) return;
       if (canRelay) this.retryRelayed(total - first);
-      else this.giveUpConnecting();
+      else {
+        this.startRelayProbe();
+        this.giveUpConnecting();
+      }
     }, first);
   }
 
   /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
   private retryRelayed(budget: number): void {
+    this.startRelayProbe();
     this.relayRetry = true;
+    this.log("retry", "direct attempt stalled: dialing the host again through the relay only");
     const link = this.makeLink(this.hostPeerId, true);
     link.startOffer();
     this.cancelReadyTimer = this.cfg.clock.setTimeout(() => {
@@ -671,16 +724,162 @@ export class Lobby extends Emitter<LobbyEvents> {
   }
 
   private giveUpConnecting(): void {
+    this.startRelayProbe();
+    // wait for the relay probe (at most a moment) so a refused login is told from a silent relay
+    const probe = this.relayProbe;
+    if (probe && !this.ended) {
+      let cancel = () => {};
+      const settle = () => {
+        cancel();
+        this.finishGivingUp();
+      };
+      cancel = this.cfg.clock.setTimeout(settle, 1500);
+      void probe.then(settle, settle);
+      return;
+    }
+    this.finishGivingUp();
+  }
+
+  private finishGivingUp(): void {
+    if (this.gaveUp) return;
+    this.gaveUp = true;
     // what the host link saw (states, signals, timings), so a test log of a failed connect says where it stalled
     const hostLink = this.links.get(this.hostPeerId);
     const diagnostics = hostLink ? hostLink.diagnostics?.() : (this.lastHostLinkEnd ?? "no offer from the host ever arrived");
     // the trace holds ICE candidates (local addresses): keep it in data, out of the message a game may show
     const err = new OneLobbyError("ice_failed", iceFailedMessage(hasRelay(this.cfg.ice)), diagnostics ? { diagnostics } : undefined);
+    const facts = this.joinerFacts("ice_failed");
+    const d = diagnose(facts);
+    err.diagnosis = d;
+    this.log("diag", `cause ${d.cause} stage ${d.stage} after ${facts.elapsedMs} ms`);
+    this.log("error", "ice_failed", { code: "ice_failed" });
+    this.sendReport(d, facts);
     this.failReady(err);
     this.reportError(err);
     if (this.ended) return;
     this.signaling.send({ t: "leave" });
     this.teardown("ice_failed");
+  }
+
+  private gaveUp = false;
+
+  // ---- diagnostics -----------------------------------------------------------------------------------------------
+
+  private log(kind: "sig" | "lobby" | "sdp" | "cand" | "ice" | "chan" | "route" | "retry" | "error" | "diag" | "info", text: string, extra?: { addr?: string; code?: string }): void {
+    this.cfg.diag?.log.add(kind, text, extra);
+  }
+
+  /** Counts the candidate types in a signal that crosses the host link (the facts `diagnose` takes) and logs the step. */
+  private noteSignal(dir: "in" | "out", peerId: number, s: SignalPayload): void {
+    const tell = this.cfg.diag?.log;
+    if (s.sdp) {
+      this.negotiated = true;
+      tell?.add("sdp", `${dir} ${s.sdp.type}`);
+    }
+    const lines: string[] = [];
+    if (s.ice) lines.push(String((s.ice as { candidate?: string }).candidate ?? ""));
+    if (s.sdp) for (const l of s.sdp.sdp.split(/\r?\n/)) if (l.startsWith("a=candidate:")) lines.push(l.slice(2));
+    for (const line of lines) {
+      const m = /^(?:a=)?candidate:\S+ \d+ \S+ \d+ (\S+) (\d+) typ (host|srflx|prflx|relay)\b/.exec(line);
+      if (!m) continue;
+      const type = (m[3] === "prflx" ? "srflx" : m[3]) as CandidateType;
+      if (peerId === this.hostPeerId && !this.isHost) (dir === "out" ? this.seen.local : this.seen.remote).add(type);
+      tell?.add("cand", `${dir} ${type}`, { addr: `${m[1]}:${m[2]}` });
+    }
+  }
+
+  /** How far this joiner got with the host link. */
+  private reached(): Reached {
+    const l = this.links.get(this.hostPeerId);
+    if (l?.isOpen) return "channels";
+    if (l?.facts?.().iceConnected) return "ice";
+    return this.negotiated ? "offer" : "joined";
+  }
+
+  /** The relay state on the host link as `diagnose` reads it. */
+  private relayState(): RelayState {
+    if (!hasRelay(this.cfg.ice)) return "none";
+    const f = this.links.get(this.hostPeerId)?.facts?.();
+    if (this.seen.local.has("relay")) return "ok";
+    return f?.relay ?? "pending";
+  }
+
+  private joinerFacts(error: string): DiagnoseFacts {
+    const d = this.cfg.diag;
+    const sorted = (set: Set<CandidateType>) => (["host", "srflx", "relay"] as CandidateType[]).filter((t) => set.has(t));
+    return {
+      side: "joiner",
+      route: d?.route ?? "server",
+      error,
+      reached: this.reached(),
+      elapsedMs: Math.max(0, Math.round(this.cfg.clock.now() - this.startedAt)),
+      versions: null,
+      relaysUp: null,
+      stun: this.cfg.ice.some((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^stuns?:/i.test(String(u)))),
+      relay: this.resolvedRelay ?? this.relayState(),
+      local: sorted(this.seen.local),
+      remote: sorted(this.seen.remote),
+      retried: this.relayRetry,
+      nat: natFact(d?.lastCheck()),
+      heard: null,
+    };
+  }
+
+  /** Set once the relay probe told a refused login from a silent relay. */
+  private resolvedRelay: RelayState | null = null;
+
+  /** The stall with a relay set and no relay candidate: ask the TURN server itself why (refused login or silence), where the link cannot tell. */
+  private startRelayProbe(): void {
+    const probe = this.cfg.diag?.probeRelay;
+    if (!probe || this.relayProbe) return;
+    const f = this.links.get(this.hostPeerId)?.facts?.();
+    if (f?.relay !== "failed" && f?.relay !== "pending") return; // links without facts (or with a relay candidate) are not probed
+    const turn = this.cfg.ice.find(hasTurn);
+    if (!turn) return;
+    this.relayProbe = probe(turn)
+      .then((r): RelayState => {
+        if (r === "refused" || r === "unreachable") this.resolvedRelay = r;
+        this.log("diag", `relay probe ${r}`);
+        return this.resolvedRelay ?? "failed";
+      })
+      .catch((): RelayState => "failed");
+  }
+
+  /** Joiner: tell the host the cause over the signaling path (hubs that list the `diag` feature only), once. */
+  private sendReport(d: Diagnosis, facts: DiagnoseFacts): void {
+    const cfg = this.cfg.diag;
+    if (!cfg || !cfg.reportToHost || this.isHost || !(this.cfg.features ?? []).includes("diag")) return;
+    const nat = cfg.lastCheck();
+    const natType = nat && nat.udp === "blocked" ? "blocked" : nat && nat.natType !== "unknown" ? nat.natType : undefined;
+    const report = cleanReport({
+      cause: d.cause,
+      stage: d.stage,
+      elapsedMs: facts.elapsedMs,
+      relaySet: facts.relay !== "none",
+      ...(natType ? { natType } : {}),
+      candidateTypes: { local: facts.local, remote: facts.remote },
+      clientVersion: cfg.clientVersion,
+    });
+    if (!report) return;
+    this.signaling.send({ t: "diag", report });
+    this.log("diag", `report sent ${d.cause}`);
+  }
+
+  /** Host: a joiner diagnosis came through the hub (`diag{from, report}`). */
+  private onDiag(m: ServerMsg): void {
+    if (!this.isHost) return;
+    const from = Number(m.from);
+    const peer = this.roster.get(from);
+    const report = cleanReport(m.report);
+    if (!peer || !report || from === this.localPeerId) return;
+    const now = this.cfg.clock.now();
+    const last = this.diagAt.get(from);
+    if (last !== undefined && now - last < REPORT_HOST_GAP_MS) return;
+    this.diagAt.set(from, now);
+    const e = explainCause(report.cause, { stage: report.stage, elapsedMs: report.elapsedMs });
+    const name = this.room.players.find((p) => p.id === from)?.name ?? peer.name;
+    this.log("diag", `report from peer ${from}: ${e.cause} at ${report.stage}`);
+    this.emit("peerDiagnosis", { ...report, peer, name, message: e.message, hint: e.hostHint, line: hostLine(name, report.cause, report.stage, report.elapsedMs) });
   }
 
   // ---- links -----------------------------------------------------------------------------------------------------
@@ -697,7 +896,11 @@ export class Lobby extends Emitter<LobbyEvents> {
     }
     const link = this.cfg.links.create({ remoteId: peerId, iceServers: this.cfg.ice, relayOnly });
     this.links.set(peerId, link);
-    link.onSignal = (s) => this.signaling.send({ t: "signal", to: peerId, ...s });
+    link.onSignal = (s) => {
+      this.noteSignal("out", peerId, s);
+      this.signaling.send({ t: "signal", to: peerId, ...s });
+    };
+    link.onTrace = (kind, text) => this.log(kind, text);
     link.onOpen = () => this.onLinkOpen(peerId, link);
     link.onClose = (reason) => this.onLinkClosed(peerId, link, reason);
     link.onMessage = (ch, bytes) => this.onData(peerId, ch, bytes);
@@ -730,6 +933,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   private onLinkOpen(peerId: number, link: PeerLink): void {
     this.everOpen.add(link);
     this.offeredAt.delete(peerId);
+    this.log("chan", `link to peer ${peerId} open`);
     if (this.isHost) {
       // Joiner speaks first (`hi`). After a migration the new host announces itself so the joiner knows who won.
       if (this.epoch > 0) this.sendTo(peerId, { type: "host_claim", epoch: this.epoch, hostId: this.localPeerId, tick: this.claimTick }, 0);
@@ -756,6 +960,7 @@ export class Lobby extends Emitter<LobbyEvents> {
 
   private onLinkClosed(peerId: number, link: PeerLink, _reason: string): void {
     if (this.links.get(peerId) !== link) return; // replaced
+    this.log("ice", `link to peer ${peerId} ended: ${_reason.replace(/[^A-Za-z0-9 :_-]/g, "").slice(0, 60)}`);
     if (!this.isHost && peerId === this.hostPeerId) this.lastHostLinkEnd = `link ended (${_reason}): ${link.diagnostics?.() ?? ""}`;
     this.links.delete(peerId);
     this.hiSentTo.delete(link);
@@ -1026,6 +1231,7 @@ export class Lobby extends Emitter<LobbyEvents> {
         if (!m.peer || this.roster.has((m.peer as Peer).peerId)) return;
         const peer = seatName(m.peer as Peer);
         this.roster.set(peer.peerId, peer);
+        this.log("lobby", `peer ${peer.peerId} joined`);
         this.emit("peerJoined", peer);
         if (this.isHost) {
           this.watchReady(peer.peerId);
@@ -1056,6 +1262,9 @@ export class Lobby extends Emitter<LobbyEvents> {
       }
       case "join_request":
         this.emit("joinRequested", seatName(m.peer as Peer));
+        break;
+      case "diag":
+        this.onDiag(m);
         break;
       case "lobby": {
         const st = m as unknown as LobbyState;
@@ -1113,6 +1322,7 @@ export class Lobby extends Emitter<LobbyEvents> {
     const payload: SignalPayload = {};
     if (s.sdp) payload.sdp = s.sdp;
     if (s.ice) payload.ice = s.ice;
+    this.noteSignal("in", from, payload);
     if (s.sdp?.type === "offer") {
       // We are the answerer. An offer comes from the (new) host, so a peer may dial us only as that rule allows.
       const verdict = this.offerVerdict(from);
@@ -1297,6 +1507,7 @@ export class Lobby extends Emitter<LobbyEvents> {
   private teardown(reason: string, close?: CloseInfo): void {
     if (this.ended) return;
     this.ended = true;
+    this.log("lobby", `session ended: ${reason}`);
     this.cancelReadyTimer?.();
     for (const cancel of this.notReady.values()) cancel();
     this.notReady.clear();

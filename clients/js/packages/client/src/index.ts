@@ -4,14 +4,14 @@
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { DiagnosticsOptions, OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 // Blueprint v1: onelobby.json (docs/design/blueprint.md). OneLobby.fromConfig(json) builds a kit from it.
 export { parseBlueprint, defineBlueprint, BlueprintError } from "./blueprint.js";
 export type { Blueprint, BlueprintInput, BlueprintEngine } from "./blueprint.js";
 export { Lobby } from "./lobby.js";
-export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
+export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit, PeerDiagnosis, LobbyDiag } from "./lobby.js";
 export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
 // WebSocket-shaped sockets over a lobby: lobby.asWebSocket() (joiner), lobby.onConnection(conn => ...) (host).
 export { closeCodeFor } from "./socket.js";
@@ -57,3 +57,11 @@ export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
 export { encodeRoomCode } from "./joincode.js";
 // Browser host (no Node process, no port): kit.hostNostr(options).
 export type { BrowserHostOptions, VisibilityDoc } from "./direct/browser-host.js";
+// Diagnostics (docs/recipes/diagnostics.md, spec/diagnostics.md): why a connection failed, the net log, the connection check.
+// The rest (explainCause, maskText, cleanReport, the cause table, ...) is in onelobby/internals.
+export { Causes, diagnose } from "./diagnose.js";
+export type { Cause, Stage, Reached, RelayState, CandidateType, NatFact, DiagnoseFacts, Diagnosis, DiagnosisReport, CheckFindings, CheckVerdict, MappedAddress } from "./diagnose.js";
+export { NetLog } from "./netlog.js";
+export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
+export { checkConnection } from "./connection-check.js";
+export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";

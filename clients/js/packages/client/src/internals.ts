@@ -50,3 +50,6 @@ export { ROOM_JOIN_WAIT_MS, COUNTDOWN_TICK_MS, RESYNC_GAP_MS, ROOM_REQUESTS_PER_
 export * from "./room-rules.js";
 export { encodeRoomFrame, decodeRoomFrame, parseRoomBody, roomMessage } from "./room-wire.js";
 export type { RoomMsg, GoneWhy } from "./room-wire.js";
+export { CAUSE_TEXT, STAGE_TEXT, explainCause, hostLine, stageOf, elapsedText, cleanReport, checkVerdict, classifyNat, natFact } from "./diagnose.js";
+export { maskText } from "./netlog.js";
+export { probeRelay } from "./connection-check.js";

@@ -1,7 +1,9 @@
 import {
   CHANNEL_IDS,
   type ChannelName,
+  hasTurn,
   type LinkFactory,
+  type LinkFacts,
   type LinkOptions,
   type PeerLink,
   type SignalPayload,
@@ -28,6 +30,7 @@ export class WebRtcLink implements PeerLink {
   onMessage: PeerLink["onMessage"] = null;
   onPath: PeerLink["onPath"] = null;
   onRemoteAddress: PeerLink["onRemoteAddress"] = null;
+  onTrace: PeerLink["onTrace"] = null;
 
   private pc: RTCPeerConnection;
   private channels = {} as Record<ChannelName, RTCDataChannel>;
@@ -44,11 +47,16 @@ export class WebRtcLink implements PeerLink {
   private readonly relayOnly: boolean;
   private readonly born = Date.now();
   private trace: string[] = [];
+  private readonly turnSet: boolean;
+  private relaySeen = false;
+  private relayError: "refused" | "unreachable" | null = null;
+  private iceUp = false;
 
   /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
   constructor(opts: LinkOptions, rtc: typeof RTCPeerConnection = globalThis.RTCPeerConnection) {
     this.remoteId = opts.remoteId;
     this.relayOnly = opts.relayOnly;
+    this.turnSet = opts.iceServers.some(hasTurn);
     // a typed-address candidate is a host candidate: relay-only drops it
     this.extra = opts.relayOnly ? [] : opts.extraRemoteCandidates ?? [];
     const config: RTCConfiguration & Record<string, unknown> = {
@@ -63,14 +71,25 @@ export class WebRtcLink implements PeerLink {
     }
     this.pc = new rtc(config);
     this.pc.onicecandidate = (e) => {
+      if (e.candidate && isRelayCandidate(e.candidate.candidate)) this.relaySeen = true;
       if (e.candidate && (!this.relayOnly || isRelayCandidate(e.candidate.candidate))) {
         this.note(`out ice ${e.candidate.candidate}`);
         this.onSignal?.({ ice: e.candidate.toJSON() as { candidate: string } });
       }
     };
+    // a browser says why a TURN server gave nothing (401/403: the login; 701 and the rest: no answer)
+    (this.pc as unknown as { onicecandidateerror: ((e: { errorCode?: number; url?: string }) => void) | null }).onicecandidateerror = (e) => {
+      if (!this.turnSet || (e.url !== undefined && !/^turns?:/i.test(e.url))) return;
+      this.relayError = e.errorCode === 401 || e.errorCode === 403 ? "refused" : this.relayError ?? "unreachable";
+      this.onTrace?.("ice", `relay error ${e.errorCode ?? 0}`);
+    };
+    (this.pc as unknown as { onicegatheringstatechange: (() => void) | null }).onicegatheringstatechange = () =>
+      this.onTrace?.("ice", `gathering ${this.pc.iceGatheringState}`);
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
       this.note(`connection ${s}`);
+      if (s === "connected") this.iceUp = true;
+      this.onTrace?.("ice", `connection ${s}`);
       if (s === "failed" || s === "closed" || s === "disconnected") {
         // "disconnected" can recover; give ICE a moment before declaring the link dead.
         if (s === "disconnected") setTimeout(() => this.pc.connectionState === "disconnected" && this.fail("disconnected"), 4000);
@@ -81,6 +100,16 @@ export class WebRtcLink implements PeerLink {
 
   private note(what: string): void {
     if (this.trace.length < 40) this.trace.push(`+${Date.now() - this.born}ms ${what}`);
+  }
+
+  /** What a diagnosis needs from this link: whether ICE connected and what the TURN allocation did. */
+  facts(): LinkFacts {
+    const f: LinkFacts = { iceConnected: this.iceUp };
+    if (this.turnSet) {
+      const gathered = (this.pc as unknown as { iceGatheringState?: string }).iceGatheringState === "complete";
+      f.relay = this.relaySeen ? "ok" : this.relayError ?? (gathered ? "failed" : "pending");
+    }
+    return f;
   }
 
   /** What a "could not connect" report adds: the peer connection's states and the signals seen so far. */
@@ -100,6 +129,7 @@ export class WebRtcLink implements PeerLink {
       const ch = this.pc.createDataChannel(name, CHANNEL_INIT[name]);
       ch.binaryType = "arraybuffer";
       ch.onopen = () => {
+        this.onTrace?.("chan", `open ${name}`);
         if (++this.opened === 3 && !this.closed) {
           this.isOpen = true;
           this.onOpen?.();
@@ -203,7 +233,9 @@ export class WebRtcLink implements PeerLink {
         // the remote address (not a relay's, not an mDNS name) lets a Nostr host ban the IP behind a kicked key
         const addr = String(r.address ?? r.ip ?? "");
         if (r.candidateType !== "relay" && l.candidateType !== "relay" && addr && !addr.endsWith(".local")) this.onRemoteAddress?.(addr.replace(/^::ffff:/i, ""));
-        this.onPath?.(l.candidateType === "relay" || r.candidateType === "relay" ? "relayed" : "direct");
+        const path = l.candidateType === "relay" || r.candidateType === "relay" ? "relayed" : "direct";
+        this.onTrace?.("route", path === "relayed" ? "relay" : "direct");
+        this.onPath?.(path);
         return;
       }
     } catch {

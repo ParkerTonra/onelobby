@@ -42,6 +42,8 @@ public sealed class Member
     public string Token = "";
     public string Ip = "";
     public RateWindow? Renames;
+    /// <summary>Diagnosis reports forwarded to the host (spec/diagnostics.md s.7).</summary>
+    public RateWindow? DiagRate;
 }
 
 public sealed class Lobby

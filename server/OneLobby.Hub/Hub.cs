@@ -171,7 +171,7 @@ public sealed class Hub
 
     private static readonly HashSet<string> KnownTypes = new(StringComparer.Ordinal)
     {
-        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans",
+        "hello", "create", "join", "list", "leave", "signal", "meta", "phase", "kick", "approve", "ping", "host_changed", "path", "set_name", "bans", "diag",
     };
 
     public void Receive(Session s, string text)
@@ -218,6 +218,7 @@ public sealed class Hub
                 case "path": PathReport(s, msg); break;
                 case "set_name": SetName(s, msg); break;
                 case "bans": HostBans(s, msg); break;
+                case "diag": Diag(s, msg); break;
                 default: break; // unknown types are ignored
             }
         }
@@ -275,7 +276,7 @@ public sealed class Hub
             ["ice"] = IceList(s),
             ["serverTime"] = _clock.NowMs,
             ["limits"] = new JsonObject { ["maxMsg"] = _o.MaxMessageBytes, ["maxPlayers"] = _o.HardMaxPlayers },
-            ["features"] = new JsonArray("set_name", "room"),
+            ["features"] = new JsonArray("set_name", "room", "diag"),
         };
         if (resumed is not null) w["peerId"] = resumed.PeerId;
         Send(s, w);
@@ -587,6 +588,23 @@ public sealed class Hub
         if (!rate.TryHit(now)) { RateLimited(s, "set_name", rate.RetryAfterMs(now), null); return; }
         s.Member.Name = name; s.Name = name;
         BroadcastLobby(s.Lobby);
+    }
+
+    /// <summary>
+    /// A joiner tells the host why its link failed (spec/diagnostics.md s.7). The report is rebuilt from the known fields (nothing
+    /// else crosses), counted at most <see cref="DiagReport.PerWindow"/> per minute per peer, and forwarded to the host only,
+    /// with <c>from</c> stamped here.
+    /// </summary>
+    private void Diag(Session s, JsonObject m)
+    {
+        if (s.Lobby is not { } lobby || s.Member is not { } me) { Error(s, "bad_request", "not in a lobby", Field("report")); return; }
+        if (me.PeerId == lobby.HostId) { Error(s, "bad_request", "the host has nobody to report to", Field("report")); return; }
+        var report = DiagReport.Clean(m["report"]);
+        if (report is null || m.ToJsonString().Length > DiagReport.MaxBytes) { Error(s, "bad_request", "report must be a small diagnosis report", Field("report")); return; }
+        long now = _clock.NowMs;
+        var rate = me.DiagRate ??= new RateWindow(DiagReport.PerWindow, DiagReport.WindowMs);
+        if (!rate.TryHit(now)) { RateLimited(s, "diag", rate.RetryAfterMs(now), null); return; }
+        if (lobby.Find(lobby.HostId) is { Session: { } host }) Send(host, new JsonObject { ["t"] = "diag", ["from"] = me.PeerId, ["report"] = report });
     }
 
     private void HostPhase(Session s, JsonObject m)

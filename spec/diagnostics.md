@@ -57,8 +57,9 @@ facts = {
   browser's `icecandidateerror` 401 / 403); `unreachable` it never answered (no reply, browser error 701);
   `failed` gathering finished without a relay candidate and the client cannot tell which of the two it was (the honest
   fallback: 10); `pending` gathering is not finished.
-- Candidate types come from the signaling traffic: parse `typ host|srflx|relay` out of every `candidate:` line this side
-  sent and received (`ice` signals and `a=candidate:` lines in SDP). `prflx` is counted as `srflx`.
+- Candidate types come from the signaling traffic: parse `typ host|srflx|relay` out of every candidate line this side
+  sent and received (`ice` signals, whose text may start with `a=` or not, and `a=candidate:` lines in SDP). `prflx` is
+  counted as `srflx`.
 
 **Stage** (the step that failed, `stage`), from `reached`:
 
@@ -81,8 +82,8 @@ facts = {
 3. `error` is `ice_failed` or `timeout` (the negotiation did not finish). Let `negotiated` = `reached` is `offer`.
    1. `relay` is `refused`: `relay_refused`. `relay` is `unreachable` or `failed`: `relay_unreachable`.
    2. `negotiated`, `relay` is `none`, `nat` is `blocked`: `udp_blocked`.
-   3. `negotiated`, `relay` is `none`, `stun` is true and `local` has no `srflx`: `udp_blocked` (this client asked a
-      STUN server and nothing came back).
+   3. `negotiated`, `relay` is `none`, `stun` is true, `local` is not empty and has no `srflx`: `udp_blocked` (this
+      client gathered candidates, asked a STUN server, and nothing came back; with no candidates at all it cannot tell).
    4. `negotiated`, `relay` is `none`, `nat` is `symmetric`: `nat_blocked`.
    5. `side` `host`, `negotiated`, `relay` is `none`, `heard` is `false`: `firewall`.
    6. `side` `joiner`, `negotiated`, `relay` is `none`, `local` and `remote` both non-empty: `nat_blocked`.
@@ -312,7 +313,9 @@ A report carries it as `natType`.
 ## 9. How errors carry the cause
 
 A new error **code** is not added for causes. The existing codes (`ice_failed`, `timeout`, `version_mismatch`,
-`connect_failed`, `direct_unreachable`, `no_server`) stay what they are; the failure also carries the diagnosis as data:
+`connect_failed`, `direct_unreachable`, `server_closed`, `closed`) stay what they are; the failure also carries the
+diagnosis as data (`no_server` keeps its own exact text: "this game has no lobby server address yet" is already the
+cause):
 `{ cause, message, hint, stage }`. JS: `OneLobbyError.diagnosis`; `describeError(err)` then returns the diagnosis'
 `message` and `hint` (and `cause`, `stage`) instead of the generic text for that code. A game that ignores diagnostics
 behaves as before apart from better error text.
@@ -343,4 +346,4 @@ its unknown value (`relay` `failed`, `heard` null, `nat` `unknown`) and the rule
 | host keeps per peer | 1 per 10 s |
 | check: per STUN server | 1500 ms (one retransmit at 500 ms) |
 | check: TURN probe | 1500 ms |
-| check: whole | 4000 ms |
+| check: whole | 8000 ms |

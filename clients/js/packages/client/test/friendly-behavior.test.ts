@@ -97,7 +97,9 @@ describe("joiner ready timeout (ice_failed)", () => {
     expect(rejected).toBeInstanceOf(OneLobbyError);
     expect((rejected as OneLobbyError).code).toBe("ice_failed");
     expect(errors.map((e) => (e as OneLobbyError).code)).toEqual(["ice_failed"]);
-    expect(describeError(errors[0]).message).toBe("Couldn't connect to the other players.");
+    // the connect failure now says how far it got (nothing else is observable on this in-memory link)
+    expect(describeError(errors[0])).toMatchObject({ code: "ice_failed", cause: "timeout_unknown", stage: "ice" });
+    expect(describeError(errors[0]).message).toMatch(/^The connection did not finish\. It stopped at the connection check after 10 s\.$/);
     expect(blocked.relayTries).toBe(0); // no TURN offered: no relay retry
     expect((rejected as OneLobbyError).message).toContain(
       "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.",

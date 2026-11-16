@@ -584,6 +584,31 @@
    }
   },
   {
+   "name": "STUN configured but no candidate of any kind was seen",
+   "facts": {
+    "side": "joiner",
+    "route": "server",
+    "error": "ice_failed",
+    "reached": "offer",
+    "elapsedMs": 15000,
+    "versions": null,
+    "relaysUp": null,
+    "stun": true,
+    "relay": "none",
+    "local": [],
+    "remote": [],
+    "retried": false,
+    "nat": "unknown",
+    "heard": null
+   },
+   "expect": {
+    "cause": "timeout_unknown",
+    "message": "The connection did not finish. It stopped at the connection check after 15 s.",
+    "hint": "Try again. If it keeps happening, copy the log and send it to the host.",
+    "stage": "ice"
+   }
+  },
+  {
    "name": "host side: nothing reached the listener",
    "facts": {
     "side": "host",

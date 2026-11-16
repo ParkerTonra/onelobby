@@ -12,6 +12,10 @@ export interface FriendlyError {
   message: string;
   /** What the player can do about it, when there is something. */
   hint?: string;
+  /** When the error carries a diagnosis (a connect failure): the cause code, e.g. "nat_blocked" (spec/diagnostics.md). */
+  cause?: string;
+  /** With `cause`: the step it stopped at ("signaling", "join", "offer", "ice", "channels", "handshake"). */
+  stage?: string;
 }
 
 type Entry = { message: string; hint?: string };
@@ -158,6 +162,14 @@ function codeOf(err: unknown): { code: string | null; data?: Record<string, unkn
  */
 export function describeError(err: unknown): FriendlyError {
   const { code, data } = codeOf(err);
+  // a connect failure that knows why (`error.diagnosis`) says why instead of the generic line for its code
+  const dx = err && typeof err === "object" ? (err as { diagnosis?: { cause?: unknown; message?: unknown; hint?: unknown; stage?: unknown } }).diagnosis : undefined;
+  if (code && dx && typeof dx.cause === "string" && typeof dx.message === "string") {
+    const out: FriendlyError = { code, message: dx.message, cause: dx.cause };
+    if (typeof dx.hint === "string" && dx.hint) out.hint = dx.hint;
+    if (typeof dx.stage === "string") out.stage = dx.stage;
+    return out;
+  }
   if (!code) return { code: "unknown", ...TEXT.unknown };
   let key = code;
   if (code === "kicked" && data?.reason === "denied") key = "denied";

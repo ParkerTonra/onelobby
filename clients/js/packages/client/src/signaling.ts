@@ -62,6 +62,12 @@ export interface ServerError {
 export type ServerMsg = { t: string; [k: string]: unknown };
 
 export class OneLobbyError extends Error {
+  /**
+   * Why a connection failed, in plain words (spec/diagnostics.md): `{ cause, message, hint, stage }`. Set on connect
+   * failures (`ice_failed`, `timeout`, `version_mismatch`, `connect_failed`, `direct_unreachable`, `no_server`); the code
+   * stays what it was. `describeError(err)` shows it.
+   */
+  diagnosis?: { cause: string; message: string; hint: string; stage: string };
   constructor(public code: string, message?: string, public data?: Record<string, unknown>) {
     super(message ? `${code}: ${message}` : code);
     this.name = "OneLobbyError";

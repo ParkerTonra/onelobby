@@ -34,6 +34,14 @@ export interface SignalPayload {
   ice?: IceInit;
 }
 
+/** What a link knows for a diagnosis (spec/diagnostics.md s.2). */
+export interface LinkFacts {
+  /** A candidate pair was selected (ICE connected), whether or not the channels opened. */
+  iceConnected?: boolean;
+  /** The TURN allocation: `failed` = gathering ended with no relay candidate and the reason is not known. Absent: no TURN entry. */
+  relay?: "pending" | "ok" | "refused" | "unreachable" | "failed";
+}
+
 /** One peer connection with the three negotiated channels (s.8). */
 export interface PeerLink {
   readonly remoteId: number;
@@ -56,6 +64,10 @@ export interface PeerLink {
   close(): void;
   /** Optional one-line state for a "could not connect" report (connection states, signals seen); never parsed. */
   diagnostics?(): string;
+  /** Optional: connection steps for the net log (ICE and channel state changes). Text carries no address or credential. */
+  onTrace?: ((kind: "ice" | "chan" | "route", text: string) => void) | null;
+  /** Optional: what this link knows for a diagnosis (`diagnose`); links without it read as unknown. */
+  facts?(): LinkFacts;
 }
 
 export interface LinkOptions {
