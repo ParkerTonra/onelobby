@@ -5,6 +5,39 @@ Godot snippets are not compiled by `check-snippets.mjs` (they need GodotSharp); 
 `dotnet-generic.md` and are. Use Godot 4.5 or newer with the .NET build (tested on 4.5.1 and 4.7.2; `OneLobby.Godot`
 builds against GodotSharp 4.5.1, and a newer project's GodotSharp takes its place).
 
+## One command
+
+`create-onelobby` does sections 1 and 2 below and the headless test for you. It adds `OneLobby.Core`, `OneLobby.Godot` and `OneLobby.Direct` to the
+`.csproj` as package references, copies the menu (`addons/onelobby_menu/`, pinned by `PIN.json`), installs the WebRTC natives (a download whose SHA-256 is
+checked), writes `onelobby.json`, `OneLobbyNet.cs` (the `HostDirect` / `JoinDirect` the menu needs, because `OneLobby.Core` cannot reference
+`OneLobby.Direct`), `tests/MultiplayerTest.tscn` and an olc entry, and keeps the menu LF in git. It needs the .NET build of Godot 4.5 or newer and the .NET 8 SDK.
+
+```
+npx create-onelobby my-game --template godot-csharp --yes                 # a new project with the drop-in menu as its main scene
+npx create-onelobby --into path/to/your-project                           # an existing Godot C# project; your scenes are not touched
+cd my-game
+dotnet build
+godot --headless --import --path .                                        # once: registers the WebRTC extension
+godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn   # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
+```
+
+The packages of a version reach the public registry only with its release. Before that, pack them (`clients/dotnet/pack.sh <new version> <folder>`) and add
+`--packages-from <folder>`: the references get that version and a `nuget.config` takes `OneLobby.*` from the folder.
+
+`npx create-onelobby verify` is THE test command: Godot is the .NET build, the game builds, the menu matches `PIN.json`, the natives are registered,
+`onelobby.json` loads in JS and in C#, then two peers on 127.0.0.1 directly and through a local Nostr relay (the relay-only route through a local TURN server
+is skipped for C# for now: `OneLobby.Godot` does not enforce relay-only on Godot's C# build, see the package README); the last line is `VERIFY_OK` or
+`VERIFY_FAIL <check>: <next step>`. `npx create-onelobby update` re-vendors the menu when a new one is out (it stops on files you edited unless `--force`) and moves the
+`OneLobby.*` versions in the `.csproj`.
+
+For `--into` the output prints the lines that add `OneLobbyMenu.tscn` to your main scene and wire it (section 2). A second run changes nothing.
+The `.csproj` is edited in place: only the missing package references are added, everything else stays; a file it cannot read safely is refused
+(`bad_csproj`) and nothing is written. Details: `clients/js/packages/create-onelobby/README.md`.
+
+## By hand
+
+What the command did, step by step: sections 1 and 2. The rest of the page is the same either way.
+
 ## 1. Add the packages
 
 ```

@@ -318,7 +318,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 
 ## Recipes (each is copy-paste and ends with a "Done when" check)
 
-- Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`
+- Godot 4 C# (desktop + web): `docs/recipes/godot-csharp.md`; one command: `npx create-onelobby my-game --template godot-csharp --yes` (or `npx create-onelobby --into <project>` for a Godot C# project) adds the NuGet package references (`--packages-from <folder>` until the packages are released), the pinned drop-in menu (`addons/onelobby_menu/`), the WebRTC natives, `OneLobbyNet.cs` (direct hosting for the menu) and a headless two-peer test (`tests/MultiplayerTest.tscn` prints `MULTIPLAYER_OK`); needs the .NET build of Godot and the .NET 8 SDK; `npx create-onelobby verify` and `update` work on it too
 - Godot 4 GDScript, no .NET (desktop; raw and lockstep, chat, pause, room layer): `docs/recipes/godot-gdscript.md`; one command:
   `npx create-onelobby my-game --template godot-gdscript --yes` (or `npx create-onelobby --into <project>`) vendors the add-on and the WebRTC natives, adds the autoload, the menu and a headless two-peer test (`tests/multiplayer.gd` prints `MULTIPLAYER_OK`); `npx create-onelobby verify` is the one test command (last line `VERIFY_OK` or `VERIFY_FAIL <check>: <next step>`), `npx create-onelobby update` re-vendors the add-on
 - Unity 6 (desktop + mobile, no WebGL): `docs/recipes/unity.md`

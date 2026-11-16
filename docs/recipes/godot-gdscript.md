@@ -23,7 +23,7 @@ godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    
 For `--into` the output prints the lines that add `res://addons/onelobby/menu/menu.tscn` to your main scene and connect its signals (section 3).
 A second run changes nothing; files that exist are skipped and listed (`--force` overwrites them). Flags for offline use: `--webrtc-zip <file>`,
 `--webrtc-dir <folder>`, `--no-natives`, `--addon-from <checkout>`; `--dry-run` shows the file list and downloads nothing. A Godot C# project
-is refused (`template_planned`): use [godot-csharp.md](godot-csharp.md). Details: `clients/js/packages/create-onelobby/README.md`.
+has its own template (`wrong_template` here): use [godot-csharp.md](godot-csharp.md). Details: `clients/js/packages/create-onelobby/README.md`.
 
 ## By hand
 

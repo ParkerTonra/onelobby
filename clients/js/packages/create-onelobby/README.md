@@ -1,7 +1,7 @@
 # create-onelobby
 
-Scaffold a multiplayer game with [OneLobby](https://github.com/ParkerTonra/onelobby): a browser game (`web`) or a Godot 4
-GDScript game (`godot-gdscript`).
+Scaffold a multiplayer game with [OneLobby](https://github.com/ParkerTonra/onelobby): a browser game (`web`), a Godot 4
+GDScript game (`godot-gdscript`) or a Godot 4 C# game (`godot-csharp`).
 
 ## Web
 
@@ -44,7 +44,7 @@ What it installs (the same for both, except the main scene):
 
 `--into` never touches your main scene: it prints the three lines that add the menu scene. Files that already exist are
 skipped and listed (`--force` overwrites them); a second run changes nothing and says so. A folder with a `.csproj` or `.sln`
-beside `project.godot` is a Godot C# project: `template_planned`.
+beside `project.godot` is a Godot C# project: see the next section (`--template godot-gdscript` on it is `wrong_template`).
 
 | Flag | Meaning |
 |---|---|
@@ -54,11 +54,71 @@ beside `project.godot` is a Godot C# project: `template_planned`.
 | `--no-natives` | skip the natives; the output prints the command that fetches them later (`--into . --template godot-gdscript`) |
 
 Errors (`--json` gives `{ ok: false, error: { code, message } }`): `autoload_taken` (`project.godot` already has `Net` pointing
-elsewhere), `not_godot_project`, `template_planned`, `bad_addon_from`, `bad_zip`, `bad_webrtc`, `download_failed`,
+elsewhere), `not_godot_project`, `wrong_template`, `bad_addon_from`, `bad_zip`, `bad_webrtc`, `download_failed`,
 `bad_download`, `addon_missing`.
 
 Godot needs one import run after the natives are in place: `godot --headless --import --path .` (it writes
 `.godot/extension_list.cfg` itself; there is nothing to commit for it). Recipe: `docs/recipes/godot-gdscript.md`.
+
+## Godot 4 C#
+
+A new project, or add to the one you have. Use the .NET build of Godot 4.5 or newer (the standard build cannot run C#) and the .NET 8 SDK:
+
+```
+npx create-onelobby my-game --template godot-csharp --yes
+cd my-game
+dotnet build                                                                    # restores the OneLobby packages and builds the game
+godot --headless --import --path .                                              # once: registers the WebRTC extension
+godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn # MULTIPLAYER_OK
+godot --path . -- --host --local --name=Sam                                     # play; a second window: -- --join=127.0.0.1:47810 --local --name=Ann
+
+npx create-onelobby --into path/to/your-godot-csharp-project                    # an existing one (project.godot with a .csproj beside it)
+```
+
+A C# game takes OneLobby from NuGet, not from a vendored add-on: `OneLobby.Core`, `OneLobby.Godot` and `OneLobby.Direct` (host and join
+without a server) are `PackageReference`s in the game's `.csproj`, at this create-onelobby's version. Only the menu is copied in, because
+Godot can only attach a C# script that is a source file of the game's own project.
+
+- `addons/onelobby_menu/`: `OneLobbyMenu.cs`, `.cs.uid` and `OneLobbyMenu.tscn`, from the copy bundled in this package, with `PIN.json`
+  (the same guard as the GDScript add-on's: create-onelobby version, OneLobby commit, webrtc-native version, a SHA-256 per file).
+- `addons/godot_webrtc/`: the same pinned, checked natives download as the GDScript template (`--webrtc-zip`, `--webrtc-dir`, `--no-natives`).
+- `onelobby.json` (engine `godot-csharp`, `ui.kind` `drop-in`), `OneLobbyNet.cs` (gives the menu its `HostDirect` / `JoinDirect`: `OneLobby.Core`
+  cannot reference `OneLobby.Direct`; reads `--local`, which listens on 127.0.0.1 only with no Nostr and no router request),
+  `tests/MultiplayerTest.tscn` + `.cs` (two peers in one process on 127.0.0.1: host, join by address, a message each way; last line
+  `MULTIPLAYER_OK` or `MULTIPLAYER_FAIL <why>`), `.olc/<name>.json` (builds, then a host window and a small joiner window, the same flags and
+  port as the GDScript entry) and a managed block in `.gitignore` (also `bin/`, `obj/`) and `.gitattributes`.
+- New project only: `<Name>.csproj`, `project.godot` (C# feature, assembly name; the microphone setting when `chat.voice` is on), `Main.tscn` +
+  `Main.cs` (the menu, `GameStarted` / `ReturnedToLobby` / `Left`, the wiring, the boot flags), `AGENTS.md`.
+
+**The Godot.NET.Sdk version** of a new project's `.csproj` follows the .NET Godot that `--godot`, `$GODOT` or PATH names (a stable 4.5 or
+newer: its editor refuses a game built against another version's GodotSharp), else `4.5.1`, the version the packages were built and tested
+against. `--into` leaves the project's own SDK line alone.
+
+**Where the packages come from.** The packages of a version are on the public registry only after its release, so before that a game cannot
+restore them. `--packages-from <folder>` points the project at a folder of `.nupkg` files (`clients/dotnet/pack.sh <version> <folder>`;
+every pack needs a new version, NuGet never re-reads one): the references get the version read from the file names (`OneLobby.Core`, `.Godot`
+and `.Direct` must share exactly one) and a `nuget.config` takes `OneLobby.*` from that folder (written relative to the project) and everything
+else from nuget.org. Without the flag the references are this create-onelobby's version and no `nuget.config` is written. A `nuget.config` that
+create-onelobby did not write is left alone and listed (`--force` replaces it).
+
+**The `.csproj` edit (`--into`).** The package references are added in place: after the last package reference of an unconditional
+`ItemGroup` (else in a new `ItemGroup` before `</Project>`), in the file's own indentation and line endings, a BOM and every other byte kept.
+References already there are left as they are (a different version is a note: `update` moves it). A second run changes nothing. It refuses
+(`bad_csproj`, nothing written) a file that is not well-formed XML, whose root is not `<Project>`, that does not use `Godot.NET.Sdk`, that
+targets below net8.0, a folder under central package management (`Directory.Packages.props`), a folder with a `.sln` but no `.csproj`, and
+several `.csproj` files when `project.godot` does not name the game's (`dotnet/project/assembly_name`). The output prints the lines that add
+`OneLobbyMenu.tscn` to your main scene and wire it (`OneLobbyNet.Wire(menu, OS.GetCmdlineUserArgs())`, then `menu.Model!.ApplyBootFlags(...)`);
+the menu's `BootFlags` goes off in the inspector so the wiring comes first.
+
+| Flag | Meaning |
+|---|---|
+| `--packages-from <folder>` | use the OneLobby packages from this folder of `.nupkg` files (writes `nuget.config`); with `update`, moves the references to that folder's version |
+| `--godot <exe>` | (new project) the .NET Godot whose version picks the Godot.NET.Sdk line |
+| `--addon-from <folder>` | vendor the menu from a OneLobby checkout (or `clients/dotnet/demo-godot`, or the menu folder) instead of the bundled copy |
+| `--webrtc-zip`, `--webrtc-dir`, `--no-natives` | as for GDScript |
+
+Errors add `bad_csproj`, `bad_packages_from`, `not_csharp_project` (`--template godot-csharp --into` a Godot folder with no `.csproj` or `.sln`).
+Recipe: `docs/recipes/godot-csharp.md`.
 
 ## update
 
@@ -73,20 +133,26 @@ package (or `--addon-from <folder>`).
   (a checked download, `--webrtc-zip`, `--webrtc-dir`, or `--no-natives`). No `PIN.json`: error `no_pin`, which names `--into` as
   the way to adopt the project. Already current: it says so, exit 0, nothing written. It ends with the import command
   `godot --headless --import --path .` (new `class_name`s need it).
+- `godot-csharp`: the same guard and the same rules for `addons/onelobby_menu/` (`no_pin`, `bad_pin`, `local_changes`, `--force`, natives only when
+  their pinned version moved or the folder is gone). It also moves the `Version` of every `OneLobby.*` `PackageReference` in the game's `.csproj`
+  to this version (only those attributes or `<Version>` elements; one written as a property such as `$(OneLobbyVersion)` is left and listed;
+  `--dry-run` shows each `id from -> to`), or to the folder's version with `--packages-from` (which also refreshes a `nuget.config` this tool
+  wrote). The `.csproj` is read before anything is written, so a file it refuses (`bad_csproj`) stops the whole update. It ends with
+  `dotnet build` and the import command.
 - `web`: the dependency is the `onelobby` npm package, so `update` prints the one `npm install onelobby@^<version>` line and
   whether `src/session.js` (or `multiplayer/session.js`) differs from this version's glue. It writes nothing and never runs npm
   (the glue is yours to edit).
 
-Flags: `--addon-from`, `--webrtc-zip`, `--webrtc-dir`, `--no-natives`, `--force`, `--dry-run`, `--json`. Errors: `no_pin`,
-`bad_pin`, `local_changes` (with `details: { edited, missing, added }` in `--json`), `not_a_project`, `no_such_dir`,
-`template_planned`, plus the natives errors above. (A folder literally named `update` or `verify` is scaffolded as `./update`.)
+Flags: `--addon-from`, `--webrtc-zip`, `--webrtc-dir`, `--no-natives`, `--packages-from` (C#), `--force`, `--dry-run`, `--json`. Errors: `no_pin`,
+`bad_pin`, `local_changes` (with `details: { edited, missing, added }` in `--json`), `not_a_project`, `no_such_dir`, `bad_csproj`,
+plus the natives errors above. (A folder literally named `update` or `verify` is scaffolded as `./update`.)
 
 ## verify
 
 `npx create-onelobby verify [dir | --into <dir>]` answers "does multiplayer work here" with no manual steps. It prints one
 line per check (`ok` / `FAIL <why>` / `skipped <why>`) and a last line `VERIFY_OK` (exit 0) or
 `VERIFY_FAIL <first failing check>: <what is wrong and the next step>` (exit 1). `--json` prints one object with the same facts.
-A failed `godot`, `addon-pin`, `natives` or `blueprint` check makes the later ones `skipped`.
+A failed `godot`, `addon-pin` (`dotnet` and `menu-pin` for C#), `natives` or `blueprint` check makes the later ones `skipped`.
 
 | Check (godot-gdscript) | What it proves |
 |---|---|
@@ -99,6 +165,25 @@ A failed `godot`, `addon-pin`, `natives` or `blueprint` check makes the later on
 | `turn` | relay-only through a LOCAL TURN server on 127.0.0.1 with a random login given as one pasted line; fails unless the TURN server saw allocations and relayed packets |
 | `server` | host and join through a lobby server, only when `hosting.server` is on AND `--server http://127.0.0.1:<port>` is given (verify never starts the server); else `skipped` with the reason |
 
+| Check (godot-csharp) | What it proves | Where it ran |
+|---|---|---|
+| `godot` | the executable is the **.NET build** of Godot 4.5 or newer (`--version` says `.mono.`); a standard build is a FAIL that names the .NET download; a different `Godot.NET.Sdk` version in the `.csproj` is a warning on the line | locally, CI |
+| `dotnet` | a .NET 8+ SDK answers and `dotnet build <the .csproj>` succeeds (the file is named: a Godot folder has a `.csproj` and a `.sln`); a missing OneLobby package points at `--packages-from` | locally, CI |
+| `menu-pin` | `addons/onelobby_menu/` matches `PIN.json`; edited files are a warning, not a failure | locally, CI |
+| `natives` | the WebRTC natives are there and registered (it runs the headless import when `.godot/extension_list.cfg` is missing; Godot may then rewrite the `Godot.NET.Sdk` version in the `.csproj` to its own) | locally, CI |
+| `blueprint` | `onelobby.json` loads through the JS loader and through the game's C# loader (`Blueprint.Parse`, run by `tests/MultiplayerTest`) | locally, CI |
+| `direct` | two peers on 127.0.0.1, host and join by address, a message each way (the game's `tests/MultiplayerTest`) | locally, CI |
+| `nostr` | the same through a LOCAL Nostr relay, when `hosting.nostr` is on | locally, CI |
+| `turn` | relay-only through a LOCAL TURN server. **Known gap:** on Godot 4.7.2 (.NET) `OneLobby.Godot`'s links gather host candidates although `iceTransportPolicy relay` is set, and connect with a wrong TURN password, so the TURN server sees no relayed packets. The check is `skipped` with that text, and a `FAIL` when `hosting.relayOnly` is true | locally, CI (skipped) |
+| `server` | host and join through a lobby server you started, with `--server`; else `skipped` | never run (it needs a lobby server process) |
+
+How the routes run in a C# game: the game's code runs only from its own assembly, and MSBuild leaves folders that start with a dot out of the build,
+so the probe file that GDScript's `verify` drops into `.onelobby/` would never be compiled. The scaffolder writes `tests/MultiplayerTest.cs` + `.tscn`,
+a scene that takes the route as arguments after `--` (`--route=config|direct|nostr|turn|server`, `--relay`, `--turn`, `--server`), and `verify` runs
+that scene. An `--into` game that lacks it gets the file from `npx create-onelobby --into .`; until then `blueprint` is `ok` with a warning (JS loader only) and
+the route checks `FAIL` with that command as the next step. `verify` needs the project to build, so besides `.onelobby/` it writes what `dotnet build`
+makes (`bin/`, `obj/`, `.godot/mono/`), all in the managed `.gitignore` block.
+
 | Check (web) | What it proves |
 |---|---|
 | `blueprint` | `onelobby.json` loads through the real loader |
@@ -107,7 +192,7 @@ A failed `godot`, `addon-pin`, `natives` or `blueprint` check makes the later on
 
 Flags: `--godot <exe>`, `--server <url>`, `--fetch-helpers`, `--json`. Everything binds 127.0.0.1 on free ports, no window opens,
 nothing it started outlives it (also on a failed check and on Ctrl+C), and it writes only inside the game folder
-(`.onelobby/`, covered by the managed `.gitignore` block).
+(`.onelobby/`, covered by the managed `.gitignore` block; a C# game also gets what `dotnet build` and the import write).
 
 **Helpers.** The Nostr relay is built in (pure Node). The TURN server is the npm package `node-turn` (pinned), loaded only when
 `verify` runs: from the game's own `node_modules` or from `.onelobby/helpers/`. Without it the `turn` check says
@@ -130,7 +215,7 @@ Two uses, one engine behind both:
    nothing else gave. Order of precedence: explicit flags and `--set`, then `--from <onelobby.json>`, then the recommendation,
    then the built-in defaults. The output (text and `--json`) lists the keys that came from it with each one's reason, and the
    ones it proposed that a flag or file kept; `--dry-run` shows the same and writes nothing. When no `--template`, `--from` or
-   Godot project says otherwise, an engine named in the sentence picks the template (a planned one stops as `template_planned`).
+   Godot project says otherwise, an engine named in the sentence picks the template (a planned one stops as `template_planned`: only `unity`, `dotnet` and `node-browser` are).
    On a terminal without `--yes` or `--no-input` it asks one first question, "Describe your game in one line (Enter to skip)",
    and then shows the recommended values as the defaults of the later prompts.
 
@@ -158,8 +243,8 @@ Honest about this version: a proposal never promises what the engine's client la
 the data for them (`lastProcessedInput`, `trySampleAt`) and the advice row says "by-hand". The `web` template writes only the
 `lockstep` and `raw` sample game, so where the best mode for the game is `replication` it proposes `raw` and the output says so in
 a `limits` row. Input redundancy on the fast channel and an adaptive input delay are not in any lockstep helper yet (advice
-rows `lockstep-fast-inputs` and `adaptive-input-delay`, status `by-hand`). A proposal for a planned template (`godot-csharp`,
-`unity`, `dotnet`, `node-browser`) is printed, with no command to run, because the scaffolder would stop with `template_planned`.
+rows `lockstep-fast-inputs` and `adaptive-input-delay`, status `by-hand`). A proposal for a planned template (`unity`,
+`dotnet`, `node-browser`) is printed, with no command to run, because the scaffolder would stop with `template_planned`; one for `godot-csharp` carries a real command.
 
 ### Examples
 
@@ -297,6 +382,6 @@ it proposed when its `sync.mode` was replaced (a tick rate chosen for lockstep i
 
 `create-onelobby --help` lists every flag (one per setting, plus `--set key=value`). `--dry-run` writes nothing (and downloads
 nothing), `--json` prints one machine-readable result, `--into <dir>` adds to an existing project. `node-browser`,
-`godot-csharp`, `unity` and `dotnet` are planned.
+`unity` and `dotnet` are planned.
 
 Zero runtime dependencies; Node 18 or newer. Design: `docs/design/blueprint.md` and `docs/design/one-shot.md` in the repository.

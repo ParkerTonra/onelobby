@@ -400,7 +400,7 @@ prompt library in the CLI only.
 |---|---|---|
 | `web` | browser game, hosted lobby server, drop-in or generated UI | v1 |
 | `node-browser` | Node host serves the page, direct codes, browser joiners (browser-game recipe) | v2 |
-| `godot-csharp` | autoload `Net.cs`, `OneLobby.Godot` | v2 |
+| `godot-csharp` | `OneLobby.Core`, `.Godot`, `.Direct` from NuGet (`--packages-from <folder>` before a release), the drop-in menu copied in and pinned (`addons/onelobby_menu/`), `OneLobbyNet.cs` wires direct hosting, WebRTC natives, a `tests/MultiplayerTest` scene (landed) | v2 |
 | `godot-gdscript` | autoload `net.gd`, the `addons/onelobby` add-on, the drop-in menu as main scene, WebRTC natives, PIN file (landed) | v2 |
 | `unity` | `OneLobbyRunner`, `com.onelobby.unity` package | v2 |
 | `dotnet` | console / MonoGame, `OneLobby.DataChannel` + `OneLobby.Direct` | v2 |
@@ -431,12 +431,15 @@ create-onelobby [dir] [options]
   --dry-run                    print the plan and the file, write nothing (Angular, Astro)
   --json                       machine-readable result: the file, the file list, next steps (clig.dev)
   --no-install  --no-git       as the other scaffolders
-  godot-gdscript only:
-  --addon-from <folder>        vendor the add-on from a OneLobby checkout instead of the copy bundled in the package
+  godot-csharp only:
+  --packages-from <folder>     take the OneLobby NuGet packages from a folder of .nupkg files (writes nuget.config), e.g. before a release
+  --godot <exe>                the .NET Godot whose version picks the Godot.NET.Sdk line (else $GODOT, PATH, else 4.5.1)
+  godot-gdscript and godot-csharp:
+  --addon-from <folder>        vendor the add-on (the C# menu) from a OneLobby checkout instead of the copy bundled in the package
   --webrtc-zip <file>          install the WebRTC natives from this zip (offline); --webrtc-dir <folder> from an unpacked folder
   --no-natives                 skip the natives and print the command that fetches them later
 
-create-onelobby update [dir | --into <dir>]   re-vendor the add-on (PIN-guarded): --addon-from, --webrtc-zip, --webrtc-dir, --no-natives, --force, --dry-run, --json
+create-onelobby update [dir | --into <dir>]   re-vendor the add-on or menu (PIN-guarded), for C# also move the OneLobby.* package versions: --addon-from, --webrtc-zip, --webrtc-dir, --no-natives, --packages-from, --force, --dry-run, --json
 create-onelobby verify [dir | --into <dir>]   prove multiplayer on 127.0.0.1, last line VERIFY_OK / VERIFY_FAIL: --godot <exe>, --server <url>, --fetch-helpers, --json
 ```
 
