@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { encodeStreamEvent } from "../src/internals.js";
 import { MAX_STREAM_AHEAD, MAX_STREAM_BUFFERED, MAX_STREAM_BUFFERED_BYTES, type ReplicatedEvent, type StreamGap } from "../src/internals.js";
 import { RepRig, type RepPlayer } from "./replication-rig.js";
+import { specJson } from "./spec.js";
 
 const u32 = (v: number) => new Uint8Array(new Uint32Array([v]).buffer);
 const readU32 = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
@@ -145,4 +146,45 @@ describe("a misbehaving sender", () => {
     expect(host.session.bufferedStreamEvents).toBe(0);
     expect(got.map((e) => e.stream)).toEqual([3]);
   });
+});
+
+// The receive side of numbered streams against the shared vectors (spec/vectors/replication.json, group streamReceive): the
+// arrivals of one sender are forged on a reliable link with no latency, one millisecond per step, and the host session must
+// deliver, report gaps and count anomalies exactly as the C# reference did.
+describe("replication vectors: streamReceive", () => {
+  const cases = specJson("vectors/replication.json").streamReceive as {
+    name: string;
+    arrivals: { at: number; stream: number; seq: number; bytes: number }[];
+    endAt: number;
+    expect: { events: unknown[]; duplicates: number; outOfOrder: number; gaps: number; malformed: number; buffered: number };
+  }[];
+  it("has cases", () => expect(cases.length).toBeGreaterThanOrEqual(10));
+  for (const c of cases) {
+    it(c.name, async () => {
+      const rig = new RepRig(undefined, { latencyMs: 0 });
+      const host = await rig.startHost();
+      const a = await rig.join("a");
+      await rig.run(0.5);
+      rig.frameMs = 1;
+      const start = host.lobby.nowMs + 1; // the first step below reads 0
+      const events: unknown[] = [];
+      host.session.on("eventDelivered", (e) => events.push({ type: "deliver", at: host.lobby.nowMs - start, stream: e.stream, seq: e.seq }));
+      host.session.on("eventGap", (g) =>
+        events.push({ type: "gap", at: host.lobby.nowMs - start, stream: g.stream, firstMissing: g.firstMissing, nextDelivered: g.nextDelivered }));
+      const s = host.session.stats;
+      const before = { dup: s.eventsDuplicate, ooo: s.eventsOutOfOrder, gap: s.eventsGap, bad: s.malformed };
+      let next = 0;
+      for (let t = 0; t <= c.endAt; t++) {
+        while (next < c.arrivals.length && c.arrivals[next].at === t) {
+          const x = c.arrivals[next++];
+          a.lobby.send(host.peerId, encodeStreamEvent(1, x.stream, x.seq, new Uint8Array(x.bytes)), { channel: "reliable" });
+        }
+        await rig.step();
+      }
+      expect({
+        events, duplicates: s.eventsDuplicate - before.dup, outOfOrder: s.eventsOutOfOrder - before.ooo, gaps: s.eventsGap - before.gap,
+        malformed: s.malformed - before.bad, buffered: host.session.bufferedStreamEvents,
+      }).toEqual(c.expect);
+    }, 60_000);
+  }
 });

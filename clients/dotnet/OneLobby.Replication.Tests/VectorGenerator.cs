@@ -406,6 +406,86 @@ namespace OneLobby.Replication.Tests
             };
         }
 
+        // ---- streamReceive: the receive side of numbered stream events ---------------------------------------------
+        // One receiver (the host), one sender (a joiner that forges kind 4 frames on the reliable channel), a millisecond
+        // clock. An arrival at T is delivered to the host's session while its lobby clock reads T; the session pumps every
+        // millisecond, so a hole that opens at S is reported at S + 1000. The expectation is what the C# session did.
+
+        private static JsonObject Arr(int at, int stream, uint seq, int bytes = 4) =>
+            new() { ["at"] = at, ["stream"] = stream, ["seq"] = seq, ["bytes"] = bytes };
+
+        private static JsonObject StreamCase(string name, int endAt, params JsonObject[] arrivals)
+        {
+            var c = new JsonObject { ["name"] = name, ["arrivals"] = new JsonArray(arrivals.Select(a => (JsonNode)a.DeepClone()).ToArray()), ["endAt"] = endAt };
+            c["expect"] = ReplayStreamReceive(c);
+            return c;
+        }
+
+        /// <summary>Plays one streamReceive case through a real session and returns what happened ("expect" of the case).</summary>
+        internal static JsonObject ReplayStreamReceive(JsonNode c)
+        {
+            var rig = new Rig(latencyMs: 0);
+            var host = rig.StartHost();
+            var a = rig.Join("a");
+            rig.Run(0.5);
+            rig.FrameMs = 1;
+            var start = host.Lobby.NowMs + 1;                            // the first step below reads 0
+            var events = new JsonArray();
+            host.Session.EventDelivered += e => events.Add(new JsonObject { ["type"] = "deliver", ["at"] = host.Lobby.NowMs - start, ["stream"] = (int)e.Stream, ["seq"] = e.Seq });
+            host.Session.EventGap += g => events.Add(new JsonObject
+            {
+                ["type"] = "gap", ["at"] = host.Lobby.NowMs - start, ["stream"] = (int)g.Stream, ["firstMissing"] = g.FirstMissing, ["nextDelivered"] = g.NextDelivered,
+            });
+            var s0 = host.Session.Stats;
+            long dup0 = s0.EventsDuplicate, ooo0 = s0.EventsOutOfOrder, gap0 = s0.EventsGap, bad0 = s0.Malformed;
+            var arrivals = c["arrivals"]!.AsArray();
+            var next = 0;
+            for (var t = 0; t <= c["endAt"]!.GetValue<int>(); t++)
+            {
+                while (next < arrivals.Count && arrivals[next]!["at"]!.GetValue<int>() == t)
+                {
+                    var x = arrivals[next++]!;
+                    var frame = Proto.EncodeStreamEvent(1, (byte)x["stream"]!.GetValue<int>(), x["seq"]!.GetValue<uint>(), new byte[x["bytes"]!.GetValue<int>()], new ByteWriter());
+                    a.Lobby.Send(host.Lobby.LocalPeerId, frame, Channel.Reliable);
+                }
+                rig.Step();
+            }
+            return new JsonObject
+            {
+                ["events"] = events, ["duplicates"] = s0.EventsDuplicate - dup0, ["outOfOrder"] = s0.EventsOutOfOrder - ooo0,
+                ["gaps"] = s0.EventsGap - gap0, ["malformed"] = s0.Malformed - bad0, ["buffered"] = host.Session.BufferedStreamEvents,
+            };
+        }
+
+        private static JsonArray StreamReceive()
+        {
+            var a = new JsonArray();
+            a.Add(StreamCase("in order", 100, Arr(0, 1, 1), Arr(10, 1, 2), Arr(20, 1, 3), Arr(30, 1, 4), Arr(40, 1, 5)));
+            a.Add(StreamCase("a seq already delivered is a duplicate and is dropped", 100, Arr(0, 1, 1), Arr(10, 1, 2), Arr(20, 1, 2), Arr(30, 1, 3), Arr(40, 1, 1)));
+            a.Add(StreamCase("one hole, filled later: the waiting events follow it at once", 600, Arr(0, 1, 1), Arr(10, 1, 3), Arr(20, 1, 4), Arr(300, 1, 2)));
+            a.Add(StreamCase("a seq already waiting is a duplicate", 100, Arr(0, 1, 1), Arr(10, 1, 3), Arr(20, 1, 3), Arr(30, 1, 2)));
+            a.Add(StreamCase("a hole that stays open 1000 ms is reported as a gap and skipped", 1500, Arr(0, 1, 1), Arr(100, 1, 3), Arr(200, 1, 4)));
+            a.Add(StreamCase("the first event of a stream is 3: numbers 1 and 2 are a gap", 1500, Arr(50, 1, 3), Arr(60, 1, 4)));
+            a.Add(StreamCase("the timer restarts when the hole moves", 2200, Arr(0, 1, 1), Arr(10, 1, 3), Arr(500, 1, 5), Arr(800, 1, 2)));
+            a.Add(StreamCase("999 ms is not enough, 1000 ms is", 1200, Arr(0, 1, 2)));
+            a.Add(StreamCase("a late arrival of a skipped number is a duplicate", 2000, Arr(0, 1, 1), Arr(10, 1, 3), Arr(1500, 1, 2)));
+            a.Add(StreamCase("two holes in a row: two gaps, in order", 3000, Arr(0, 1, 1), Arr(10, 1, 3), Arr(20, 1, 6), Arr(30, 1, 7)));
+            a.Add(StreamCase("streams are independent: a hole in stream 1 does not hold stream 2", 1500,
+                Arr(0, 1, 1), Arr(10, 1, 3), Arr(20, 2, 1), Arr(30, 2, 2), Arr(40, 2, 3)));
+            a.Add(StreamCase("exactly 4096 past the last delivered is buffered", 1200, Arr(0, 1, 1), Arr(10, 1, 4097)));
+            a.Add(StreamCase("4097 past the last delivered is malformed and dropped", 1200, Arr(0, 1, 1), Arr(10, 1, 4098), Arr(20, 1, 2)));
+            var burst = new List<JsonObject> { Arr(0, 1, 1) };
+            for (uint i = 0; i < 65; i++) burst.Add(Arr(10 + (int)i, 1, 3 + 2 * i));
+            a.Add(StreamCase("65 waiting events: past the count cap the hole is skipped at once", 200, burst.ToArray()));
+            var cap = new List<JsonObject> { Arr(0, 1, 1) };
+            for (uint i = 0; i < 5; i++) cap.Add(Arr(10 + (int)i, 1, 3 + 2 * i, 64 * 1024));
+            a.Add(StreamCase("more than 256 KiB waiting: past the byte cap the hole is skipped at once", 200, cap.ToArray()));
+            var exactly = new List<JsonObject> { Arr(0, 1, 1) };
+            for (uint i = 0; i < 64; i++) exactly.Add(Arr(10 + (int)i, 1, 3 + 2 * i));
+            a.Add(StreamCase("64 waiting events are still within the cap", 200, exactly.ToArray()));
+            return a;
+        }
+
         // ---- the file -----------------------------------------------------------------------------------------------
 
         public static string Build()
@@ -413,7 +493,7 @@ namespace OneLobby.Replication.Tests
             var groups = new (string Name, JsonArray Cases)[]
             {
                 ("snapshots", Snapshots()), ("inputs", Inputs()), ("events", Events()), ("streamEvents", StreamEvents()),
-                ("stateBits", StateBits()), ("quantize", QuantizeCases()), ("invalid", Invalid()), ("describe", DescribeCases()),
+                ("stateBits", StateBits()), ("quantize", QuantizeCases()), ("invalid", Invalid()), ("describe", DescribeCases()), ("streamReceive", StreamReceive()),
             };
             var sb = new StringBuilder();
             sb.Append("{\n  \"description\": ").Append(JsonSerializer.Serialize(
@@ -441,6 +521,26 @@ namespace OneLobby.Replication.Tests
             var built = VectorBuilder.Build();
             if (Environment.GetEnvironmentVariable("ONELOBBY_WRITE_VECTORS") == "1") File.WriteAllText(path, built, new UTF8Encoding(false));
             Assert.Equal(built.Replace("\r\n", "\n"), File.ReadAllText(path).Replace("\r\n", "\n"));
+        }
+    }
+
+    public class StreamReceiveVectorTests
+    {
+        /// <summary>Every committed streamReceive case, replayed through a real session, must give the committed expectation.</summary>
+        [Fact]
+        public void CommittedStreamReceiveCasesReplayThroughTheSession()
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !File.Exists(Path.Combine(dir, "spec", "vectors", "replication.json"))) dir = Path.GetDirectoryName(dir);
+            Assert.NotNull(dir);
+            var doc = JsonNode.Parse(File.ReadAllText(Path.Combine(dir!, "spec", "vectors", "replication.json")))!;
+            var cases = doc["streamReceive"]!.AsArray();
+            Assert.True(cases.Count >= 10);
+            foreach (var c in cases)
+            {
+                var got = VectorBuilder.ReplayStreamReceive(c!);
+                Assert.Equal(c!["expect"]!.ToJsonString(), got.ToJsonString());
+            }
         }
     }
 }
