@@ -52,6 +52,9 @@ export type { LobbySummary, LobbyState, PeerInfo } from "./signaling.js";
 // Types for the seams in OneLobbyOptions (ChannelName also tags raw messages).
 export type { PeerLink, LinkFactory, SocketFactory, SocketLike, IceServer, ChannelName } from "./transport.js";
 export type { Clock } from "./clock.js";
+// Fake lag, jitter and loss for dev builds and tests (the C# NetSimTransport): wrap a link factory, pass it as advanced.linkFactory.
+export { NetSimLinkFactory } from "./netsim.js";
+export type { NetSimOptions } from "./netsim.js";
 export { describeError, shareUrl, codeFromUrl, directJoinInfo, ErrorCodes } from "./friendly.js";
 export type { FriendlyError, ErrorCode, JoinInfo } from "./friendly.js";
 // Nostr signaling for direct hosts (spec/nostr-signaling.md): relay probe for picking hosting.nostrRelays.
