@@ -17,6 +17,10 @@ step() { # step <name> <cmd...>
   local name="$1"; shift
   echo "::group::$name"
   timeout 240 "$@" > "$LOG/$name.out" 2>&1; local rc=$?
+  if [ $rc -ne 0 ]; then # failed step: name the failed checks before the tail (the tail is often only warnings)
+    grep -n -A1 -E 'FAIL|SCRIPT ERROR|^ERROR:' "$LOG/$name.out" | head -n 60
+    echo "--- tail ---"
+  fi
   tail -n 40 "$LOG/$name.out"
   [ $rc -eq 0 ] || grep -a -m 20 "FAIL" "$LOG/$name.out" | grep -v "^::" # the failing check, even when it scrolled out of the tail
   echo "::endgroup::"
