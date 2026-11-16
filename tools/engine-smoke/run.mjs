@@ -21,7 +21,7 @@ for (const x of process.argv.slice(2)) {
 }
 // --room: the room layer scenario (password, data, ready, countdown, start, kick with a reason, a wrong password) between JS, GDScript and C# peers
 const ROOM = !!flags.room;
-// --replication: the binary replication scenario (spawn, move, input, event, despawn; both sides print the same world hash) between JS and C# peers
+// --replication: the binary replication scenario (spawn, move, input, event, despawn; both sides print the same world hash) between the JS, GDScript and C# peers
 const REPL = !!flags.replication;
 const ENGINES = (flags.engines ?? "js,gd,cs").split(",");
 const ROUTES = (flags.routes ?? (ROOM || REPL ? "server,typed" : "server,nostr,typed,ipcode,turn")).split(",");
@@ -40,7 +40,7 @@ const SUPPORTS = { js: ROUTES, gd: ROUTES, cs: ROUTES };
 // Cases: every engine alone (host + 2 joiners of that engine), then each host with the two OTHER engines as its joiners.
 // "js+gd" style cases from --cases are host + joiner engines, e.g. --cases=js,js+gd+cs (host js, joiners gd and cs).
 function cases() {
-  if (REPL) return ENGINES.filter((e) => e !== "gd").flatMap((h) => ENGINES.filter((e) => e !== "gd").map((j) => ({ host: h, joiners: [j] })));
+  if (REPL) return ENGINES.flatMap((h) => ENGINES.map((j) => ({ host: h, joiners: [j] })));
   if (ROOM) return ENGINES.flatMap((h) => ENGINES.map((j) => ({ host: h, joiners: [j, j] }))); // joiner 1 is a good one, joiner 2 uses a wrong password
   if (flags.cases) return flags.cases.split(",").map((c) => { const [h, ...j] = c.split("+"); return { host: h, joiners: j.length === 1 ? [j[0], j[0]] : j.length ? j : [h, h] }; });
   const out = [];

@@ -5,7 +5,8 @@ extends SceneTree
 ##   godot --headless --audio-driver Dummy --path clients/gdscript -s res://tests/engine_smoke_peer.gd -- \
 ##       --role=host|join --route=... [--server=ws://..] [--relay=ws://..] [--port=N] [--code=..] [--turn="turn:.. user pass"]
 ## `--scenario=room` runs the room layer instead of the ping rounds (a joiner with `--wrongpw` must be refused with bad_password);
-## the protocol is the one in tools/engine-smoke/js-peer.mjs `roomScenario()`.
+## the protocol is the one in tools/engine-smoke/js-peer.mjs `roomScenario()`. `--scenario=replication` runs the binary replication
+## scenario (js-peer.mjs `replicationScenario()`): it prints the same `REPL ...` line as the JS and C# peers.
 
 var _a := {}
 var _client: OneLobbyClient
@@ -61,6 +62,8 @@ func _run() -> void:
 	root.add_child(_client)
 	if _a.get("scenario") == "room":
 		await _room(ice)
+	elif _a.get("scenario") == "replication":
+		await _replication(ice)
 	elif _a.get("role") == "host":
 		await _host(ice)
 	else:
@@ -400,3 +403,163 @@ func _sync_run(lobby: OneLobbyLobby, is_host: bool, total: int) -> bool:
 		return false
 	print("LOCKSTEP tick=%d hash=%d cmds=%d pausegap=%d" % [SYNC_TICKS, final_hash, final_cmds, pause["gap"]])
 	return true
+
+
+# ---- replication scenario (--scenario=replication): the flow of tools/engine-smoke/js-peer.mjs `replicationScenario()` -----------------
+# The host spawns two entities (e1 host-owned, e2 owned by the joiner) and steps them as a pure function of the host tick (frozen after tick
+# 60), despawns e2 at tick 40, sends one stream event to the joiner at tick 10. The joiner submits one input byte per tick, sends one event to
+# the host when it first sees an entity, and the raw message "bye" once it holds a snapshot of tick >= 66. Both print
+# REPL spawned=2 despawned=1 entities=1 events=1 hash=<FNV-1a 32 of e1's id, type, owner and state bytes>; run.mjs requires the lines equal.
+
+func _write_repl(w: OneLobbyNetWriter, s: Dictionary) -> void:
+	w.write_quantized(s["x"], -256.0, 256.0, 16)
+	w.write_quantized(s["z"], -256.0, 256.0, 16)
+	w.write_angle(s["yaw"], 9)
+	w.write_bits(int(s["hp"]), 7)
+
+
+func _e1_at(t: int) -> Dictionary:
+	var tt := mini(t, 60)
+	return {"x": -100.0 + 1.5 * float(tt), "z": 20.0, "yaw": float((tt * 7) % 360), "hp": 100 - (tt % 10)}
+
+
+func _e2_at(t: int) -> Dictionary:
+	var tt := mini(t, 60)
+	return {"x": 50.0 - 0.5 * float(tt), "z": -20.0, "yaw": float((tt * 3) % 360), "hp": 90}
+
+
+func _repl_hash(owner: int, s: Dictionary) -> int:
+	var w := OneLobbyNetWriter.new()
+	_write_repl(w, s)
+	var h := 0x811C9DC5
+	var bytes := PackedByteArray([1, 1, owner])
+	bytes.append_array(w.to_bytes())
+	for b in bytes:
+		h = ((h ^ int(b)) * 16777619) & 0xFFFFFFFF
+	return h
+
+
+## The state schema the joiner reads with (the game's own, a small quantised state).
+class ReplSchema:
+	extends RefCounted
+
+	func read(r: OneLobbyNetReader) -> Dictionary:
+		return {"x": r.read_quantized(-256.0, 256.0, 16), "z": r.read_quantized(-256.0, 256.0, 16), "yaw": r.read_angle(9), "hp": r.read_bits(7)}
+
+	func interpolate(p: Dictionary, q: Dictionary, t: float) -> Dictionary:
+		return p if t < 0.5 else q
+
+
+func _replication(ice: Array) -> void:
+	var route := str(_a.get("route"))
+	if _a.get("role") == "host":
+		var lobby: OneLobbyLobby
+		var typed := ""
+		if route == "server":
+			lobby = await _client.host({"name": "smoke", "max_players": 4})
+		else:
+			var port := int(_a.get("port"))
+			var o := {"name": "smoke", "max_players": 4, "tcp_port": port, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1",
+				"udp_port_range": [port, port + 3], "ice_servers": ice, "stun": [], "nostr": false, "relays": [str(_a.get("relay", ""))] if _a.has("relay") else []}
+			lobby = await _client.host_direct(o)
+			typed = "127.0.0.1:%d" % port
+		if lobby == null:
+			_finish(false, "host failed: %s" % _client.last_error)
+			return
+		print("HOST_READY code=%s typed=%s ipcode=" % [lobby.code if route == "server" else typed, typed])
+		var joiner := [0]
+		lobby.peer_ready.connect(func(p: Dictionary) -> void: joiner[0] = int(p["peer_id"]))
+		if not await _until(func() -> bool: return joiner[0] != 0, "a linked joiner", 40.0):
+			return
+		var rep := OneLobbyReplicationSession.new(lobby)
+		var cur := [0] # the host tick the entity states are a function of
+		var counts := {"spawned": 0, "despawned": 0, "events": 0}
+		var bye := [false]
+		var bad := [""]
+		rep.spawn(1, 0, func(w: OneLobbyNetWriter) -> void: _write_repl(w, _e1_at(cur[0])))
+		counts["spawned"] += 1
+		var id2 := rep.spawn(2, joiner[0], func(w: OneLobbyNetWriter) -> void: _write_repl(w, _e2_at(cur[0])))
+		counts["spawned"] += 1
+		rep.event_received.connect(func(_f: int, _t: int, p: PackedByteArray) -> void:
+			if p.get_string_from_utf8() == "hello-host":
+				counts["events"] += 1
+			else:
+				bad[0] = "event " + p.get_string_from_utf8())
+		rep.other_message.connect(func(_f: int, p: PackedByteArray, _c: int) -> void:
+			if p.get_string_from_utf8() == "bye":
+				bye[0] = true)
+		var seqs: Array = []
+		var t0 := Time.get_ticks_msec()
+		while not (bye[0] and rep.clock.tick >= 75 and counts["events"] == 1):
+			rep.pump()
+			while rep.clock.try_advance():
+				var t := rep.clock.tick
+				cur[0] = t
+				if t == 10:
+					rep.send_event(_txt("hello-client"), joiner[0], OneLobbyWire.RELIABLE, 1)
+				if t == 40:
+					rep.despawn(id2)
+					counts["despawned"] += 1
+				var f := rep.try_get_input(joiner[0])
+				if not f.is_empty() and not f["repeated"]:
+					seqs.append(f["seq"])
+					var fb: PackedByteArray = f["bytes"]
+					if fb.size() != 1 or fb[0] != (int(f["seq"]) & 255):
+						bad[0] = "input bytes of seq %d" % f["seq"]
+				rep.send_snapshot()
+			if Time.get_ticks_msec() - t0 > 40000:
+				_finish(false, "host stalled: bye %s tick %d events %d" % [bye[0], rep.clock.tick, counts["events"]])
+				return
+			await process_frame
+		var contiguous := seqs.size() >= 20
+		for i in range(1, seqs.size()):
+			contiguous = contiguous and seqs[i] == seqs[i - 1] + 1
+		print("REPL spawned=%d despawned=%d entities=%d events=%d hash=%d" % [counts["spawned"], counts["despawned"], rep.host_entities().size(), counts["events"], _repl_hash(0, _e1_at(cur[0]))])
+		await create_timer(0.3).timeout
+		await lobby.leave_and_flush()
+		var ok: bool = contiguous and bad[0] == "" and rep.stats.malformed == 0
+		_finish(ok, "replication host" if ok else "inputs %d contiguous=%s %s malformed=%d" % [seqs.size(), contiguous, bad[0], rep.stats.malformed])
+		return
+	var code := str(_a.get("code", ""))
+	var jl: OneLobbyLobby
+	if route == "server":
+		jl = await _client.join(code)
+	else:
+		jl = await _client.join_direct(code, {"ice_servers": ice, "timeout_ms": 40000, "relays": [str(_a.get("relay", ""))] if _a.has("relay") else []})
+	if jl == null:
+		_finish(false, "join failed: %s" % _client.last_error)
+		return
+	if not jl.is_ready:
+		await jl.ready
+	var jrep := OneLobbyReplicationSession.new(jl)
+	var jc := {"spawned": 0, "despawned": 0, "events": 0}
+	var said := [false]
+	jrep.entity_spawned.connect(func(_e: Dictionary) -> void:
+		jc["spawned"] += 1
+		if not said[0]:
+			said[0] = true
+			jrep.send_event(_txt("hello-host")))
+	jrep.entity_despawned.connect(func(_e: Dictionary) -> void: jc["despawned"] += 1)
+	jrep.event_delivered.connect(func(e: Dictionary) -> void:
+		if (e["payload"] as PackedByteArray).get_string_from_utf8() == "hello-client" and e["stream"] == 1 and e["seq"] == 1:
+			jc["events"] += 1)
+	var t1 := Time.get_ticks_msec()
+	while not (jc["spawned"] == 2 and jc["despawned"] == 1 and jc["events"] == 1 and jrep.latest_tick >= 66 and jrep.last_processed_input > 0):
+		jrep.pump()
+		while jrep.clock.try_advance():
+			jrep.submit_input(PackedByteArray([jrep.clock.tick & 255]))
+		if Time.get_ticks_msec() - t1 > 40000:
+			_finish(false, "stalled: spawned %d despawned %d events %d latest %d" % [jc["spawned"], jc["despawned"], jc["events"], jrep.latest_tick])
+			return
+		await process_frame
+	var schema := ReplSchema.new()
+	var latest := jrep.try_get_latest(1, schema)
+	if latest.is_empty():
+		_finish(false, "entity 1 is not in the newest snapshot")
+		return
+	print("REPL spawned=%d despawned=%d entities=%d events=%d hash=%d" % [jc["spawned"], jc["despawned"], jrep.entities().size(), jc["events"], _repl_hash(0, latest["state"])])
+	jl.send(jl.host_peer_id, _txt("bye"), OneLobbyWire.RELIABLE)
+	await create_timer(0.5).timeout
+	await jl.leave_and_flush()
+	var jok: bool = jrep.stats.malformed == 0 and jrep.entities().size() == 1 and absf(float(latest["state"]["x"]) - float(_e1_at(60)["x"])) < 0.01
+	_finish(jok, "replication joiner" if jok else "malformed=%d entities=%d x=%s" % [jrep.stats.malformed, jrep.entities().size(), latest["state"]["x"]])

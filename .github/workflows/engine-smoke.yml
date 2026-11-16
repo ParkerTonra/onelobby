@@ -89,7 +89,7 @@ jobs:
         run: |
           set -o pipefail
           GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" node tools/engine-smoke/run.mjs --room --no-build | tee engine-smoke-room.log
-      - name: Engine smoke, binary replication (JS and C#, all pairs)
+      - name: Engine smoke, binary replication (JS, GDScript and C#, all nine pairs)
         run: |
           set -o pipefail
           GODOT="$HOME/godot/Godot_v${GODOT_VERSION}_linux.x86_64" node tools/engine-smoke/run.mjs --replication --no-build | tee engine-smoke-replication.log

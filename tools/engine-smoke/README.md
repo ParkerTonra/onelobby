@@ -23,7 +23,7 @@ kicks it with a code and a reason the joiner must read back; joiner 2 uses a wro
 
 ## The replication scenario
 
-`node tools/engine-smoke/run.mjs --replication` (JS and C# peers, routes `server` and `typed`: every host/joiner pair of the two) runs
+`node tools/engine-smoke/run.mjs --replication` (JS, GDScript and C# peers, routes `server` and `typed`: every host/joiner pair of the three, nine pairs per route) runs
 `ReplicationSession` end to end: the host spawns two entities with a small quantised state, steps them as a function of the host tick (frozen
 after tick 60), despawns one at tick 40 and sends the joiner one numbered stream event; the joiner submits one input byte per tick, sends one
 event to the host and the raw message `bye`. Both print `REPL spawned=2 despawned=1 entities=1 events=1 hash=<FNV-1a of the final state>`
