@@ -6,7 +6,8 @@ import { spawn } from "node:child_process";
 import { createSocket } from "node:dgram";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { LanFinder, LanHost } from "../packages/client/dist/index.js";
+import { LanFinder } from "../packages/client/dist/index.js";
+import { LanHost } from "../packages/client/dist/internals.js";
 
 const godot = process.env.GODOT;
 if (!godot) throw new Error("set GODOT to a Godot 4 executable");

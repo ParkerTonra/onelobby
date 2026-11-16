@@ -60,3 +60,5 @@ export {
   ByteWriter, MAX_STATE_BYTES, toHex, fromHex,
 } from "./replication/index.js";
 export type { Ent, World, SnapshotHeader, DecodedInput, InputEntry, Json } from "./replication/index.js";
+export { LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets, nodeLanUdp } from "./lan.js";
+export type { LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";

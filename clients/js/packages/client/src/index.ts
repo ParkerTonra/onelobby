@@ -67,8 +67,8 @@ export type { Cause, Stage, Reached, RelayState, CandidateType, NatFact, Diagnos
 export { NetLog } from "./netlog.js";
 export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
 export { checkConnection } from "./connection-check.js";
-export { LanFinder, LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets } from "./lan.js";
-export type { LanGame, LanFinderOptions, LanFinderStatus, LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";
+export { LanFinder } from "./lan.js";
+export type { LanGame, LanFinderOptions, LanFinderStatus } from "./lan.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
 // Binary replication (docs/recipes/replication.md, spec/replication.md): delta snapshots, inputs, events, interpolation.
 // The codec functions (encodeSnapshot, decodeInput, ...) are in onelobby/internals.

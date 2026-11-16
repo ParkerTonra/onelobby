@@ -76,7 +76,7 @@ describe("export surface", () => {
       "CHAT_MAX_BYTES", "Chat", "DEFAULT_READY_TIMEOUT_MS", "OneLobby", "OneLobbyError", "LIB_NAME", "LIB_VERSION", "Pause",
       "Lobby", "Lockstep", "Voice", "codeFromUrl", "describeError", "directJoinInfo", "formatCode", "normalizeCode", "shareUrl",
       "webCodecsOpusAvailable", "decodeJoinCode", "looksLikeJoinCode", "webRtcLinkFactoryFor",
-      "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes",
+      "MIN_PEER_TIMEOUT_MS", "closeCodeFor", "ErrorCodes", "LanFinder",
       "checkNostrRelays", "DEFAULT_NOSTR_RELAYS", "DEFAULT_NOSTR_STUN", "encodeRoomCode",
       "parseBlueprint", "defineBlueprint", "BlueprintError", "turnLogin", "turnCredential", "parseTurnLine",
       "Room", "BanList", "Causes", "diagnose", "NetLog", "checkConnection", "PlayerSettings", "SETTINGS_ENV", "maskRelay",

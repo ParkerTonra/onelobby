@@ -8,7 +8,7 @@ import {
   LanAnswerer, LanFinder, LanHost, LAN_DEFAULT_PORT, LAN_MAX_DATAGRAM, LAN_RATE_PER_SOURCE, LAN_RATE_TOTAL,
   decodeLanAnswer, decodeLanQuestion, encodeLanAnswer, encodeLanQuestion, lanSourceClass, type LanHostInfo, type LanUdp,
 } from "../src/lan.js";
-import { loopbackRtc } from "./helpers.js";
+import { freePort, loopbackRtc } from "./helpers.js";
 import { hex, specJson, unhex } from "./spec.js";
 
 const V = specJson("vectors/lan-discovery.json");
@@ -284,14 +284,14 @@ describe("the switch", () => {
   it("off: a direct host opens no UDP socket for LAN discovery (and on opens exactly one)", async () => {
     const spy = vi.spyOn(dgram, "createSocket");
     const kit = OneLobby.fromConfig({ game: { id: "com.example.lantest" }, engine: "dotnet", hosting: { nostr: false, openPort: false } }, { displayName: "Sam", advanced: { linkFactory: links } });
-    const off = await hostDirect(kit, { bindHost: "127.0.0.1", port: await freeUdpPort(), log: false });
+    const off = await hostDirect(kit, { bindHost: "127.0.0.1", port: await freePort(), log: false });
     expect(off.lanHost).toBeNull();
     expect(lanSockets(spy)).toBe(0);
     await off.leave();
 
     const port = await freeUdpPort();
     const kit2 = OneLobby.fromConfig({ game: { id: "com.example.lantest" }, engine: "dotnet", hosting: { nostr: false, openPort: false, lan: true } }, { displayName: "Sam", advanced: { linkFactory: links } });
-    const on = await hostDirect(kit2, { bindHost: "127.0.0.1", port: await freeUdpPort(), lan: { port }, log: false });
+    const on = await hostDirect(kit2, { bindHost: "127.0.0.1", port: await freePort(), lan: { port }, log: false });
     cleanup.push(() => on.leave());
     expect(on.lanHost?.listening).toBe(true);
     expect(lanSockets(spy)).toBe(1);
