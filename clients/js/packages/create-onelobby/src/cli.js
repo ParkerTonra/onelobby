@@ -17,6 +17,8 @@ import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
 import { isCSharpProject } from "./godot-project.js";
 import { runGodot } from "./godot.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
+import { runUpdate } from "./update.js";
+import { runVerify } from "./verify/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The hand recipe for each template that is not built yet. */
@@ -42,7 +44,7 @@ export async function main(argv, io = defaultIo()) {
     return await run(argv, io);
   } catch (e) {
     const err = e instanceof CliError ? e : new CliError("internal", e?.message ?? String(e));
-    if (wantJson) io.stdout.write(JSON.stringify({ ok: false, error: { code: err.code, message: err.message, ...(err.path !== undefined ? { path: err.path } : {}) } }) + "\n");
+    if (wantJson) io.stdout.write(JSON.stringify({ ok: false, error: { code: err.code, message: err.message, ...(err.path !== undefined ? { path: err.path } : {}), ...(err.details !== undefined ? { details: err.details } : {}) } }) + "\n");
     else io.stderr.write(`create-onelobby: ${err.message}${err.path ? ` (at ${err.path})` : ""}\n`);
     return 1;
   }
@@ -75,8 +77,12 @@ function run_(cmd, args, cwd, io) {
   return spawnSync(file, fileArgs, { cwd, stdio: ["ignore", 2, 2] }).status === 0;
 }
 
+/** Commands that act on an existing game, named first: `create-onelobby update`, `create-onelobby verify`. (A folder called "update" needs ./update.) */
+const COMMANDS = { update: runUpdate, verify: runVerify };
+
 export async function run(argv, io) {
-  const { dir, opts, given } = parseArgs(argv);
+  const command = Object.hasOwn(COMMANDS, argv[0]) ? argv[0] : undefined;
+  const { dir, opts, given } = parseArgs(command ? argv.slice(1) : argv);
   if (opts.help) {
     io.stdout.write(USAGE);
     return 0;
@@ -85,6 +91,8 @@ export async function run(argv, io) {
     io.stdout.write(JSON.parse(readFileSync(join(here, "../package.json"), "utf8")).version + "\n");
     return 0;
   }
+
+  if (command) return await COMMANDS[command]({ dir, opts, io });
 
   const fromFile = opts.from ? readFromFile(opts.from, io.cwd) : undefined;
   // --into a folder with a project.godot and no --template: a Godot project (C# when a .csproj / .sln sits beside it)

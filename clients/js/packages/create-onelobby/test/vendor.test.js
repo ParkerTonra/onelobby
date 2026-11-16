@@ -162,7 +162,7 @@ describe("the add-on source and the pin", () => {
 
 describe(".gitignore and .gitattributes blocks", () => {
   it("makes the block for a missing or empty file", () => {
-    expect(applyBlock(undefined, GITIGNORE_LINES)).toBe(`${BLOCK_BEGIN}\naddons/godot_webrtc/\n.godot/\n${BLOCK_END}\n`);
+    expect(applyBlock(undefined, GITIGNORE_LINES)).toBe(`${BLOCK_BEGIN}\naddons/godot_webrtc/\n.godot/\n.onelobby/\n${BLOCK_END}\n`);
     expect(applyBlock("", GITATTRIBUTES_LINES)).toContain("addons/onelobby/** text eol=lf");
   });
 

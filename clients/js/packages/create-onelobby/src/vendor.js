@@ -84,13 +84,13 @@ export const PIN_PATH = "addons/onelobby/PIN.json";
 const sortKeys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortKeys(o[k])])) : o);
 
 /** PIN.json for these add-on files, deterministic (sorted keys, LF, trailing newline). */
-export function buildPin({ files, commit, version = packageVersion() }) {
+export function buildPin({ files, commit, version = packageVersion(), webrtcNative = { version: WEBRTC_NATIVE_VERSION, zipSha256: WEBRTC_NATIVE_ZIP_SHA256 } }) {
   const hashes = {};
   for (const f of files) hashes[f.path] = sha256(f.content);
   const pin = {
     createOnelobby: version,
     source: { commit },
-    webrtcNative: { version: WEBRTC_NATIVE_VERSION, zipSha256: WEBRTC_NATIVE_ZIP_SHA256 },
+    webrtcNative,
     files: hashes,
   };
   return JSON.stringify(sortKeys(pin), null, 2) + "\n";
@@ -202,5 +202,5 @@ export function applyBlock(existing, lines) {
 }
 
 /** The managed lines for each engine-neutral file. `.gitignore`: what a fresh clone regenerates; `.gitattributes`: keep the add-on LF. */
-export const GITIGNORE_LINES = ["addons/godot_webrtc/", ".godot/"];
+export const GITIGNORE_LINES = ["addons/godot_webrtc/", ".godot/", ".onelobby/"]; // .onelobby/: scratch and helper cache of `create-onelobby verify`
 export const GITATTRIBUTES_LINES = ["addons/onelobby/** text eol=lf"];

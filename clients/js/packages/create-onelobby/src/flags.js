@@ -1,10 +1,11 @@
 // Argument parsing: no dependencies. Every answer flag maps to one blueprint key (docs/design/blueprint.md s.6).
 
 export class CliError extends Error {
-  constructor(code, message, path) {
+  constructor(code, message, path, details) {
     super(message);
     this.code = code;
     if (path !== undefined) this.path = path;
+    if (details !== undefined) this.details = details; // extra facts for --json (e.g. the files that stopped an update)
   }
 }
 
@@ -56,6 +57,9 @@ const OPTION_FLAGS = {
   "webrtc-zip": "value",
   "webrtc-dir": "value",
   "no-natives": "bool",
+  godot: "value",
+  server: "value",
+  "fetch-helpers": "bool",
   yes: "bool",
   y: "bool",
   "no-input": "bool",
@@ -125,6 +129,9 @@ export function parseArgs(argv) {
     webrtcZip: undefined,
     webrtcDir: undefined,
     noNatives: false,
+    godot: undefined,
+    server: undefined,
+    fetchHelpers: false,
   };
   const given = [];
   const positional = [];
@@ -166,6 +173,8 @@ export function parseArgs(argv) {
         else if (name === "addon-from") opts.addonFrom = v;
         else if (name === "webrtc-zip") opts.webrtcZip = v;
         else if (name === "webrtc-dir") opts.webrtcDir = v;
+        else if (name === "godot") opts.godot = v;
+        else if (name === "server") opts.server = v;
         else if (name === "hosting") {
           if (!["direct", "server", "both"].includes(v)) throw bad(name, "must be direct, server or both");
           given.push(["hosting.direct", v !== "server"], ["hosting.server", v !== "direct"]);
@@ -185,6 +194,7 @@ export function parseArgs(argv) {
         else if (name === "no-install") opts.noInstall = on;
         else if (name === "no-git") opts.noGit = on;
         else if (name === "no-natives") opts.noNatives = on;
+        else if (name === "fetch-helpers") opts.fetchHelpers = on;
         else if (name === "force") opts.force = on;
         else if (name === "help" || name === "h") opts.help = on;
         else if (name === "version") opts.version = on;
@@ -236,6 +246,8 @@ export function parseArgs(argv) {
 export const USAGE = `create-onelobby: scaffold a multiplayer game with OneLobby (writes onelobby.json, the glue and a two-player test)
 
 Usage: create-onelobby [dir] [options]
+       create-onelobby update [dir] [options]   re-vendor the add-on in a game made by this tool (see "update" below)
+       create-onelobby verify [dir] [options]   prove the game's multiplayer on 127.0.0.1: one line, VERIFY_OK or VERIFY_FAIL ... (see "verify" below)
 
   --template <web|godot-gdscript|node-browser|godot-csharp|unity|dotnet>   "web" and "godot-gdscript" exist; the rest are planned for v2
   --into <dir>                 add to an existing project: web writes onelobby.json, multiplayer/ and test/ only; a Godot GDScript
@@ -263,6 +275,20 @@ Usage: create-onelobby [dir] [options]
   --webrtc-dir <folder>        the same from an unpacked add-on folder (the one holding webrtc_native.gdextension)
   --no-natives                 do not install the WebRTC natives (the output says how to fetch them later)
   -h, --help  --version
+
+update [dir | --into <dir>]  (default: the current folder)
+  godot-gdscript: replaces addons/onelobby/ with the add-on bundled in this package (or --addon-from <folder>) when PIN.json says it is
+                  untouched; an edited, added or missing add-on file stops it (exit 1) unless --force. Also refreshes the managed .gitignore and
+                  .gitattributes blocks, and the WebRTC natives when their pinned version moved or the folder is gone (--webrtc-zip, --webrtc-dir,
+                  --no-natives as when scaffolding). Ends with the import command. A project with no PIN.json: adopt it with --into first.
+  web:            prints the one "npm install onelobby@<version>" line and whether the glue differs from this version's; writes nothing.
+  --dry-run  --json  --force
+verify [dir | --into <dir>]  (default: the current folder)
+  runs the checks in order, one line each (ok / FAIL <why> / skipped <why>), then VERIFY_OK or VERIFY_FAIL <check>: <next step> (exit 0 / 1)
+  --godot <exe>                Godot 4.4+ (else $GODOT, else "godot" on PATH); always run --headless --audio-driver Dummy
+  --server <ws://127.0.0.1:port/ws>   also check the lobby-server route, against a server you started on this machine
+  --fetch-helpers              download the local TURN helper (npm node-turn, anonymous) into .onelobby/ when it is not there yet
+  --json                       one object with the same facts
 
 Every --flag has a --no-flag form when it is a yes/no answer. Prompts appear only when stdin is a terminal and neither
 --yes nor --no-input is set; the prompt text is each key's description from the schema.

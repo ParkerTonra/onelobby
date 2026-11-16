@@ -66,3 +66,6 @@ export function intoFiles({ blueprint }) {
     { path: "test/multiplayer.mjs", content: conditional(read("glue", "multiplayer-test.mjs"), "into") },
   ];
 }
+
+/** The glue file this version writes (templates/glue/session.js), for `update` to compare a project copy with. */
+export const glueSession = () => read("glue", "session.js");
