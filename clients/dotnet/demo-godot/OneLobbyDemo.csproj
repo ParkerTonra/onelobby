@@ -14,5 +14,6 @@
     <ProjectReference Include="..\OneLobby.Direct\OneLobby.Direct.csproj" />
     <ProjectReference Include="..\OneLobby.Godot\OneLobby.Godot.csproj" />
     <ProjectReference Include="..\OneLobby.Opus\OneLobby.Opus.csproj" />
+    <ProjectReference Include="..\OneLobby.Replication\OneLobby.Replication.csproj" />
   </ItemGroup>
 </Project>
