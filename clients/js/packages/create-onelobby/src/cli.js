@@ -276,7 +276,7 @@ export async function run(argv, io) {
       throw new CliError("unsupported", 'template web writes the lockstep and raw sample game (sync.mode "lockstep" or "raw"); sync.mode "replication" needs a ReplicationSession the web template does not write yet (see docs/recipes/replication.md)', "sync.mode");
 
     // ---- validate with the real loader ----
-    const blueprint = await buildBlueprint(answers);
+    const blueprint = await buildBlueprint(answers, { comments: fromFile });
     const netPlayer = answersWantNetPlayer(answers); // asked for (a flag, --set, --from or the recommendation); the loader fills sync.player either way
 
     if (template === "godot-gdscript" || template === "godot-csharp") {

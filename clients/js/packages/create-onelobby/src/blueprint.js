@@ -93,12 +93,30 @@ export function withDefaults(answers, defaults) {
 }
 
 /**
+ * Copy the `$comment` strings of `source` (a --from file) into `file`, at the same place: the loader drops them, and they hold the reasons
+ * (the skill puts one in each object). An object `file` does not have is skipped. `$comment` goes first in its object (after `$schema` at the top).
+ */
+export function carryComments(file, source) {
+  if (!source || typeof source !== "object" || Array.isArray(source) || !file || typeof file !== "object" || Array.isArray(file)) return;
+  for (const [k, v] of Object.entries(source)) {
+    if (k === "$comment" && typeof v === "string") {
+      const rest = Object.entries(file).filter(([key]) => key !== "$comment");
+      const head = rest.filter(([key]) => key === "$schema");
+      const tail = rest.filter(([key]) => key !== "$schema");
+      for (const key of Object.keys(file)) delete file[key];
+      Object.assign(file, Object.fromEntries([...head, ["$comment", v], ...tail]));
+    } else if (v && typeof v === "object" && !Array.isArray(v) && file[k] && typeof file[k] === "object") carryComments(file[k], v);
+  }
+}
+
+/**
  * Validate the answers with the real loader and return the full file to write: every key, `$schema` pinned,
  * defaults filled in.
  */
-export async function buildBlueprint(answers) {
+export async function buildBlueprint(answers, { comments } = {}) {
   const filled = thaw(await validate(answers));
   const file = { $schema: SCHEMA_URL, ...filled };
+  if (comments) carryComments(file, comments);
   // the written file must load again exactly as the loader sees it
   await validate(file);
   return file;
