@@ -149,6 +149,13 @@ Names of state fields and action arguments are those of `spec/net-player.md` (`x
 aiming blocking health alive team teleport`; `shoot` has `yaw`, `pitch`, `view`). `Reconciler`, `PredictionSmoother` and
 `HistoryRing` are exported on their own for games that want the pieces (they are the JS twins of the C# helpers).
 
+**Packet loss and a watched player.** With authority `"owner"` the host carries a player on by its velocity for a tick on which its
+state is late or lost and takes a second state later to make it up, so a lost packet no longer leaves the player a tick (33 ms at
+30 Hz) older on every screen for the rest of the session; nothing needs setting for that. On a 3% lossy link the watched path now
+stays within 0.3 m of the owner's (it was up to 0.8 m), at 0 and 20 ms of jitter. With authority `"host"` a lost input still leaves the
+queue one tick longer (worst 0.4 m on the same link); the only setting that hides it is a deeper standing queue, which makes every
+player a tick older for good, so the layer does not do it for you. Measured numbers: `spec/net-player.md` section 11.
+
 ## 6. The host's limits
 
 `sync.player.limits`: `maxSpeed`, `maxStep` (owner mode), `minShotIntervalMs`, `minMeleeIntervalMs`. A limit that is not set
