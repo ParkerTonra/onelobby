@@ -76,6 +76,19 @@ describe("WebRtcLink", () => {
     expect(offers).toEqual(["offer"]);
   });
 
+  it("a send on a channel that closed under us (readyState still open) is dropped, not thrown", async () => {
+    // node-datachannel's send throws "DataChannel is closed" when the peer closed in the same instant the channel opened
+    // (its readyState lags); a link's sends after close are dropped, so this one is too, instead of an uncaught error
+    const link = make();
+    await link.handleSignal({ sdp: { type: "offer", sdp: "v=0" } });
+    const [reliable, fast, voice] = FakePc.last.channels;
+    for (const c of [reliable, fast, voice]) c.open();
+    reliable.send = () => {
+      throw new Error("libdatachannel error while sending data channel message: DataChannel is closed");
+    };
+    expect(() => link.send("reliable", Uint8Array.of(1))).not.toThrow();
+  });
+
   it("data that arrives before every channel is open waits for onOpen, then comes in order", async () => {
     const link = make();
     await link.handleSignal({ sdp: { type: "offer", sdp: "v=0" } });

@@ -246,7 +246,13 @@ export class WebRtcLink implements PeerLink {
 
   send(channel: ChannelName, bytes: Uint8Array): void {
     const ch = this.channels[channel];
-    if (ch && ch.readyState === "open") ch.send(bytes as unknown as ArrayBuffer);
+    if (!ch || ch.readyState !== "open") return;
+    try {
+      ch.send(bytes as unknown as ArrayBuffer);
+    } catch {
+      // the channel closed in the same instant (node-datachannel's readyState lags its native close, e.g. a peer that
+      // opened and closed at once): a send after close is dropped, and reliable's own close event ends the link
+    }
   }
 
   close(): void {
