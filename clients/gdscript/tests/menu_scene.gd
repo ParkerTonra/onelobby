@@ -263,6 +263,23 @@ func _smoke() -> void:
 	_check(String(a.get_node("InGame").text).begins_with("in game"), "smoke: the label text: %s" % a.get_node("InGame").text)
 	am.model.lobby.room.back_to_lobby()
 	_check(await _until(func() -> bool: return am.visible and bm.visible and not a.get_node("InGame").visible), "smoke: back to the lobby shows the menu again")
+	# the pump: a menu with pump on turns the client's auto_pump off and gives it back when it leaves the tree (an autoload's client outlives it)
+	var kept := _client("Pump")
+	root.add_child(kept)
+	var pm: OneLobbyMenu = (load("res://addons/onelobby/menu/menu.tscn") as PackedScene).instantiate()
+	pm.client = kept
+	root.add_child(pm)
+	_check(not kept.auto_pump, "pump: a menu with pump on turns the client's auto_pump off")
+	pm.free()
+	_check(kept.auto_pump, "pump: freeing that menu turns auto_pump back on, so the next menu can run with pump = false")
+	var pm2: OneLobbyMenu = (load("res://addons/onelobby/menu/menu.tscn") as PackedScene).instantiate()
+	pm2.client = kept
+	pm2.pump = false
+	root.add_child(pm2)
+	_check(kept.auto_pump, "pump: a menu with pump = false leaves auto_pump on (negative control)")
+	pm2.free()
+	_check(kept.auto_pump, "pump: freeing a menu that took no pump leaves auto_pump alone (negative control)")
+	kept.queue_free()
 	a.queue_free()
 	b.queue_free()
 

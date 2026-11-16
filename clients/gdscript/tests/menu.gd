@@ -207,6 +207,19 @@ func _headless_and_start_on_host() -> void:
 	_check(hl["model"].check_on_open_enabled(), "headless false on the model turns the check on open back on")
 	hl["client"].queue_free()
 	OneLobbyMenuModel.headless_default = _real_headless_default
+	# the hosting line (a second headless copy joins by this code, not by a fixed port): one line for the host, none for a joiner
+	var said: Array[String] = []
+	var logged := _rig()
+	logged.model.host_log = func(line: String) -> void: said.append(line)
+	await logged.model.host()
+	var shown_code := logged.model.code_text()
+	_check(shown_code != "" and said == ["OneLobby: hosting, join code " + shown_code], "the host logs one line with the code the room page shows: %s (%s)" % [str(said), shown_code])
+	var guest_said: Array[String] = []
+	var guest := _rig()
+	guest.model.host_log = func(line: String) -> void: guest_said.append(line)
+	guest.model.set_join_text(logged.model.lobby.ip_code)
+	await guest.model.join()
+	_check(guest.model.screen == Screen.LOBBY and guest_said.is_empty(), "a joiner logs no hosting line (negative control): %s" % str(guest_said))
 	# start_on_host: off by default (the host waits in the room), on: Start is pressed once, game_started fires
 	var wait := _rig()
 	await wait.model.host()

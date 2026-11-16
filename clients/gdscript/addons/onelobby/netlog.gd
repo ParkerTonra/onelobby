@@ -15,6 +15,18 @@ const HIDDEN := "<hidden>"
 
 var entries: Array[Dictionary] = [] ## {seq, t, kind, text, addr?, code?}, oldest first
 var path := "" ## where save() writes when given no path, and where the exit / error flush writes; "" = nowhere
+## True: every entry is also appended to `path` as it is added (a killed process still has its log). Set by `ONELOBBY_NETLOG` / `--netlog=`.
+var live := false
+var _live_open := false
+
+## The log file one run asked for: `--netlog=<file>` after `--` wins, else the environment variable `ONELOBBY_NETLOG`, else "". `env`: null reads the real
+## environment, or a Dictionary of variables (tests); `args`: the user args. Give each copy of a game on one PC its own file: the default file is one per game name.
+static func requested_path(env: Variant, args: PackedStringArray) -> String:
+	for a in args:
+		if a.begins_with("--netlog=") and a.length() > 9:
+			return a.substr(9)
+	var v := str(env.get("ONELOBBY_NETLOG", "")) if env is Dictionary else OS.get_environment("ONELOBBY_NETLOG")
+	return v.strip_edges()
 var _next_seq := 1
 var _cap := DEFAULT_CAPACITY
 var _t0 := 0
@@ -65,7 +77,9 @@ func add(kind: String, text: String, addr := "", code := "") -> void:
 	entries.append(e)
 	if entries.size() > _cap:
 		entries.pop_front()
-	if kind == "error" and path != "":
+	if live and path != "":
+		_append_live(e)
+	elif kind == "error" and path != "":
 		flush()
 
 
@@ -109,6 +123,20 @@ func save(to := "", include_addresses := false) -> String:
 	f.store_string(export(include_addresses))
 	f.close()
 	return target
+
+
+## Live mode: the first entry writes the whole log (header and what is in the ring), later ones append one masked line each.
+func _append_live(e: Dictionary) -> void:
+	if not _live_open:
+		_live_open = true
+		save()
+		return
+	var f := FileAccess.open(path, FileAccess.READ_WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_string(mask("#%d +%dms %s %s" % [e["seq"], e["t"], e["kind"], e["text"]], false) + "\n")
+	f.close()
 
 
 ## Writes the masked log to `path` now (the exit and error flush); never fails loudly: the log is a courtesy.

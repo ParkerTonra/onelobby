@@ -102,6 +102,9 @@ var _ticket := 0
 var _game_started := false
 var _autostarted := false
 var _opened := false
+## Where the one "hosting" line goes (a test or a game passes a callable taking the line). Unset: `print` in a headless run (no window, so nobody
+## reads the room page; a second headless copy joins by this code), nothing with a display.
+var host_log := Callable()
 
 
 func _init(p_client: OneLobbyClient = null) -> void:
@@ -438,6 +441,8 @@ func _connected(ticket: int, l: OneLobbyLobby) -> void:
 	_attach(l)
 	_game_started = false
 	lobby_note = ""
+	if l.is_host:
+		_log_hosting()
 	_set_screen(Screen.LOBBY)
 	if l.phase == "in_game":
 		_start_playing()
@@ -446,6 +451,15 @@ func _connected(ticket: int, l: OneLobbyLobby) -> void:
 
 
 # ---- the lobby ------------------------------------------------------------------------------------------------------
+
+## The line a headless host prints: `OneLobby: hosting, join code <code>` (the code a joiner types, as the room page shows it).
+func _log_hosting() -> void:
+	var line := "OneLobby: hosting, join code " + code_text()
+	if host_log.is_valid():
+		host_log.call(line)
+	elif headless:
+		print(line)
+
 
 func _attach(l: OneLobbyLobby) -> void:
 	lobby = l

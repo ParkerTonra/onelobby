@@ -176,6 +176,25 @@ func _netlog_extras() -> void:
 	saved.add("error", "ice_failed", "", "ice_failed") # an error entry saves the log
 	_check(FileAccess.file_exists(path) and FileAccess.get_file_as_string(path).contains("error ice_failed"), "an error entry saves the log")
 	DirAccess.remove_absolute(path)
+	# one file per copy, written as it goes: the requested path wins, then the environment; none asked means none
+	_check(OneLobbyNetLog.requested_path({}, PackedStringArray()) == "", "no --netlog and no variable asks for nothing (negative control)")
+	_check(OneLobbyNetLog.requested_path({"ONELOBBY_NETLOG": "user://env.txt"}, PackedStringArray()) == "user://env.txt", "ONELOBBY_NETLOG names the file")
+	_check(OneLobbyNetLog.requested_path({"ONELOBBY_NETLOG": "user://env.txt"}, PackedStringArray(["--netlog=user://arg.txt"])) == "user://arg.txt", "--netlog= beats the variable")
+	_check(OneLobbyNetLog.requested_path({}, PackedStringArray(["--netlog="])) == "", "an empty --netlog= asks for nothing")
+	var live_path := "user://diag-test/live.txt"
+	var lv := OneLobbyNetLog.new()
+	lv.path = live_path
+	lv.live = true
+	lv.add("info", "first")
+	lv.add("info", "second") # no error entry, no save(), no exit: the file already has both
+	var live_text := FileAccess.get_file_as_string(live_path)
+	_check(live_text.begins_with("# onelobby netlog v1") and live_text.contains("info first") and live_text.contains("info second"), "a live log is on disk after each entry, with no exit")
+	var quiet := OneLobbyNetLog.new()
+	var quiet_path := "user://diag-test/quiet.txt"
+	quiet.path = quiet_path
+	quiet.add("info", "only in memory")
+	_check(not FileAccess.file_exists(quiet_path), "without live, an info entry writes nothing until exit or error (negative control)")
+	DirAccess.remove_absolute(live_path)
 	_check(OneLobbyConnectionCheck.all_loopback([{"host": "127.0.0.1"}, {"host": "localhost"}]), "loopback targets")
 	_check(not OneLobbyConnectionCheck.all_loopback([{"host": "127.0.0.1"}, {"host": "203.0.113.9"}]), "a public target is not loopback")
 

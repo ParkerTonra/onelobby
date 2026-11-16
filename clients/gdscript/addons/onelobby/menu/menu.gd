@@ -127,6 +127,8 @@ var _ping_at := 0
 var _syncing := false
 ## True while the name field holds text the player typed and the model has not taken yet.
 var _name_dirty := false
+## True when this menu turned the client's auto_pump off (so it turns it back on when it leaves the tree).
+var _took_pump := false
 
 
 func _ready() -> void:
@@ -137,6 +139,7 @@ func _ready() -> void:
 	if client.get_parent() == null:
 		add_child(client)
 	if pump:
+		_took_pump = client.auto_pump
 		client.auto_pump = false
 	model = OneLobbyMenuModel.new(client)
 	model.host_options = host_options
@@ -205,11 +208,17 @@ func _process(_delta: float) -> void:
 func _enter_tree() -> void:
 	if model != null:
 		model.resume() # put back in the tree with the LAN list on screen: look again
+		if _took_pump and pump and client != null:
+			client.auto_pump = false
 
 
 func _exit_tree() -> void:
 	if model != null:
 		model.shutdown()
+	# a menu that took the pump gives it back: the client (an autoload's, it outlives the menu) pumps itself again, so a game that
+	# builds the next menu with `pump = false` still has a pumped client
+	if _took_pump and client != null and is_instance_valid(client):
+		client.auto_pump = true
 
 
 func _notification(what: int) -> void:

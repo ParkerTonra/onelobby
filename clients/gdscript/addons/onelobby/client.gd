@@ -46,7 +46,9 @@ const RETIRE_MS := 1500
 ## A joiner that gives up tells the host why (cause and step only: no address, name or free text) over the signaling path
 ## it already uses, once, when the hub lists the "diag" feature (spec/diagnostics.md s.7).
 @export var report_to_host := true
-## Where the connection log (`net_log`) is saved: when the scene tree exits, after every error entry and on net_log.save().
+## Where the connection log (`net_log`) is saved: when the scene tree exits, after every error entry and on net_log.save(). The default is one file per game name,
+## so two copies of a game on one PC (and `verify`) overwrite each other: start each copy with `-- --netlog=<file>` (or `ONELOBBY_NETLOG=<file>`) and its log goes to that
+## file, line by line, so a killed copy still has it.
 ## "" keeps it in memory only. GDScript cannot hook a crash, so a crash loses only what came after the last error entry.
 @export_file var log_path := "user://onelobby-netlog.txt"
 ## Net log ring size: 500 by default, clamped to 50..5000.
@@ -120,6 +122,12 @@ var _last_ping_ms := 0
 var _ping_n := 0
 
 
+func _ready() -> void:
+	# a copy that asked for its own log file (`--netlog=` / ONELOBBY_NETLOG) has the file from the start, not only once something is logged
+	if OneLobbyNetLog.requested_path(settings_env, OS.get_cmdline_user_args()) != "":
+		get_net_log()
+
+
 func _process(_delta: float) -> void:
 	if auto_pump:
 		pump()
@@ -131,6 +139,10 @@ func get_net_log() -> OneLobbyNetLog:
 	if _net_log == null:
 		_net_log = OneLobbyNetLog.new(log_size, transport.now_ms)
 		_net_log.path = log_path
+		var asked := OneLobbyNetLog.requested_path(settings_env, OS.get_cmdline_user_args())
+		if asked != "":
+			_net_log.path = asked
+			_net_log.live = true # one file per copy, written line by line
 		_net_log.set_meta_info("onelobby-gdscript " + LIB_VERSION, "lk1", "godot " + OS.get_name().to_lower())
 		_net_log.add("info", "client onelobby-gdscript %s protocol lk1 game version %s" % [LIB_VERSION, net_version])
 	return _net_log
