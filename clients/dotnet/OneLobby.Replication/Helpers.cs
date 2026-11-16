@@ -55,6 +55,25 @@ namespace OneLobby.Replication
         }
     }
 
+    /// <summary>Bytes per second over a sliding second, in six buckets (sent and received x snapshots, inputs, events).</summary>
+    internal sealed class RateMeter
+    {
+        public const int Snapshot = 0, Input = 1, Event = 2, Received = 3; // bucket = kind + (received ? Received : 0)
+        private readonly Queue<(long At, int Bucket, int Bytes)> _q = new();
+
+        public void Add(long nowMs, int bucket, int bytes) { _q.Enqueue((nowMs, bucket, bytes)); Trim(nowMs); }
+
+        private void Trim(long nowMs) { while (_q.Count > 0 && nowMs - _q.Peek().At >= 1000) _q.Dequeue(); }
+
+        public TrafficRates Get(long nowMs)
+        {
+            Trim(nowMs);
+            var b = new double[6];
+            foreach (var e in _q) b[e.Bucket] += e.Bytes;
+            return new TrafficRates(b[0], b[1], b[2], b[0] + b[1] + b[2], b[3], b[4], b[5], b[3] + b[4] + b[5]);
+        }
+    }
+
     /// <summary>
     /// Host-side lag compensation history (Valve/Mirror pattern): record each entity's hit volume every tick, then ask for
     /// it at the tick the shooter was seeing (<see cref="InputFrame.ViewTick"/>, clamped by

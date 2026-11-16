@@ -38,26 +38,36 @@ namespace OneLobby.Replication.Tests
             }
         }
 
+        private static float F(JsonElement e) => e.ValueKind == JsonValueKind.String
+            ? e.GetString() switch { "NaN" => float.NaN, "Infinity" => float.PositiveInfinity, _ => float.NegativeInfinity }
+            : e.GetSingle();
+
+        private static World? BaselineOf(JsonElement b) =>
+            b.ValueKind == JsonValueKind.Null ? null : WorldOf(b.GetProperty("tick").GetUInt32(), b.GetProperty("world"));
+
         [Fact]
         public void SnapshotVectorsEncodeAndDecodeByteExact()
         {
+            var n = 0;
             foreach (var v in Vectors().GetProperty("snapshots").EnumerateArray())
             {
+                n++;
                 var tick = v.GetProperty("tick").GetUInt32();
                 var cur = WorldOf(tick, v.GetProperty("world"));
-                var b = v.GetProperty("baseline");
-                World? baseline = b.ValueKind == JsonValueKind.Null ? null : WorldOf(b.GetProperty("tick").GetUInt32(), b.GetProperty("world"));
+                var baseline = BaselineOf(v.GetProperty("baseline"));
                 var bytes = Proto.EncodeSnapshot(cur, baseline, v.GetProperty("lastInputSeq").GetUInt32(), new ByteWriter(), new ByteWriter());
                 Assert.Equal(v.GetProperty("hex").GetString(), Hex(bytes));
                 var h = Proto.PeekSnapshot(bytes);
                 Assert.Equal(tick, h.Tick);
                 Assert.Equal(baseline?.Tick ?? 0, h.BaselineTick);
+                Assert.Equal(v.GetProperty("lastInputSeq").GetUInt32(), h.LastInputSeq);
                 SameWorld(cur, Proto.DecodeSnapshot(bytes, baseline));
             }
+            Assert.True(n >= 15);
         }
 
         [Fact]
-        public void InputAndEventVectors()
+        public void InputEventAndStreamEventVectors()
         {
             var root = Vectors();
             foreach (var v in root.GetProperty("inputs").EnumerateArray())
@@ -69,6 +79,7 @@ namespace OneLobby.Replication.Tests
                 Assert.Equal(v.GetProperty("ack").GetUInt32(), ack);
                 Assert.Equal(v.GetProperty("newestSeq").GetUInt32(), newest);
                 Assert.Equal(list.Select(x => x.Item1), inputs.Select(x => x.View256));
+                Assert.Equal(list.Select(x => Hex(x.Item2)), inputs.Select(x => Hex(x.Bytes)));
                 Assert.Equal(Enumerable.Range(0, list.Count).Select(i => newest - (uint)i), inputs.Select(x => x.Seq));
             }
             foreach (var v in root.GetProperty("events").EnumerateArray())
@@ -79,41 +90,172 @@ namespace OneLobby.Replication.Tests
                 Assert.Equal(v.GetProperty("tick").GetUInt32(), tick);
                 Assert.Equal(v.GetProperty("payloadHex").GetString(), Hex(payload));
             }
+            foreach (var v in root.GetProperty("streamEvents").EnumerateArray())
+            {
+                var stream = (byte)v.GetProperty("stream").GetUInt32();
+                var bytes = Proto.EncodeStreamEvent(v.GetProperty("tick").GetUInt32(), stream, v.GetProperty("seq").GetUInt32(), Hex(v.GetProperty("payloadHex").GetString()!), new ByteWriter());
+                Assert.Equal(v.GetProperty("hex").GetString(), Hex(bytes));
+                var (tick, st, seq, payload) = Proto.DecodeStreamEvent(bytes);
+                Assert.Equal(v.GetProperty("tick").GetUInt32(), tick);
+                Assert.Equal(stream, st);
+                Assert.Equal(v.GetProperty("seq").GetUInt32(), seq);
+                Assert.Equal(v.GetProperty("payloadHex").GetString(), Hex(payload));
+            }
         }
 
         [Fact]
-        public void InvalidSnapshotsAreRejectedWithTheNamedError()
+        public void InvalidMessagesAreRejectedWithTheNamedError()
         {
+            var seen = new HashSet<string>();
             foreach (var v in Vectors().GetProperty("invalid").EnumerateArray())
             {
-                var b = v.GetProperty("baseline");
-                World? baseline = b.ValueKind == JsonValueKind.Null ? null : WorldOf(b.GetProperty("tick").GetUInt32(), b.GetProperty("world"));
-                var ex = Assert.Throws<MalformedException>(() => Proto.DecodeSnapshot(Hex(v.GetProperty("hex").GetString()!), baseline));
+                var bytes = Hex(v.GetProperty("hex").GetString()!);
+                var baseline = BaselineOf(v.GetProperty("baseline"));
+                var kind = v.TryGetProperty("kind", out var k) ? k.GetString() : "snapshot";
+                Action act = kind switch
+                {
+                    "input" => () => Proto.DecodeInput(bytes),
+                    "event" => () => Proto.DecodeEvent(bytes),
+                    "streamEvent" => () => Proto.DecodeStreamEvent(bytes),
+                    _ => () => Proto.DecodeSnapshot(bytes, baseline),
+                };
+                var ex = Assert.Throws<MalformedException>(act);
                 Assert.Equal(v.GetProperty("error").GetString(), ex.Message);
+                seen.Add(ex.Message);
+            }
+            foreach (var name in new[] { "too_short", "trailing", "range", "varint", "id", "delta", "despawn", "op", "tick", "baseline", "full", "seq", "stream_0", "seq_0" })
+                Assert.Contains(name, seen);
+        }
+
+        [Fact]
+        public void StateBitsVectors()
+        {
+            foreach (var v in Vectors().GetProperty("stateBits").EnumerateArray())
+            {
+                var name = v.GetProperty("name").GetString()!;
+                if (v.TryGetProperty("ops", out var ops))
+                {
+                    var w = new NetWriter();
+                    foreach (var o in ops.EnumerateArray()) for (var i = 0; i < (o.TryGetProperty("repeat", out var rp) ? rp.GetInt32() : 1); i++) Write(w, o);
+                    Assert.Equal(v.GetProperty("hex").GetString(), Hex(w.ToArray()));
+                    Assert.Equal(v.GetProperty("bits").GetInt32(), w.BitCount);
+                }
+                var r = new NetReader(Hex(v.GetProperty("hex").GetString()!));
+                foreach (var o in v.GetProperty("reads").EnumerateArray())
+                    for (var i = 0; i < (o.TryGetProperty("repeat", out var rp) ? rp.GetInt32() : 1); i++) CheckRead(r, o, name);
+                Assert.Equal(v.GetProperty("overrun").GetBoolean(), r.Overrun);
+            }
+        }
+
+        private static void Write(NetWriter w, JsonElement o)
+        {
+            var v = o.GetProperty("v");
+            switch (o.GetProperty("op").GetString())
+            {
+                case "bits": w.WriteBits(v.GetUInt32(), o.GetProperty("n").GetInt32()); break;
+                case "bool": w.WriteBool(v.GetBoolean()); break;
+                case "byte": w.WriteByte((byte)v.GetUInt32()); break;
+                case "u16": w.WriteUInt16((ushort)v.GetUInt32()); break;
+                case "u32": w.WriteUInt32(v.GetUInt32()); break;
+                case "i32": w.WriteInt32(v.GetInt32()); break;
+                case "float": w.WriteFloat(v.GetSingle()); break;
+                case "q": w.WriteQuantized(v.GetSingle(), o.GetProperty("min").GetSingle(), o.GetProperty("max").GetSingle(), o.GetProperty("bits").GetInt32()); break;
+                case "angle": w.WriteAngle(v.GetSingle(), o.GetProperty("bits").GetInt32()); break;
+                case "quat": w.WriteQuaternion(v[0].GetSingle(), v[1].GetSingle(), v[2].GetSingle(), v[3].GetSingle(), o.GetProperty("bits").GetInt32()); break;
+                default: throw new InvalidOperationException("op");
+            }
+        }
+
+        private static void CheckRead(NetReader r, JsonElement o, string name)
+        {
+            var want = o.GetProperty("read");
+            switch (o.GetProperty("op").GetString())
+            {
+                case "bits": Assert.Equal(want.GetUInt32(), r.ReadBits(o.GetProperty("n").GetInt32())); break;
+                case "bool": Assert.Equal(want.GetBoolean(), r.ReadBool()); break;
+                case "byte": Assert.Equal(want.GetUInt32(), (uint)r.ReadByte()); break;
+                case "u16": Assert.Equal(want.GetUInt32(), (uint)r.ReadUInt16()); break;
+                case "u32": Assert.Equal(want.GetUInt32(), r.ReadUInt32()); break;
+                case "i32": Assert.Equal(want.GetInt32(), r.ReadInt32()); break;
+                case "float": Assert.Equal(want.GetSingle(), r.ReadFloat()); break;
+                case "q": Assert.Equal(want.GetSingle(), r.ReadQuantized(o.GetProperty("min").GetSingle(), o.GetProperty("max").GetSingle(), o.GetProperty("bits").GetInt32())); break;
+                case "angle": Assert.Equal(want.GetSingle(), r.ReadAngle(o.GetProperty("bits").GetInt32())); break;
+                case "quat":
+                {
+                    var q = r.ReadQuaternion(o.GetProperty("bits").GetInt32());
+                    Assert.Equal(new[] { want[0].GetSingle(), want[1].GetSingle(), want[2].GetSingle(), want[3].GetSingle() }, new[] { q.X, q.Y, q.Z, q.W });
+                    break;
+                }
+                default: throw new InvalidOperationException("op " + name);
             }
         }
 
         [Fact]
-        public void StateBitsAndQuantizeVectors()
+        public void QuantizeVectors()
         {
-            var root = Vectors();
-            var w = new NetWriter();
-            w.WriteBits(5, 3); w.WriteBits(1, 1); w.WriteBits(0xAB, 8);
-            Assert.Equal(root.GetProperty("stateBits")[0].GetProperty("hex").GetString(), Hex(w.ToArray()));
-            var r = new NetReader(w.ToArray());
-            Assert.Equal(5u, r.ReadBits(3)); Assert.Equal(1u, r.ReadBits(1)); Assert.Equal(0xABu, r.ReadBits(8));
-            Assert.False(r.Overrun);
-            r.ReadBits(8);
-            Assert.True(r.Overrun);
-            foreach (var v in root.GetProperty("quantize").EnumerateArray())
+            var n = 0;
+            foreach (var v in Vectors().GetProperty("quantize").EnumerateArray())
             {
+                n++;
                 var bits = v.GetProperty("bits").GetInt32();
-                var value = v.GetProperty("value").GetSingle();
-                var q = v.GetProperty("fn").GetString() == "angle"
-                    ? Quantize.Angle(value, bits)
-                    : Quantize.Float(value, v.GetProperty("min").GetSingle(), v.GetProperty("max").GetSingle(), bits);
-                Assert.Equal(v.GetProperty("q").GetUInt32(), q);
+                switch (v.GetProperty("fn").GetString())
+                {
+                    case "angle":
+                    {
+                        var q = Quantize.Angle(F(v.GetProperty("value")), bits);
+                        Assert.Equal(v.GetProperty("q").GetUInt32(), q);
+                        Assert.Equal(v.GetProperty("back").GetSingle(), Quantize.AngleFrom(q, bits));
+                        break;
+                    }
+                    case "float":
+                    {
+                        float min = v.GetProperty("min").GetSingle(), max = v.GetProperty("max").GetSingle();
+                        var q = Quantize.Float(F(v.GetProperty("value")), min, max, bits);
+                        Assert.Equal(v.GetProperty("q").GetUInt32(), q);
+                        Assert.Equal(v.GetProperty("back").GetSingle(), Quantize.Dequantize(q, min, max, bits));
+                        break;
+                    }
+                    default:
+                    {
+                        var x = v.GetProperty("value");
+                        var q = Quantize.SmallestThree(x[0].GetSingle(), x[1].GetSingle(), x[2].GetSingle(), x[3].GetSingle(), bits);
+                        Assert.Equal(v.GetProperty("largest").GetUInt32(), q.Largest);
+                        var qs = v.GetProperty("q");
+                        Assert.Equal(new[] { qs[0].GetUInt32(), qs[1].GetUInt32(), qs[2].GetUInt32() }, new[] { q.A, q.B, q.C });
+                        var b = Quantize.FromSmallestThree(q.Largest, q.A, q.B, q.C, bits);
+                        var bk = v.GetProperty("back");
+                        Assert.Equal(new[] { bk[0].GetSingle(), bk[1].GetSingle(), bk[2].GetSingle(), bk[3].GetSingle() }, new[] { b.X, b.Y, b.Z, b.W });
+                        break;
+                    }
+                }
             }
+            Assert.True(n >= 50);
+        }
+
+        [Fact]
+        public void DescribeVectors()
+        {
+            foreach (var v in Vectors().GetProperty("describe").EnumerateArray())
+            {
+                var json = Describe.Json(Hex(v.GetProperty("hex").GetString()!), BaselineOf(v.GetProperty("baseline")));
+                Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(json), System.Text.Json.Nodes.JsonNode.Parse(v.GetProperty("json").GetRawText())), v.GetProperty("name").GetString() + ": " + json);
+            }
+        }
+
+        [Fact]
+        public void AClientWithoutTheBaselineDropsTheSnapshotQuietly()
+        {
+            var v = Vectors().GetProperty("snapshots").EnumerateArray().Single(e => e.TryGetProperty("clientHoldsBaseline", out _));
+            var rig = new Rig();
+            var host = rig.StartHost();
+            rig.Run(1);                  // the host is past tick 5 when the client joins, so the client never holds it
+            var a = rig.Join("a");
+            rig.Run(0.2);
+            var before = a.Session.Stats.SnapshotsDropped;
+            host.Lobby.Send(a.Lobby.LocalPeerId, Hex(v.GetProperty("hex").GetString()!), Channel.Fast);
+            rig.Run(0.2);
+            Assert.Equal(before + 1, a.Session.Stats.SnapshotsDropped);
+            Assert.Equal(0, a.Session.Stats.Malformed);
         }
 
         [Fact]

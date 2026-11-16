@@ -55,8 +55,13 @@ namespace OneLobby.Replication
         int MaxInputBuffer = 4,
         double MaxRewindMs = 250,
         int SnapshotWarnBytes = 1200,
-        int HoldEventsForTicks = 0)
+        int HoldEventsForTicks = 0,
+        double KeyframeSeconds = 5,
+        int PacketLogPerSecond = 20)
     {
+        // KeyframeSeconds (host, 0 = off): a client gets a full snapshot on the reliable channel when its link comes up and
+        // then every this many seconds (spec/replication.md "Keyframes"). PacketLogPerSecond caps ReplicationSession.PacketLog.
+
         // HoldEventsForTicks (client, 0 = off): an event whose tick is newer than the newest snapshot waits (arrival order
         // kept) until that snapshot is in, or for at most this many ticks, so the event and the state it refers to line up.
 
@@ -117,5 +122,15 @@ namespace OneLobby.Replication
         /// <summary>Numbered stream events that arrived ahead of a missing one and waited for it.</summary>
         public long EventsOutOfOrder { get; internal set; }
         public long Malformed { get; internal set; }
+        /// <summary>Reliable full snapshots sent (late join and every <see cref="ReplicationConfig.KeyframeSeconds"/>); also counted in SnapshotsSent and FullSnapshotsSent.</summary>
+        public long KeyframesSent { get; internal set; }
     }
+
+    /// <summary>
+    /// Replication payload bytes per second over the last 1000 ms (no lobby header), for a net stats overlay
+    /// (<see cref="ReplicationSession.Rates"/>). Events include numbered stream events.
+    /// </summary>
+    public readonly record struct TrafficRates(
+        double SnapshotsSent, double InputsSent, double EventsSent, double TotalSent,
+        double SnapshotsReceived, double InputsReceived, double EventsReceived, double TotalReceived);
 }

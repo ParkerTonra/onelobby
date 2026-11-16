@@ -68,6 +68,7 @@ namespace OneLobby.Replication
             for (var shift = 0; shift < 64; shift += 7)
             {
                 var b = U8();
+                if (shift == 63 && b > 1) throw new MalformedException("varint"); // more than 64 bits
                 v |= (ulong)(b & 0x7F) << shift;
                 if ((b & 0x80) == 0) return v;
             }
@@ -179,6 +180,7 @@ namespace OneLobby.Replication
         {
             var r = new ByteReader(p.Slice(3));
             var tick = r.Var32(); var back = r.Var32(); r.Var32();
+            if (tick == 0 || back > tick) throw new MalformedException("tick");
             if ((back == 0) != (baseline == null)) throw new MalformedException("baseline");
             var count = r.Var();
             var bas = baseline?.Ents;

@@ -36,6 +36,8 @@ namespace OneLobby.Replication
             public long BytesSent;
             public uint AckFloor; // SendFullSnapshot: acks at or below this tick no longer count as a baseline
             public long Repeated, Skipped, Lost;
+            public bool KeyframeDue;     // the next snapshot is a reliable full one (link just came up, or the interval ran out)
+            public long NextKeyframeMs;
         }
 
         // reliable streams: last seq sent / delivered, per (peer, stream); a peer's entries go when it leaves or rejoins
@@ -49,6 +51,9 @@ namespace OneLobby.Replication
         private readonly NetWriter _nw = new();
         private readonly NetReader _nr = new();
         private bool _disposed;
+        private readonly RateMeter _rates = new();
+        private long _logWindowStart;
+        private int _logCount;
 
         // host
         private readonly SortedDictionary<uint, HostEnt> _hostEnts = new();
@@ -118,6 +123,29 @@ namespace OneLobby.Replication
         /// <summary>Host: the authoritative sim tick. Client: the local input tick (same rate, its own count).</summary>
         public NetworkClock Clock { get; }
         public ReplicationStats Stats { get; } = new();
+
+        /// <summary>Replication bytes per second sent and received over the last second, per kind (no lobby header).</summary>
+        public TrafficRates Rates => _rates.Get(_lobby.NowMs);
+
+        /// <summary>
+        /// Debug view: when set, receives one line per replication packet sent or received, at most
+        /// <see cref="ReplicationConfig.PacketLogPerSecond"/> a second: <c>rep out|in &lt;peer&gt; &lt;channel&gt; &lt;json&gt;</c>, the JSON from
+        /// <see cref="DescribeMessage"/>. The wire stays binary.
+        /// </summary>
+        public Action<string>? PacketLog { get; set; }
+
+        /// <summary>One replication message as a JSON object text (spec/replication.md "Debug view"). Pass the baseline world of a delta snapshot for its records.</summary>
+        public static string DescribeMessage(ReadOnlySpan<byte> payload) => Describe.Json(payload);
+
+        private void LogPacket(string dir, int peer, Channel channel, ReadOnlySpan<byte> bytes, World? baseline)
+        {
+            var sink = PacketLog;
+            if (sink == null) return;
+            var now = _lobby.NowMs;
+            if (now - _logWindowStart >= 1000) { _logWindowStart = now; _logCount = 0; }
+            if (++_logCount > Math.Max(1, Config.PacketLogPerSecond)) return;
+            sink("rep " + dir + " " + peer + " " + (channel == Channel.Fast ? "fast" : "reliable") + " " + Describe.Json(bytes, baseline));
+        }
 
         /// <summary>Client: a reliable or fast event from the host; host: from a client. (from peerId, tick, payload).</summary>
         public event Action<int, uint, ReadOnlyMemory<byte>>? EventReceived;
@@ -294,12 +322,19 @@ namespace OneLobby.Replication
             _sentOrder.Enqueue(tick);
             while (_sentOrder.Count > 0 && _sentOrder.Peek() + (uint)Config.HistoryTicks < tick) _sent.Remove(_sentOrder.Dequeue());
 
+            var nowMs = _lobby.NowMs;
             foreach (var c in _clients.Values)
             {
                 World? baseline = null;
                 if (c.Ack != 0 && _sent.TryGetValue(c.Ack, out var b)) baseline = b;
+                // keyframe: a full snapshot on the reliable channel instead of this tick's fast one
+                var keyframe = Config.KeyframeSeconds > 0 && (c.KeyframeDue || nowMs >= c.NextKeyframeMs);
+                if (keyframe) { baseline = null; c.KeyframeDue = false; c.NextKeyframeMs = nowMs + (long)(Config.KeyframeSeconds * 1000); Stats.KeyframesSent++; }
                 var bytes = Proto.EncodeSnapshot(world, baseline, c.LastConsumed, _w, _recs);
-                _lobby.Send(c.Peer, bytes, Channel.Fast);
+                var ch = keyframe ? Channel.Reliable : Channel.Fast;
+                _lobby.Send(c.Peer, bytes, ch);
+                _rates.Add(nowMs, RateMeter.Snapshot, bytes.Length);
+                LogPacket("out", c.Peer, ch, bytes, baseline);
                 c.BytesSent += bytes.Length;
                 Stats.SnapshotsSent++;
                 if (baseline == null) Stats.FullSnapshotsSent++;
@@ -339,6 +374,8 @@ namespace OneLobby.Replication
                 bytes = Proto.EncodeStreamEvent(tick, stream, last + 1, body, _w);
             }
             _lobby.Send(peer, bytes, channel);
+            _rates.Add(_lobby.NowMs, RateMeter.Event, bytes.Length);
+            LogPacket("out", peer, channel, bytes, null);
             if (channel == Channel.Reliable) { _eventBytes.TryGetValue(peer, out var n); _eventBytes[peer] = n + bytes.Length; }
         }
 
@@ -357,7 +394,7 @@ namespace OneLobby.Replication
         {
             _joining.Remove(peer);
             if (_clients.ContainsKey(peer)) return;
-            _clients[peer] = new ClientRec { Peer = peer }; // Ack 0: the first snapshot it gets is a full one
+            _clients[peer] = new ClientRec { Peer = peer, KeyframeDue = true }; // Ack 0: the first snapshot it gets is a full one, reliable
             ClientReady?.Invoke(peer);
         }
 
@@ -429,6 +466,8 @@ namespace OneLobby.Replication
             for (; n < count; n++) { size += _recentInputs[n].Bytes.Length + 6; if (n > 0 && size > 1000) break; }
             var bytes = Proto.EncodeInput(_ack, _inputSeq, _recentInputs, n, _w);
             _lobby.Send(_lobby.HostPeerId, bytes, Channel.Fast);
+            _rates.Add(_lobby.NowMs, RateMeter.Input, bytes.Length);
+            LogPacket("out", _lobby.HostPeerId, Channel.Fast, bytes, null);
             _lastInputSendMs = _lobby.NowMs;
             Stats.InputsSent += n > 0 ? 1 : 0;
             Stats.InputBytesSent += bytes.Length;
@@ -576,6 +615,11 @@ namespace OneLobby.Replication
             var span = payload.Span;
             if (!Proto.IsReplication(span)) { OtherMessage?.Invoke(from, payload, channel); return; }
             if (span[1] != Proto.Version) { Stats.Malformed++; return; }
+            if (span[2] >= 1 && span[2] <= 4)
+            {
+                _rates.Add(_lobby.NowMs, RateMeter.Received + (span[2] == Proto.KindSnapshot ? RateMeter.Snapshot : span[2] == Proto.KindInput ? RateMeter.Input : RateMeter.Event), span.Length);
+                if (PacketLog != null) LogPacket("in", from, channel, span, IncomingBaseline(span));
+            }
             try
             {
                 switch (span[2])
@@ -709,6 +753,13 @@ namespace OneLobby.Replication
         private void OnHostChanged(int newHost)
         {
             if (!IsHost) HostLost?.Invoke();
+        }
+
+        private World? IncomingBaseline(ReadOnlySpan<byte> span)
+        {
+            if (span[2] != Proto.KindSnapshot || IsHost) return null;
+            try { var h = Proto.PeekSnapshot(span); return h.BaselineTick != 0 && _ring.TryGetValue(h.BaselineTick, out var w) ? w : null; }
+            catch (MalformedException) { return null; }
         }
 
         // test seams (InternalsVisibleTo OneLobby.Replication.Tests)
