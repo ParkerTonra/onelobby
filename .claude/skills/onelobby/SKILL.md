@@ -25,6 +25,11 @@ Note each finding with the file and line that told you:
   sim (`Date.now`, `Time.get_ticks_msec`, `Time.time`); unordered iteration; physics engine; floats.
 - **Genre and pace**; **players** the design implies (map slots, spawns, else 4); **menus** (where a "Play together" entry fits);
   **pause** (what the Escape menu calls); **settings storage**; **build and test commands**.
+- **What multiplayer it already has** (skip for a new game): its own menu, join-code or relay (TURN) paste field, settings storage, a copy of the add-on
+  in `addons/onelobby/` (older pin file `PIN`, a `PIN.json`, or no pin), its own snapshot or session code, its own two-process test. Note each file; the section
+  "A game that already has multiplayer" below says what to do with them.
+- **Game id and net version** of a game that already has them: grep its data and settings files for `game_id`, `gameId`, `net_version`, `netVersion` (a tunables or
+  config file, the old client's constructor). Pass them as `--game-id` and `--net-version` (`--yes` would invent `com.example.<folder>` and the version `1`).
 - **One plain sentence** for the recommender: genre, engine, player count, and the tick rate when the game has one (a new game:
   leave it out; every game type has a default `tickRate`, and `why` says how to change it). Write "deterministic" only for what the
   survey proved (fixed tick, state-held seed, no wall clock, no unordered iteration), never as a hope.
@@ -47,6 +52,9 @@ Note each finding with the file and line that told you:
 - `limits`: what this engine's client or template cannot do yet (it wanted X, wrote Y). Tell the user, do not hide it.
 - `advice`: `built-in` is a client feature to use; `by-hand` is work the game must do; `depends` waits on the engine.
 - `engine.template` `"planned"` or `runCommand: null`: the scaffolder cannot write this engine yet; take the by-hand path (4.5).
+- **Co-op where the host runs the world** (the host sends snapshots, joiners predict their own actions, "not deterministic" next to "co-op") is `coop-snapshots`, not
+  the competitive `replication`: write "co-op" or "cooperative" and "the host runs the world" or "the host sends snapshots". A competitive word (shooter, versus, pvp,
+  racing, physics, battle royale) keeps `replication`. Both shapes answer `sync.mode replication`: for a game that keeps its own sync see "A game that already has multiplayer".
 - **The survey wins over the sentence.** The matcher reads words and ignores code facts ("deterministic ... calls `Math.random`"
   still gives `lockstep`). When they disagree, fix the sentence ("not deterministic", the real tick rate) and run again; if that is
   not enough, correct a value with a flag (`--mode raw`, `--max-players 2`) or `--set key=value`: a flag beats the recommendation
@@ -58,21 +66,23 @@ Preview, writing and downloading nothing: `npx create-onelobby --into . --templa
 --dry-run --json` (a new game: `npx create-onelobby my-game --template <engine> ...`). `--recommend` fills in its `answers` by
 itself; add a flag only to override one (section 2), not to repeat them. Pass `--template` when you know the engine; without it
 `--into` reads the folder (Godot, Unity, .NET or web files) and stops with `engine_unknown` when the folder tells nothing. `--yes` invents the game id `com.example.<folder>`; give the real one with
-`--game-id`. The result holds `blueprint` (the file to be written), `files` (added or updated) and `recommendation`.
+`--game-id`, and a game's own net version with `--net-version` (survey). The result holds `blueprint` (the file to be written), `files` (added or updated), `recommendation`,
+`collisions` (game files that differ from what the run would write), `removed` (old add-on files that go) and `addon.replaces` (old version -> new). In words, the dry run says
+`Add-on: <old> -> <new>` and lists every game file that collides under `Collides with files already in your game`: read both before the go.
 
 Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
 (the command, the files it adds or changes, where the menu goes and which scene or page opens it) and the `limits`. If every value
 is a schema default, build without stopping; otherwise stop for the user's go or edits. With no user at hand (an unattended run),
 the task that started you is the go: build, and list every value that is not a schema default in the report. After the build, put the reasons in the
 file: one key named exactly `"$comment"` in each object (`hosting`, `lobby`, `sync`, ...), holding the reasons for that object's
-keys in one string. The loaders ignore that name only; any other spelling (`"$comment tickRate"`) fails as `unknown_key`.
+keys in one string. The loaders ignore that name only; any other spelling (`"$comment tickRate"`) fails as `unknown_key`. `--force` never replaces an existing `onelobby.json` (the dry run lists it as kept): delete the file to write a fresh one.
 
 ## 4. Build
 
 1. Run the previewed command without `--dry-run`; its "Next:" lines are part of the job. Godot downloads the WebRTC natives once
    (pinned, SHA-256 checked, anonymous; offline: `--webrtc-zip <file>`). Godot C# needs the .NET build of Godot and the .NET 8 SDK,
    and until a release is on NuGet `--packages-from <folder of .nupkg>`. Then `godot --headless --audio-driver Dummy --import --path .`
-   (C#: first `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with
+   (C#: first `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json` (`--force` keeps it too); web stops with
    `exists`: edit by hand. **Unity needs the package tarball** at the path its manifest names (the "Next:" line says where): a released game
    takes the release tarball (`com.onelobby.unity-<version>.tgz`, natives included); in a clone, or for an unreleased build, run
    `clients/unity/fetch-natives.sh` once (anonymous, SHA-256 checked download of the last released package for its WebRTC libraries; it
@@ -87,6 +97,15 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    parent's `_enter_tree` (`$Menu.client = Net.client`) when the menu sits in the scene file, or before `add_child` when you
    instance it in code (`Net` is the autoload the scaffolder registered). Connect `game_started(lobby)` (start the match),
    `returned_to_lobby` and `left` (end it), keep a way to play alone. Restyle and reword: `docs/recipes/menu.md`.
+   **Handing over to a game's own session** (the add-on's `menu.gd` comment has the same list): `game_started(lobby)` fires on every copy when the match starts
+   (the host after its Start and the room's countdown, a joiner when the host's phase turns `in_game`, also a late joiner) and hands over the `OneLobbyLobby`
+   (`lobby.local_peer_id`, `lobby.host_peer_id`, `lobby.is_host`, `lobby.room.players()`; in raw mode `lobby.send`, `lobby.broadcast` and `lobby.message_received` carry
+   the game's own bytes). The menu has a room step the old flow may not have had: after Host or Join the lobby page shows the roster, Ready and the host's Start;
+   nothing starts until the host clicks Start. With `pump` on (the default) the menu turns the client's `auto_pump` off and pumps it from its own `_process`, so the pump stops when the menu is freed: set
+   `menu.pump = false` on a menu inside a node the game frees or replaces when the match starts (the autoload's client then keeps pumping itself). The menu reads `--host`, `--join=<code>`, `--name=<name>`, `--local` and `--autostart` from the command line itself: a game that reads flags of
+   those names too would act twice (both copies host), so set `menu.boot_flags = false` and open the host or join yourself (`menu.model.apply_local()` for the
+   127.0.0.1-only setup). A menu built in code (a runtime CanvasLayer, no scene file): `var menu: OneLobbyMenu = load("res://addons/onelobby/menu/menu.tscn").instantiate()`,
+   `menu.client = Net.client`, then `layer.add_child(menu)`: the client and every export are set before `add_child`. The "Next:" lines name both ways (scene and code).
    **Test on this PC only.** The menu acts on `-- --host` and `-- --join=<code>` by itself, and a plain `--host` opens a port and
    reaches public relays. `--local` (127.0.0.1 only, no Nostr) is read by the GDScript menu itself, with no game code, as long as `boot_flags`
    is on; the C# menu reads it too (no lobby server, no check on open), and the "Next:" line's `OneLobbyNet.Wire(menu, args)` in the
@@ -129,7 +148,7 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
 `npx create-onelobby verify` in the game folder (Godot from `--godot <exe>`, else `$GODOT`, else `godot`; headless, loopback only:
 for `nostr` and `turn` it starts a local Nostr relay and a TURN server in node, bound to 127.0.0.1, and stops them at the end).
 Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that step and run again until `VERIFY_OK`, or until you can
-name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
+name why a check cannot run here. (A `direct` failure that says `never linked` after 15 s can be a slow first start, not a bug: its text says what to try, once.) `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
 runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
 `nostr` and `turn`: two JS clients over real WebRTC in Node need a package the game does not have). `verify` proves the routes, and in `wiring` that some scene or page uses
 the menu or the glue (a bare `--into` fails it until you wire the game); it does not run your game, so also boot it and read the output for errors. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 90` (no flags).
@@ -137,8 +156,9 @@ Unity: build the player (`Unity.exe -batchmode -nographics -quit -projectPath . 
 `Builds/Windows/Game.exe -batchmode -nographics -logFile <abs>/boot.log --host --local --name=Sam` for about 20 s and stop that process yourself (a player has no quit flag; the log should say
 `direct host listening` and hold no exception). Web: `node test/multiplayer.mjs`. Check **offline** the same way: with `--local` nothing leaves the PC, and with no lobby server the game still plays and the menu says multiplayer is unavailable.
 Headless, the boot runs above are that check (no lobby server, no error in the output); the menu's text shows only on screen, so a headless run lists it as not seen.
-**Players moving across two copies, headless:** the generated two-peer test already prints one `MULTIPLAYER_PLAYER` line per way. For two real copies (Godot GDScript, Godot C#, Unity; a game with the player layer)
-start both with `--local --autostart`: the host starts the match as soon as a second player has joined (no menu click), and every copy walks its own player and prints
+**Two real copies, headless:** the generated two-peer test already prints one `MULTIPLAYER_PLAYER` line per way. Two real copies of a game with the GDScript drop-in menu, in any mode (the menu reads `--autostart` itself, so a raw or
+replication game with no player layer runs the same path: `game_started` fires on both copies and the game's own session code starts from it; put a `print` in that handler to see it) or a game with the player layer (Godot C#, Unity: `--autostart` exists for the player layer only)
+start both with `--local --autostart`: the host starts the match as soon as a second player has joined (no menu click), and with the player layer every copy walks its own player and prints
 `MULTIPLAYER_PLAYER <me> sees <other> (peer N) move: from x = .. to x = ..` once it sees the other's player move. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --host --local --autostart --name=Sam`,
 then the same with `--join=127.0.0.1:47810 --name=Ann` in place of `--host --name=Sam` (Unity: the built player with `-batchmode -nographics -logFile <abs>.log`). Read both logs.
 `verify` refuses engines the scaffolder does not build (no verdict line); then use the recipe's "Done when" and say which checks you could not run.
@@ -163,3 +183,24 @@ Next
 ```
 
 Every Settings line is a key the user can change by hand.
+
+## A game that already has multiplayer
+
+Read at Survey when the game has a menu, a code or relay field, settings storage or session code of its own. The drop-in pieces replace the front end; the game's own
+sync stays unless the user asks for OneLobby's.
+
+- **The drop-in pieces replace** the host/join menu with its roster and Start step, the join-code field and its cleaning, the relay (TURN) paste field with its parsing and
+  warnings, the storage of name, relay and last code, the name rules, the error texts, and the two-process smoke test (`tests/multiplayer.gd`; the game's own tests stay beside
+  it, and a test of a piece you delete goes with it: list those in the report). Delete a hand-built piece only after the menu works.
+- **Its own sync stays: `--mode raw`.** `coop-snapshots` and `replication` both answer `sync.mode replication`, which means OneLobby's `ReplicationSession` replaces the game's
+  snapshot code. A game that keeps its own codec and sessions passes `--mode raw` (the game sends its own bytes over `lobby.send` / `lobby.broadcast`), and the report says
+  "Overrode the recommendation: sync.mode replication -> raw, because <the files that already do it>". Use `replication` only to replace that code on purpose (`docs/recipes/replication.md`).
+- **Stays hand-built**: the game's session and snapshot code, its wire codec, host migration and rejoin logic (the lobby gives `host_changed` and `resume_token`), its in-world roster, its
+  solo start, and anything it adds to the net version at run time (`client.net_version = <its own value>` after `from_config` is the game's own line, not a copy of `onelobby.json`).
+- **Old settings**: read the old name and relay line once and keep them: `client.settings.save({"name": old_name, "relay": old_line})` returns `{ok, rejected}` (a relay line that
+  does not parse is rejected). Then delete the old storage code. If you do not carry them over, say why in the report (existing players start with an empty name and no relay).
+- **Names**: `--into` refuses with `name_clash` when a script it adds would take a `class_name` or autoload name the game already has, naming both files; rename the one in the game
+  and run again. It never writes a clash. The autoload is `Net` (script `net.gd`, no `class_name`): a game with its own node or autoload called `Net` renames that one.
+- **An older add-on** in `addons/onelobby/` (an old `PIN` file, a `PIN.json` of an older version, or no pin) is replaced whole by `--into` and by `update`: the dry run says
+  `Add-on: <old> -> <new>` and lists every file that goes; files the new add-on does not have are removed, so old and new never mix. Pinned files you edited stop it
+  (`local_changes`, each named) until `--force`. Do not delete the old `PIN` or old files by hand; `verify` fails `addon-pin` on a mixed folder and names the command.

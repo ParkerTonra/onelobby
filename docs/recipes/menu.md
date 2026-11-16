@@ -61,7 +61,7 @@ The lobby is `menu.client.lobby` (the signal gives it to you too). Nothing else 
 
 ## Boot flags
 
-With `boot_flags` on (default), `--host`, `--join=<code>`, `--name=<name>` and `--local` after `--` act at once:
+With `boot_flags` on (default), `--host`, `--join=<code>`, `--name=<name>`, `--local` and `--autostart` after `--` act at once:
 
 ```
 godot --path . -- --host --local --name=Sam                 # this PC only
@@ -69,12 +69,17 @@ godot --path . -- --join=127.0.0.1:47810 --local --name=Ann
 godot --path . -- --join=D1PB-1X9S-FPV --name=Ann           # a real code: the internet
 ```
 
+`--autostart` (the GDScript menu; the C# menu and Unity have it for the player layer only) is for tests with no clicks: the host does what its Start button does, once, as soon as a second player is in the room, so `game_started` fires on both copies
+(`OneLobbyMenuModel.apply_autostart()`; it works in every sync mode and needs no player layer). Start both copies with `--local --autostart` and read what the game prints from
+its `game_started` handler.
+
 `--local` makes the menu local (`OneLobbyMenuModel.apply_local()`): the direct route, the host listens on 127.0.0.1 only with Nostr off
 and no public address (these keys win over `host_options` the game set; its other keys stay), and the connection check never runs by
 itself. Without `--local` a game's own `route` and `host_options` are not touched. Never test a game with `--host` and no `--local`: it
 opens a real port and reaches public relays. The GDScript menu needs no game code for it; the C# menu takes it from `OneLobbyNet.Wire`.
 
-One switch (`boot_flags = false`) turns all four off. Tests give the flags to a menu with `boot_args` instead of the process command line.
+One switch (`boot_flags = false`) turns all five off: set it when the game reads flags of those names itself (the menu and the game would both act on `--host`), and call
+`menu.model.host()`, `join()` or `apply_local()` yourself. The menu still reads `--local` on its own to keep the connection check off. Tests give the flags to a menu with `boot_args` instead of the process command line.
 
 ## Restyling
 
