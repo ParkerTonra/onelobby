@@ -14,11 +14,11 @@ installs the WebRTC natives (a download whose SHA-256 is checked), registers the
 npx create-onelobby my-game --template godot-gdscript --yes                # a new project with the drop-in menu as its main scene
 npx create-onelobby --into path/to/your-project                            # an existing GDScript project; your main scene is not touched
 cd my-game
-godot --headless --import --path .                                         # once: registers the WebRTC extension and the add-on's classes
+godot --headless --audio-driver Dummy --import --path .                         # once: registers the WebRTC extension and the add-on's classes
 godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd    # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
 ```
 
-`npx create-onelobby verify` is THE test command: it checks the add-on against `PIN.json`, the natives and `onelobby.json`, then proves two peers on 127.0.0.1 directly, through a local Nostr relay and relay-only through a local TURN server, and ends with one line, `VERIFY_OK` or `VERIFY_FAIL <check>: <next step>` (add `--fetch-helpers` the first time: it downloads the TURN helper anonymously into the gitignored `.onelobby/`). `npx create-onelobby update` re-vendors the add-on when a new one is out (it stops on files you edited unless `--force`, and tells you to run `godot --headless --import --path .` after).
+`npx create-onelobby verify` is THE test command: it checks the add-on against `PIN.json`, the natives and `onelobby.json`, then proves two peers on 127.0.0.1 directly, through a local Nostr relay and relay-only through a local TURN server, and ends with one line, `VERIFY_OK` or `VERIFY_FAIL <check>: <next step>` (add `--fetch-helpers` the first time: it downloads the TURN helper anonymously into the gitignored `.onelobby/`). `npx create-onelobby update` re-vendors the add-on when a new one is out (it stops on files you edited unless `--force`, and tells you to run `godot --headless --audio-driver Dummy --import --path .` after).
 
 Players in the world are one command too: add `--mode replication --set sync.player.authority=owner` (or `host`; `--set sync.player.space=2d` for a side-on game), or a
 `--recommend "co-op survival sandbox for 4"`, and a new project also gets `player.tscn` / `player.gd` (a character with the `OneLobbyNetPlayer` node that walks and jumps),

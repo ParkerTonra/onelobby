@@ -17,7 +17,7 @@ npx create-onelobby my-game --template godot-csharp --yes                 # a ne
 npx create-onelobby --into path/to/your-project                           # an existing Godot C# project; your scenes are not touched
 cd my-game
 dotnet build MyGame.csproj                                       # name the file: once Godot's editor writes a .sln beside it, a bare `dotnet build` cannot pick
-godot --headless --import --path .                                        # once: registers the WebRTC extension
+godot --headless --audio-driver Dummy --import --path .                           # once: registers the WebRTC extension
 godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn   # prints MULTIPLAYER_OK (two peers on 127.0.0.1)
 ```
 

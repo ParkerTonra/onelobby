@@ -38,7 +38,7 @@ import {
   verifyPin,
 } from "./vendor.js";
 
-export const IMPORT_COMMAND = "godot --headless --import --path .";
+export const IMPORT_COMMAND = "godot --headless --audio-driver Dummy --import --path .";
 const ADDON_DIR = "addons/onelobby";
 
 /** What differs between the two vendored folders: where it lives, where it comes from, which blocks it brings. */

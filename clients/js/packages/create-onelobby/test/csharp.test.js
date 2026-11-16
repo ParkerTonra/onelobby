@@ -315,7 +315,7 @@ describe("godot-csharp: update", () => {
     expect(text("my-game/addons/onelobby_menu/OneLobbyMenu.cs")).toContain("v2");
     expect(verifyPin(at("my-game"), MENU_DIR).ok).toBe(true);
     expect(r.json.next[0]).toContain("dotnet build MyGame.csproj");
-    expect(r.json.next[1]).toContain("godot --headless --import");
+    expect(r.json.next[1]).toContain("godot --headless --audio-driver Dummy --import");
   });
 
   it("--dry-run shows the csproj edit and writes nothing", async () => {

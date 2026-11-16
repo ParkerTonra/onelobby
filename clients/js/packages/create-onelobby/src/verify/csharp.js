@@ -151,7 +151,7 @@ export function csharpChecks() {
         // --import can crash on exit after a good import (harmless): the registered files decide, not the exit code
         const r = await g(ctx, ["--import"], { timeoutMs: 240000 });
         if (registered()) return { status: "ok", detail: "extension registered; ran the headless import first" };
-        return { status: "fail", detail: `the headless import did not register the WebRTC extension (${r.timedOut ? "it timed out" : lastError(r.out)}).`, next: "Run: godot --headless --import --path . and read its output." };
+        return { status: "fail", detail: `the headless import did not register the WebRTC extension (${r.timedOut ? "it timed out" : lastError(r.out)}).`, next: "Run: godot --headless --audio-driver Dummy --import --path . and read its output." };
       },
     },
     {

@@ -46,7 +46,7 @@ const shellWord = (name) => (/^[\w.-]+$/.test(name) ? name : `"${name}"`);
  * Godot names the file after the project, spaces included (`My Game.csproj`), so the name is quoted when it needs it.
  */
 export const buildCommand = (csproj) => `dotnet build ${shellWord(csproj)}`;
-export const IMPORT_COMMAND = "godot --headless --import --path .";
+export const IMPORT_COMMAND = "godot --headless --audio-driver Dummy --import --path .";
 export const TEST_COMMAND = "godot --headless --audio-driver Dummy --path . res://tests/MultiplayerTest.tscn";
 
 const slugOf = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "game";

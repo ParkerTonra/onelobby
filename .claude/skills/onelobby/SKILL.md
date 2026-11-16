@@ -25,7 +25,8 @@ Note each finding with the file and line that told you:
   sim (`Date.now`, `Time.get_ticks_msec`, `Time.time`); unordered iteration; physics engine; floats.
 - **Genre and pace**; **players** the design implies (map slots, spawns, else 4); **menus** (where a "Play together" entry fits);
   **pause** (what the Escape menu calls); **settings storage**; **build and test commands**.
-- **One plain sentence** for the recommender: genre, engine, player count, tick rate. Write "deterministic" only for what the
+- **One plain sentence** for the recommender: genre, engine, player count, and the tick rate when the game has one (a new game:
+  leave it out; every game type has a default `tickRate`, and `why` says how to change it). Write "deterministic" only for what the
   survey proved (fixed tick, state-held seed, no wall clock, no unordered iteration), never as a hope.
 
 ## 2. Recommend
@@ -61,7 +62,8 @@ itself; add a flag only to override one (section 2), not to repeat them. Pass `-
 
 Show the user a table `key | value | why` (the `why` of `applied` rows, else the survey's reason with file and line), the plan
 (the command, the files it adds or changes, where the menu goes and which scene or page opens it) and the `limits`. If every value
-is a schema default, build without stopping; otherwise stop for the user's go or edits. After the build, put the reasons in the
+is a schema default, build without stopping; otherwise stop for the user's go or edits. With no user at hand (an unattended run),
+the task that started you is the go: build, and list every value that is not a schema default in the report. After the build, put the reasons in the
 file: one key named exactly `"$comment"` in each object (`hosting`, `lobby`, `sync`, ...), holding the reasons for that object's
 keys in one string. The loaders ignore that name only; any other spelling (`"$comment tickRate"`) fails as `unknown_key`.
 
@@ -73,11 +75,13 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    (C#: first `dotnet build <the .csproj>`). A second Godot run changes nothing and keeps your `onelobby.json`; web stops with
    `exists`: edit by hand. **Unity needs the package tarball** at the path its manifest names (the "Next:" line says where): a released game
    takes the release tarball (`com.onelobby.unity-<version>.tgz`, natives included); in a clone, or for an unreleased build, run
-   `clients/unity/fetch-natives.sh` once (anonymous, checked download of the WebRTC libraries), then `clients/unity/build-unity-package.sh --pack`,
+   `clients/unity/fetch-natives.sh` once (anonymous, SHA-256 checked download of the last released package for its WebRTC libraries; it
+   writes them into the clone's `clients/dotnet/OneLobby.DataChannel/runtimes/`; both scripts need bash, Git Bash on Windows), then `clients/unity/build-unity-package.sh --pack`,
    and put the new `.tgz` there. `--pack` stops with `PACK_FAIL` when `Runtime/Plugins/x86_64/datachannel.dll` would be missing, and `verify`
    fails `package` for a tarball without it: on Windows two peers never link. Your own code that uses OneLobby from its own `.asmdef` lists
    `OneLobby.Unity` in `references` (and `OneLobby.Replication.dll` in `precompiledReferences` for the player layer).
-2. **Wire the drop-in menu where the survey said** (a new project has it as the main scene). Godot `--into` never edits your scenes:
+2. **Wire the drop-in menu where the survey said** (a new project has it as the main scene; a new Unity project has nothing to wire:
+   its `Boot.cs` adds the menu when the first scene loads, the game's `AGENTS.md` says where). Godot `--into` never edits your scenes:
    instance `addons/onelobby/menu/menu.tscn` (C#: `addons/onelobby_menu/OneLobbyMenu.tscn`) in the menu entry's scene (it is a
    Control; a Node2D scene can hold it as a child). GDScript: give it the client before the menu's own `_ready`, so from the
    parent's `_enter_tree` (`$Menu.client = Net.client`) when the menu sits in the scene file, or before `add_child` when you
@@ -114,13 +118,16 @@ keys in one string. The loaders ignore that name only; any other spelling (`"$co
    `OneLobbyClient.from_config`, `Blueprint.Load`); the game plays offline and every lobby call can fail (show `describeError`);
    the lobby server URL is a player setting; bump `game.netVersion` when command bytes change. **Relay list** (only when
    `hosting.nostr` is on; a web game on a lobby server skips this): the scaffolder writes the library's default list unprobed and
-   some are dead. In a scratch folder `npm install onelobby`, then run
+   some are dead. The check reaches public relays: run it only where that is allowed (a "nothing leaves the PC" test skips it and
+   keeps the default list; say so in the report). In a scratch folder `npm install onelobby` (in a clone, or for an unreleased build,
+   the clone's own: `npm install <clone>/clients/js/packages/client --install-links`, so the default list is the one this game ships), then run
    `node -e "import('onelobby').then(async m => console.log(JSON.stringify((await m.checkNostrRelays(m.DEFAULT_NOSTR_RELAYS, 8000)).filter(r => r.ok).map(r => r.url))))"`
    (anonymous, random keys) and write the result to `hosting.nostrRelays` with a `$comment` naming the date; offline, keep the default.
 
 ## 5. Verify
 
-`npx create-onelobby verify` in the game folder (Godot from `--godot <exe>`, else `$GODOT`, else `godot`; headless, loopback only).
+`npx create-onelobby verify` in the game folder (Godot from `--godot <exe>`, else `$GODOT`, else `godot`; headless, loopback only:
+for `nostr` and `turn` it starts a local Nostr relay and a TURN server in node, bound to 127.0.0.1, and stops them at the end).
 Read the last line: `VERIFY_OK`, or `VERIFY_FAIL <check>: <next step>`. Do that step and run again until `VERIFY_OK`, or until you can
 name why a check cannot run here. `--fetch-helpers` (once) fetches the TURN helper anonymously when `turn` says skipped; `server`
 runs only with `--server <ws url>` of a lobby server you started. `skipped` is not a pass: list it (a web game always skips
@@ -129,6 +136,7 @@ the menu or the glue (a bare `--into` fails it until you wire the game); it does
 Unity: build the player (`Unity.exe -batchmode -nographics -quit -projectPath . -logFile <abs>/build.log -executeMethod OneLobbyBuild.Windows`, the command in the game's `AGENTS.md`), run
 `Builds/Windows/Game.exe -batchmode -nographics -logFile <abs>/boot.log --host --local --name=Sam` for about 20 s and stop that process yourself (a player has no quit flag; the log should say
 `direct host listening` and hold no exception). Web: `node test/multiplayer.mjs`. Check **offline** the same way: with `--local` nothing leaves the PC, and with no lobby server the game still plays and the menu says multiplayer is unavailable.
+Headless, the boot runs above are that check (no lobby server, no error in the output); the menu's text shows only on screen, so a headless run lists it as not seen.
 **Players moving across two copies, headless:** the generated two-peer test already prints one `MULTIPLAYER_PLAYER` line per way. For two real copies (Godot GDScript, Godot C#, Unity; a game with the player layer)
 start both with `--local --autostart`: the host starts the match as soon as a second player has joined (no menu click), and every copy walks its own player and prints
 `MULTIPLAYER_PLAYER <me> sees <other> (peer N) move: from x = .. to x = ..` once it sees the other's player move. Godot: `godot --headless --audio-driver Dummy --path . --quit-after 1500 -- --host --local --autostart --name=Sam`,

@@ -68,7 +68,7 @@ describe("update: a godot-gdscript game with an untouched add-on", () => {
     expect(existsSync(at("game/addons/onelobby/old.gd"))).toBe(false);
     expect(verifyPin(at("game"))).toMatchObject({ ok: true });
     expect(Object.keys(JSON.parse(text("game/addons/onelobby/PIN.json")).files).sort()).toEqual(["client.gd", "client.gd.uid", "menu/menu.tscn", "new.gd"]);
-    expect(r.json.next[0]).toContain("godot --headless --import --path .");
+    expect(r.json.next[0]).toContain("godot --headless --audio-driver Dummy --import --path .");
   });
 
   it("in words: lists each file under its verb and ends with the import command", async () => {
@@ -79,7 +79,7 @@ describe("update: a godot-gdscript game with an untouched add-on", () => {
     expect(r.out).toMatch(/changed\s+client\.gd/);
     expect(r.out).toMatch(/added\s+new\.gd/);
     expect(r.out).toMatch(/removed\s+old\.gd/);
-    expect(r.out).toContain("godot --headless --import --path .");
+    expect(r.out).toContain("godot --headless --audio-driver Dummy --import --path .");
   });
 
   it("removes a sub-folder the removal emptied, and touches nothing outside addons/onelobby/ but the managed blocks", async () => {

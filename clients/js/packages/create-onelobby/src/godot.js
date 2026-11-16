@@ -220,7 +220,7 @@ export function godotNext({ into, rel, plan }) {
   if (rel !== ".") next.push(`cd ${rel}`);
   if (plan.natives.status === "skipped")
     next.push(`fetch the WebRTC natives (not installed yet): npx create-onelobby --into . --template godot-gdscript   (changes nothing else)`);
-  next.push(`godot --headless --import --path .   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension and the add-on's classes`);
+  next.push(`godot --headless --audio-driver Dummy --import --path .   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension and the add-on's classes`);
   next.push("godot --headless --audio-driver Dummy --path . -s res://tests/multiplayer.gd   # expect MULTIPLAYER_OK");
   if (into) {
     next.push(
