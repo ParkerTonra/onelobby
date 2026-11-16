@@ -286,7 +286,9 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   }
   const map = await mapping;
   const direct = Object.assign(lobby, { directHub: hub, joinUrl: null as string | null, lanHost });
-  direct.directAddresses = localAddresses(hub.port);
+  // a loopback host is reachable on this PC only: its address list and (below) its code say 127.0.0.1, not a LAN address nothing listens on
+  const loopbackOnly = isLoopbackHost(o.bindHost);
+  direct.directAddresses = loopbackOnly ? [`127.0.0.1:${hub.port}`] : localAddresses(hub.port);
   const log = o.log === false ? null : (o.log ?? console.log);
   // Sets joinCode / joinCodeKind / directCode / joinUrl / portMapping / directHostLog and what GET /joininfo answers.
   let lastIp: [string | null, Exclude<IpCodeKind, "none">, string] = [null, "same_network", "off"];
@@ -312,7 +314,7 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   if (manual) applyCode(manual, "internet", map?.mapped ? map.detail : o.publicAddress ? "manual" : "manual (ONELOBBY_PUBLIC_IP)");
   else if (map?.mapped && isPublicIPv4(map.externalIPv4)) applyCode(map.externalIPv4, "internet", map.detail);
   else {
-    applyCode(map?.localIPv4 ?? (await lanIPv4()), "same_network", map ? map.detail : "off");
+    applyCode(loopbackOnly ? "127.0.0.1" : (map?.localIPv4 ?? (await lanIPv4())), "same_network", map ? map.detail : "off");
     if (map && !map.mapped && hub.portMapper) retryMapping(hub.portMapper, o.portMapping?.retryMs ?? 30000, (r) => {
       if (!isPublicIPv4(r.externalIPv4)) return;
       applyCode(r.externalIPv4, "internet", r.detail);

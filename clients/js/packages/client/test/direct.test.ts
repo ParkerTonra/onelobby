@@ -470,6 +470,8 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     if (code) {
       expect(host.joinCodeKind).toBe("same_network");
       expect(decodeJoinCode(code)).toMatchObject({ port });
+      // negative control: a host that is not loopback-bound keeps the machine's LAN address (the loopback rule is not blanket)
+      if (host.directAddresses.length > 0) expect((decodeJoinCode(code) as { ip: string }).ip).not.toBe("127.0.0.1");
     }
 
     const got: string[] = [];
@@ -758,3 +760,22 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
 });
 
 export type { Lobby };
+
+describe("a loopback host's code names loopback", () => {
+  it("bindHost 127.0.0.1: code, link and addresses say 127.0.0.1, and a joiner joins by the code", async () => {
+    const host = await hostIp(kit("Sam"), { port: 0, http: () => ({ type: "text/plain", body: "ok" }), maxPlayers: 2, openPort: false });
+    cleanup.push(() => host.leave());
+    const port = host.directHub.port;
+    expect(host.joinCodeKind).toBe("same_network");
+    expect(decodeJoinCode(host.joinCode)).toEqual({ ip: "127.0.0.1", port });
+    expect(decodeJoinCode(host.directCode)).toEqual({ ip: "127.0.0.1", port });
+    expect(host.directAddresses).toEqual([`127.0.0.1:${port}`]);
+    expect(host.joinUrl).toBe(`http://127.0.0.1:${port}/`);
+    expect(host.portMapping).toBe("off");
+
+    const ann = await kit("Ann").joinDirect(host.joinCode);
+    cleanup.push(() => ann.leave());
+    await ann.ready;
+    expect(ann.peers.length).toBe(2);
+  });
+});
