@@ -720,13 +720,16 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
     // a NAT-PMP gateway on loopback: a map (lifetime > 0) or delete (lifetime 0) takes effect when the packet arrives
     const gw = createSocket("udp4");
     const mappings = new Map<string, number>();
+    // replies still pending when the test closes the gateway are dropped (a send on a closed socket throws)
+    const pending = new Set<ReturnType<typeof setTimeout>>();
     gw.on("message", (q, r) => {
       if (q[1] === 0) return void gw.send(Buffer.from([0, 128, 0, 0, 0, 0, 0, 1, 198, 51, 100, 9]), r.port, r.address);
       const internal = q.readUInt16BE(4);
       const life = q.readUInt32BE(8);
       if (life === 0) mappings.delete(`${q[1]} ${internal}`);
       else mappings.set(`${q[1]} ${internal}`, life);
-      setTimeout(() => {
+      const t = setTimeout(() => {
+        pending.delete(t);
         const reply = Buffer.alloc(16);
         reply[1] = 128 + q[1];
         reply.writeUInt32BE(1, 4);
@@ -735,9 +738,12 @@ describe("hostDirect + joinDirect over real WebRTC (node-datachannel)", () => {
         reply.writeUInt32BE(life, 12);
         gw.send(reply, r.port, r.address);
       }, 200);
+      pending.add(t);
     });
     await new Promise<void>((r) => gw.bind(0, "127.0.0.1", () => r()));
     cleanup.push(() => {
+      for (const t of pending) clearTimeout(t);
+      pending.clear();
       gw.close();
     });
     const port = await freePort();
