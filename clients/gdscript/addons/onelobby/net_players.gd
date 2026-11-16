@@ -484,7 +484,8 @@ func _sample_traffic(now: int) -> void:
 
 # ---- roster ------------------------------------------------------------------------------------------------------------
 
-func _is_spectator(peer: int) -> bool:
+## True when the room layer seats this peer as a spectator (a spectator has no player).
+func is_spectator(peer: int) -> bool:
 	var room: Variant = _lobby.get("room")
 	if room == null:
 		return false
@@ -499,7 +500,7 @@ func _host_roster() -> void:
 	var all: Array = [local_peer_id]
 	all.append_array(session.clients())
 	for peer: int in all:
-		if not _is_spectator(peer):
+		if not is_spectator(peer):
 			want[peer] = true
 	for peer: int in want:
 		if not _host_players.has(peer):
