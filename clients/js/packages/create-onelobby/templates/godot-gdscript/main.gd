@@ -19,8 +19,4 @@ func _ready() -> void:
 		in_game.show())
 	menu.returned_to_lobby.connect(func(_lobby: OneLobbyLobby) -> void: in_game.hide()) # end the match
 	menu.left.connect(func() -> void: in_game.hide())
-	var args := OS.get_cmdline_user_args()
-	if "--local" in args:
-		menu.route = "direct"
-		menu.host_options = {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1"}
-	menu.model.apply_boot_flags(args) # --host, --join=<code> and --name=<name> (boot_flags is off in main.tscn so --local lands first)
+	# --host, --join=<code>, --name=<name> and --local are the menu's own boot flags (boot_flags is on): nothing to do here

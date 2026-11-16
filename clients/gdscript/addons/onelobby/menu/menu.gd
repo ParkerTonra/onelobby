@@ -38,7 +38,8 @@ signal left
 @export var pump := true
 ## Hide the menu while a game runs, show it again when the lobby comes back.
 @export var auto_hide_on_start := true
-## Act on --host, --join=<code> and --name=<name> (after `--` on the command line) at once. One switch for all three.
+## Act on --host, --join=<code>, --name=<name> and --local (after `--` on the command line) at once. One switch for all four.
+## `--local`: the direct route, host and join on 127.0.0.1 only, no Nostr (a game that sets route or host_options itself keeps them without it).
 @export var boot_flags := true
 ## Base address of an invite link ("https://game.example/play"); with it the lobby shows Copy invite for a lobby-server code.
 @export var invite_base := ""

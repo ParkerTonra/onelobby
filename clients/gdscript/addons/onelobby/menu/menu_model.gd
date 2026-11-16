@@ -23,8 +23,6 @@ enum Screen { START, CONNECTING, LOBBY, ERROR, SETTINGS, BROWSE, PLAYING }
 
 const SCREEN_NAMES := ["start", "connecting", "lobby", "error", "settings", "browse", "playing"]
 const CHAT_KEEP := 100
-## The check verdicts (spec/diagnostics.md s.8) that put a line on the start screen.
-const WARNING_VERDICTS := ["likely_fail", "blocked", "relay_refused", "relay_unreachable"]
 
 var client: OneLobbyClient
 var screen := Screen.START
@@ -66,18 +64,16 @@ var settings_note := ""
 var relay_note := ""
 var server_text := ""
 var check_verdict := "" ## one line, "" before a check
-var check_verdict_id := "" ## the verdict word of the last finished check ("good", "blocked", ...), "" before one and while it runs
 var check_facts: Array = [] ## three lines
 var check_running := false
 var log_note := ""
 
-## True when nothing may leave this PC (the templates' `--local` flag, see `args_say_local`): the check never runs on its
-## own; the button still works.
+## True when nothing may leave this PC (`--local` after `--`, see `args_say_local`): the menu is local. `apply_local` sets it,
+## and with it the direct route and loopback host options; the connection check never runs on its own while it is set.
 var local_only := false
 
 var _ticket := 0
 var _game_started := false
-var _opened := false
 
 
 func _init(p_client: OneLobbyClient = null) -> void:
@@ -127,32 +123,6 @@ func can_browse() -> bool:
 func connection_check_shown() -> bool:
 	var c := _cfg()
 	return c == null or bool(c.diagnostics.get("show_connection_check", true))
-
-
-## The menu runs the connection check once when it opens: on unless the blueprint says `diagnostics.checkOnOpen: false`
-## ("button only"), hides the check (`showConnectionCheck: false`), or the menu is `local_only`.
-func check_on_open_enabled() -> bool:
-	var c := _cfg()
-	return connection_check_shown() and not local_only and (c == null or bool(c.diagnostics.get("check_on_open", true)))
-
-
-## The UI calls this whenever it shows the start screen. The first call that finds the start screen up starts the check
-## (when `check_on_open_enabled()`); later calls, the way back from a lobby or from Settings, change nothing. A check that
-## is running is never started twice. Hosting and joining never wait for it.
-func start_shown() -> void:
-	if _opened or screen != Screen.START:
-		return
-	_opened = true
-	if check_on_open_enabled() and not check_running:
-		run_check()
-
-
-## The one line the start screen shows: the verdict sentence when the check found a problem (direct connections likely to
-## fail, UDP blocked, a relay that refuses the login or does not answer), else "" (while it runs, before it, and when all is well).
-func start_check_line() -> String:
-	if check_running or not WARNING_VERDICTS.has(check_verdict_id):
-		return ""
-	return check_verdict
 
 
 ## True when `--local` is among the command-line arguments (host and join on 127.0.0.1 only, nothing leaves this PC).
@@ -298,9 +268,9 @@ static func _after_marker(words: Array, at: int) -> Dictionary:
 	return {"kind": "", "value": ""}
 
 
-## The boot flags the menu acts on at once: --host, --join=<code> and --name=<name>, as {host, join, name}.
+## The boot flags the menu acts on at once: --host, --join=<code>, --name=<name> and --local, as {host, join, name, local}.
 static func parse_boot_flags(args: PackedStringArray) -> Dictionary:
-	var out := {"host": false, "join": "", "name": ""}
+	var out := {"host": false, "join": "", "name": "", "local": args_say_local(args)}
 	for a in args:
 		if a == "--host":
 			out["host"] = true
@@ -786,7 +756,6 @@ func run_check() -> void:
 		return
 	check_running = true
 	check_verdict = OneLobbyMenuText.t("check_running")
-	check_verdict_id = ""
 	check_facts = []
 	changed.emit()
 	var r: Dictionary
@@ -795,9 +764,7 @@ func run_check() -> void:
 	else:
 		r = await client.check_connection(check_options)
 	check_running = false
-	var v := OneLobbyDiagnose.check_verdict(r)
-	check_verdict = str(v["message"])
-	check_verdict_id = str(v["verdict"])
+	check_verdict = str(OneLobbyDiagnose.check_verdict(r)["message"])
 	var udp := str(r.get("udp", "unknown"))
 	var nat := str(r.get("natType", "unknown"))
 	var relay := str(r.get("relay", "none"))
@@ -848,9 +815,26 @@ func join_listed(code: String) -> void:
 
 # ---- boot -----------------------------------------------------------------------------------------------------------
 
-## Acts on --host / --join=<code> / --name=<name> (see parse_boot_flags). Returns what it started: "host", "join" or "".
+## What `--local` puts over the host options: loopback only, no Nostr relays, no public address.
+const LOCAL_HOST_OPTIONS := {"nostr": false, "listen_address": "127.0.0.1", "public_ip": "127.0.0.1"}
+
+
+## Makes this menu local (what `--local` means): hosts and joins by the direct route, the host listens on 127.0.0.1 only with
+## Nostr off (these keys win over host_options the game set; its other keys stay), and the connection check does not run on its own.
+func apply_local() -> void:
+	local_only = true
+	route = "direct"
+	var o := host_options.duplicate()
+	o.merge(LOCAL_HOST_OPTIONS, true)
+	host_options = o
+
+
+## Acts on --local, --host, --join=<code> and --name=<name> (see parse_boot_flags). --local is applied first: the host and the
+## join that follow in the same call use it. Returns what it started: "host", "join" or "".
 func apply_boot_flags(args: PackedStringArray) -> String:
 	var f := parse_boot_flags(args)
+	if bool(f["local"]):
+		apply_local()
 	if str(f["name"]) != "":
 		set_name(str(f["name"]))
 	if str(f["join"]) != "":
