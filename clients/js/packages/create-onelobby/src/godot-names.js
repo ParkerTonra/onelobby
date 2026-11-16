@@ -28,6 +28,27 @@ export function gameClassNames(dir, ignore = new Set()) {
   return out;
 }
 
+/**
+ * The first script of the game that makes a node of that name at run time (`node.name = "Net"`, `get_node("/root/Net")`): the autoload would
+ * land on the same path under /root, so Godot renames one of the two. null when none. `ignore`: files to leave out.
+ */
+export function runtimeNodeNamed(dir, name, ignore = new Set()) {
+  const re = new RegExp(`\\bname\\s*=\\s*["']${name}["']|["']/root/${name}["']`);
+  let found = null;
+  const walk = (rel) => {
+    for (const e of readdirSync(join(dir, ...rel.split("/").filter(Boolean)), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (found) return;
+      const path = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (e.name.startsWith(".") || SKIP.has(path) || e.name === "node_modules") continue;
+        walk(path);
+      } else if (e.isFile() && e.name.endsWith(".gd") && !ignore.has(path) && re.test(readFileSync(join(dir, ...path.split("/")), "utf8"))) found = path;
+    }
+  };
+  walk("");
+  return found;
+}
+
 /** The `[autoload]` entries of a project.godot text: Map(name -> "res://path" without the leading `*`). */
 export function gameAutoloads(projectText) {
   const out = new Map();
@@ -66,8 +87,10 @@ export function checkNameClashes({ target, classes, autoload, ignore = new Set()
     else if (autoloads.has(c.name)) clashes.push({ name: c.name, adds: c.file, kind: "autoload", gameFile: `project.godot (autoload ${c.name}="${autoloads.get(c.name)}")` });
   }
   if (own.has(autoload.name)) clashes.push({ name: autoload.name, adds: `${autoload.file} (the autoload ${autoload.name})`, kind: "class_name", gameFile: own.get(autoload.name) });
+  const node = runtimeNodeNamed(target, autoload.name, ignore);
+  if (node) clashes.push({ name: autoload.name, adds: `${autoload.file} (the autoload ${autoload.name})`, kind: "node", gameFile: node });
   if (!clashes.length) return;
-  const lines = clashes.map((c) => `  ${c.name}: ${c.adds} would take the name, but ${c.gameFile} already ${c.kind === "class_name" ? `declares class_name ${c.name}` : "uses it"}`);
+  const lines = clashes.map((c) => `  ${c.name}: ${c.adds} would take the name, but ${c.gameFile} already ${c.kind === "class_name" ? `declares class_name ${c.name}` : c.kind === "node" ? `makes a node named ${c.name} at run time` : "uses it"}`);
   throw new CliError(
     "name_clash",
     `--into would add names your game already uses, so Godot would refuse to load both; nothing was written:\n${lines.join("\n")}\nWay out: rename the one in your game (its class_name or autoload, and every use of it), then run the same command again.`,

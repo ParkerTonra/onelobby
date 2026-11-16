@@ -40,6 +40,20 @@ const json = (o) => JSON.stringify(o, null, 2) + "\n";
 const quoteGd = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 const bytes = (c) => (Buffer.isBuffer(c) ? c : Buffer.from(c, "utf8"));
 
+/**
+ * The repository folder above `target` when `target` is a project folder inside it (a Godot project in a `game/` subfolder): olc reads
+ * `.olc/` at the repository root, so an entry written in the project folder would never be loaded. null when `target` is itself a
+ * repository root or no repository is above it.
+ */
+export function repoAbove(target) {
+  if (existsSync(join(target, ".git"))) return null;
+  for (let dir = dirname(target); dirname(dir) !== dir; dir = dirname(dir)) if (existsSync(join(dir, ".git"))) return dir;
+  return null;
+}
+
+/** The Next line for a skipped play entry (`repo`: what repoAbove found). */
+export const olcSkippedLine = (repo) => `no .olc entry was written: this project folder is inside the repository ${repo.replace(/\\/g, "/")}, and olc reads .olc/ at the repository root, so an entry here would never load; to play from olc, add one at the repository root whose cwd is this folder (the play commands are in this run's other lines)`;
+
 /** .olc/<slug>.json: two tasks that open the game as a host window plus a small joiner window on this PC (Godot from $GODOT). */
 export function olcEntry({ slug, title, build = false }) {
   const joiner = `--join=127.0.0.1:${DEFAULT_DIRECT_PORT} --local --name=Joiner`;
@@ -128,7 +142,8 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
   );
   for (const f of addon.files) wanted.push({ path: `addons/onelobby/${f.path}`, content: f.content });
   wanted.push({ path: PIN_PATH, content: buildPin({ files: addon.files, commit: addon.commit }) });
-  wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
+  const olcRepo = into ? repoAbove(target) : null;
+  if (!olcRepo) wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
 
   const files = [];
   const notes = [];
@@ -195,7 +210,7 @@ export function planGodot({ into, target, dirName, blueprint, opts, cwd, netPlay
   natives.version = WEBRTC_NATIVE_VERSION;
   natives.zipSha256 = WEBRTC_NATIVE_ZIP_SHA256;
   natives.folder = `${NATIVES_DIR}/`;
-  return { files, natives, notes, addon: { commit: addon.commit, from: addon.from, ...(replace ? { replaces: { kind: replace.kind, from: replace.from, to: replace.to, created: replace.create.length, overwritten: replace.overwrite.length, unchanged: replace.unchanged.length, removed: replace.remove, edited: replace.edited, unlisted: replace.unlisted } } : {}) }, collisions, slug, netPlayer };
+  return { olcRepo, files, natives, notes, addon: { commit: addon.commit, from: addon.from, ...(replace ? { replaces: { kind: replace.kind, from: replace.from, to: replace.to, created: replace.create.length, overwritten: replace.overwrite.length, unchanged: replace.unchanged.length, removed: replace.remove, edited: replace.edited, unlisted: replace.unlisted } } : {}) }, collisions, slug, netPlayer };
 }
 
 /** Write a plan: the files that are create / update / overwrite, then the natives. Returns { written, natives }. */
@@ -267,6 +282,7 @@ export function godotNext({ into, rel, plan }) {
   const players = plan.netPlayer ?? null;
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
+  if (plan.olcRepo) next.push(olcSkippedLine(plan.olcRepo));
   if (plan.natives.status === "skipped")
     next.push(`fetch the WebRTC natives (not installed yet): npx create-onelobby --into . --template godot-gdscript   (changes nothing else)`);
   next.push(`godot --headless --audio-driver Dummy --import --path .   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension and the add-on's classes`);

@@ -10,7 +10,7 @@ import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { NET_PLAYER_PACKAGES, ONELOBBY_PACKAGES, addReferences, inspectCsproj, newCsproj } from "./csproj.js";
 import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
-import { olcEntry } from "./godot.js";
+import { olcEntry, olcSkippedLine, repoAbove } from "./godot.js";
 import { NUGET_CONFIG_MARK, hasMark, nugetConfig, sourcePath, targetVersion } from "./packages.js";
 import {
   CSHARP_GITATTRIBUTES_LINES,
@@ -248,7 +248,8 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk, n
     for (const f of player.files) wanted.push({ path: `${NET_PLAYER_DIR}/${f.path}`, content: f.content });
     wanted.push({ path: NET_PLAYER_PIN_PATH, content: buildPin({ files: player.files, commit: player.commit }) });
   }
-  wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title, build: `${buildCommand(csprojName)} -nologo -v q` }) });
+  const olcRepo = into ? repoAbove(target) : null;
+  if (!olcRepo) wanted.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title, build: `${buildCommand(csprojName)} -nologo -v q` }) });
 
   const files = [];
   const plan = (path, content, exists, same) => {
@@ -311,6 +312,7 @@ export function planCSharp({ into, target, dirName, blueprint, opts, cwd, sdk, n
     ...(player ? { netPlayer: { commit: player.commit, from: player.from, ...netPlayer } } : {}),
     sdk,
     slug,
+    olcRepo,
     assembly,
   };
 }
@@ -332,6 +334,7 @@ export async function applyCSharp(plan, { target, opts, cwd, fetchImpl }) {
 export function csharpNext({ into, rel, plan }) {
   const next = [];
   if (rel !== ".") next.push(`cd ${rel}`);
+  if (plan.olcRepo) next.push(olcSkippedLine(plan.olcRepo));
   if (plan.natives.status === "skipped") next.push("fetch the WebRTC natives (not installed yet): npx create-onelobby update   (changes nothing else)");
   next.push(`${buildCommand(plan.csproj.file)}   # restores the OneLobby packages and builds the game`);
   next.push(`${IMPORT_COMMAND}   # once${plan.natives.status === "skipped" ? " (and again after the natives are in)" : ""}: registers the WebRTC extension`);
