@@ -29,6 +29,43 @@ after tick 60), despawns one at tick 40 and sends the joiner one numbered stream
 event to the host and the raw message `bye`. Both print `REPL spawned=2 despawned=1 entities=1 events=1 hash=<FNV-1a of the final state>`
 and `run.mjs` requires the two lines to be equal (the joiner reads the state back through the codec, the host writes it from its own variables).
 
+## The players scenario
+
+`node tools/engine-smoke/run.mjs --players` (JS, GDScript and C# peers, routes `server` and `typed`: every host/joiner pair of the three, nine pairs per route)
+runs the networked player layer (`NetPlayers` / `OneLobbyNetPlayers`, `docs/recipes/net-player.md`) between two different engines over a lagging link. `--players=host`
+runs the same nine pairs on each route with authority `"host"` (the default, `--players` alone, is authority `"owner"`). Both peers make the layer from the same
+settings (3D, range 300, velocity range 32, the 30 Hz session, nothing left out, no limits) and nothing else.
+
+**Fake lag on every peer's link.** Each peer wraps its own transport in the fake network of its client: C# `NetSimTransport`, JS `NetSimLinkFactory`, GDScript
+`OneLobbyNetSimTransport` (all three delay, jitter and drop on this peer's sends AND receives; `latency` is half on each, so with both ends wrapped it is
+the added one-way time). Flags, with their defaults: `--lag=50` (ms one way), `--jitter=10` (ms: each hop adds up to this, so up to 20 on a link), `--loss=2`
+(percent of `fast` frames, each hop: about 4% of the frames of one link; `reliable` frames are only delayed), `--seed=1000` (the host's seed; the joiner's is
+one more). Only the data channels are slowed; signaling is not.
+
+**The walk (one rule, written once per language).** The joiner waits until its player is in the world (owner: its own entity is in the snapshot; host: the host's first state
+of it has arrived), stands 1.5 s, then walks 6 s (`t` = seconds since the walk start):
+
+- heading `h = 0.75 t` rad, speed 6 m/s: `x = 8 (1 - cos h)`, `z = 8 sin h`, velocity `6 (sin h, cos h)`, yaw `h` in degrees (a circle of 8 m);
+- one jump at `t = 2`: `y = 5 s - 7.5 s^2` for `s = t - 2` in `[0, 2/3)`, mode 4 in the air, 1 walking, 0 standing; it stands still from `t = 6`;
+- authority `owner`: every loop it gives the layer that state (`setLocalState`). Authority `host`: it gives the input instead: move forward 1 (0 from `t = 6`),
+  yaw `h` in degrees, jump pressed for `t` in `[2, 2.1)`; **the step both ends run** (`step(state, input, dt)`): velocity `6 (forward sin yaw + right cos yaw, forward cos yaw - right sin yaw)`
+  (right = `moveX`, forward = `moveY`), position += velocity dt; on the ground with jump pressed `vy = 5`; in the air `vy -= 15 dt`, `y += vy dt`, landing at `y <= 0`; yaw = the input's;
+  mode 4 in the air, else 1 when moving, else 0;
+- `action("jump")` at `t = 2` in both authorities (the one jump each side counts).
+
+After the walk it stands 1 s more, then sends the host its own trace (the layer's local state at every tick of the walk: unix ms, x, y, z) over the lobby as raw
+messages (first byte `0x54`, the text `S|t,x,y,z;...` in parts of 20 samples, then `E|<jumps>`). The host records its copy of the joiner (`get(joiner)`, the smoothed state it
+would draw) every 20 ms from the start, compares the two paths at the best constant lag (0 to 600 ms in 8 ms steps: the lag where the copy is closest to the joiner on average, which is the render delay plus
+the link; the same search as `clients/gdscript/examples/net_player_demo/autotest.gd`) and prints
+
+```
+PLAYERS lag=<ms> mean=<m> worst=<m> samples=<n> jumps=<joiner>/<copy>
+```
+
+(`samples` = the copy's samples that fall inside the joiner's trace at that lag; `jumps` = the joiner's own jump events / the jump events the host saw for the joiner). `run.mjs` passes a
+pair when `mean < 0.15 m`, `worst < 0.45 m` (the D1 bounds of `spec/net-player.md` section 11), `samples >= 100` and `jumps=1/1`, and every peer printed `RESULT PASS`.
+The host then tells the joiner it is done and both leave. The two clocks are the same PC's wall clock, so the traces line up in time.
+
 ## What a case is
 
 One host and two joiners, each its own process, play three rounds on one route: the host sends `ping|r` (reliable) and
@@ -94,7 +131,7 @@ After the 30 raw cases the run plays the same six engine combinations again in a
 - Godot 4.4+: `GODOT=<path>` (or `--godot=`), and `bash clients/gdscript/fetch-webrtc.sh` then
   `godot --headless --import --path clients/gdscript` once
 
-Flags: `--engines=js,gd,cs`, `--routes=...`, `--cases=...`, `--repeat=N` (flake hunting), `--timeout=S` (per case, 60),
+Flags: `--players[=host]` (with `--lag`, `--jitter`, `--loss`, `--seed`, above), `--engines=js,gd,cs`, `--routes=...`, `--cases=...`, `--repeat=N` (flake hunting), `--timeout=S` (per case, 60),
 `--rounds=N`, `--loopback`, `--no-build` (skip the dotnet builds), `--verbose` (all peer output). Last results:
 `tools/engine-smoke/.build/last-run.json`.
 
