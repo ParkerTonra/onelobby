@@ -85,20 +85,42 @@ export function intoNext({ rel, pkg, glueName = "session.js", standIn = true, no
     if (!pkg.isModule) next.push(`your package.json has no "type": "module" and was left as it is (a CommonJS game keeps working): the glue is named multiplayer/${glueName}, and a .mjs file is an ES module whatever the package says; do not add "type": "module"`);
     next.push(pkg.hasOnelobby ? "npm install" : `npm install onelobby@${onelobbyVersion}   # your package.json was left as it is and does not list onelobby`);
   }
+  if (nodeHost) next.push(`npm install --save-optional ${NODE_DATACHANNEL}   # WebRTC for the Node host: without it hostDirect cannot link a browser (an existing package.json is never edited, so run this yourself)`);
   if (titleFromFolder) next.push("game.title in onelobby.json came from the folder name: set it to the game's name (--title, or edit the file)");
-  if (nodeHost)
-    next.push(
-      'a Node process hosts this game: build the kit with OneLobby.fromConfig(onelobby.json) and call hostDirect(kit, { http }) from "onelobby/direct"; hostDirect and hostNostr take seats, late join, port and nostr from kit.blueprint (explicit options win). To test on this PC only: hostDirect(kit, { bindHost: "127.0.0.1", openPort: false, nostr: false })',
-    );
+  if (nodeHost) next.push(...nodeHostNext({ glueName, mode, isModule: pkg.isModule || pkg.created }));
   if (standIn) next.push("put your game behind step(tick, commands) -> hash, snapshot() -> bytes, restore(tick, bytes) and hash(), and swap it for the stand-in Game in test/multiplayer.mjs");
-  else next.push(`sync.mode is ${mode}: your own sync stays, so no lockstep stand-in test was written; \`verify\` skips its project-test and the proof of your netcode is your own two-player test`);
-  next.push(
-    `in the page: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/${glueName}"; const bp = await loadBlueprint(); const kit = makeKit(bp, { displayName }); const lobby = await kit.host() (or await kit.join(code)); const s = bindSession(lobby, kit.blueprint, game) before lobby.start(); call s.pump(performance.now()) every frame and s.send(bytes) when the player acts`,
-    'a page with no bundler cannot resolve the bare "onelobby" import in that glue: serve node_modules/onelobby/dist/onelobby.bundle.mjs (one file; require.resolve("onelobby/bundle") in Node) at a URL of your server and put <script type="importmap">{ "imports": { "onelobby": "/onelobby.bundle.js" } }</script> before your module script',
-  );
+  else if (!nodeHost || mode === "raw") next.push(`sync.mode is ${mode}: your own sync stays, so no lockstep stand-in test was written; \`verify\` skips its project-test and the proof of your netcode is your own two-player test`);
+  if (!nodeHost)
+    next.push(
+      `in the page: import { loadBlueprint, makeKit, bindSession } from "./multiplayer/${glueName}"; const bp = await loadBlueprint(); const kit = makeKit(bp, { displayName }); const lobby = await kit.host() (or await kit.join(code)); const s = bindSession(lobby, kit.blueprint, game) before lobby.start(); call s.pump(performance.now()) every frame and s.send(bytes) when the player acts`,
+      'a page with no bundler cannot resolve the bare "onelobby" import in that glue: serve node_modules/onelobby/dist/onelobby.bundle.mjs (one file; require.resolve("onelobby/bundle") in Node) at a URL of your server and put <script type="importmap">{ "imports": { "onelobby": "/onelobby.bundle.js" } }</script> before your module script',
+    );
   if (standIn) next.push("node test/multiplayer.mjs   # expect every check to PASS");
-  next.push(`follow ${RECIPE_URL}`);
+  next.push(`follow ${nodeHost ? NODE_BROWSER_RECIPE_URL : RECIPE_URL}`);
   return next;
+}
+
+export const NODE_DATACHANNEL = "node-datachannel@^0.33.4";
+export const NODE_BROWSER_RECIPE_URL = "https://github.com/ParkerTonra/onelobby/blob/main/docs/recipes/browser-game.md";
+
+/** The Next lines that are only true for a Node process that hosts and serves browser pages (engine node-browser). */
+export function nodeHostNext({ glueName, mode, isModule }) {
+  const lines = [
+    `a Node process hosts this game and every page only JOINS it: the page never hosts, so leave multiplayer/${glueName} (bindSession, kit.host, kit.join) unused; the glue is for a game whose page hosts. The flow is browser-game.md sections 3 and 4. hostDirect takes seats, late join, port, openPort, nostr and allowed origins from kit.blueprint (an option you pass wins)`,
+  ];
+  if (mode !== "raw" && mode !== "lockstep")
+    lines.push(`sync.mode is ${mode}, but pages talk through asWebSocket() with the game's own messages: set sync.mode to "raw" in onelobby.json (or pass --mode raw on the first run): replication would replace the game's own sync`);
+  lines.push(
+    isModule
+      ? 'in the Node process: import { OneLobby, webRtcLinkFactoryFor } from "onelobby"; import { hostDirect } from "onelobby/direct"; import { RTCPeerConnection } from "node-datachannel/polyfill"; const kit = OneLobby.fromConfig(JSON.parse(readFileSync("onelobby.json", "utf8")), { advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) } }); const lobby = await hostDirect(kit, { http: page }); lobby.onConnection((conn) => { /* the old WebSocket handler: conn.onmessage, conn.send, conn.onclose */ })'
+      : 'in the Node process (your package is CommonJS and onelobby is ES-module only, so require("onelobby") fails with ERR_REQUIRE_ESM before Node 22.12): inside an async function (CommonJS has no top-level await) const { OneLobby, webRtcLinkFactoryFor } = await import("onelobby"); const { hostDirect } = await import("onelobby/direct"); const { RTCPeerConnection } = await import("node-datachannel/polyfill"); const kit = OneLobby.fromConfig(JSON.parse(fs.readFileSync("onelobby.json", "utf8")), { advanced: { linkFactory: webRtcLinkFactoryFor(RTCPeerConnection) } }); const lobby = await hostDirect(kit, { http: page }); lobby.onConnection((conn) => { /* the old WebSocket handler: conn.onmessage, conn.send, conn.onclose */ })',
+    `in the page: import { OneLobby } from "/onelobby.bundle.js"; const kit = new OneLobby({ gameId, netVersion, mode: "raw", lobbyServer: "" }) (or OneLobby.fromConfig(await (await fetch("/onelobby.json")).json())); const lobby = await kit.joinDirect(location.host); await lobby.ready; const ws = lobby.asWebSocket(): the game's own message code runs on ws unchanged. No import map is needed`,
+    `serve the page from hostDirect itself, from memory: page(path) must return { type, body } for / (the page), /onelobby.bundle.js (readFileSync(require.resolve("onelobby/bundle")): one spelling, one file), /onelobby.json when the page fetches it, and every script and asset of the game. hostDirect answers its own port (47810, else the next free one up to 47819), so a page still served from the game's old http port gets 403 on the WebSocket upgrade: serve it from hostDirect, or list its origin in hosting.allowedOrigins. The page must be plain http, not https`,
+    "lobby.maxPlayers is the whole lobby and the Node host holds one seat: one lobby is the whole server, so set it to the most browsers connected at once plus one (the recipe uses 64), not to a match size",
+    "no host migration: when the Node process stops every page gets onclose with code 1001 and reason host_left; keep the game's own redial loop (lobby.rejoin and resume_token are for Lobby pages, not asWebSocket)",
+    'to test on this PC only: hostDirect(kit, { local: true, port: 0 }) (local sets bindHost "127.0.0.1", openPort false and nostr false, so no router, no Nostr, no STUN; port 0 takes any free port, read it from lobby.directAddresses[0], so another run on the PC never collides). Your own two-peer test joins with kit.joinDirect("127.0.0.1:<port>"), needs node-datachannel in the test too (docs/recipes/testing.md section 4 has a minimal one), and must import the game without starting its server: a server.js that listens when it is loaded needs the listen call split out. Add it to package.json scripts.test yourself',
+  );
+  return lines;
 }
 
 /** The glue file this version writes (templates/glue/session.js), for `update` to compare a project copy with. */

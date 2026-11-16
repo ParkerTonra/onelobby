@@ -293,6 +293,32 @@ export const MENU_LINES = [
 ];
 
 /**
+ * The game's own player build, when it has one: the first .cs file under Assets/ (outside Assets/OneLobby/) that calls
+ * BuildPipeline.BuildPlayer. A game that builds its own player does not want a second build method that builds
+ * whatever is enabled in File > Build Profiles into Builds/Windows/Game.exe.
+ */
+export function findOwnBuild(target) {
+  const walk = (rel) => {
+    let entries;
+    try {
+      entries = readdirSync(join(target, ...rel.split("/")), { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    for (const e of entries) {
+      const path = rel + "/" + e.name;
+      if (e.isDirectory()) {
+        if (path === "Assets/OneLobby" || e.name.startsWith(".")) continue;
+        const hit = walk(path);
+        if (hit) return hit;
+      } else if (e.isFile() && /\.cs$/i.test(e.name) && /\bBuildPipeline\s*\.\s*BuildPlayer\b/.test(readFileSync(join(target, ...path.split("/")), "utf8"))) return path;
+    }
+    return undefined;
+  };
+  return walk("Assets");
+}
+
+/**
  * Work out everything a run would do, writing nothing. Returns
  * { files: [{ path, content, action }], notes, manifest, package, editor, slug } where action is create | update | overwrite | unchanged | skip.
  * Throws before anything is written when the plan cannot work (a manifest it cannot edit, a tarball that is not there).
@@ -337,8 +363,11 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
   list.push(
     { path: "Assets/OneLobby/Tests/MultiplayerTests.cs", content: withPlayers ? multiplayerWithPlayer(read("tests/MultiplayerTests.cs"), read("net-player", "multiplayer_part.cs"), netPlayer) : read("tests/MultiplayerTests.cs") },
     { path: "Assets/OneLobby/Tests/OneLobbyGame.Tests.asmdef", content: withPlayers ? testAsmdefWithPlayer(read("tests/OneLobbyGame.Tests.asmdef")) : read("tests/OneLobbyGame.Tests.asmdef") },
-    { path: BUILD_FILE, content: read("editor/BuildPlayer.cs") },
   );
+  // --into a game that already builds its own player: the scaffolder's build method would be a second, different build (and its Next lines name the wrong exe)
+  const ownBuild = into ? findOwnBuild(target) : undefined;
+  if (ownBuild) notes.push(`${ownBuild} already calls BuildPipeline.BuildPlayer: ${BUILD_FILE} was not written (build with your own method; verify never uses ${BUILD_METHOD})`);
+  else list.push({ path: BUILD_FILE, content: read("editor/BuildPlayer.cs") });
   // the play entry builds OneLobbyBuild.Windows and runs Builds/Windows/Game.exe: right for a new project, a guess for a game that already has its own build
   if (!into) list.push({ path: `.olc/${slug}.json`, content: olcEntry({ slug, title }) });
   for (const f of list) {
@@ -373,6 +402,7 @@ export function planUnity({ into, target, dirName, blueprint, opts, cwd, editor,
     editor,
     slug,
     netPlayer,
+    ownBuild: ownBuild ?? null,
   };
 }
 
@@ -400,11 +430,15 @@ export function unityNext({ into, rel, plan, titleFromFolder = false }) {
       `no .olc entry was written: the one a new project gets builds ${BUILD_METHOD} and runs ${PLAYER_EXE}, which an existing project may not have; point your own entry at the game's own build and add --host --local to its command (a second copy joins by the code the host's log prints, never a fixed port)`,
       "add the menu to your start-up code (one line, where your game starts; nothing was added to your scenes or settings):",
       ...MENU_LINES.map((l) => `  ${l}`),
-      `the blueprint is ${BLUEPRINT_PATH}: change choices there`,
+      "a game that has its own runner or client: add OneLobbyRunner yourself FIRST and set Blueprint (and ConfigureConfig = c => c with { NetVersion = <your constant> }) before anything reads runner.Client; then add the menu, which takes the runner it finds. A menu added first adds its own runner and builds the client at once",
+      "Unity has no start_on_host and no --autostart: to start with no click (a headless two-copy test) set room.autoStart to \"players\" with room.autoStartPlayers 2 in the blueprint, else the host clicks Start; your own code that reads --host / --join must set menu.BootFlags = false, or both copies act on the flag",
+      `the blueprint is ${BLUEPRINT_PATH}: change choices there (lobby.joinLink stays false for a Unity player: a joinLink is a web page's share URL)`,
       ...(players ? netPlayerLines(players) : []),
-      `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log`,
-      `build the Windows player: Unity -batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}   # ${PLAYER_EXE}`,
-      `try it on this PC only: ${PLAYER_EXE} --host --local --name=Sam   (a second window: --local --name=Ann, then type the code the host window shows, or --join=<that code>; never a fixed port: another match on this PC may hold it); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
+      `unity-batchmode: Unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -assemblyNames ${TEST_ASSEMBLY} -testResults <abs>/tests.xml -logFile <abs>/tests.log --local   # expect MULTIPLAYER_OK in the log; run only this assembly here: the game's own PlayMode assembly is a separate run (-assemblyNames <its name>), because these flags would reach its tests too; the editor must be closed (a project open in the editor cannot be opened again)`,
+      ...(plan.ownBuild
+        ? [`the game builds its own player (${plan.ownBuild}): no ${BUILD_FILE} was written. Build with your own method; the two-copy lines below use its exe in place of ${PLAYER_EXE}`]
+        : [`build the Windows player: Unity -batchmode -nographics -quit -projectPath . -logFile .onelobby/build.log -executeMethod ${BUILD_METHOD}   # ${PLAYER_EXE}: builds the scenes enabled in File > Build Profiles`]),
+      `try it on this PC only: ${plan.ownBuild ? "<your player exe>" : PLAYER_EXE} --host --local --name=Sam   (a second window: --local --name=Ann, then type the code the host window shows, or --join=<that code>; never a fixed port: another match on this PC may hold it); --local is 127.0.0.1 only, no Nostr, so never run --host without it`,
       `check it: npx create-onelobby verify   # one VERIFY_OK or VERIFY_FAIL line`,
       `follow ${UNITY_RECIPE_URL}`,
     );

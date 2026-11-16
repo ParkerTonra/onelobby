@@ -61,8 +61,13 @@ export function packageHasWindowsLibrary(dir, ref) {
   return hit ? { has: existsSync(join(cache, hit, ...WIN_LIBRARY.split("/"))), what: ref } : { has: null, what: ref };
 }
 
+/** Unity's own words when a second process opens a project that is already open (the editor, or another batchmode run): Library and Temp/UnityLockfile belong to the first. */
+export const PROJECT_LOCKED = /another Unity instance is running|already (?:been )?opened? in another Unity|Multiple Unity instances cannot open the same project/i;
+export const PROJECT_LOCKED_TEXT = "the project is already open in another Unity (the editor, or a batchmode run): close it and run verify again (its lock file is Temp/UnityLockfile; delete it only when no Unity runs)";
+
 /** The line of a Unity log that names the error: the first compiler error (`Assets/x.cs(3,4): error CS...`), else the last line that names one; shortened. */
 export function lastError(log) {
+  if (PROJECT_LOCKED.test(log)) return PROJECT_LOCKED_TEXT;
   const all = log.split(/\r?\n/);
   const compiler = all.find((l) => /error CS\d+/.test(l));
   const lines = all.filter((l) => /^error |Exception:|An error occurred|Scripts have compiler errors|Unable to resolve|Failed to resolve/i.test(l));
@@ -167,7 +172,7 @@ export function unityChecks() {
         return {
           status: "fail",
           detail: `Unity ${r.timedOut ? "did not finish opening the project in time" : `exited ${r.code}`}${resolved ? "" : " without resolving the package"}${compile ? " with script errors" : ""}: ${lastError(log)}.`,
-          next: compile ? "Fix the compile errors named in .onelobby/unity-import.log (a game script that references OneLobby from its own .asmdef must list \"OneLobby.Unity\")." : registry ? `Check that ${ref} points at a real tarball and read .onelobby/unity-import.log; is this project open in the Unity editor already?` : "Read .onelobby/unity-import.log.",
+          next: compile ? "Fix the compile errors named in .onelobby/unity-import.log (a game script that references OneLobby from its own .asmdef must list \"OneLobby.Unity\")." : PROJECT_LOCKED.test(log) ? "Close the Unity editor that has this project open (check Temp/UnityLockfile), then run verify again: the tarball is not the problem." : registry ? `Check that ${ref} points at a real tarball and read .onelobby/unity-import.log; is this project open in the Unity editor already? (verify cannot open a project the editor holds: close it first)` : "Read .onelobby/unity-import.log.",
         };
       },
     },

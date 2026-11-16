@@ -60,9 +60,10 @@ describe("--into --template node-browser", () => {
     const next = r.json.next.join("\n");
     expect(next).toContain("a Node process hosts this game");
     expect(next).toContain("kit.blueprint");
-    expect(next).toContain('bindHost: "127.0.0.1"');
+    expect(next).toContain("local: true, port: 0");
+    expect(next).not.toContain(`bindHost: "127.0.0.1"`);
     expect(next).toContain("no lockstep stand-in test was written");
-    expect(next).toContain("importmap");
+    expect(next).not.toContain("importmap");
     expect(next).toContain("game.title");
     put("g2/package.json", "{}");
     const titled = await cli(["--into", "g2", "--template", "node-browser", "--mode", "raw", "--yes", "--json", "--dry-run", "--title", "Real Name"]);

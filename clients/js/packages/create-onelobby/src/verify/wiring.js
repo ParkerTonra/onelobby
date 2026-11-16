@@ -74,6 +74,18 @@ export function wiringDetail(hits, what) {
   return `${hits.length} files ${what.replace(/^uses\b/, "use").replace(/^imports\b/, "import").replace(/^builds\b/, "build")}: ${shown}${more}`;
 }
 
+/** The host call of a Node process that serves pages: a call or an import of hostDirect / hostNostr (a mention in a comment line is not it). */
+export const NODE_HOST_CALL = /^(?!\s*(?:\/\/|\*|\/\*)).*\b(?:hostDirect|hostNostr)\b/m;
+
+/** The onelobby.json's engine (unreadable or unset: null). */
+function engineOf(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.engine ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The onelobby.json's ui.kind (unreadable or unset: the drop-in menu, the default of both Godot templates). */
 function uiKind(dir) {
   try {
@@ -91,6 +103,17 @@ export function wiringCheck() {
       if (ctx.kind === "web") {
         const glue = WEB_GLUE_PATHS.find((p) => existsSync(join(dir, ...p.split("/")))) ?? "multiplayer/session.js";
         const files = gameFiles(dir, WEB_FILES, SKIP_DIRS).filter((f) => f !== glue);
+        if (engineOf(dir) === "node-browser") {
+          // a Node process hosts and the pages only join: the thing to find is the HOST file that opens the lobby, not any file that mentions "onelobby"
+          const hosts = allMatches(dir, files, NODE_HOST_CALL);
+          if (hosts.length) return { status: "ok", detail: wiringDetail(hosts, "opens the lobby (hostDirect or hostNostr)") };
+          const mentions = allMatches(dir, files, /["']onelobby(?:\/[^"']*)?["']/);
+          return {
+            status: "fail",
+            detail: `engine node-browser: no file outside test/ and node_modules/ calls hostDirect or hostNostr, so the Node process never opens a lobby for the pages${mentions.length ? ` (${mentions.slice(0, WIRING_LIST_MAX).join(", ")} mention onelobby only)` : ""} (the routes pass on their own two peers).`,
+            next: 'In the Node file that serves the page: get hostDirect from "onelobby/direct" (a CommonJS file: const { hostDirect } = await import("onelobby/direct") inside an async function), build the kit with OneLobby.fromConfig and call hostDirect(kit, { http: page }); the page joins with kit.joinDirect(location.host) (docs/recipes/browser-game.md sections 3 and 4).',
+          };
+        }
         const uses = /["'](?:[^"'\s]*\/)?session\.m?js["']|["']onelobby(?:\/[^"']*)?["']|onelobby\.(?:global|bundle)/;
         const hits = allMatches(dir, files, uses);
         if (hits.length) return { status: "ok", detail: wiringDetail(hits, "imports the OneLobby glue") };
