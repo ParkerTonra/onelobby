@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using Godot;
@@ -86,14 +85,9 @@ public partial class MultiplayerTest : Node
     private static LobbyClient MakeClient(Blueprint bp, string name, Func<OneLobbyConfig, OneLobbyConfig> configure, string? server = null) =>
         LobbyClient.FromBlueprint(bp, new GodotTransport(), name, server, configure);
 
-    private static int FreeLoopbackPort()
-    {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        var port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
-    }
+    // a random port in a quiet range, not the OS's next free one: Windows keeps blocks of consecutive ports back (Hyper-V, WSL, Docker), and the
+    // next free port is usually inside one of them. A port that is busy or reserved makes the host say port_in_use; Run asks for another.
+    private static int RandomPort() => Random.Shared.Next(20000, 47000);
 
     private async Task Run()
     {
@@ -147,10 +141,21 @@ public partial class MultiplayerTest : Node
         }
         else
         {
-            // loopback only: the listener binds 127.0.0.1 on a free port, public STUN servers are switched off, no router request
-            var port = FreeLoopbackPort();
+            // loopback only: the listener binds 127.0.0.1 on a random port, public STUN servers are switched off, no router request
             var nostr = relay.Length > 0 ? new NostrOptions { Enabled = true, Relays = new[] { relay }, Stun = Array.Empty<string>() } : new NostrOptions { Enabled = false };
-            _host = await _hostClient.HostDirectAsync(new DirectHostOptions { MaxPlayers = 2, Port = port, FallbackPorts = 0, BindAddress = IPAddress.Loopback, OpenPort = false, Nostr = nostr, IceServers = ice });
+            var port = 0;
+            for (var attempt = 1; _host == null; attempt++)
+            {
+                port = RandomPort();
+                try
+                {
+                    _host = await _hostClient.HostDirectAsync(new DirectHostOptions { MaxPlayers = 2, Port = port, FallbackPorts = 0, BindAddress = IPAddress.Loopback, OpenPort = false, Nostr = nostr, IceServers = ice });
+                }
+                catch (OneLobbyException e) when (e.Code == "port_in_use" && attempt < 8)
+                {
+                    // a free port can still be one Windows reserves (an excluded range): ask for another
+                }
+            }
             if (relay.Length > 0 && _host.JoinCodeKind != JoinCodeKind.Nostr)
             {
                 Finish(false, "the host never got a Nostr code from the local relay");
@@ -172,6 +177,6 @@ public partial class MultiplayerTest : Node
         if (atHost[0] != (_guest.LocalPeerId, "hello host") || atGuest[0] != (_host.LocalPeerId, "hello guest")) { Finish(false, $"wrong message: host got {atHost[0]}, guest got {atGuest[0]}"); return; }
         await _guest.LeaveAsync();
         await _host.LeaveAsync();
-        Finish(true, $"code={_host.Code}");
+        Finish(true, $"code={_host.JoinCode}");
     }
 }
