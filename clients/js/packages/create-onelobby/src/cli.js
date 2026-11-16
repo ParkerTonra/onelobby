@@ -25,6 +25,20 @@ import { runUpdate } from "./update.js";
 import { runVerify } from "./verify/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The line that says which build this is, first in `--help`: the version, and whether it is the published npm package (inside a
+ * node_modules folder or an npx cache) or the folder of a clone of the OneLobby repo (where `npx create-onelobby` would fetch a different,
+ * older build). `pkgDir`: this package's folder.
+ */
+export function buildLine(pkgDir, version) {
+  const published = /(^|[\\/])(node_modules|_npx)([\\/]|$)/.test(pkgDir);
+  if (published) return `create-onelobby ${version} (the published npm package, ${pkgDir})`;
+  const entry = join(pkgDir, "bin", "create-onelobby.js");
+  return `create-onelobby ${version} (a clone's build, ${pkgDir}; run it as "node ${entry}", never "npx create-onelobby", which fetches the published package)`;
+}
+
+const packageVersion = () => JSON.parse(readFileSync(join(here, "../package.json"), "utf8")).version;
 /** The hand recipe for each template that is not built yet. */
 const PLANNED_RECIPES = { dotnet: "dotnet-generic.md", "node-browser": "js-web.md" };
 
@@ -116,11 +130,11 @@ export async function run(argv, io) {
   const command = Object.hasOwn(COMMANDS, argv[0]) ? argv[0] : undefined;
   const { dir, opts, given } = parseArgs(command ? argv.slice(1) : argv);
   if (opts.help) {
-    io.stdout.write(USAGE);
+    io.stdout.write(buildLine(resolve(here, ".."), packageVersion()) + "\n\n" + USAGE);
     return 0;
   }
   if (opts.version) {
-    io.stdout.write(JSON.parse(readFileSync(join(here, "../package.json"), "utf8")).version + "\n");
+    io.stdout.write(packageVersion() + "\n");
     return 0;
   }
 

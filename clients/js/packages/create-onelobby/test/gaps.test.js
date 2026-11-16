@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { main } from "../src/cli.js";
+import { buildLine, main } from "../src/cli.js";
 import { fixtureNativesZip } from "./helpers/zip.js";
-import { blueprintNext, wiringCheck } from "../src/verify/wiring.js";
+import { WIRING_LIST_MAX, blueprintNext, wiringCheck, wiringDetail } from "../src/verify/wiring.js";
 import { runChecks } from "../src/verify/core.js";
 
 let cwd;
@@ -143,6 +143,31 @@ describe("--help", () => {
   });
 });
 
+describe("--help names the build", () => {
+  it("the first line has the version and says this is a clone's build, with the node command and never npx", async () => {
+    const r = await cli(["--help"]);
+    const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+    const first = r.out.split("\n")[0];
+    expect(first).toContain(`create-onelobby ${version} (a clone's build`);
+    expect(first).toContain('run it as "node ');
+    expect(first).toContain('never "npx create-onelobby"');
+    expect(r.out).toContain("Usage: create-onelobby [dir] [options]");
+  });
+
+  it("buildLine tells a published package (node_modules, an npx cache) from a clone", () => {
+    expect(buildLine("/home/x/.npm/_npx/ab12/node_modules/create-onelobby", "0.1.3")).toBe("create-onelobby 0.1.3 (the published npm package, /home/x/.npm/_npx/ab12/node_modules/create-onelobby)");
+    expect(buildLine("C:\\p\\node_modules\\create-onelobby", "0.1.3")).toContain("the published npm package");
+    // negative controls: a folder that only has "node_modules" inside a longer name is a clone
+    expect(buildLine("/work/my_node_modules_clone/create-onelobby", "0.1.4")).toContain("a clone's build");
+    expect(buildLine("/work/onelobby/clients/js/packages/create-onelobby", "0.1.4")).toContain("a clone's build");
+  });
+
+  it("--version stays the bare number", async () => {
+    const r = await cli(["--version"]);
+    expect(r.out).toMatch(/^\d+\.\d+\.\d+\n$/);
+  });
+});
+
 describe("a second Godot --into --recommend run", () => {
   const FROM = ["--addon-from", "checkout", "--webrtc-zip", "natives.zip", "--yes", "--no-git"];
   const SENTENCE = "co-op survival game for 4 players in Godot";
@@ -187,6 +212,28 @@ describe("the wiring check", () => {
     expect(bad.next).toContain("docs/recipes/menu.md");
     put("a/main.tscn", '[ext_resource type="PackedScene" path="res://addons/onelobby/menu/menu.tscn" id="1"]\n');
     expect((await run("godot-gdscript", at("a"))).status).toBe("ok");
+  });
+
+  it("names every file that builds the menu: one keeps the plain sentence, several give the count and the first few", async () => {
+    put("m/project.godot", "config_version=5\n");
+    put("m/onelobby.json", bp());
+    put("m/ui/a.gd", 'var m = load("res://addons/onelobby/menu/menu.tscn")\n');
+    const one = await run("godot-gdscript", at("m"));
+    expect(one.status).toBe("ok");
+    expect(one.detail).toBe("ui/a.gd uses the drop-in menu");
+    for (const n of ["b", "c", "d", "e", "f", "g", "h"]) put(`m/ui/${n}.gd`, "var m = OneLobbyMenu.new()\n");
+    put("m/ui/skip.gd", "var nothing = 1\n");
+    const many = await run("godot-gdscript", at("m"));
+    expect(many.status).toBe("ok");
+    expect(many.detail).toBe("8 files use the drop-in menu: ui/a.gd, ui/b.gd, ui/c.gd, ui/d.gd, ui/e.gd and 3 more");
+    expect(many.detail).not.toContain("skip.gd");
+  });
+
+  it("wiringDetail: one, exactly the limit, one over the limit", () => {
+    const names = (n) => Array.from({ length: n }, (_, i) => `f${i}.gd`);
+    expect(wiringDetail(["a.gd"], "uses the menu")).toBe("a.gd uses the menu");
+    expect(wiringDetail(names(WIRING_LIST_MAX), "uses the menu")).toBe(`${WIRING_LIST_MAX} files use the menu: ${names(WIRING_LIST_MAX).join(", ")}`);
+    expect(wiringDetail(names(WIRING_LIST_MAX + 1), "imports the glue")).toBe(`${WIRING_LIST_MAX + 1} files import the glue: ${names(WIRING_LIST_MAX).join(", ")} and 1 more`);
   });
 
   it("a C# game: OneLobbyNet.cs alone is not wiring; a scene that instances OneLobbyMenu.tscn is", async () => {

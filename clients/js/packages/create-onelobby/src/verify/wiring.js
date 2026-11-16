@@ -30,6 +30,20 @@ function gameFiles(dir, pattern, skipDirs, rel = "") {
 /** The first file whose text matches `regex`, or undefined. */
 const firstMatch = (dir, files, regex) => files.find((f) => regex.test(readFileSync(join(dir, f), "utf8")));
 
+/** Every file whose text matches `regex`, in the order of `files`. */
+const allMatches = (dir, files, regex) => files.filter((f) => regex.test(readFileSync(join(dir, f), "utf8")));
+
+/** How many wired files a passing `wiring` line names before it says "and N more". */
+export const WIRING_LIST_MAX = 5;
+
+/** The detail of a passing check: one file keeps the plain sentence (`<file> <what>`); several give the count and the first few. */
+export function wiringDetail(hits, what) {
+  if (hits.length === 1) return `${hits[0]} ${what}`;
+  const shown = hits.slice(0, WIRING_LIST_MAX).join(", ");
+  const more = hits.length > WIRING_LIST_MAX ? ` and ${hits.length - WIRING_LIST_MAX} more` : "";
+  return `${hits.length} files ${what.replace(/^uses\b/, "use").replace(/^imports\b/, "import")}: ${shown}${more}`;
+}
+
 /** The onelobby.json's ui.kind (unreadable or unset: the drop-in menu, the default of both Godot templates). */
 function uiKind(dir) {
   try {
@@ -48,8 +62,8 @@ export function wiringCheck() {
         const glue = WEB_GLUE_PATHS.find((p) => existsSync(join(dir, ...p.split("/")))) ?? "multiplayer/session.js";
         const files = gameFiles(dir, WEB_FILES, SKIP_DIRS).filter((f) => f !== glue);
         const uses = /["'](?:[^"'\s]*\/)?session\.js["']|["']onelobby(?:\/[^"']*)?["']|onelobby\.(?:global|bundle)/;
-        const hit = firstMatch(dir, files, uses);
-        if (hit) return { status: "ok", detail: `${hit} imports the OneLobby glue` };
+        const hits = allMatches(dir, files, uses);
+        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "imports the OneLobby glue") };
         return {
           status: "fail",
           detail: `no file outside test/ and node_modules/ imports ${glue} or onelobby, so the game never opens a lobby (the routes pass on their own two peers).`,
@@ -59,8 +73,8 @@ export function wiringCheck() {
 
       if (ctx.kind === "unity") {
         const files = gameFiles(dir, /\.cs$/i, UNITY_SKIP).filter((f) => !f.startsWith("Assets/OneLobby/"));
-        const hit = firstMatch(dir, files, /\b(?:OneLobbyMenu|OneLobbyRunner|LobbyClient)\b/);
-        if (hit) return { status: "ok", detail: `${hit} uses the menu or the client` };
+        const hits = allMatches(dir, files, /\b(?:OneLobbyMenu|OneLobbyRunner|LobbyClient)\b/);
+        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "uses the menu or the client") };
         return {
           status: "fail",
           detail: "no script outside Packages/ and Assets/OneLobby/ uses OneLobbyMenu, OneLobbyRunner or the client, so the game never shows a menu or opens a lobby (the routes pass on their own two peers).",
@@ -74,8 +88,8 @@ export function wiringCheck() {
       if (kind === "drop-in") {
         const regex = csharp ? /\bOneLobbyMenu(?:\.tscn)?\b/ : /addons\/onelobby\/menu\/menu\.tscn|\bOneLobbyMenu\b/;
         if (existsSync(join(dir, "project.godot"))) files.push("project.godot"); // the menu as the main scene or an autoload
-        const hit = firstMatch(dir, files, regex);
-        if (hit) return { status: "ok", detail: `${hit} uses the drop-in menu` };
+        const hits = allMatches(dir, files, regex);
+        if (hits.length) return { status: "ok", detail: wiringDetail(hits, "uses the drop-in menu") };
         const scene = csharp ? "res://addons/onelobby_menu/OneLobbyMenu.tscn" : "res://addons/onelobby/menu/menu.tscn";
         return {
           status: "fail",
@@ -84,8 +98,8 @@ export function wiringCheck() {
         };
       }
       const regex = csharp ? /\b(?:OneLobbyClient|LobbyClient)\b/ : /\bOneLobbyClient\b|\bNet\.client\b/;
-      const hit = firstMatch(dir, files, regex);
-      if (hit) return { status: "ok", detail: `${hit} uses the client (ui.kind ${kind})` };
+      const hits = allMatches(dir, files, regex);
+      if (hits.length) return { status: "ok", detail: wiringDetail(hits, `uses the client (ui.kind ${kind})`) };
       return {
         status: "fail",
         detail: `ui.kind is ${kind} and no script outside addons/ and tests/ uses the client (${csharp ? "LobbyClient" : "OneLobbyClient or the Net autoload"}), so the game never opens a lobby.`,
