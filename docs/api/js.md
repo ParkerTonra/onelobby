@@ -12,13 +12,13 @@ sections are the modules it re-exports.
  * WebRTC/signaling classes, clocks, the gridpaint demo game) live in `onelobby/internals`.
  */
 export { OneLobby, LIB_NAME, LIB_VERSION } from "./onelobby.js";
-export type { OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
+export type { DiagnosticsOptions, OneLobbyOptions, FromConfigOverrides, HostOptions, JoinOptions, ListOptions, OneLobbyEvents, JoinDirectOptions } from "./onelobby.js";
 export { DEFAULT_READY_TIMEOUT_MS } from "./onelobby.js";
 export type { AdvancedOptions, SeatStorage } from "./onelobby.js";
 export { parseBlueprint, defineBlueprint, BlueprintError } from "./blueprint.js";
 export type { Blueprint, BlueprintInput, BlueprintEngine } from "./blueprint.js";
 export { Lobby } from "./lobby.js";
-export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit } from "./lobby.js";
+export type { LobbyEvents, LobbyConfig, Peer, Phase, RateLimit, PeerDiagnosis, LobbyDiag } from "./lobby.js";
 export { MIN_PEER_TIMEOUT_MS } from "./lobby.js";
 export { closeCodeFor } from "./socket.js";
 export type { LobbySocket, LobbySocketOptions } from "./socket.js";
@@ -53,6 +53,12 @@ export { checkNostrRelays, DEFAULT_NOSTR_RELAYS, DEFAULT_NOSTR_STUN } from "./no
 export type { RelayCheck, RelayConnect } from "./nostr/relays.js";
 export { encodeRoomCode } from "./joincode.js";
 export type { BrowserHostOptions, VisibilityDoc } from "./direct/browser-host.js";
+export { Causes, diagnose } from "./diagnose.js";
+export type { Cause, Stage, Reached, RelayState, CandidateType, NatFact, DiagnoseFacts, Diagnosis, DiagnosisReport, CheckFindings, CheckVerdict, MappedAddress } from "./diagnose.js";
+export { NetLog } from "./netlog.js";
+export type { NetLogEntry, NetLogKind, NetLogMeta, NetLogOptions } from "./netlog.js";
+export { checkConnection } from "./connection-check.js";
+export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
 ```
 
 ## onelobby
@@ -70,6 +76,8 @@ import type { VoiceCodec, FrameSource, AudioSink } from "./voice-types.js";
 import { type RelayConnect } from "./nostr/relays.js";
 import { type Blueprint } from "./blueprint.js";
 import { type BrowserHostOptions } from "./direct/browser-host.js";
+import { NetLog } from "./netlog.js";
+import { type CheckOptions, type CheckResult } from "./connection-check.js";
 export declare const LIB_NAME = "onelobby";
 export declare const LIB_VERSION = "0.7.2";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
@@ -100,6 +108,23 @@ export interface AdvancedOptions {
     playerIdStore?: KeyValueStore | null;
     /** Where the host's ban list is kept (spec/room.md s.5.3). Default: `banFile` when given, else `localStorage`, else memory. */
     banStore?: KeyValueStore | null;
+}
+/** Diagnostics switches (spec/diagnostics.md): the net log, the report to the host, the relay probe. All have working defaults. */
+export interface DiagnosticsOptions {
+    /** Net log ring size, 50 to 5000 (default 500). */
+    logSize?: number;
+    /**
+     * Node: where the masked log is written when the process exits or dies from an uncaught error, and where
+     * `kit.netLog.save()` writes by default. Without it the log stays in memory.
+     */
+    logPath?: string;
+    /**
+     * A joiner whose link to the host fails tells that host why (cause, stage, how long, whether a relay was set; never an
+     * address) over the signaling path. Default true; false sends nothing.
+     */
+    reportToHost?: boolean;
+    /** Tells a refused relay login from a silent relay when ICE gathered no relay candidate (default: a raw TURN probe where UDP sockets exist; null: off). */
+    relayProbe?: ((entry: IceServer) => Promise<"ok" | "refused" | "unreachable" | "unknown">) | null;
 }
 export interface OneLobbyOptions {
     gameId: string;
@@ -140,6 +165,8 @@ export interface OneLobbyOptions {
     banFile?: string;
     /** The room layer's defaults for every lobby this kit hosts (`onelobby.json` `room` fills the same); `host()` options win. */
     room?: RoomOptions;
+    /** The net log, the report to the host and the relay probe (see DiagnosticsOptions). */
+    diagnostics?: DiagnosticsOptions;
     /** Test and runtime seams (see AdvancedOptions). */
     advanced?: AdvancedOptions;
     /** @deprecated use `advanced.socketFactory` */
@@ -231,6 +258,12 @@ export declare const DEFAULT_READY_TIMEOUT_MS = 15000;
 /** Entry point (DESIGN s.11.2). */
 export declare class OneLobby extends Emitter<OneLobbyEvents> {
     readonly options: Required<Pick<OneLobbyOptions, "gameId" | "netVersion" | "lobbyServer" | "mode" | "tickRate" | "hashEveryTicks" | "displayName" | "relayOnly" | "readyTimeoutMs" | "peerTimeoutMs">>;
+    /**
+     * The net log (spec/diagnostics.md s.5): a ring buffer of connection steps with timings. `kit.netLog.export()` is the
+     * text to show under "Copy logs" (addresses masked; `export({ includeAddresses: true })` unmasks addresses only),
+     * `save(path?)` writes it (Node), `download()` offers it as a file (browsers). Stays on this machine.
+     */
+    readonly netLog: NetLog;
     /** The validated, frozen onelobby.json this kit was built from (`OneLobby.fromConfig`); undefined for `new OneLobby`. */
     readonly blueprint?: Blueprint;
     /**
@@ -251,6 +284,14 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
     /** The host-side ban list (also `lobby.room.bans`): persistent per game, see `banFile` and `advanced.banStore`. */
     get bans(): BanList;
     constructor(o: OneLobbyOptions);
+    /**
+     * Checks what this network allows (spec/diagnostics.md s.8): whether UDP gets out, the NAT type (two STUN servers from
+     * one socket), and whether a relay takes its login. Contacts only the STUN servers it is given (default: the ones the
+     * client connects with) and the TURN entry in `iceServers`. A menu runs it on demand; the library never does. The
+     * result's `message` is one plain line ("Direct connections: likely to fail. A relay is recommended."); the kit
+     * remembers it so a later failure diagnosis and the report to the host use the NAT type.
+     */
+    checkConnection(options?: CheckOptions): Promise<CheckResult>;
     /** The lobby code of the seat this tab can take back (rememberSeat), or null. */
     get rememberedCode(): string | null;
     /**
@@ -258,6 +299,11 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
      * or the server no longer holds it (the seat is forgotten then).
      */
     resume(): Promise<Lobby | null>;
+    /**
+     * Puts the diagnosis on a connect failure (`error.diagnosis`; the code is unchanged), logs it, and returns the same
+     * error. Errors that are not about reaching or matching the host pass through untouched.
+     */
+    /** `diagnosed` for a refused join: a version mismatch names both versions. */
     /** The signaling socket only (no hello yet); with a timeout (direct IP), no answer is `direct_unreachable`. */
     /** With a blueprint (`fromConfig`) every option defaults from `lobby.*`; explicit options win. */
     host(opts?: Partial<HostOptions>): Promise<Lobby>;
@@ -312,7 +358,7 @@ export declare class OneLobby extends Emitter<OneLobbyEvents> {
  */
 import { OneLobbyError } from "./signaling.js";
 import { type AutoStartMode, type DataDecl, type LateJoinPolicy, type SeatDroppedPolicy } from "./room-rules.js";
-export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "unity" | "dotnet";
+export type BlueprintEngine = "web" | "node-browser" | "godot-csharp" | "godot-gdscript" | "unity" | "dotnet";
 export interface Blueprint {
     readonly version: 1;
     readonly game: {
@@ -519,6 +565,9 @@ import { Pause } from "./pause.js";
 import { BanList } from "./bans.js";
 import { Room, type RemovalInfo, type RoomJoinOptions, type RoomOptions } from "./room.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
+import { type DiagnosisReport } from "./diagnose.js";
+import type { CheckResult } from "./connection-check.js";
+import type { NetLog } from "./netlog.js";
 import { type ChannelName, type IceServer, type LinkFactory, type PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
 import { type LobbySocket, type LobbySocketOptions } from "./socket.js";
@@ -538,6 +587,32 @@ export interface KickOptions {
     reason?: string;
 }
 export type Peer = PeerInfo;
+/** What a host learns when a joiner it dialed could not connect (`lobby.on("peerDiagnosis")`, spec/diagnostics.md s.7.3). */
+export interface PeerDiagnosis extends DiagnosisReport {
+    peer: Peer;
+    /** The joiner's name in the roster. */
+    name: string;
+    /** The same sentence the joiner saw. */
+    message: string;
+    /** What the host can do about it. */
+    hint: string;
+    /** One line for a host screen: "Sam: strict NAT, no relay set, stopped at the connection check after 15 s." */
+    line: string;
+}
+/** What the kit hands a lobby for diagnostics (spec/diagnostics.md): the log, the route, and the switches. */
+export interface LobbyDiag {
+    log: NetLog;
+    /** How this lobby was reached: the lobby server's code, an IP / IP code, or a Nostr code. */
+    route: "server" | "ip" | "nostr";
+    /** Send the joiner's diagnosis to the host when the link fails (default true). */
+    reportToHost: boolean;
+    /** `0.7.2`: sent in the report. */
+    clientVersion: string;
+    /** The last connection check this kit ran, if any (its NAT reading joins the facts and the report). */
+    lastCheck: () => CheckResult | null;
+    /** Tells a refused relay login from a silent relay after ICE gathered no relay candidate (Node: a raw TURN probe). */
+    probeRelay: ((s: IceServer) => Promise<"ok" | "refused" | "unreachable" | "unknown">) | null;
+}
 /** What the kit hands a lobby for its room layer (spec/room.md). */
 export interface RoomSetup {
     /** Host: settings (blueprint `room` plus code options). */
@@ -570,6 +645,12 @@ export type LobbyEvents = {
      * per peer, just before that `peerLeft`; not for peers the host kicks or disconnects.
      */
     peerFailed: [Peer, reason: string];
+    /**
+     * Host only: a joiner it dialed could not connect and tells why (cause, stage, how long, whether it had a relay): the
+     * same plain sentence the joiner saw, plus a one-line `line` for a host screen. Sent over the signaling path, so it
+     * arrives when the direct link failed. Nothing in it is an address. Old clients and hubs send none.
+     */
+    peerDiagnosis: [PeerDiagnosis];
     joinRequested: [Peer];
     hostChanged: [hostId: number];
     /** A member (you included) changed its display name mid-session (`rename`): the peer with its new name, and the old name. */
@@ -629,6 +710,8 @@ export interface LobbyConfig {
     room?: RoomSetup;
     /** The game id, for the ban list key. */
     gameId?: string;
+    /** Diagnostics: the net log, route and switches (absent: a lobby with no log, as before). */
+    diag?: LobbyDiag;
 }
 /** At most `messages` raw messages per peer in any `perMs` window (a fixed window, reset every `perMs`). */
 export interface RateLimit {
@@ -701,7 +784,8 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     notifyJoinCodeChanged(): void;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
-    /** The last tick applied when this peer claimed host: every host_claim of the epoch carries it. */
+    /** Diagnostics: candidate types that crossed the wire on the host link (joiner view), and how far the attempt got. */
+    /** Host: when each joiner's last diagnosis was accepted. */
     /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
     /** Host: when each pending link was offered, and how many times a quick failure was re-offered (per peer). */
     /** clock.now() of the last frame from each peer (peerTimeoutMs). */
@@ -793,6 +877,13 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     /** @internal set by OneLobby: the server issued a new resume token (rememberSeat). */
     seatSink: ((token: string) => void) | null;
     /** The direct attempt stalled: dial the host ourselves through the TURN relay (a host answers any offer). */
+    /** Counts the candidate types in a signal that crosses the host link (the facts `diagnose` takes) and logs the step. */
+    /** How far this joiner got with the host link. */
+    /** The relay state on the host link as `diagnose` reads it. */
+    /** Set once the relay probe told a refused login from a silent relay. */
+    /** The stall with a relay set and no relay candidate: ask the TURN server itself why (refused login or silence), where the link cannot tell. */
+    /** Joiner: tell the host the cause over the signaling path (hubs that list the `diag` feature only), once. */
+    /** Host: a joiner diagnosis came through the hub (`diag{from, report}`). */
     /** @internal A direct host's hub learns where each joiner's link comes from (Nostr kick bans the address too). */
     linkAddressSink: ((peerId: number, ip: string) => void) | null;
     /** Host side: offer to a joiner. */
@@ -1881,7 +1972,7 @@ export declare function looksLikeJoinCode(input: string): boolean;
 ## webrtc
 
 ```ts
-import { type ChannelName, type LinkFactory, type LinkOptions, type PeerLink, type SignalPayload } from "./transport.js";
+import { type ChannelName, type LinkFactory, type LinkFacts, type LinkOptions, type PeerLink, type SignalPayload } from "./transport.js";
 /** An ICE candidate line (or SDP `a=candidate:` line) of type relay (a TURN allocation). */
 export declare function isRelayCandidate(candidate: string): boolean;
 /** Browser (or any WebRTC-capable runtime) PeerLink over RTCPeerConnection with three negotiated channels. */
@@ -1894,12 +1985,15 @@ export declare class WebRtcLink implements PeerLink {
     onMessage: PeerLink["onMessage"];
     onPath: PeerLink["onPath"];
     onRemoteAddress: PeerLink["onRemoteAddress"];
+    onTrace: PeerLink["onTrace"];
     /**
      * Set once setRemoteDescription resolves. Not `pc.remoteDescription`: node-datachannel's polyfill returns an object
      * there before any is set, and its addIceCandidate throws until one is.
      */
     /** `rtc`: the RTCPeerConnection class to use (default the global one; in Node, node-datachannel's polyfill). */
     constructor(opts: LinkOptions, rtc?: typeof RTCPeerConnection);
+    /** What a diagnosis needs from this link: whether ICE connected and what the TURN allocation did. */
+    facts(): LinkFacts;
     /** What a "could not connect" report adds: the peer connection's states and the signals seen so far. */
     diagnostics(): string;
     /**
@@ -2023,6 +2117,17 @@ export type ServerMsg = {
 export declare class OneLobbyError extends Error {
     code: string;
     data?: Record<string, unknown> | undefined;
+    /**
+     * Why a connection failed, in plain words (spec/diagnostics.md): `{ cause, message, hint, stage }`. Set on connect
+     * failures (`ice_failed`, `timeout`, `version_mismatch`, `connect_failed`, `direct_unreachable`, `no_server`); the code
+     * stays what it was. `describeError(err)` shows it.
+     */
+    diagnosis?: {
+        cause: string;
+        message: string;
+        hint: string;
+        stage: string;
+    };
     constructor(code: string, message?: string, data?: Record<string, unknown> | undefined);
 }
 export declare const PROTO_ID = "lk1";
@@ -2078,6 +2183,13 @@ export interface SignalPayload {
     sdp?: SdpInit;
     ice?: IceInit;
 }
+/** What a link knows for a diagnosis (spec/diagnostics.md s.2). */
+export interface LinkFacts {
+    /** A candidate pair was selected (ICE connected), whether or not the channels opened. */
+    iceConnected?: boolean;
+    /** The TURN allocation: `failed` = gathering ended with no relay candidate and the reason is not known. Absent: no TURN entry. */
+    relay?: "pending" | "ok" | "refused" | "unreachable" | "failed";
+}
 /** One peer connection with the three negotiated channels (s.8). */
 export interface PeerLink {
     readonly remoteId: number;
@@ -2100,6 +2212,10 @@ export interface PeerLink {
     close(): void;
     /** Optional one-line state for a "could not connect" report (connection states, signals seen); never parsed. */
     diagnostics?(): string;
+    /** Optional: connection steps for the net log (ICE and channel state changes). Text carries no address or credential. */
+    onTrace?: ((kind: "ice" | "chan" | "route", text: string) => void) | null;
+    /** Optional: what this link knows for a diagnosis (`diagnose`); links without it read as unknown. */
+    facts?(): LinkFacts;
 }
 export interface LinkOptions {
     remoteId: number;
@@ -2163,6 +2279,10 @@ export interface FriendlyError {
     message: string;
     /** What the player can do about it, when there is something. */
     hint?: string;
+    /** When the error carries a diagnosis (a connect failure): the cause code, e.g. "nat_blocked" (spec/diagnostics.md). */
+    cause?: string;
+    /** With `cause`: the step it stopped at ("signaling", "join", "offer", "ice", "channels", "handshake"). */
+    stage?: string;
 }
 /**
  * Every `code` a `OneLobbyError` can carry. Compare against these instead of string literals; C# has the shared ones in
@@ -2178,16 +2298,6 @@ export declare const ErrorCodes: {
     readonly Kicked: "kicked";
     readonly BadPassword: "bad_password";
     readonly Banned: "banned";
-    readonly Denied: "denied";
-    readonly Disconnected: "disconnected";
-    readonly SpectatorsFull: "spectators_full";
-    readonly RoomUnsupported: "room_unsupported";
-    readonly PasswordRequired: "password_required";
-    readonly WrongState: "wrong_state";
-    readonly NotEnoughPlayers: "not_enough_players";
-    readonly BadValue: "bad_value";
-    readonly UnknownKey: "unknown_key";
-    readonly TooLarge: "too_large";
     readonly NotHost: "not_host";
     readonly RateLimited: "rate_limited";
     readonly ServerFull: "server_full";
@@ -2246,6 +2356,356 @@ export interface JoinInfo {
 export declare function directJoinInfo(base?: string): Promise<JoinInfo | null>;
 /** The lobby code carried by a share link (see shareUrl), or null when there is none or it is not a valid code. */
 export declare function codeFromUrl(url?: string, param?: string): string | null;
+```
+
+## diagnose
+
+```ts
+/**
+ * Diagnostics, the pure part (spec/diagnostics.md, vectors in spec/vectors/diagnostics.json): the cause table, `diagnose`,
+ * the host's one-line view, the joiner-to-host report and the connection check's verdict. Nothing here touches the network
+ * or any clock; the net log is in `netlog.ts` and the measurements are in `connection-check.ts`.
+ */
+/** The step a failed attempt stopped at. */
+export type Stage = "signaling" | "join" | "offer" | "ice" | "channels" | "handshake";
+/** How far an attempt got (the last step it completed). */
+export type Reached = "none" | "signaling" | "joined" | "offer" | "ice" | "channels";
+/** What a TURN allocation did on a link ("none": no TURN entry; "failed": gathering ended with no relay, reason unknown). */
+export type RelayState = "none" | "pending" | "ok" | "refused" | "unreachable" | "failed";
+/** Candidate types that cross the wire. */
+export type CandidateType = "host" | "srflx" | "relay";
+/** The connection check's NAT reading as `diagnose` takes it (`blocked` = UDP does not get out). */
+export type NatFact = "unknown" | "open" | "cone" | "symmetric" | "blocked";
+/** The causes of a failed connection. A newer peer may report a code this client does not list: treat it as `timeout_unknown`. */
+export declare const Causes: {
+    readonly NatBlocked: "nat_blocked";
+    readonly RelayRefused: "relay_refused";
+    readonly RelayUnreachable: "relay_unreachable";
+    readonly UdpBlocked: "udp_blocked";
+    readonly Firewall: "firewall";
+    readonly VersionMismatch: "version_mismatch";
+    readonly HostUnreachable: "host_unreachable";
+    readonly SignalingUnreachable: "signaling_unreachable";
+    readonly TimeoutUnknown: "timeout_unknown";
+};
+export type Cause = (typeof Causes)[keyof typeof Causes];
+/** Everything a client can observe about one connection attempt (spec/diagnostics.md s.2). */
+export interface DiagnoseFacts {
+    side: "joiner" | "host";
+    route: "server" | "ip" | "nostr";
+    /** The error code that ended the attempt (`ice_failed`, `timeout`, `version_mismatch`, `connect_failed`, ...), or null. */
+    error: string | null;
+    reached: Reached;
+    elapsedMs: number;
+    versions: {
+        mine: string;
+        theirs: string;
+    } | null;
+    /** Route nostr: at least one relay connected; null otherwise or unknown. */
+    relaysUp: boolean | null;
+    /** A `stun:` server was in the link's ICE list. */
+    stun: boolean;
+    relay: RelayState;
+    /** Candidate types this side sent / received (unique, sorted). */
+    local: CandidateType[];
+    remote: CandidateType[];
+    retried: boolean;
+    nat: NatFact;
+    /** Host side: any ICE traffic from this joiner reached the listener; null when the platform cannot tell. */
+    heard: boolean | null;
+}
+/** What `diagnose` says. */
+export interface Diagnosis {
+    cause: string;
+    /** What happened, one sentence a player follows. */
+    message: string;
+    /** The one concrete next step, for the failing player. */
+    hint: string;
+    stage: Stage;
+}
+interface CauseText {
+    message: string;
+    hint: string;
+    hostHint: string;
+    short: string;
+}
+/** The cause table (spec/diagnostics.md s.4). `{mine}`, `{theirs}`, `{stage_text}` and `{elapsed}` are filled in by `explainCause`. */
+export declare const CAUSE_TEXT: Record<Cause, CauseText>;
+/** How a stage reads in a sentence. */
+export declare const STAGE_TEXT: Record<Stage, string>;
+/** The stage a failed attempt stopped at, from how far it got. */
+export declare function stageOf(reached: Reached): Stage;
+/** `under 1 s` below a second, else whole seconds rounded to nearest (halves up) and ` s`. */
+export declare function elapsedText(ms: number): string;
+/** The sentence, next step and host-side step for a cause code (an unknown code reads as `timeout_unknown`). */
+export declare function explainCause(cause: string, vars?: {
+    stage?: string;
+    elapsedMs?: number;
+    mine?: string;
+    theirs?: string;
+}): {
+    cause: string;
+    message: string;
+    hint: string;
+    hostHint: string;
+    short: string;
+};
+/**
+ * The cause of a failed connection, from what the client observed: `{ cause, message, hint, stage }`. Pure: every client
+ * gives the same answer for the same facts (vectors `diagnose`).
+ */
+export declare function diagnose(facts: DiagnoseFacts): Diagnosis;
+/** The line a host shows for a joiner's failure: `Sam: strict NAT, no relay set, stopped at the connection check after 15 s.` */
+export declare function hostLine(name: string, cause: string, stage: string, elapsedMs: number): string;
+/** What a joiner tells the host it dialed. Fixed, typed fields: never an address, a name, free text or a credential. */
+export interface DiagnosisReport {
+    cause: string;
+    stage: string;
+    elapsedMs: number;
+    /** A relay was in the joiner's ICE list. */
+    relaySet: boolean;
+    /** The joiner's connection check result, when it ran one. */
+    natType?: "open" | "cone" | "symmetric" | "blocked";
+    candidateTypes: {
+        local: CandidateType[];
+        remote: CandidateType[];
+    };
+    clientVersion: string;
+}
+/** The largest `diag` frame a hub accepts, in bytes of JSON text. */
+export declare const REPORT_MAX_BYTES = 1024;
+/** Reports a hub forwards per peer in `REPORT_WINDOW_MS`. */
+export declare const REPORTS_PER_WINDOW = 3;
+export declare const REPORT_WINDOW_MS = 60000;
+/** The host keeps at most one report per peer in this long. */
+export declare const REPORT_HOST_GAP_MS = 10000;
+/**
+ * The report rebuilt from the known fields (anything else is dropped), or null when it is not a valid report. Hubs and
+ * hosts use this on everything that arrives; a sender builds with it too.
+ */
+export declare function cleanReport(input: unknown): DiagnosisReport | null;
+export interface CheckFindings {
+    udp: "ok" | "blocked" | "unknown";
+    natType: "open" | "cone" | "symmetric" | "unknown";
+    relay: "ok" | "refused" | "unreachable" | "unknown" | "none";
+}
+export type CheckVerdict = "good" | "likely_fail" | "relay_works" | "blocked" | "relay_refused" | "relay_unreachable" | "unknown";
+/** The one line a menu shows for a check (first match wins, see spec/diagnostics.md s.8). */
+export declare function checkVerdict(r: CheckFindings): {
+    verdict: CheckVerdict;
+    message: string;
+};
+export interface MappedAddress {
+    ip: string;
+    port: number;
+}
+/**
+ * `udp` and `natType` from what the STUN servers saw: `asked` servers were queried from one socket, `answers` are the mapped
+ * addresses that came back, `local` the socket's own address and port when known (it decides `open`).
+ */
+export declare function classifyNat(asked: number, answers: MappedAddress[], local: MappedAddress | null): Pick<CheckFindings, "udp" | "natType">;
+/** The `nat` fact a `diagnose` call takes from a check result. */
+export declare function natFact(r: Pick<CheckFindings, "udp" | "natType"> | null | undefined): NatFact;
+export {};
+```
+
+## netlog
+
+```ts
+/**
+ * The net log (spec/diagnostics.md s.5-6): a ring buffer of connection steps with monotonic timings, a text export with
+ * a stable line format, and the masking rule. The log stays on the player's machine; nothing here sends anything.
+ */
+import type { Clock } from "./clock.js";
+export type NetLogKind = "sig" | "lobby" | "sdp" | "cand" | "ice" | "chan" | "route" | "retry" | "error" | "diag" | "info";
+export interface NetLogEntry {
+    /** From 1, never reused: a reader sees how many entries the ring dropped. */
+    seq: number;
+    /** ms since the log was created (monotonic clock). */
+    t: number;
+    kind: NetLogKind;
+    /** At most 200 characters; no address, credential or password. */
+    text: string;
+    /** The address the step belongs to, in memory only: printed by `export({ includeAddresses: true })`. */
+    addr?: string;
+    /** The error code, for `error` entries. */
+    code?: string;
+}
+export declare const NETLOG_DEFAULT_CAPACITY = 500;
+export declare const NETLOG_MIN_CAPACITY = 50;
+export declare const NETLOG_MAX_CAPACITY = 5000;
+export declare const NETLOG_TEXT_MAX = 200;
+/**
+ * Masks one line of log text. Credentials and ICE secrets are always hidden; IPv4, IPv6 and mDNS names are replaced by
+ * `<ip4>`, `<ip6>` and `<mdns>` unless `includeAddresses` (spec/diagnostics.md s.6).
+ */
+export declare function maskText(text: string, includeAddresses?: boolean): string;
+export interface NetLogMeta {
+    /** `onelobby-js 0.7.2` */
+    client: string;
+    protocol: string;
+    platform: string;
+}
+export interface NetLogOptions {
+    /** Ring size: default 500, clamped to 50..5000 (`raw` skips the clamp: tests). */
+    capacity?: number;
+    /** The kit's clock: `t` counts from the log's creation on it. */
+    clock?: Pick<Clock, "now">;
+    meta?: Partial<NetLogMeta>;
+    /** Where `save()` writes when given no path (Node), and where the log is flushed on exit. */
+    path?: string;
+    /** Key under which a `pagehide` stores the entries in session storage so a reload can export the last session (browsers). */
+    storageKey?: string;
+    /** Do not clamp `capacity` (tests of the ring). */
+    raw?: boolean;
+}
+/** The ring buffer. One per kit (`kit.netLog`); the lobby, links and signaling add to it. */
+export declare class NetLog {
+    /** Where `save()` and the exit flush write (Node); null: nowhere. */
+    path: string | null;
+    constructor(opts?: NetLogOptions);
+    /** Adds a step. `text` is cut to 200 characters; keep addresses in `addr`, never in `text`. */
+    add(kind: NetLogKind, text: string, extra?: {
+        addr?: string;
+        code?: string;
+    }): void;
+    /** The entries kept, oldest first. */
+    get entries(): readonly NetLogEntry[];
+    /** How many entries the ring dropped. */
+    get dropped(): number;
+    /** Sets the header facts (client, protocol, platform). */
+    setMeta(meta: Partial<NetLogMeta>): void;
+    clear(): void;
+    /**
+     * The log as text (spec/diagnostics.md s.5): a header, then one line per entry, oldest first. Addresses are masked
+     * unless `includeAddresses`; credentials never print either way.
+     */
+    export(opts?: {
+        includeAddresses?: boolean;
+    }): string;
+    /**
+     * The previous page session's log (browsers: stored on `pagehide`, read back after a reload), as text; null when there
+     * is none.
+     */
+    exportLastSession(opts?: {
+        includeAddresses?: boolean;
+    }): string | null;
+    /**
+     * Writes the export to a file (Node, or any runtime with a file system) and returns the path: `path`, else the
+     * configured log path. Rejects when there is no file system or no path.
+     */
+    save(path?: string, opts?: {
+        includeAddresses?: boolean;
+    }): Promise<string>;
+    /**
+     * Browsers: offers the export as a file download (a text file named `filename`) and returns the text. Does nothing
+     * but return the text where there is no DOM.
+     */
+    download(filename?: string, opts?: {
+        includeAddresses?: boolean;
+    }): string;
+    /** Writes the masked log to the configured path now, swallowing errors (the exit and crash flush). */
+    flush(): void;
+    /**
+     * Node: flush to `path` when the process exits and when it dies from an uncaught error. The crash hook only observes
+     * (`uncaughtExceptionMonitor`), so the process still crashes as it would have.
+     */
+    flushOnExit(path?: string): void;
+}
+```
+
+## connection-check
+
+```ts
+/**
+ * The connection check (spec/diagnostics.md s.8): UDP, NAT type and relay login, measured with the STUN servers the client
+ * already uses and the player's TURN entry, and nothing else. Where the runtime can open a UDP socket (Node) it speaks STUN
+ * and TURN itself from one socket; where it cannot (browsers) it reads the candidates of one RTCPeerConnection.
+ */
+import { type CheckFindings, type CheckVerdict, type MappedAddress } from "./diagnose.js";
+import { type IceServer } from "./transport.js";
+/** What `checkConnection` resolves to. */
+export interface CheckResult extends CheckFindings {
+    verdict: CheckVerdict;
+    /** One plain line for a menu: "Direct connections: likely to fail. A relay is recommended." */
+    message: string;
+}
+export interface CheckOptions {
+    /** STUN URLs to ask; default `stun:stun.l.google.com:19302` and `stun:stun.cloudflare.com:3478` (what the client connects with). */
+    stun?: string[];
+    /** The player's TURN entry (or entries); the first `turn:` one is tested. Default none. */
+    iceServers?: IceServer[];
+    /** Give up on the whole check after this long (default 8000). */
+    timeoutMs?: number;
+    /** How long each STUN or TURN server gets to answer, with one retransmit at a third of it (default 1500). */
+    serverTimeoutMs?: number;
+    /** Bind the probe socket here (default all interfaces; tests pass 127.0.0.1). Node only. */
+    bindAddress?: string;
+    /** Measure with an RTCPeerConnection instead of raw UDP (the browser method), with this class. */
+    rtc?: typeof RTCPeerConnection;
+    /** Test seam: the UDP socket factory. Default: node:dgram where it exists. */
+    udp?: () => UdpSocketLike | null;
+}
+/** What a relay probe finds out. */
+export type RelayProbeResult = "ok" | "refused" | "unreachable" | "unknown";
+export declare const CHECK_DEFAULT_STUN: readonly string[];
+export declare function hexOf(b: Uint8Array): string;
+export declare function bytesOf(hex: string): Uint8Array;
+/** An RFC 5389 Binding Request with transaction id `tid` (12 bytes). */
+export declare function stunBindingRequest(tid: Uint8Array): Uint8Array;
+/** The mapped address in a Binding success response for `tid` (`XOR-MAPPED-ADDRESS`, else `MAPPED-ADDRESS`); null when there is none. */
+export declare function parseStunResponse(bytes: Uint8Array, tid: Uint8Array): MappedAddress | null;
+/** The `ip:port` a Binding Response for `tid` carries (an XOR-MAPPED-ADDRESS answer; the test STUN responders use it). */
+export declare function stunBindingResponse(tid: Uint8Array, ip: string, port: number): Uint8Array;
+/**
+ * A TURN Allocate request for UDP (RFC 5766). Without `auth` it is the bare first request; with it, the long-term
+ * credential form (USERNAME, REALM, NONCE, MESSAGE-INTEGRITY).
+ */
+export declare function turnAllocateRequest(tid: Uint8Array, auth?: {
+    username: string;
+    realm: string;
+    nonce: Uint8Array;
+    password: string;
+}): Uint8Array | null;
+/** What a TURN server answered: success, or an error code with the realm and nonce it wants (for the 401 round). */
+export declare function parseTurnResponse(bytes: Uint8Array, tid: Uint8Array): {
+    ok: true;
+} | {
+    ok: false;
+    code: number;
+    realm?: string;
+    nonce?: Uint8Array;
+} | null;
+/** The slice of a UDP socket the check uses (node:dgram wrapped; a Godot or .NET client has its own). */
+export interface UdpSocketLike {
+    /** Binds and resolves with the local port and the local addresses (to tell an open NAT from a cone one). */
+    bind(address?: string): Promise<{
+        port: number;
+        addresses: string[];
+    }>;
+    send(bytes: Uint8Array, host: string, port: number): void;
+    onMessage: ((bytes: Uint8Array) => void) | null;
+    close(): void;
+}
+/** A UDP socket over node:dgram, or null where there is none (a browser). */
+export declare function nodeUdp(): UdpSocketLike | null;
+/** `host` and `port` of a `stun:` / `turn:` URL (UDP only: `stuns:`, `turns:` and a tcp transport give null). */
+export declare function iceUrlTarget(url: string): {
+    host: string;
+    port: number;
+} | null;
+/**
+ * Probes a relay entry on its own (a fresh UDP socket): `ok`, `refused` (the server answered and turned the login down),
+ * `unreachable` (no answer) or `unknown` (this runtime cannot test it: no UDP socket, a `turns:` URL). A lobby uses it to
+ * tell `relay_refused` from `relay_unreachable` after a failed connect.
+ */
+export declare function probeRelay(s: IceServer, udp?: () => UdpSocketLike | null, ms?: number): Promise<RelayProbeResult>;
+/**
+ * Checks what this network allows: whether UDP gets out, the NAT's behaviour, and whether a configured relay takes the
+ * login. Nothing is contacted but the STUN servers (default: the ones the client connects with) and the player's own
+ * TURN entry. Run it from a menu; the library never runs it by itself.
+ */
+export declare function checkConnection(options?: CheckOptions): Promise<CheckResult>;
 ```
 
 ## ui/index
