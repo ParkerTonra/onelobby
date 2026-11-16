@@ -100,6 +100,7 @@ public partial class OneLobbyMenu : Control
     private readonly Dictionary<int, Label> _pingLabels = new();
     private ulong _pingAt;
     private bool _syncing;
+    private bool _hooked;
 
     private T U<T>(string name) where T : Node => GetNode<T>("%" + name);
 
@@ -114,15 +115,47 @@ public partial class OneLobbyMenu : Control
             Clipboard = text => DisplayServer.ClipboardSet(text),
             LogsPath = ProjectSettings.GlobalizePath("user://onelobby-menu-log.txt"),
         };
-        Model.Changed += Refresh;
         Model.GameStarted += l => GameStarted?.Invoke(l);
         Model.ReturnedToLobby += l => ReturnedToLobby?.Invoke(l);
-        Model.Left += () => EmitSignal(SignalName.Left);
+        Hook();
         Bind();
         ApplyStaticText();
         Refresh();
         if (BootFlags) Model.ApplyBootFlags(BootArgs.Length > 0 ? BootArgs : OS.GetCmdlineUserArgs());
     }
+
+    /// <summary>
+    /// The model's <see cref="MenuModel.Changed"/> and <see cref="MenuModel.Left"/> reach the menu only while it is in the tree. A C#
+    /// event keeps calling a node after it is freed (a Godot signal would not), and the model lives as long as its client.
+    /// </summary>
+    private void Hook()
+    {
+        if (_hooked || Model == null) return;
+        _hooked = true;
+        Model.Changed += Refresh;
+        Model.Left += EmitLeft;
+    }
+
+    private void Unhook()
+    {
+        if (!_hooked || Model == null) return;
+        _hooked = false;
+        Model.Changed -= Refresh;
+        Model.Left -= EmitLeft;
+    }
+
+    private void EmitLeft() => EmitSignal(SignalName.Left);
+
+    /// <summary>Back in the tree after being taken out (the first time, <c>_Ready</c> does this): listen again and draw what changed meanwhile.</summary>
+    public override void _EnterTree()
+    {
+        if (Model == null) return;
+        Hook();
+        Refresh();
+    }
+
+    /// <summary>Out of the tree, or about to be freed: stop listening to the model.</summary>
+    public override void _ExitTree() => Unhook();
 
     /// <summary>A client from the blueprint file, over the Godot transport, with the player's settings kept under <c>user://</c>.</summary>
     private LobbyClient MakeClient()

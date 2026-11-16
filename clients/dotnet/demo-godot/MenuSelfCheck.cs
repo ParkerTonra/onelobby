@@ -271,8 +271,30 @@ public partial class MenuSelfCheck : Node
         Cancel();
         await Until(() => a.Left == 1);
         Check(m.Screen == MenuScreen.Start && a.Left == 1, tag + ": ui_cancel in the lobby leaves it");
+
+        // out of the tree the menu draws nothing; put back, it shows the screen its model moved to meanwhile
+        var parent = a.Menu.GetParent();
+        parent.RemoveChild(a.Menu);
+        m.OpenSettings();
+        parent.AddChild(a.Menu);
+        await Frames(2);
+        Check(a.Menu.GetNode<Control>("%SettingsPage").Visible && !a.Menu.GetNode<Control>("%StartPage").Visible, tag + ": a menu put back in the tree shows its model's screen");
+        m.Back();
+        await Frames(2);
+
+        // a freed menu no longer hears its model (the model lives on with its client: a game may free the menu and keep playing)
+        var bm = b.M;
         a.Menu.QueueFree();
         b.Menu.QueueFree();
         await Frames(3);
+        var threw = "";
+        try
+        {
+            m.NoteInvited();
+            bm.Back();
+            await m.LeaveAsync();
+        }
+        catch (Exception e) { threw = e.GetType().Name; }
+        Check(threw == "" && !IsInstanceValid(a.Menu) && !IsInstanceValid(b.Menu), tag + ": a freed menu no longer hears its model " + threw);
     }
 }
