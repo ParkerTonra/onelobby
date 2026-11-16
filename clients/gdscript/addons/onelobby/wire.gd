@@ -26,11 +26,12 @@ const RAW := 0x20
 const PING := 0x30
 const PONG := 0x31
 const HOST_CLAIM := 0x40
+const ROOM := 0x80
 
 const TYPES := {
 	"hi": 0x01, "welcome_dc": 0x02, "cmd": 0x10, "frame": 0x11, "hash": 0x12, "desync": 0x13, "snapshot_req": 0x14,
 	"snapshot": 0x15, "chunk": 0x16, "raw": 0x20, "ping": 0x30, "pong": 0x31, "host_claim": 0x40, "voice": 0x50,
-	"chat": 0x60, "chat_history": 0x61, "chat_reject": 0x62,
+	"chat": 0x60, "chat_history": 0x61, "chat_reject": 0x62, "room": 0x80,
 	"pause_request": 0x70, "pause_state": 0x71, "pause_refuse": 0x72,
 }
 
@@ -54,6 +55,7 @@ const LAYOUTS := {
 	"chat": [["id", "u32"], ["ts", "i64"], ["text", "text"]],
 	"chat_history": [["lines", "list16", [["peerId", "u16"], ["id", "u32"], ["ts", "i64"], ["text", "text"]]]],
 	"chat_reject": [["id", "u32"], ["reason", "u8"]],
+	"room": [["body", "rest"]],
 	"pause_request": [["paused", "u8"]],
 	"pause_state": [["paused", "u8"], ["byPeer", "u16"], ["flags", "u8"]],
 	"pause_refuse": [["paused", "u8"], ["reason", "u8"]],
