@@ -229,11 +229,13 @@ func _reset() -> void:
 	_last_frame_rx = _l.now_ms() if _l != null else 0
 
 
-## A joiner just learned the session is in game (first frame, snapshot, or phase from the server).
+## A joiner just learned the session is in game (first frame, snapshot, or phase from the server). The 3 s silent-host
+## clock starts now: it must not count the time spent waiting in the lobby, where no frames flow.
 func _mark_started() -> void:
 	if _started:
 		return
 	_started = true
+	_last_frame_rx = _l.now_ms()
 	started.emit()
 	_l._set_phase("in_game")
 
