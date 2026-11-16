@@ -21,3 +21,18 @@ await build({
   logLevel: "warning",
 });
 copyFileSync(join(client, "blueprint.schema.json"), join(pkg, "vendor/blueprint.schema.json"));
+
+// The GDScript add-on, bundled so `npm create onelobby` needs no network for the scripts (the godot-gdscript template copies
+// vendor/gdscript-addon/onelobby/ into the game and pins it). source.json records the repo commit it was built from.
+import { cpSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+
+const repo = join(pkg, "../../../..");
+const addon = join(repo, "clients/gdscript/addons/onelobby");
+if (!existsSync(join(addon, "client.gd"))) throw new Error(`the GDScript add-on is missing at ${addon}`);
+const outDir = join(pkg, "vendor/gdscript-addon");
+rmSync(outDir, { recursive: true, force: true });
+cpSync(addon, join(outDir, "onelobby"), { recursive: true });
+const head = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+const commit = head.status === 0 && /^[0-9a-f]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : "unknown";
+writeFileSync(join(outDir, "source.json"), JSON.stringify({ commit }, null, 2) + "\n");
