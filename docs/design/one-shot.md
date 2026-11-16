@@ -18,13 +18,13 @@ one day. That code belongs in OneLobby.
 
 Strong: join codes (typo-tolerant), join by IP, STUN/TURN/relay-only, player-pasted TURN parsers, approve/kick,
 host settings, lobby browser, rejoin tokens, timeouts, rate limits, host migration (server lobbies), lockstep and
-replication (JS/C#), voice and text chat (JS/C#), pause (JS/C#), `tools/engine-smoke` (JS, GDScript, C# incl. a local TURN).
+replication (JS/GDScript/C#), voice and text chat (JS/C#), pause (JS/C#), `tools/engine-smoke` (JS, GDScript, C# incl. a local TURN).
 
 Missing or half there:
 
 | Area | Gap |
 |---|---|
-| GDScript | Voice (needs Opus) and replication (C# and JS have it; the GDScript port is next) are missing; text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
+| GDScript | Voice (needs Opus) is missing (replication landed with package 11); text chat, shared pause and lockstep landed in package 8 (the blueprint loader, `godot-gdscript` engine value, `describe_error` and invite links landed in package 1). The skill names `godot-gdscript` but has no GDScript template yet. |
 | Scaffolder | `create-onelobby` builds `web` only; Godot and Unity templates throw `template_planned`. Nothing installs or updates engine add-ons. |
 | UI | The Godot (GDScript) drop-in menu landed (`menu.tscn`, `docs/recipes/menu.md`); none yet for Godot C# or Unity. The web `<one-lobby>` element has no kick, ready, settings or browse. |
 | Room layer | Landed (`spec/room.md`, `docs/recipes/room.md`): ready, per-player data, seats, spectators, countdown, rematch, name dedupe in JS, C# and GDScript. The GDScript menu draws it (roster, ready, countdown, kick, ban, unban); the web element, Godot C# and Unity do not yet. |
@@ -107,8 +107,10 @@ Each is one lane unless noted; order matters for the first three.
 10. **Proof (section 6)**, then move the existing games onto the drop-in pieces where it removes their own code.
 11. **Binary by default (section 7.1).** Shared codec spec + vectors; JS and GDScript encoders matching the C# bit-packer;
     every snapshot, input and event path uses it; JSON only behind a debug switch. 2 lanes (spec+JS, GDScript).
-    Spec + vectors + JS landed (`spec/replication.md`, `ReplicationSession` in `onelobby`, reliable keyframes, `describe` debug view,
-    bytes per second stats, engine-smoke `--replication`); GDScript is the next lane. Lockstep and chat stay on their own codecs.
+    Landed (JS and GDScript, both lanes): `spec/replication.md`, `ReplicationSession` in `onelobby`, `OneLobbyReplicationSession` in the GDScript
+    client (codec, session, stream receive, packet log, `sync.mode: replication` valid for every engine), reliable keyframes, `describe` debug
+    view, bytes per second stats, vectors incl. the stream receive group, engine-smoke `--replication` over all nine js/gd/cs pairs. Lockstep and
+    chat stay on their own codecs. Not in 11: prediction (`Reconciler`, `HistoryRing`) outside C#, repeating one-shot events on `fast` (7.2-7.4 are package 12).
 12. **Networked player (sections 7.2-7.4).** The player preset (state + action events), smoothing and prediction, the
     Godot node and the Unity component that read the character and animator with no game code. 2 lanes (Godot, Unity+JS).
 13. **The section 8 defaults** that survive review, folded into packages 2, 5 and 12 where they fit.

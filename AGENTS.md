@@ -6,7 +6,7 @@ client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneL
 the server never sees game data.
 Pick a mode: `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
-`OneLobby.Replication` (C#) or `ReplicationSession` (JS, same wire): delta snapshots, interpolation, inputs, events (C# also has prediction and lag-compensation helpers).
+`OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# also has prediction and lag-compensation helpers).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
 
 ## API surface (same shape in both languages)
@@ -111,6 +111,9 @@ lobby.room.start(); lobby.room.cancel_countdown(); lobby.room.back_to_lobby(); l
 lobby.room.kick(id, {"reason": "..."}); lobby.room.ban(id, {"reason": "..."}); lobby.room.unban(player_id)   # the player sees lobby.removal; bans persist (lobby.room.bans)
 lobby.room.seat_dropped.connect(func(info: Dictionary) -> void: pass); lobby.room.changed.connect(func() -> void: pass); lobby.room.filter = func(text: String, kind: String) -> String: return text   # docs/recipes/room.md
 await client.host({"password": "x", "room": {"spectators": 2, "auto_start": "all_ready"}}); await client.join(code, {"password": "x", "role": "spectator"})
+# replication (docs/recipes/replication.md s.6): var rep := OneLobbyReplicationSession.new(lobby) on a raw lobby (sync.mode "replication" in onelobby.json gives one); rep.pump() every frame
+#   host: rep.spawn(type_id, owner, OneLobbyReplicationSession.replicated(schema, getter)); while rep.clock.try_advance(): rep.try_get_input(peer); rep.send_snapshot()
+#   client: rep.submit_input(bytes) per tick; rep.try_sample(id, schema); signals entity_spawned / entity_despawned / event_delivered / event_gap / host_lost; rep.send_event(bytes, to, channel, stream)
 ```
 
 ## Install
@@ -278,7 +281,7 @@ Lobby lobby = await client.HostAsync();                    // or HostDirectAsync
 
 ```gdscript
 var client := OneLobbyClient.from_config("res://onelobby.json", {"display_name": "Ann"})   # engine "godot-gdscript"; raw or lockstep
-add_child(client)                                          # client.config_error is {} unless the file is bad (or asks for replication)
+add_child(client)                                          # client.config_error is {} unless the file is bad
 var lobby := await client.host()                           # from the file; a direct lobby when hosting.server is false
 var lobby := await client.join(code)                       # a lobby code to the server, a direct code or "ip:port" to join_direct
 ```
@@ -319,7 +322,7 @@ recipe, verify two players headless, report. Design and the reasons behind each 
 - Browser JS: `docs/recipes/js-web.md`
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
-- Replicated state (host-authoritative real-time: shooters, physics, AI), C# and JS: `docs/recipes/replication.md`
+- Replicated state (host-authoritative real-time: shooters, physics, AI), C#, JS and GDScript: `docs/recipes/replication.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

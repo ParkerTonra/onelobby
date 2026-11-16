@@ -1,8 +1,8 @@
 # onelobby (Godot 4, GDScript)
 
-A pure GDScript client for Godot 4.4+, no .NET. Raw and lockstep modes, through a lobby server or Direct (no server, Nostr join codes): your own messages over the host's star (a joiner's
+A pure GDScript client for Godot 4.4+, no .NET. Raw, lockstep and replication modes, through a lobby server or Direct (no server, Nostr join codes): your own messages over the host's star (a joiner's
 send goes through the host, `from` is always the real sender), host migration, chunking of big payloads, join codes,
-lobby browse, kick/approve, rejoin, text chat, the shared pause, lockstep, the room layer (below) and `onelobby.json` (`OneLobbyConfig`, below). Voice and replication are in the C# and JS clients. Written from `spec/`;
+lobby browse, kick/approve, rejoin, text chat, the shared pause, lockstep, the room layer (below) `OneLobbyReplicationSession` (binary delta snapshots, the same wire as C# and JS: [docs/recipes/replication.md](../../docs/recipes/replication.md) section 6) and `onelobby.json` (`OneLobbyConfig`, below). Voice is in the C# and JS clients. Written from `spec/`;
 the API mirrors `OneLobby.Core`'s, with signals for events. Recipe: [docs/recipes/godot-gdscript.md](../../docs/recipes/godot-gdscript.md).
 
 ```gdscript

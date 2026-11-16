@@ -1,7 +1,7 @@
 # Recipe: Godot 4 GDScript (desktop)
 
 A GDScript-only addon, no .NET: `clients/gdscript/addons/onelobby/`. It does raw mode (your own messages over the host's
-star, host migration included), lockstep, text chat and the shared pause (section 4b); voice and replication are C# / JS only. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
+star, host migration included), lockstep, replication (host-authoritative binary snapshots, `docs/recipes/replication.md` section 6), text chat and the shared pause (section 4b); voice is C# / JS only. It reads `onelobby.json` too (section 5). Godot 4.4 or newer. Its
 `gdscript compile` snippets below are parse-checked by `check-snippets.mjs` when `GODOT` points at a Godot executable.
 
 ## 1. Add the addon

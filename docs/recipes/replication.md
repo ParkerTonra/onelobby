@@ -1,12 +1,12 @@
 # Recipe: replicated state (host-authoritative real-time games)
 
-Use `OneLobby.Replication` (C#) or `ReplicationSession` from `onelobby` (JS, section 5) when the host runs the real simulation (physics, AI, NavMesh: anything non-deterministic)
+Use `OneLobby.Replication` (C#), `ReplicationSession` from `onelobby` (JS, section 5) or `OneLobbyReplicationSession` (GDScript, section 6) when the host runs the real simulation (physics, AI, NavMesh: anything non-deterministic)
 and the other players see it: shooters, brawlers, co-op horde games. It sits on a `raw`-mode lobby and gives you a tick
 clock, entity spawn/despawn, delta snapshots (about 100 kbit/s per client for 50 moving enemies), interpolation, a
 redundant input stream, reliable events, local-player prediction and lag-compensated hitscan. No engine types: the same
 DLL runs under Unity, Godot C# and plain .NET; your engine code only copies transforms in and out.
-Design: DESIGN s.18. Wire format: `spec/replication.md`. Snippets tagged `csharp compile` are compiled by
-`docs/check-snippets.mjs`.
+Design: DESIGN s.18. Wire format: `spec/replication.md`. Snippets tagged `csharp compile`, `ts compile` and `gdscript compile` are
+checked by `docs/check-snippets.mjs`. The three clients speak the same wire: a host in one engine serves clients in the others.
 
 Connect first (`docs/recipes/dotnet-generic.md` or `godot-csharp.md`) with `SyncMode.Raw`, then add this.
 
@@ -263,7 +263,7 @@ public sealed class NetAlien : MonoBehaviour, IReplicatedEntity
 host and clients (same `spec/replication.md`, same vectors), so a browser client can join a .NET or Godot C# host and the
 other way round. The names are the C# ones in camelCase; ids are plain numbers; events are emitter events. Set
 `sync.mode: "replication"` in `onelobby.json` and `OneLobby.fromConfig` gives you the raw lobby to build it on (it works
-for every engine except `godot-gdscript`).
+for every engine).
 
 A state schema is one object that writes (host), reads (client) and blends two snapshots (`lerp`):
 
@@ -365,6 +365,119 @@ Tests: `onelobby/testing` has `ManualClock` and `MemoryNetwork`; set `net.clock`
 `net.extraDelayMs`, `net.dropReliable`, `net.duplicateReliable` and `net.reorderReliable` for latency, loss and jitter
 (see `clients/js/packages/client/test/replication-rig.ts`).
 
+## 6. GDScript (Godot 4, no .NET)
+
+`OneLobbyReplicationSession` in `clients/gdscript/addons/onelobby` is the same layer on the same wire: a GDScript host can
+serve C#, JS and GDScript clients and the other way round (`spec/replication.md`, the same vectors; the engine-smoke
+`--replication` scenario runs every pair of the three). Set `sync.mode: "replication"` in `onelobby.json` and
+`OneLobbyClient.from_config` hosts or joins a raw lobby; build the session on it. Names are the JS ones in snake_case;
+events are signals; entity infos and input frames are dictionaries (`{id, type_id, owner}`, `{seq, view_tick, bytes, repeated}`).
+Call `pump()` every frame (the client pumps the lobby itself).
+
+A state schema is any object with `write(w, state)` (host), `read(r)` (client) and `interpolate(a, b, t)` (blend two snapshots);
+the state is whatever you like (a dictionary here). A host entity is that schema bound to a getter, or any object with `write(w)`:
+
+```gdscript compile file=replication_game.gd
+extends Node
+
+const ALIEN := 7
+const AVATAR := 1
+
+
+class AlienSchema:
+	extends RefCounted
+
+	func write(w: OneLobbyNetWriter, s: Dictionary) -> void:
+		w.write_quantized(float(s["x"]), -256.0, 256.0, 16)   # 7.8 mm steps on a 512 m map
+		w.write_quantized(float(s["y"]), -32.0, 32.0, 12)
+		w.write_quantized(float(s["z"]), -256.0, 256.0, 16)
+		w.write_angle(float(s["yaw"]), 9)                      # 0.7 degree steps
+		w.write_bits(int(s["anim"]), 4)
+		w.write_bits(int(s["hp"]), 7)
+
+	func read(r: OneLobbyNetReader) -> Dictionary:
+		return {"x": r.read_quantized(-256.0, 256.0, 16), "y": r.read_quantized(-32.0, 32.0, 12), "z": r.read_quantized(-256.0, 256.0, 16),
+			"yaw": r.read_angle(9), "anim": r.read_bits(4), "hp": r.read_bits(7)}
+
+	func interpolate(a: Dictionary, b: Dictionary, t: float) -> Dictionary:
+		return {"x": OneLobbyNetMath.lerp_value(float(a["x"]), float(b["x"]), t), "y": OneLobbyNetMath.lerp_value(float(a["y"]), float(b["y"]), t),
+			"z": OneLobbyNetMath.lerp_value(float(a["z"]), float(b["z"]), t), "yaw": OneLobbyNetMath.lerp_angle(float(a["yaw"]), float(b["yaw"]), t),
+			"anim": a["anim"] if t < 0.5 else b["anim"], "hp": a["hp"] if t < 0.5 else b["hp"]}
+
+
+var _rep: OneLobbyReplicationSession
+var _schema := AlienSchema.new()
+var _alien := {"x": 0.0, "y": 0.0, "z": 10.0, "yaw": 0.0, "anim": 0, "hp": 100}
+var _objects := {}   # your game objects, by entity id
+
+
+## `lobby` comes from a client made with `OneLobbyClient.from_config` (sync.mode "replication") or `sync_mode = "raw"`.
+func start(lobby: OneLobbyLobby) -> void:
+	_rep = OneLobbyReplicationSession.new(lobby)                     # 30 Hz tick, a delta snapshot per tick per client
+	_rep.event_delivered.connect(func(ev: Dictionary) -> void: print("event ", ev["stream"], " ", ev["seq"]))
+	if lobby.is_host:
+		_rep.spawn(ALIEN, 0, OneLobbyReplicationSession.replicated(_schema, func() -> Dictionary: return _alien))   # owner 0 = the host
+		_rep.client_ready.connect(func(peer: int) -> void:                                       # an avatar per joiner
+			_rep.spawn(AVATAR, peer, OneLobbyReplicationSession.replicated(_schema, func() -> Dictionary: return _alien)))
+		_rep.send_event("round start".to_utf8_buffer())                                           # reliable, to every client
+	else:
+		_rep.entity_spawned.connect(func(e: Dictionary) -> void:                                 # e = {id, type_id, owner}: create the object here
+			var node := Node3D.new()
+			add_child(node)
+			_objects[e["id"]] = node)
+		_rep.entity_despawned.connect(func(e: Dictionary) -> void:
+			var node: Node3D = _objects.get(e["id"])
+			if node != null:
+				node.queue_free()
+			_objects.erase(e["id"]))
+		_rep.host_lost.connect(func() -> void: print("the host left: end the match"))
+		_rep.send_event("ready".to_utf8_buffer())                                                 # client to host
+
+
+func _process(_delta: float) -> void:
+	_rep.pump()
+	while _rep.clock.try_advance():                                   # one sim step (host) or one input (client) per tick
+		if _rep.is_host:
+			for peer: int in _rep.clients():
+				var input := _rep.try_get_input(peer)                  # {seq, view_tick, bytes, repeated}; repeated when none arrived
+				if not input.is_empty():
+					_alien["x"] = float(_alien["x"]) + (int((input["bytes"] as PackedByteArray)[0]) - 128) * 0.01   # your rules decide what an input means
+			_alien["yaw"] = fmod(float(_alien["yaw"]) + 3.0, 360.0)
+			_rep.send_snapshot()                                        # once per tick, after the sim step
+		else:
+			_rep.submit_input(PackedByteArray([128]))                  # sent with the last 3 inputs on the fast channel
+	if not _rep.is_host:
+		for id: int in _objects:
+			var s: Variant = _rep.try_sample(id, _schema)              # interpolated at _rep.render_tick, null if not visible
+			if s != null:
+				var state: Dictionary = s
+				(_objects[id] as Node3D).position = Vector3(float(state["x"]), float(state["y"]), float(state["z"]))
+```
+
+Also: `rep.try_get_latest(id, schema)` (`{state, tick}` of the newest snapshot, not interpolated; with `rep.last_processed_input` for
+prediction you write yourself), `try_sample_at(id, tick, schema)`, `send_full_snapshot(peer)`, `rep.rtt_ms`, `rep.snapshot_age_ms`,
+`rep.stats` (an `OneLobbyReplicationStats`: `snapshots_sent`, `largest_snapshot`, `malformed`, ...), `rep.traffic_rates` (bytes per second
+sent and received over the last second: `snapshots_sent`, `inputs_sent`, `events_sent`, `total_sent` and the `_received` ones) and
+`rep.config` (`OneLobbyReplicationSession.new(lobby, {"tick_rate": 20, "interpolation_delay_ms": 150, "keyframe_seconds": 0})`).
+Events: `rep.send_event(bytes, to, channel, stream)` (`OneLobbyWire.RELIABLE` is the default; a numbered `stream` 1-255 is reliable only
+and gives `event_delivered` a `seq` and `event_gap` a `{from, stream, first_missing, next_delivered}`); `event_received(from, tick, payload)`
+fires for every event. Raw payloads that do not start with `0x52` come out as `other_message`. A host sends each new client a full
+snapshot on the reliable channel when its link comes up and again every `keyframe_seconds` (default 5; 0 turns keyframes off).
+
+Debug view: `rep.describe(bytes)` turns any replication message into a dictionary (`kind`, `tick`, `records`, state bytes as hex);
+`rep.packet_log = true` writes one line per packet (`rep out 2 fast {"kind":"snapshot",...}`, at most 20 a second) to the lobby's
+net log (`lobby.get_net_log()`), or set `rep.packet_log_sink = func(line: String) -> void: ...` to get the lines.
+
+Cost, as a plain fact: one delta snapshot of 50 entities with 16-byte states (5 bytes changed in each, 407 bytes on the wire) took
+about 0.14 ms to encode and 0.23 ms to decode in GDScript (average of 200 runs, Godot 4.7.2 headless on Windows, AMD Ryzen 7 9800X3D;
+`tests/replication_bench.gd`). A host pays the encode once per client per tick.
+
+Tests: `clients/gdscript/tests/replication_rig.gd` is an in-memory network with a virtual clock (`net.latency_ms`, `net.drop_fast`,
+`net.extra_delay_ms`, `net.drop_reliable`, `net.duplicate_reliable`, `net.reorder_reliable`) for latency, loss and jitter; the session
+tests are `tests/replication.gd`. The session only needs a lobby with `mode`, `local_peer_id`, `host_peer_id`, `is_host`,
+`now_ms()`, `send()`, `peers()`, `is_peer_ready()`, `ping_ms()`, the signals `message_received`, `peer_joined`, `peer_ready`,
+`peer_left`, `host_changed` (and `get_net_log()` for the packet log), so your own test double works too.
+
 ## Rules
 
 - Call `rep.Pump()` every frame instead of `lobby.Pump()`, and step the sim only inside `while (rep.Clock.TryAdvance())`.
@@ -411,6 +524,7 @@ Tests: `onelobby/testing` has `ManualClock` and `MemoryNetwork`; set `net.clock`
   shot that hits an alien on the joiner's screen kills it on the host.
 - `rep.Stats` on the host shows `FullSnapshotsSent` growing only when someone joins.
 - JS: the same checks over `MemoryNetwork` with `net.dropFast` at 5% (`clients/js/packages/client/test/replication-session.test.ts`).
+- GDScript: the same checks over the in-memory rig with `net.drop_fast` at 5% (`clients/gdscript/tests/replication.gd`).
 - Under a test with `InMemoryNetwork` (`DropUnreliable`, `ExtraDelayMs`), the same checks hold at 5% loss.
   `DropReliable`, `ReorderReliable` and `DuplicateReliable` break the reliable contract on purpose, to test your own
   handling of `EventGap` and resync.
