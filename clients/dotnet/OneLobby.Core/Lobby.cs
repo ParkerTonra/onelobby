@@ -606,9 +606,10 @@ namespace OneLobby
             FinishGivingUp();
         }
 
-        // the probe's own worst case: two exchanges (the login is asked for twice), each up to a retransmit plus the server timeout
-        // when it answers late, plus a margin; a shorter wait told a slow relay's refused login apart from silence wrongly
-        private const int RelayProbeWaitMs = 2 * (ConnectionCheck.ServerMs + ConnectionCheck.RetransmitMs) + 500;
+        // the give-up wait covers the relay probe's worst case: two exchanges (the login is asked for twice), each at most the
+        // retransmit wait plus the server timeout, plus 500 ms; a shorter wait reports a slow relay's refused login as
+        // relay_unreachable
+        internal const int RelayProbeWaitMs = 2 * (ConnectionCheck.ServerMs + ConnectionCheck.RetransmitMs) + 500;
 
         private void CheckGiveUpWait()
         {
@@ -720,7 +721,7 @@ namespace OneLobby
             var turn = _c.Ice.FirstOrDefault(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
             if (turn == null) return;
             var log = _c.NetLog;
-            _relayProbe = ConnectionCheck.ProbeRelayAsync(turn).ContinueWith(t =>
+            _relayProbe = (_c.RelayProbeForTests?.Invoke(turn) ?? ConnectionCheck.ProbeRelayAsync(turn)).ContinueWith(t =>
             {
                 var r = t.Status == TaskStatus.RanToCompletion ? t.Result : "unknown";
                 log.Add("diag", "relay probe " + r);

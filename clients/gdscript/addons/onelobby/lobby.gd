@@ -106,6 +106,10 @@ var _phase_sent: Array = []
 var _addrs := {} # peer id -> remote address of its link, once known
 var _last_addr_poll_ms := 0
 const ADDR_POLL_MS := 500
+## the give-up wait covers the relay probe's worst case: two exchanges (the login is asked for twice), each at most the
+## retransmit wait plus the server timeout, plus 500 ms; a shorter wait reports a slow relay's refused login as
+## relay_unreachable
+const RELAY_PROBE_WAIT_MS := 2 * (OneLobbyConnectionCheck.SERVER_MS + OneLobbyConnectionCheck.RETRANSMIT_MS) + 500
 
 
 class OLPeerRec:
@@ -1453,7 +1457,7 @@ func _give_up_connecting() -> void:
 	_diag_start_probe()
 	if _diag_probe == "running" and not _closed:
 		var t0 := Time.get_ticks_msec()
-		while _diag_probe == "running" and Time.get_ticks_msec() - t0 < 2500 and not _closed and _c.is_inside_tree():
+		while _diag_probe == "running" and Time.get_ticks_msec() - t0 < RELAY_PROBE_WAIT_MS and not _closed and _c.is_inside_tree():
 			await _c.get_tree().process_frame
 	_finish_giving_up()
 

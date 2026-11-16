@@ -352,4 +352,5 @@ its unknown value (`relay` `failed`, `heard` null, `nat` `unknown`) and the rule
 | host keeps per peer | 1 per 10 s |
 | check: per STUN server | 1500 ms (one retransmit at 500 ms) |
 | check: TURN probe | 1500 ms |
+| give-up wait for the relay probe | at most 4500 ms = 2 x (1500 + 500) + 500: two exchanges (the login is asked for twice), each at most the server timeout plus the retransmit wait, plus 500 ms. The wait ends as soon as the probe answers |
 | check: whole | 8000 ms |

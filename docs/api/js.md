@@ -610,7 +610,7 @@ import { BanList } from "./bans.js";
 import { Room, type RemovalInfo, type RoomJoinOptions, type RoomOptions } from "./room.js";
 import { type LobbyState, type PeerInfo, type SignalingClient } from "./signaling.js";
 import { type DiagnosisReport } from "./diagnose.js";
-import type { CheckResult } from "./connection-check.js";
+import { type CheckResult } from "./connection-check.js";
 import type { NetLog } from "./netlog.js";
 import { type ChannelName, type IceServer, type LinkFactory, type PeerLink } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -2791,6 +2791,8 @@ export interface CheckOptions {
 /** What a relay probe finds out. */
 export type RelayProbeResult = "ok" | "refused" | "unreachable" | "unknown";
 export declare const CHECK_DEFAULT_STUN: readonly string[];
+export declare const SERVER_MS = 1500;
+export declare const RETRANSMIT_MS = 500;
 export declare function hexOf(b: Uint8Array): string;
 export declare function bytesOf(hex: string): Uint8Array;
 /** An RFC 5389 Binding Request with transaction id `tid` (12 bytes). */

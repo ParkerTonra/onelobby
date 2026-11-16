@@ -178,6 +178,46 @@ describe("joiner ready timeout (ice_failed)", () => {
     );
   });
 
+  it("waits for a slow relay probe: a refused login that is answered late is still relay_refused", async () => {
+    // a link that gathered no relay candidate and cannot say why (what the probe is for)
+    class NoRelayLink extends DeadLink {
+      facts() {
+        return { relay: "failed" as const };
+      }
+    }
+    const join = async (probe: () => Promise<"refused">) => {
+      const w = world();
+      w.server.iceServers = [{ urls: ["turn:t.example:3478"] }];
+      const la = await w.make("alice").host({ name: "t", maxPlayers: 4 });
+      const kit = w.make("bob", { readyTimeoutMs: 8_000, diagnostics: { relayProbe: probe } }, { linkFactory: { create: (o) => new NoRelayLink(o.remoteId) } });
+      kit.on("error", () => {});
+      const lb = await kit.join(la.code);
+      let rejected: unknown = null;
+      lb.ready.catch((e) => (rejected = e));
+      await w.clock.run(8_000, 100); // the ready timer ran out (the relay retry too): the give-up wait starts here
+      return { w, rejected: () => rejected };
+    };
+
+    // the probe answers 3000 ms into the wait: later than the 1500 ms the joiner used to wait, 1500 ms before the wait ends
+    let answer: (r: "refused") => void = () => {};
+    let calls = 0;
+    const a = await join(() => new Promise((res) => (calls++, (answer = res))));
+    expect(calls).toBe(1);
+    await a.w.clock.run(3_000, 100);
+    expect(a.rejected()).toBeNull();
+    answer("refused");
+    await settle();
+    expect(describeError(a.rejected())).toMatchObject({ code: "ice_failed", cause: "relay_refused" });
+
+    // a probe that never answers does not hold the joiner past the wait (4500 ms)
+    const b = await join(() => new Promise(() => {}));
+    await b.w.clock.run(4_400, 100);
+    expect(b.rejected()).toBeNull();
+    await b.w.clock.run(200, 100);
+    expect(describeError(b.rejected())).toMatchObject({ code: "ice_failed" });
+    expect(describeError(b.rejected()).cause).not.toBe("relay_refused");
+  });
+
   it("readyTimeoutMs: 0 waits forever; a normal join is unaffected by the default", async () => {
     const w = world();
     const la = await w.make("alice").host({ name: "t", maxPlayers: 4 });

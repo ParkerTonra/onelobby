@@ -34,8 +34,8 @@ export interface CheckOptions {
 export type RelayProbeResult = "ok" | "refused" | "unreachable" | "unknown";
 
 export const CHECK_DEFAULT_STUN: readonly string[] = ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"];
-const SERVER_MS = 1500;
-const RETRANSMIT_MS = 500;
+export const SERVER_MS = 1500;
+export const RETRANSMIT_MS = 500;
 const WHOLE_MS = 8000;
 
 // ---- STUN / TURN messages ----------------------------------------------------------------------------------------

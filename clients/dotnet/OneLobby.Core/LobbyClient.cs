@@ -129,6 +129,8 @@ namespace OneLobby
         /// <summary>Optional messages the hub handles (<c>welcome.features</c>, e.g. "set_name"); empty for an older hub.</summary>
         internal IReadOnlyCollection<string> Features { get; private set; } = Array.Empty<string>();
         internal ISignalingSocket? Socket { get; private set; }
+        /// <summary>Test seam (InternalsVisibleTo OneLobby.Core.Tests): stands in for <see cref="ConnectionCheck.ProbeRelayAsync"/> when a lobby asks the relay why it gave no candidate. Null: the real probe.</summary>
+        internal Func<IceServer, Task<string>>? RelayProbeForTests { get; set; }
 
         private Op? _op;
         private long _opStartMs;

@@ -22,7 +22,7 @@ import { Room, resolveSettings, type RemovalInfo, type RoomJoinOptions, type Roo
 import { CODE_PATTERN, applyFilter, removalReason } from "./room-rules.js";
 import { OneLobbyError, type LobbyState, type PeerInfo, type SignalingClient, type ServerMsg } from "./signaling.js";
 import { diagnose, cleanReport, explainCause, hostLine, natFact, REPORT_HOST_GAP_MS, type CandidateType, type DiagnoseFacts, type Diagnosis, type DiagnosisReport, type Reached, type RelayState } from "./diagnose.js";
-import type { CheckResult } from "./connection-check.js";
+import { RETRANSMIT_MS, SERVER_MS, type CheckResult } from "./connection-check.js";
 import type { NetLog } from "./netlog.js";
 import { hasTurn, type ChannelName, type IceServer, type LinkFactory, type PeerLink, type SignalPayload } from "./transport.js";
 import { Voice, type VoiceDeps } from "./voice.js";
@@ -222,6 +222,10 @@ export function iceFailedMessage(relayConfigured: boolean): string {
     : "Could not connect to the host. Strict NATs need a relay (TURN), see docs/recipes/turn.md; the host can also port-forward.";
 }
 
+// the give-up wait covers the relay probe's worst case: two exchanges (the login is asked for twice), each at most the
+// retransmit wait plus the server timeout, plus 500 ms; a shorter wait reports a slow relay's refused login as
+// relay_unreachable
+const RELAY_PROBE_WAIT_MS = 2 * (SERVER_MS + RETRANSMIT_MS) + 500;
 const HOST_WATCHDOG_MS = 250;
 const PING_EVERY_MS = 2000;
 
@@ -741,7 +745,7 @@ export class Lobby extends Emitter<LobbyEvents> {
         cancel();
         this.finishGivingUp();
       };
-      cancel = this.cfg.clock.setTimeout(settle, 1500);
+      cancel = this.cfg.clock.setTimeout(settle, RELAY_PROBE_WAIT_MS);
       void probe.then(settle, settle);
       return;
     }
