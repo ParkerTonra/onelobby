@@ -325,7 +325,7 @@ itself runs on Node.
 - **Automated tests.** Each test build is a new exe path, so each one prompts again. Tests that run every player on one
   machine can listen on loopback only, which Windows never prompts for: `DirectHostOptions.BindAddress =
   IPAddress.Loopback` (the hub's TCP + UDP listener) plus `DataChannelTransport.BindAddress = "127.0.0.1"` (the WebRTC
-  sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both. Never in
+  sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both (the runner applies the field when it hosts or joins, so set it any time before `HostDirectAsync` / `JoinDirectAsync`, also after something read `runner.Client`; `verify` fails a started host that listens beyond 127.0.0.1). Never in
   a shipped build: other machines cannot connect.
   **JS "test on this PC only"** (the equivalent of `--local` in the Godot and Unity menus; a Node host has no flag of its own):
   `hostDirect(kit, { local: true })`, which is `bindHost: "127.0.0.1", openPort: false, nostr: false` in one switch. Without

@@ -27,7 +27,9 @@ npm install --save-optional node-datachannel@^0.33.4     # WebRTC for Node (libd
 Optional, so the game still installs (and runs single-player or same-machine) where the native module can't.
 
 Testing an unreleased OneLobby from a clone: build it first (`npm run build` in `clients/js/packages/client`), then
-`npm install <clone>/clients/js/packages/client`. Installing a folder only links it, so an unbuilt one has no `dist/`.
+`npm install <clone>/clients/js/packages/client --install-links`. Installing a folder only links it, so an unbuilt one has no `dist/`.
+
+Two side effects of that install for a game that has its own `package.json`: it writes a relative `file:../../.../clients/js/packages/client` path into `package.json` and `package-lock.json`, which is only good on this PC, so after the release put the range back with `npm install onelobby@^<released version>` (or add `--no-save` for a test run and the range stays as it was); and `npm install --save-optional node-datachannel@^0.33.4` rewrites that range to the version it installed (`^0.33.4` becomes `^0.33.6`): restore the range the game pinned by hand. Say both in the report.
 
 ## 2. Shared constants
 
@@ -135,6 +137,8 @@ The host must serve every file the page loads, from memory: `/`, `/onelobby.bund
 `import { OneLobby } from "/onelobby.bundle.js"`, so it needs no import map), `/onelobby.json` when the page fetches it, and the
 game's own scripts and assets. `OneLobby.fromConfig` in the page needs that json; `new OneLobby({ gameId, netVersion, mode: "raw",
 lobbyServer: "" })` does not.
+
+`fromConfig(json, overrides?)` takes the **parsed object**, never a path, a URL or a JSON string: the page passes `await (await fetch("/onelobby.json")).json()`; the Node host and the game's Node tests pass `JSON.parse(readFileSync(path.join(__dirname, "onelobby.json"), "utf8"))` (ES module: `new URL("./onelobby.json", import.meta.url)`). A game's own page or Node helper that used to take a hand-built option object (or the kit class, so a test can hand in its own) takes that parsed `config` instead and calls `fromConfig(config, { displayName })` itself; a test that needs another value copies the object first (`{ ...cfg, game: { ...cfg.game, netVersion: "99" } }`).
 
 The `<meta name="onelobby">` marker lets one `index.html` work both from the host's port (join through OneLobby) and
 from any other web server you already run. If the game already shares one page function between its own web server and
@@ -324,6 +328,8 @@ free port (read it from `lobby.directAddresses[0]`), so a second copy of the gam
 A two-peer test over real WebRTC, host and joiner both in Node, is [testing.md section 4](testing.md#4-a-node-host-and-a-node-joiner-over-real-webrtc).
 Import the game's modules from the test without starting its server: a `server.js` that calls `listen` when it is loaded must
 export a `start()` and call it only from `if (require.main === module)`.
+
+**A game with no this-PC-only switch of its own** (its server listens on every interface, its tests start it) gets one before its tests run: one env var or flag read where it starts the host (`const local = process.env.GAME_LOCAL === "1"` and `hostDirect(kit, { local, port: local ? 0 : undefined, ... })`), and its own suite runs with it set. The game's tests that asserted its old join-failure texts change when the page shows `describeError(err)` (a version mismatch now reads "You have version 1, the host has 2 ..."): assert on `describeError(err).code` or the new message, and give a host-side `peerFailed` notice the same swap. A game that also hosts from a browser tab (section 6) takes the same `fromConfig` config; `verify` never runs a browser, so a tab host stays "not run" in the report.
 
 ## Done when
 
