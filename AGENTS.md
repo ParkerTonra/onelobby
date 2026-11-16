@@ -6,7 +6,7 @@ client libraries (`onelobby` for JS; `OneLobby.Core` + a transport for C#: `OneL
 the server never sees game data.
 Pick a mode (or run `npx create-onelobby --recommend "<one line about the game>" --json` for a proposal with reasons): `lockstep` (deterministic sim, host orders commands per tick) or `raw` (you send bytes, you own the netcode).
 Real-time host-authoritative games (shooters, physics, AI; anything non-deterministic) use `raw` plus
-`OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# also has prediction and lag-compensation helpers).
+`OneLobby.Replication` (C#), `ReplicationSession` (JS) or `OneLobbyReplicationSession` (GDScript), same wire: delta snapshots, interpolation, inputs, events (C# and JS also have prediction and lag-compensation helpers; JS has the networked player layer `NetPlayers`, `docs/recipes/net-player.md`: players in the world with no player sync of your own).
 You do not need to open `clients/`, `server/` or `spec/` to integrate a game. This file plus one recipe is enough.
 
 ## API surface (same shape in both languages)
@@ -61,6 +61,7 @@ new PredictionSmoother().Correct(dx, dy, dz, sequence); smoother.Update(ms); smo
 //   host: rep.spawn(type, owner, replicated(schema, () => state)); while (rep.clock.tryAdvance()) { rep.tryGetInput(peer); rep.sendSnapshot(); }
 //   client: rep.submitInput(bytes) per tick; rep.trySample(id, schema); rep.on("entitySpawned" | "entityDespawned" | "eventDelivered" | "eventGap" | "hostLost", ...); rep.sendEvent(bytes, { to, stream })
 //   rep.trafficRates / rep.stats / rep.describe(bytes) / rep.packetLog = true; keyframe (reliable full snapshot) on join and every 5 s
+//   players: const players = new NetPlayers(lobby) (sync.player in onelobby.json; docs/recipes/net-player.md); players.pump() each frame; players.setLocalState({...}) (owner) or setLocalInput + step (host); players.get(peer); players.action("jump"); players.onAction("shoot", e => ...)
 // JS: onelobby (no pump(): events come from the event loop)
 const kit = new OneLobby({ gameId: "com.you.game", netVersion: "1", lobbyServer, mode: "raw", displayName: "Ann" });
 const lobby = await kit.host({ name: "Ann's game", maxPlayers: 4, visibility: "public" });
@@ -328,6 +329,7 @@ per non-default key, build with the scaffolder's template and the drop-in menu (
 - Any .NET app (console, MonoGame, bots, tests; real WebRTC via `OneLobby.DataChannel`): `docs/recipes/dotnet-generic.md`
 - Raw mode (your own netcode, e.g. turn-based or arcade): `docs/recipes/raw-mode.md`
 - Replicated state (host-authoritative real-time: shooters, physics, AI), C#, JS and GDScript: `docs/recipes/replication.md`
+- Networked players (position, facing, jump, shoot, melee; the player's own PC or the host places them), JS only for now: `docs/recipes/net-player.md`
 - Voice and text chat: `docs/recipes/voice-and-chat.md`
 - Shared pause (anyone pauses, the pauser or host resumes; lockstep frames stop; works on direct lobbies): `docs/recipes/pause.md`
 - Test two players headless (playwright-core): `docs/recipes/testing.md`

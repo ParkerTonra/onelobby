@@ -63,8 +63,8 @@ export { checkConnection } from "./connection-check.js";
 export { LanFinder } from "./lan.js";
 export type { LanGame, LanFinderOptions, LanFinderStatus } from "./lan.js";
 export type { CheckOptions, CheckResult, RelayProbeResult } from "./connection-check.js";
-export { ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication, DEFAULT_REPLICATION_CONFIG, } from "./replication/index.js";
-export type { EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates, ReplicationEvents, ReplicationErrorCode, } from "./replication/index.js";
+export { ReplicationSession, NetWriter, NetReader, Quantize, NetMath, NetworkClock, replicated, ReplicationError, describeReplication, DEFAULT_REPLICATION_CONFIG, Reconciler, PredictionSmoother, HistoryRing, NetPlayers, NET_PLAYER, PLAYER_TYPE_ID, PlayerCodec, defaultPlayerState, defaultPlayerInput, } from "./replication/index.js";
+export type { EntityInfo, ReplicatedEntity, StateSchema, InputFrame, ReplicationConfig, StreamGap, ReplicatedEvent, ClientInputStats, TrafficRates, ReplicationEvents, ReplicationErrorCode, PlayerAuthority, PlayerLimits, PlayerBlueprint, NetPlayersOptions, ActionEvent, PlayerStats, NetPlayersEvents, PlayerState, PlayerInput, PlayerSpace, PlayerWireConfig, ActionName, ActionArgs, ButtonName, } from "./replication/index.js";
 ```
 
 ## onelobby
@@ -447,6 +447,24 @@ export interface Blueprint {
         readonly mode: "raw" | "lockstep" | "replication";
         readonly tickRate: number;
         readonly hashEveryTicks: number;
+        /**
+         * The networked player layer (spec/net-player.md), with its defaults filled in. Present only with `sync.mode` "replication"
+         * (the filled file stays valid when written back: `sync.player` with another mode is an error). It costs nothing until a game uses the layer.
+         */
+        readonly player?: {
+            readonly authority: "owner" | "host";
+            readonly space: "2d" | "3d";
+            readonly range: number;
+            readonly velocityRange: number;
+            /** Only the limits that are set; a limit that is not set is not checked. */
+            readonly limits: {
+                readonly maxSpeed?: number;
+                readonly maxStep?: number;
+                readonly minShotIntervalMs?: number;
+                readonly minMeleeIntervalMs?: number;
+            };
+            readonly omit: readonly string[];
+        };
     };
     readonly players: {
         readonly identity: "name" | "anonymous" | "platform";
@@ -546,6 +564,21 @@ export interface BlueprintInput {
         mode?: "raw" | "lockstep" | "replication";
         tickRate?: number;
         hashEveryTicks?: number;
+        player?: {
+            $comment?: string;
+            authority?: "owner" | "host";
+            space?: "2d" | "3d";
+            range?: number;
+            velocityRange?: number;
+            limits?: {
+                $comment?: string;
+                maxSpeed?: number;
+                maxStep?: number;
+                minShotIntervalMs?: number;
+                minMeleeIntervalMs?: number;
+            };
+            omit?: string[];
+        };
     };
     players?: {
         $comment?: string;
@@ -603,6 +636,8 @@ export declare class BlueprintError extends OneLobbyError {
     rule: string;
     constructor(path: string, rule: string, detail: string);
 }
+/** Preset fields and events a game may leave out of the networked player (spec/net-player.md); position and the teleport counter cannot go. */
+export declare const PLAYER_OMITTABLE: readonly string[];
 /**
  * Validate `json` (an already-parsed onelobby.json), fill every default and return the frozen result.
  * Throws a `BlueprintError` (`OneLobbyError` code `bad_config`, with `path` and `rule`) on the first problem.

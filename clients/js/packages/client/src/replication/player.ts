@@ -269,7 +269,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
   }
 
   /** Host mode: the input of the current tick (a partial patch is merged); sent and stepped once per tick. */
-  setLocalInput(patch: Partial<PlayerInput>): void {
+  setLocalInput(patch: Partial<Omit<PlayerInput, "buttons">> & { buttons?: Partial<PlayerInput["buttons"]> }): void {
     if (this.authority !== "host") throw new Error('setLocalInput is for authority "host"; give your state with setLocalState');
     this.localInput = { ...this.localInput, ...patch, buttons: { ...this.localInput.buttons, ...(patch.buttons ?? {}) } };
   }

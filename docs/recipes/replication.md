@@ -350,6 +350,12 @@ export function runClient(lobby: Lobby, readStick: () => number): void {
 }
 ```
 
+Prediction and hit rewind in JS: `Reconciler`, `PredictionSmoother` and `HistoryRing` are exported from `onelobby` (the same behaviour and
+numbers as the C# ones of section 3 and section 2: a correction blended over 100 ms, a snap past 2.0 m on the ground plane or 0.5 m vertically),
+and `rep.rewindTick(input)` clamps a rewind to `maxRewindMs`. For players you do not need to wire them yourself:
+`NetPlayers` (`docs/recipes/net-player.md`) does position, prediction, events and hit rewind for you. The config option
+`adaptiveDelay` (default off) grows and shrinks the render delay with the link's jitter (`spec/replication.md` "Clock and render time").
+
 Also: `rep.tryGetLatest(id, schema)` (newest snapshot, not interpolated, with `rep.lastProcessedInput` for prediction),
 `rep.trySampleAt(id, tick, schema)`, `rep.sendFullSnapshot(peer)`, `rep.rttMs`, `rep.snapshotAgeMs`, `rep.stats`,
 `rep.trafficRates` (bytes per second sent and received over the last second: snapshots, inputs, events, total) and

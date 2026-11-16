@@ -226,10 +226,25 @@ window, per-player data. All keys are optional; the host can override each in co
 | `sync.mode` | `"raw"` \| `"lockstep"` \| `"replication"` | surveyed; scaffolder default `raw` | both | `raw` and `lockstep` exist (`mode`); `replication` exists in C# (`OneLobby.Replication`) and JS (`ReplicationSession`) | Rune (deterministic), 1500 Archers (lockstep), Photon Fusion (host-authoritative) in DESIGN.md s.1 |
 | `sync.tickRate` | int 1-120 | 20 | R | exists (`tickRate`, 30 Hz in replication) | Unity Netcode Tick Rate; Mirror `sendRate` with its "60-100Hz fast paced ... 1-10Hz slow paced" guidance |
 | `sync.hashEveryTicks` | int | `tickRate` | R | exists (`hashEveryTicks`) | 1500 Archers checksums; Factorio desync detection |
+| `sync.player.authority` | `"owner"` \| `"host"` | `"owner"` | R | JS (`NetPlayers`); the Godot node and Unity component are next | Unity Netcode client-authoritative vs server-authoritative `NetworkTransform`; Photon Fusion state vs host authority; one-shot.md s.5 (co-op owner, competitive host) |
+| `sync.player.space` | `"2d"` \| `"3d"` | `"3d"` | R | JS | the player preset has x, y, z and pitch in 3D and x, y in 2D (`spec/net-player.md`) |
+| `sync.player.range` | int 1-100000 | 300 | R | JS | positions are quantised to -range..range, about 1 cm a step (16 bits at 300, 24 at 100000); Overwatch and Quake-style bounded worlds |
+| `sync.player.velocityRange` | int 1-1000 | 32 | R | JS | velocities are 10 bits each in -range..range; used for the carry-on past the newest snapshot |
+| `sync.player.limits.maxSpeed`, `.maxStep` | int | not set | R | JS | the host's checks on an owner's claimed move (25% tolerance); not set = not checked; basic protection, not an anti-cheat |
+| `sync.player.limits.minShotIntervalMs`, `.minMeleeIntervalMs` | int 1-60000 | not set | R | JS | the shortest time between two shots or swings; an event over it is dropped and counted |
+| `sync.player.omit` | array of names | `[]` | R | JS | preset fields and events this game does not need (`velocity`, `yaw`, `pitch`, `onGround`, `mode`, `item`, `aiming`, `blocking`, `health`, `alive`, `team`, and the events `jump`, `land`, `shoot`, `melee`, `reload`, `use`, `itemSwitch`, `throw`, `hit`, `death`, `respawn`, `emote`); they leave the wire |
 
 The agent chooses `lockstep` only when the survey finds a fixed-tick loop, seeded RNG and no wall clock or unordered
 iteration (AGENTS.md rule 3); otherwise `raw`, or `replication` for a real-time game with host-owned physics or AI.
 `replication` is valid for every engine and for a file with no engine (C#, JS and GDScript all speak it).
+
+`sync.player` is the networked player layer (`spec/net-player.md`, recipe `docs/recipes/net-player.md`): who places a player,
+the position range, the host's limits and the preset fields a game leaves out. It needs `sync.mode` `replication` (error
+rule `player_needs_replication`, path `sync.player`). An absent `sync.player` means the defaults, and the layer costs nothing
+until a game uses it. The loaders fill it only for `replication`, so a written-back file stays valid. Only leaving preset
+fields and events out is in the file; a game's own extra fields and events are not (send your own entity or `sendEvent`). The
+agent proposes `host` for the shooter and physics shape and `owner` for the free-roam co-op shape
+(`create-onelobby --recommend`); the other shapes get no key.
 
 ### 4f. `players`
 

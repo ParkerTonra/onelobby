@@ -19,6 +19,13 @@ Binary replication (host-authoritative real-time games; `docs/recipes/replicatio
 `new ReplicationSession(lobby)` gives delta snapshots (bit-packed, quantised, against the last acked baseline; a reliable keyframe on join and every 5 s),
 a redundant input stream, events (also numbered streams), interpolated sampling, a tick clock and per-second byte rates, compatible byte for byte with the
 C# `OneLobby.Replication`. `describeReplication(bytes)` / `rep.packetLog = true` read packets by eye. Call `rep.pump()` every frame.
+`Reconciler`, `PredictionSmoother` and `HistoryRing` (prediction and hit rewind) are the JS twins of the C# helpers.
+
+Networked players (`docs/recipes/net-player.md`, `spec/net-player.md`): `new NetPlayers(lobby)` puts every seated peer's player in the world with no
+player sync of your own: position, facing and movement state smooth on every other screen, and jump, shoot, melee and the rest arrive exactly once at the
+right moment. `sync.player.authority` `"owner"` (the player's own PC places it, the default) or `"host"` (the host steps it and the owner predicts); the
+host's limits and hit rewind are included. Call `players.pump()` instead of `rep.pump()`. JS only for now (the Godot node and the Unity component are next);
+proven on an in-memory network, not yet in a real engine.
 
 Tick convention (spec/binary.md): the initial state is tick 0; `frame(T)` produces tick T; call `reportHash(tick, hash)` after
 applying each frame (the library only sends it when `tick % hashEveryTicks == 0`). `snapshot()` returns the state after the last

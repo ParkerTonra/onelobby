@@ -94,8 +94,16 @@ public sealed record RoomSection(bool PasswordRequired, AutoStartMode AutoStart,
     public static readonly RoomSection Defaults;
     /// The same as RoomOptions for the client (maxNameLength is players.maxNameLength).
     public RoomOptions ToOptions(int maxNameLength = 24);
-/// Mode is "raw", "lockstep" or "replication".
-public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks);
+/// Mode is "raw", "lockstep" or "replication". Player is the networked player layer (spec/net-player.md; the defaults when the file has no sync.player); it needs mode "replication".
+public sealed record SyncSection(string Mode, int TickRate, int HashEveryTicks)
+    public PlayerSection Player { get; init; }
+/// The host's limits of the networked player; null = not set = not checked.
+public sealed record PlayerLimits(int? MaxSpeed, int? MaxStep, int? MinShotIntervalMs, int? MinMeleeIntervalMs);
+/// sync.player (spec/net-player.md). Authority: "owner" or "host". Space: "2d" or "3d". Range and VelocityRange shape the quantisation; Omit names the preset fields and events left out.
+public sealed record PlayerSection(string Authority, string Space, int Range, int VelocityRange, PlayerLimits Limits, IReadOnlyList<string> Omit)
+    public static readonly PlayerSection Defaults;
+    /// Preset fields and events a game may leave out; position and the teleport counter cannot go.
+    public static readonly string[] Omittable;
 /// Identity is "name", "anonymous" or "platform".
 public sealed record PlayersSection(string Identity, int MaxNameLength);
 /// VoiceMode is "pushToTalk" or "voiceActivity".
