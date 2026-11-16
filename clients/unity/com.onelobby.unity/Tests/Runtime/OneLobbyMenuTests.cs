@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using OneLobby.Direct;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.UIElements;
@@ -24,6 +25,9 @@ namespace OneLobby.Unity.PlayTests
         private const string Relay = "turn:127.0.0.1:9 samuser sampass77";
 
         private InMemoryNetwork _net = null!;
+        private InMemoryLanNet _lanNet = null!; // the LAN finders and hosts of the LAN tests: no OS socket exists
+        private readonly List<LanHost> _lanHosts = new();
+        private long _lanClock = 1000; // the LAN finder's clock, 33 ms a frame
         private readonly List<GameObject> _objects = new();
         private readonly List<string> _logged = new();
         private int _checks;
@@ -41,6 +45,8 @@ namespace OneLobby.Unity.PlayTests
         public void SetUp()
         {
             _net = new InMemoryNetwork();
+            _lanNet = new InMemoryLanNet();
+            _lanHosts.Clear();
             _objects.Clear();
             _logged.Clear();
             _checks = 0;
@@ -51,6 +57,8 @@ namespace OneLobby.Unity.PlayTests
         public void TearDown()
         {
             Application.logMessageReceived -= OnLog;
+            foreach (var h in _lanHosts) h.Dispose();
+            _lanHosts.Clear();
             foreach (var go in _objects)
                 if (go != null) UnityEngine.Object.Destroy(go);
             _objects.Clear();
@@ -72,6 +80,7 @@ namespace OneLobby.Unity.PlayTests
             for (var i = 0; i < n; i++)
             {
                 _net.Advance(33);
+                _lanClock += 33;
                 yield return null;
             }
         }
@@ -81,6 +90,7 @@ namespace OneLobby.Unity.PlayTests
             for (var i = 0; i < maxFrames && !cond(); i++)
             {
                 _net.Advance(33);
+                _lanClock += 33;
                 yield return null;
             }
             Check(cond(), "timed out waiting for: " + what);
@@ -695,6 +705,148 @@ namespace OneLobby.Unity.PlayTests
             var f = typeof(MenuModel).GetField(eventName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(f, "MenuModel has no event field " + eventName);
             return (f!.GetValue(model) as Delegate)?.GetInvocationList().Length ?? 0;
+        }
+
+        // ---- LAN games: the Browse screen's second list, on the in-memory UDP network (no OS socket) -------------------------------------
+
+        private P NewLanPlayer(string name, bool server = false)
+        {
+            var json = @"{""game"":{""id"":""menu-test""},""hosting"":{""direct"":true,""server"":" + (server ? "true" : "false") + @",""lan"":true,""lobbyServer"":""ws://mem/ws""},""diagnostics"":{""checkOnOpen"":false}}";
+            var p = NewPlayer(name, blueprint: json, args: server ? Array.Empty<string>() : new[] { "--local" });
+            p.Menu.FinderFactory = o => { o.Udp = _lanNet.Factory; o.NowMs = () => _lanClock; if (server) o.Targets = new[] { "127.0.0.1" }; return p.Menu.Client!.CreateLanFinder(o); };
+            return p;
+        }
+
+        private LanHost LanHostOnNet(string version = "1", string lobby = "Sam's game", string host = "Sam", bool password = false)
+        {
+            var h = new LanHost("menu-test", version, () => new LanHostInfo(lobby, host, 2, 4, password, 47811), 47840, System.Net.IPAddress.Loopback, _lanNet.Factory);
+            Check(h.Start(), "the in-memory LAN host starts");
+            _lanHosts.Add(h);
+            return h;
+        }
+
+        [UnityTest]
+        public IEnumerator TheLanListAtBothResolutions([ValueSource(nameof(Sizes))] Vector2Int size)
+        {
+            var tag = size.x + "x" + size.y;
+            var p = NewLanPlayer("Sam");
+            yield return Frames(4);
+            SetPanelSize(p, size.x, size.y);
+            yield return Frames(3);
+            var m = p.M;
+            Check(_lanNet.BoundCount == 0 && !m.FinderRunning, $"{tag}: before Browse no LAN socket exists ({_lanNet.BoundCount})");
+            Check(Shown(p.Q("BrowseButton")), $"{tag}: Browse shows with only the LAN list");
+            Click(p.Q("BrowseButton"));
+            yield return Frames(3);
+            Check(m.Screen == MenuScreen.Browse && _lanNet.BoundCount == 1 && !Shown(p.Q("BrowseTabs")) && p.Q<Label>("BrowseTitle").text == "LAN games",
+                $"{tag}: Browse opens the LAN list with one socket, no tab bar, the title says LAN games ({_lanNet.BoundCount})");
+            Check(p.Q<Label>("BrowseStatus").text.StartsWith("Looking for games"), $"{tag}: the looking sentence shows");
+            yield return Audit(p, tag + " LAN list, looking", true);
+            var host = LanHostOnNet(lobby: "A lobby with a long name", password: true);
+            yield return Until(() => m.LanRows().Count == 1, tag + " the host shows in the LAN list");
+            yield return Frames(2);
+            var r = m.LanRows()[0];
+            Check(r.Name == "A lobby with a long name" && r.HostName == "Sam" && r.Players == 2 && r.MaxPlayers == 4 && r.HasPassword && r.Port == 47811, $"{tag}: the row's fields ({r.Text})");
+            var texts = p.Q("BrowseList").Query<Label>().ToList().Select(l => l.text).ToList();
+            Check(texts.Contains("A lobby with a long name (Sam) 2/4") && texts.Contains("Needs a password"), $"{tag}: the view draws the row and the password mark: {string.Join(" | ", texts)}");
+            Check(Shown(p.Q("BrowseLanPasswordEdit")), $"{tag}: the password field shows above the rows");
+            yield return Audit(p, tag + " LAN list, a row", false);
+            host.Dispose();
+            yield return Until(() => m.LanRows().Count == 0, tag + " the row goes after the host leaves");
+            LanHostOnNet(version: "0", lobby: "<b>Old</b>", host: "Bob");
+            yield return Until(() => m.LanRows().Count == 1, tag + " a host of another version shows too");
+            yield return Frames(2);
+            var labels = p.Q("BrowseList").Query<Label>().ToList();
+            var join = p.Q("BrowseList").Query<Button>().ToList();
+            Check(labels.Any(l => l.text == "<b>Old</b> (Bob) 2/4" && !l.enableRichText), $"{tag}: names are drawn as text, never markup");
+            Check(labels.Any(l => l.text == "You and the host are running different versions of the game.") && join.Count == 1 && !join[0].enabledSelf,
+                $"{tag}: the other-version row is greyed with its reason and a disabled Join");
+            yield return Audit(p, tag + " LAN list, another version", false);
+            _lanHosts[^1].Dispose();
+            yield return Until(() => m.LanRows().Count == 0, tag + " that row goes too");
+            yield return Audit(p, tag + " LAN list, empty", false);
+            CancelKey(p);
+            yield return Frames(2);
+            Check(m.Screen == MenuScreen.Start && _lanNet.BoundCount == 0 && !m.FinderRunning, $"{tag}: Escape leaves the list and closes the socket ({_lanNet.BoundCount})");
+        }
+
+        [UnityTest]
+        public IEnumerator TheLanFinderLivesOnlyWhileTheListIsShown()
+        {
+            var p = NewLanPlayer("Sam");
+            var joined = new List<(string, string?)>();
+            p.Menu.JoinDirect = (text, pw) => { joined.Add((text, pw)); return Task.FromException<Lobby>(new OneLobbyException("bad_address", "test: no lobby")); };
+            yield return Frames(4);
+            var m = p.M;
+            // a join from a row: address:port and the typed password, and the socket is closed with the screen
+            LanHostOnNet(password: true);
+            Click(p.Q("BrowseButton"));
+            yield return Until(() => m.LanRows().Count == 1, "a row shows");
+            p.Q<TextField>("BrowseLanPasswordEdit").value = "pw1";
+            yield return Frames(1);
+            Click(p.Q("BrowseList").Query<Button>().First());
+            yield return Frames(3);
+            Check(joined.Count == 1 && joined[0].Item1 == "127.0.0.1:47811" && joined[0].Item2 == "pw1", $"a click joins through the join path with address:port and the password ({string.Join(",", joined)})");
+            Check(!m.FinderRunning && _lanNet.BoundCount == 1, $"the join closed the finder (sockets: {_lanNet.BoundCount}, the host's own)");
+            yield return Until(() => m.Screen != MenuScreen.Connecting, "the failed join ends");
+            m.Back();
+            yield return Frames(2);
+            // the menu disabled (hidden): no socket; enabled again: it looks again
+            Click(p.Q("BrowseButton"));
+            yield return Frames(2);
+            Check(_lanNet.BoundCount == 2, $"the list is open again (sockets {_lanNet.BoundCount}: host and finder)");
+            p.Menu.enabled = false;
+            yield return Frames(2);
+            Check(_lanNet.BoundCount == 1 && !m.FinderRunning, $"disabling the menu closes the finder's socket ({_lanNet.BoundCount})");
+            p.Menu.enabled = true;
+            yield return Frames(2);
+            Check(_lanNet.BoundCount == 2, $"enabling it looks again ({_lanNet.BoundCount})");
+            // destroyed while the list is open
+            UnityEngine.Object.Destroy(p.Menu.gameObject);
+            yield return Frames(3);
+            Check(_lanNet.BoundCount == 1, $"a menu destroyed while the list is open leaves no finder socket ({_lanNet.BoundCount})");
+            _lanHosts[0].Dispose();
+
+            // both lists: the tab bar
+            var b = NewLanPlayer("Bea", server: true);
+            yield return Frames(4);
+            Click(b.Q("BrowseButton"));
+            yield return Frames(3);
+            Check(Shown(b.Q("BrowseTabs")) && b.M.ShownList == "online" && _lanNet.BoundCount == 0 && b.Q<Label>("BrowseTitle").text == "Games to join",
+                $"both lists: tab bar shown, opens on Online with no socket ({_lanNet.BoundCount})");
+            Click(b.Q("BrowseTabLanButton"));
+            yield return Frames(2);
+            Check(b.M.ShownList == "lan" && _lanNet.BoundCount == 1, $"the LAN tab opens one socket ({_lanNet.BoundCount})");
+            Click(b.Q("BrowseTabOnlineButton"));
+            yield return Frames(3);
+            Check(b.M.ShownList == "online" && _lanNet.BoundCount == 0, $"the Online tab closes it ({_lanNet.BoundCount})");
+            Click(b.Q("BrowseTabLanButton"));
+            yield return Frames(2);
+            b.M.Back();
+            yield return Frames(2);
+            Check(_lanNet.BoundCount == 0, $"Back from the LAN tab closes it ({_lanNet.BoundCount})");
+            Click(b.Q("BrowseButton"));
+            yield return Frames(3);
+            Check(b.M.ShownList == "lan" && _lanNet.BoundCount == 1, $"Browse opens on the tab used last ({_lanNet.BoundCount})");
+        }
+
+        [UnityTest]
+        public IEnumerator ALobbyHostedFromTheMenuCarriesTheLanSwitch()
+        {
+            // the options the menu's direct host starts with (nothing is hosted: no socket)
+            var build = typeof(OneLobbyMenu).GetMethod("BuildDirectOptions", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            DirectHostOptions Options(P p) => (DirectHostOptions)build.Invoke(p.Menu, new object?[] { null })!;
+            var on = NewLanPlayer("On");
+            var off = NewPlayer("Off", blueprint: @"{""game"":{""id"":""menu-test""},""hosting"":{""direct"":true,""server"":false,""lan"":false}}");
+            var plain = NewPlayer("Plain");
+            var plainOn = NewPlayer("PlainOn");
+            plainOn.Menu.Lan = true;
+            yield return Frames(4);
+            Check(Options(on).Lan, "hosting.lan true: the direct host answers LAN questions");
+            Check(!Options(off).Lan, "hosting.lan false: it does not");
+            Check(!Options(plain).Lan, "no blueprint, the menu's Lan off: it does not");
+            Check(Options(plainOn).Lan, "no blueprint, the menu's Lan on: it does");
+            Check(Options(on).BindAddress != null && System.Net.IPAddress.IsLoopback(Options(on).BindAddress!), "--local: the answering socket stays on the loopback");
         }
 
         // ---- the runner ---------------------------------------------------------------------------------------------------------------

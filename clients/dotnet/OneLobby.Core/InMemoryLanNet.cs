@@ -53,13 +53,13 @@ namespace OneLobby
 
             public bool TryReceive(int waitMs, out byte[] data, out IPAddress from, out int fromPort)
             {
-                var until = Environment.TickCount64 + waitMs;
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 do
                 {
                     if (_closed) break;
                     if (_in.TryDequeue(out var d)) { data = d.Data; from = d.From; fromPort = d.Port; return true; }
                     if (waitMs > 0) Thread.Sleep(1);
-                } while (Environment.TickCount64 < until);
+                } while (clock.ElapsedMilliseconds < waitMs);
                 data = Array.Empty<byte>(); from = IPAddress.None; fromPort = 0;
                 return false;
             }

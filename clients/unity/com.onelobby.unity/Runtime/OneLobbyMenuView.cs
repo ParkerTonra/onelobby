@@ -27,7 +27,7 @@ namespace OneLobby.Unity
             "ErrorPage", "ErrorTitle", "ErrorMessage", "ErrorHint", "ErrorCode", "CopyLogsButton", "SaveLogsButton", "LogNote", "ErrorBackButton",
             "SettingsPage", "SettingsTitle", "RelayLabel", "RelayStatus", "RelayEdit", "RelaySaveButton", "RelayClearButton", "RelayNote", "ServerLabel",
             "ServerEdit", "ServerSaveButton", "ServerNote", "ConnectionCheckButton", "CheckVerdict", "CheckFacts", "SettingsCopyLogsButton", "SettingsBackButton",
-            "BrowsePage", "BrowseTitle", "BrowseStatus", "BrowseList", "BrowseRefreshButton", "BrowseBackButton",
+            "BrowsePage", "BrowseTitle", "BrowseTabs", "BrowseTabOnlineButton", "BrowseTabLanButton", "BrowseStatus", "BrowseLanPasswordEdit", "BrowseList", "BrowseRefreshButton", "BrowseBackButton",
         };
 
         private static readonly string[] AutoStartKeys = { "off", "all_ready", "players" };
@@ -255,7 +255,11 @@ namespace OneLobby.Unity
             // browse
             var browse = Add(pages, new VisualElement(), "BrowsePage");
             Lbl(browse, "BrowseTitle", "onelobby-title");
+            var tabs = Row(browse, "BrowseTabs");
+            Btn(tabs, "BrowseTabOnlineButton", () => _ = m.SetBrowseTabAsync("online"));
+            Btn(tabs, "BrowseTabLanButton", () => _ = m.SetBrowseTabAsync("lan"));
             Lbl(browse, "BrowseStatus");
+            Edit(browse, "BrowseLanPasswordEdit", password: true).RegisterValueChangedCallback(e => m.SetLanPassword(e.newValue));
             Add(browse, new VisualElement(), "BrowseList");
             var browseRow = Row(browse);
             Btn(browseRow, "BrowseRefreshButton", () => _ = m.RefreshBrowseAsync());
@@ -379,7 +383,9 @@ namespace OneLobby.Unity
             Text("ConnectionCheckButton", "check");
             Text("SettingsCopyLogsButton", "copy_logs");
             Text("SettingsBackButton", "back");
-            Text("BrowseTitle", "browse_title");
+            Text("BrowseTabOnlineButton", "browse_tab_online");
+            Text("BrowseTabLanButton", "browse_tab_lan");
+            Placeholder("BrowseLanPasswordEdit", "password_placeholder");
             Text("BrowseRefreshButton", "browse_refresh");
             Text("BrowseBackButton", "back");
             Get<Label>("RosterNote").text = MenuText.T("plain_list_note");
@@ -453,7 +459,7 @@ namespace OneLobby.Unity
             var m = Model;
             Show(Get<Label>("NameLabel"), m.NamesAllowed);
             Show(Get<TextField>("NameEdit"), m.NamesAllowed);
-            Show(Get<Button>("BrowseButton"), m.CanBrowse());
+            Show(Get<Button>("BrowseButton"), m.BrowseAvailable);
             SetLabel("StartNote", m.StartNote);
             SetLabel("StartCheckLine", m.StartCheckLine);
             if (entering)
@@ -641,12 +647,27 @@ namespace OneLobby.Unity
         private void DrawBrowse()
         {
             var m = Model;
-            SetLabel("BrowseStatus", m.BrowseStatus);
-            var sig = string.Join("|", m.BrowseItems.Select(i => i.Code + "," + i.Name + "," + i.HostName + "," + i.Players + "," + i.MaxPlayers));
+            var lan = m.ShownList == "lan";
+            Get<Label>("BrowseTitle").text = m.BrowseTitle;
+            Show(_by["BrowseTabs"], m.BrowseTabsShown);
+            _by["BrowseTabOnlineButton"].EnableInClassList("onelobby-tab--on", !lan);
+            _by["BrowseTabLanButton"].EnableInClassList("onelobby-tab--on", lan);
+            Show(_by["BrowseLanPasswordEdit"], lan);
+            SetLabel("BrowseStatus", m.ListStatus);
+            var lanRows = lan ? m.LanRows() : (IReadOnlyList<MenuLanRow>)Array.Empty<MenuLanRow>();
+            var sig = lan ? "lan" + string.Join("|", lanRows.Select(r => r.Address + ":" + r.Port + "," + r.Text + "," + r.Lock + "," + r.CanJoin))
+                          : "online" + string.Join("|", m.BrowseItems.Select(i => i.Code + "," + i.Name + "," + i.HostName + "," + i.Players + "," + i.MaxPlayers));
             if (sig == _browseSig) return;
             _browseSig = sig;
             var list = _by["BrowseList"];
             list.Clear();
+            if (lan)
+            {
+                DrawLanRows(list, lanRows);
+                Show(list, list.childCount > 0);
+                return;
+            }
+            Show(list, true);
             foreach (var it in m.BrowseItems)
             {
                 var code = it.Code;
@@ -655,6 +676,30 @@ namespace OneLobby.Unity
                 row.Add(new Button(() => _ = m.JoinListedAsync(code)) { text = MenuText.T("browse_join") });
             }
             if (_shown == (int)MenuScreen.Browse && list.childCount > 0) _later(() => FocusFirst(MenuScreen.Browse));
+        }
+
+        /// <summary>One row per LAN game: the line, a password mark, why it cannot be joined (greyed), and a Join button. Plain text, never markup.</summary>
+        private void DrawLanRows(VisualElement list, IReadOnlyList<MenuLanRow> rows)
+        {
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                var index = i;
+                var row = AddRow(list);
+                row.Add(new Label(r.Text) { enableRichText = false });
+                if (r.Lock.Length > 0) row.Add(new Label(r.Lock) { enableRichText = false });
+                if (!r.CanJoin)
+                {
+                    row.AddToClassList("onelobby-row--disabled");
+                    row.style.opacity = 0.5f;
+                    row.Add(new Label(r.Note) { enableRichText = false });
+                }
+                var join = new Button(() => _ = Model.JoinLanAsync(index)) { text = MenuText.T("browse_join") };
+                join.SetEnabled(r.CanJoin);
+                row.Add(join);
+            }
+            // keep a player's focus (the password field) unless it was on a row that is gone
+            if (_shown == (int)MenuScreen.Browse && FocusedName() == "") _later(() => FocusFirst(MenuScreen.Browse));
         }
 
         /// <summary>Every frame while the lobby shows: the countdown and, twice a second, the pings.</summary>

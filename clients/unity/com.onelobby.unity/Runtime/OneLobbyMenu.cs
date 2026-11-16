@@ -55,6 +55,8 @@ namespace OneLobby.Unity
         public PanelSettings? PanelSettings;
         [Tooltip("Draw order of the menu's panel above other UI Toolkit panels.")]
         public int SortingOrder = 1000;
+        [Tooltip("LAN games list for a game with no blueprint (with one, hosting.lan decides): the Browse screen shows a \"LAN games\" list and a lobby hosted from the menu answers LAN questions. The menu looks for LAN games only while that list is on screen. Not available in WebGL.")]
+        public bool Lan;
 
         /// <summary>The host started the game, or the player joined a game that is already running. The menu hides itself when <see cref="AutoHideOnStart"/> is true.</summary>
         public event Action<Lobby>? GameStarted;
@@ -83,6 +85,9 @@ namespace OneLobby.Unity
 
         /// <summary>Runs the connection check instead of <c>Client.CheckConnectionAsync</c> (a test gives a fake; see <see cref="MenuModel.CheckRunner"/>). Set it before the first frame.</summary>
         public Func<CheckOptions?, Task<CheckResult>>? CheckRunner { get; set; }
+
+        /// <summary>Makes the LAN finder instead of the client's own (a test passes one on an in-memory network; see <see cref="MenuModel.FinderFactory"/>). Set it before the first frame.</summary>
+        public Func<LanFinderOptions, LanFinder>? FinderFactory { get; set; }
 
         private LobbyOptions? _hostOptions;
         private RoomJoinOptions? _joinOptions;
@@ -145,6 +150,7 @@ namespace OneLobby.Unity
                 Clipboard = text => GUIUtility.systemCopyBuffer = text,
                 LogsPath = System.IO.Path.Combine(Application.persistentDataPath, "onelobby-menu-log.txt"),
                 CheckRunner = CheckRunner,
+                Lan = Lan, FinderFactory = FinderFactory, LanSupported = Application.platform != RuntimePlatform.WebGLPlayer,
                 // `--local`: 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
                 // Read here, not with the boot flags: a game that applies the flags itself later would be too late for the check on open.
                 LocalOnly = _local,
@@ -207,7 +213,10 @@ namespace OneLobby.Unity
             return chars.Length == 0 ? "game" : chars.ToString();
         }
 
-        private Task<Lobby> HostDirectThroughRunner(string? password)
+        private Task<Lobby> HostDirectThroughRunner(string? password) => Runner!.HostDirectAsync(BuildDirectOptions(password));
+
+        /// <summary>The options a lobby hosted from the menu starts with: the blueprint's (so <c>hosting.lan</c> reaches <c>DirectHostOptions.Lan</c>), the menu's own <see cref="Lan"/> without one, loopback only for <c>--local</c>.</summary>
+        private DirectHostOptions BuildDirectOptions(string? password)
         {
             var name = Model?.NameText;
             var blueprint = Client!.Blueprint;
@@ -215,6 +224,7 @@ namespace OneLobby.Unity
                 ? blueprint.ToDirectHostOptions(null, string.IsNullOrEmpty(name) ? null : name)
                 : new DirectHostOptions { Name = (string.IsNullOrEmpty(name) ? "Player" : name) + "'s game" };
             options.Password = password;
+            if (blueprint == null && Lan) options.Lan = true; // no blueprint: the menu's own switch (with one, ToDirectHostOptions carries hosting.lan)
             if (_local)
             {
                 options.BindAddress = System.Net.IPAddress.Loopback;
@@ -222,7 +232,7 @@ namespace OneLobby.Unity
                 options.OpenPort = false;
                 options.PublicAddress = "127.0.0.1"; // the join code a local host shows must work on this PC: it carries this address, not the network one
             }
-            return Runner!.HostDirectAsync(options);
+            return options;
         }
 
         private void BuildPanel()
@@ -314,14 +324,22 @@ namespace OneLobby.Unity
         {
             if (!_started || Model == null) return;
             Hook();
+            Model.Resume(); // enabled again with the LAN list on screen: look again
             _view?.Refresh();
         }
 
-        private void OnDisable() => Unhook();
+        private void OnDisable()
+        {
+            Unhook();
+            Model?.Shutdown(); // the LAN finder's socket closes with the menu
+        }
+
+        private void OnApplicationQuit() => Model?.Shutdown();
 
         private void OnDestroy()
         {
             Unhook();
+            Model?.Shutdown();
             if (_overrodeText)
             {
                 _overrodeText = false;
@@ -340,6 +358,7 @@ namespace OneLobby.Unity
                 foreach (var a in run) a();
             }
             if (Model == null) return;
+            Model.Pump(); // reads the LAN finder's answers (only while the LAN list is on screen) and lets "nothing found" appear after 3 seconds
             if (Pump)
             {
                 // a OneLobbyRunner pumps its own client, and the lobby it adopted (a direct one); anything else is pumped here, once
