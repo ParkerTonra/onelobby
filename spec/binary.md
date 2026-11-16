@@ -96,7 +96,9 @@ hash of the state at tick `T`.
   host's state at its **current** tick (not at `T`), then frames continue from `current+1`. The 1st and 2nd mismatch
   of a peer in a session are resynced; the **3rd** drops the peer (host closes that connection and signals `desync` to
   its game; there is no wire message). `snapshot_req` is answered with a snapshot without `desync` and does not count.
-- A peer with no frames for 3 s sends `snapshot_req`; the host drops a peer it has had no `hash` from for 10 s.
+- A peer with no frames for 3 s sends `snapshot_req`; the host drops a peer it has had no `hash` from for 10 s. The 3 s
+  count starts when the peer learns the game started (the phase message, a frame or a snapshot), never at join: no frames
+  flow in the lobby phase, however long it lasts.
 - Hash reporting: a peer sends `hash` when `T % hashEvery == 0`; `hashEvery` defaults to `tickRate` and is a local setting
   (the host compares whenever it has both hashes).
 
