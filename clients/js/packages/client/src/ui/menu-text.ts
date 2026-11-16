@@ -132,11 +132,21 @@ export const MENU_TEXT_SHARED: Readonly<Record<string, string>> = Object.freeze(
   relay_none_fact: "none set",
   // browse
   browse_title: "Games to join",
+  browse_title_online: "Online games",
+  browse_title_lan: "LAN games",
+  browse_tab_online: "Online",
+  browse_tab_lan: "LAN games",
   browse_loading: "Looking for games...",
   browse_empty: "No games found right now.",
   browse_row: "%s (%s) %d/%d",
   browse_refresh: "Refresh",
   browse_join: "Join",
+  lan_looking: "Looking for games on your network...",
+  lan_empty: "No games found on your network. The host can also read out their address: type it in the join box on the start screen.",
+  lan_socket_failed: "Couldn't look for games on your network. Ask the host for their address and type it in the join box.",
+  lan_off: "LAN games are switched off in this game.",
+  lan_row: "%s (%s) %d/%d",
+  lan_locked: "Needs a password",
 });
 
 /** Keys only the web element has (the Godot menu draws these as part of its scenes or has no such control). */

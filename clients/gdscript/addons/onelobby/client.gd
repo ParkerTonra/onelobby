@@ -320,6 +320,18 @@ func lan_finder(options: Dictionary = {}) -> OneLobbyLanFinder:
 	return _lan_finder
 
 
+## Stops the LAN finder (closing its socket) and frees it, so no finder object exists until lan_finder() is called again. The drop-in
+## menu uses this: it looks for LAN games only while its LAN list is the one on screen.
+func drop_lan_finder() -> void:
+	if _lan_finder == null:
+		return
+	var f := _lan_finder
+	_lan_finder = null
+	f.stop()
+	remove_child(f)
+	f.queue_free()
+
+
 ## Direct mode, host: runs the lobby inside this game with no lobby server. Joiners find you through public Nostr
 ## relays with a short code: `lobby.code` ("D1PB-1X9S-FPV"; show it, or copy it). The lobby, its signals and peers are
 ## the same as raw mode, and JS and .NET players can join it.

@@ -22,7 +22,8 @@ extends Control
 ##   settings:   SettingsPage SettingsTitle RelayLabel RelayStatus RelayEdit RelaySaveButton RelayClearButton RelayNote
 ##               ServerLabel ServerEdit ServerSaveButton ServerNote ConnectionCheckButton CheckVerdict CheckFacts
 ##               SettingsCopyLogsButton SettingsBackButton
-##   browse:     BrowsePage BrowseTitle BrowseStatus BrowseList BrowseRefreshButton BrowseBackButton
+##   browse:     BrowsePage BrowseTitle BrowseTabs BrowseTabOnlineButton BrowseTabLanButton BrowseStatus BrowseLanPasswordEdit
+##               BrowseList BrowseRefreshButton BrowseBackButton
 ## (The roster, ban, request and browse rows are built at run time inside RosterList, BansList, RequestsList and BrowseList.)
 
 ## The host started the game, or the player joined a game that is already running. Hide the menu (auto_hide_on_start does).
@@ -45,6 +46,9 @@ signal left
 @export var invite_base := ""
 ## Rewording: {text key: new text}, keys as in OneLobbyMenuText.TABLE.
 @export var texts := {}
+## LAN games list for a game with no onelobby.json (with one, `hosting.lan` decides): the Browse screen shows a "LAN games" list and
+## a lobby hosted from the menu answers LAN questions. The menu looks for LAN games only while that list is on screen.
+@export var lan := false
 
 ## The client the menu drives. Set it before the menu enters the tree to use your own; default: OneLobbyClient.from_config(config_path).
 var client: OneLobbyClient
@@ -67,6 +71,12 @@ var route := "auto":
 		route = v
 		if model != null:
 			model.route = v
+## Makes the LAN finder instead of the client's own (a test passes a fake; see OneLobbyMenuModel.finder_factory).
+var finder_factory := Callable():
+	set(v):
+		finder_factory = v
+		if model != null:
+			model.finder_factory = v
 ## Runs the connection check instead of client.check_connection (a test gives a fake; see OneLobbyMenuModel.check_runner).
 var check_runner := Callable():
 	set(v):
@@ -79,6 +89,7 @@ var _roster_sig := ""
 var _bans_sig := ""
 var _requests_sig := ""
 var _browse_sig := ""
+var _lan_sig := ""
 var _ping_labels := {} # peer id -> Label
 var _ping_at := 0
 var _syncing := false
@@ -99,6 +110,8 @@ func _ready() -> void:
 	model.host_options = host_options
 	model.join_options = join_options
 	model.route = route
+	model.lan = lan
+	model.finder_factory = finder_factory
 	model.invite_base = invite_base
 	model.check_runner = check_runner
 	# `--local` (after `--`): 127.0.0.1 only, nothing leaves this PC, so the check does not run by itself (the button still does).
@@ -119,6 +132,8 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if pump and client != null:
 		client.pump()
+	if model != null and model.screen == OneLobbyMenuModel.Screen.BROWSE:
+		model.tick() # lets "nothing found" appear after its 3 seconds
 	if model == null or model.screen != OneLobbyMenuModel.Screen.LOBBY:
 		return
 	%CountdownLabel.text = model.countdown_text()
@@ -127,6 +142,30 @@ func _process(_delta: float) -> void:
 	if now - _ping_at > 500:
 		_ping_at = now
 		_update_pings()
+
+
+## The LAN finder goes with the menu: out of the tree, hidden, or the application closing. (Freeing the menu frees the client and the
+## finder with it; this closes the socket first.)
+func _enter_tree() -> void:
+	if model != null:
+		model.resume() # put back in the tree with the LAN list on screen: look again
+
+
+func _exit_tree() -> void:
+	if model != null:
+		model.shutdown()
+
+
+func _notification(what: int) -> void:
+	if model == null:
+		return
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		model.shutdown()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED:
+		if is_visible_in_tree():
+			model.resume()
+		else:
+			model.shutdown()
 
 
 ## ui_cancel goes back one screen (out of settings, browse, an error, a connect in progress, or the lobby).
@@ -192,6 +231,9 @@ func _bind() -> void:
 	%SettingsCopyLogsButton.pressed.connect(func() -> void: model.copy_logs())
 	%SettingsBackButton.pressed.connect(func() -> void: model.back())
 	%BrowseRefreshButton.pressed.connect(func() -> void: model.refresh_browse())
+	%BrowseTabOnlineButton.pressed.connect(func() -> void: model.set_browse_tab("online"))
+	%BrowseTabLanButton.pressed.connect(func() -> void: model.set_browse_tab("lan"))
+	%BrowseLanPasswordEdit.text_changed.connect(func(t: String) -> void: model.set_lan_password(t))
 	%BrowseBackButton.pressed.connect(func() -> void: model.back())
 	var auto: OptionButton = %AutoStartOption
 	auto.clear()
@@ -284,7 +326,9 @@ func _apply_static_text() -> void:
 	%ConnectionCheckButton.text = T.t("check")
 	%SettingsCopyLogsButton.text = T.t("copy_logs")
 	%SettingsBackButton.text = T.t("back")
-	%BrowseTitle.text = T.t("browse_title")
+	%BrowseTabOnlineButton.text = T.t("browse_tab_online")
+	%BrowseTabLanButton.text = T.t("browse_tab_lan")
+	%BrowseLanPasswordEdit.placeholder_text = T.t("password_placeholder")
 	%BrowseRefreshButton.text = T.t("browse_refresh")
 	%BrowseBackButton.text = T.t("back")
 	var auto: OptionButton = %AutoStartOption
@@ -348,7 +392,7 @@ func _set_text(edit: LineEdit, text: String) -> void:
 func _draw_start(entering: bool) -> void:
 	%NameLabel.visible = model.names_allowed()
 	%NameEdit.visible = model.names_allowed()
-	%BrowseButton.visible = model.can_browse()
+	%BrowseButton.visible = model.browse_available()
 	%StartNote.text = model.start_note
 	%StartNote.visible = model.start_note != ""
 	%StartCheckLine.text = model.start_check_line()
@@ -548,14 +592,26 @@ func _draw_settings(entering: bool) -> void:
 
 
 func _draw_browse() -> void:
-	%BrowseStatus.text = model.browse_status
-	%BrowseStatus.visible = model.browse_status != ""
-	var sig := JSON.stringify(model.browse_items)
+	var lan_shown := model.shown_list() == "lan"
+	%BrowseTitle.text = model.browse_title()
+	%BrowseTabs.visible = model.browse_tabs_shown()
+	%BrowseTabOnlineButton.set_pressed_no_signal(not lan_shown)
+	%BrowseTabLanButton.set_pressed_no_signal(lan_shown)
+	%BrowseLanPasswordEdit.visible = lan_shown
+	%BrowseList.visible = %BrowseList.get_child_count() > 0 or not lan_shown
+	%BrowseStatus.text = model.list_status()
+	%BrowseStatus.visible = %BrowseStatus.text != ""
+	var items: Array = model.lan_rows() if lan_shown else model.browse_items
+	var sig := ("lan" if lan_shown else "online") + JSON.stringify(items)
 	if sig == _browse_sig:
 		return
 	_browse_sig = sig
 	_clear(%BrowseList)
-	for it: Dictionary in model.browse_items:
+	if lan_shown:
+		_draw_lan_rows(items)
+		%BrowseList.visible = %BrowseList.get_child_count() > 0
+		return
+	for it: Dictionary in items:
 		var row := HFlowContainer.new()
 		var l := Label.new()
 		l.text = OneLobbyMenuText.t("browse_row", [str(it.get("name", "")), str(it.get("host_name", "")), int(it.get("players", 0)), int(it.get("max_players", 0))])
@@ -566,6 +622,39 @@ func _draw_browse() -> void:
 		row.add_child(j)
 		%BrowseList.add_child(row)
 	if _shown == OneLobbyMenuModel.Screen.BROWSE and %BrowseList.get_child_count() > 0:
+		_focus_first(OneLobbyMenuModel.Screen.BROWSE)
+
+
+## One row per LAN game: the line, a password mark, why it cannot be joined (greyed), and a Join button. Text only, never markup.
+func _draw_lan_rows(rows: Array) -> void:
+	for i in rows.size():
+		var r: Dictionary = rows[i]
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 12)
+		var l := Label.new()
+		l.text = str(r["text"])
+		row.add_child(l)
+		if str(r["lock"]) != "":
+			var lock := Label.new()
+			lock.text = str(r["lock"])
+			row.add_child(lock)
+		if not bool(r["can_join"]):
+			l.modulate = Color(1, 1, 1, 0.5)
+			var why := Label.new()
+			why.text = str(r["note"])
+			why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			why.custom_minimum_size.x = 200
+			why.modulate = Color(1, 1, 1, 0.5)
+			row.add_child(why)
+		var j := Button.new()
+		j.text = OneLobbyMenuText.t("browse_join")
+		j.disabled = not bool(r["can_join"])
+		j.pressed.connect(func() -> void: model.join_lan(i))
+		row.add_child(j)
+		%BrowseList.add_child(row)
+	# keep a player's focus (the password field) unless it was on a row that is gone
+	var f := get_viewport().gui_get_focus_owner()
+	if _shown == OneLobbyMenuModel.Screen.BROWSE and (f == null or not f.is_visible_in_tree() or not is_ancestor_of(f)):
 		_focus_first(OneLobbyMenuModel.Screen.BROWSE)
 
 

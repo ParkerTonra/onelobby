@@ -60,6 +60,14 @@ var chat_lines: Array = [] ## [{peer_id, name, text}]
 var requests: Array = [] ## [{peer_id, name}]
 var browse_items: Array = []
 var browse_status := ""
+## LAN games (spec/lan-discovery.md). `lan`: the switch for a game with no blueprint (with one, hosting.lan decides). `browse_tab`:
+## "online" or "lan", the list the Browse screen opened on last in this run (first time: Online).
+var lan := false
+var browse_tab := "online"
+var lan_password_text := ""
+## Makes the finder: Callable(options) -> an object like OneLobbyLanFinder (a test passes a fake). Default: client.lan_finder().
+var finder_factory := Callable()
+var now_fn := Callable(Time, "get_ticks_msec")
 var settings_note := ""
 var relay_note := ""
 var server_text := ""
@@ -72,6 +80,9 @@ var log_note := ""
 ## and with it the direct route and loopback host options; the connection check never runs on its own while it is set.
 var local_only := false
 
+var _finder = null
+var _lan_empty_since := -1
+var _lan_status_shown := ""
 var _ticket := 0
 var _game_started := false
 
@@ -118,6 +129,32 @@ func can_browse() -> bool:
 	if c != null and not bool(c.hosting.get("server", false)):
 		return false
 	return route != "direct" and not client.effective_server().is_empty()
+
+
+## True when this game has LAN discovery on (blueprint `hosting.lan`; with no blueprint, the menu's `lan`) and the client can open UDP
+## (a web export cannot).
+func lan_available() -> bool:
+	if OS.has_feature("web"):
+		return false
+	var c := _cfg()
+	return bool(c.hosting.get("lan", false)) if c != null else lan
+
+
+## The Browse button shows when the lobby server list or the LAN list is available.
+func browse_available() -> bool:
+	return can_browse() or lan_available()
+
+
+## True when the Browse screen shows the two-button tab bar (both lists are available).
+func browse_tabs_shown() -> bool:
+	return can_browse() and lan_available()
+
+
+## "online" or "lan": the list the Browse screen shows now.
+func shown_list() -> String:
+	if lan_available() and (not can_browse() or browse_tab == "lan"):
+		return "lan"
+	return "online"
 
 
 func connection_check_shown() -> bool:
@@ -305,6 +342,8 @@ func host() -> void:
 	var l: OneLobbyLobby
 	var use_direct := route == "direct" or (route == "auto" and client.config == null and client.lobby_server.is_empty())
 	if use_direct:
+		if client.config == null and lan and not o.has("lan"):
+			o["lan"] = true # no blueprint: the menu's own switch (with one, direct_options carries hosting.lan)
 		l = await client.host_direct(o)
 	else:
 		l = await client.host(o)
@@ -783,18 +822,40 @@ func _fact(prefix: String, value: String, fallback: String) -> String:
 # ---- browse ---------------------------------------------------------------------------------------------------------
 
 func open_browse() -> void:
-	if screen != Screen.START or not can_browse():
+	if screen != Screen.START or not browse_available():
 		return
 	_set_screen(Screen.BROWSE)
-	await refresh_browse()
+	await _show_list()
 
 
+## Starts what the shown list needs: the LAN finder for the LAN list (and only then), the lobby server query for the other.
+func _show_list() -> void:
+	if shown_list() == "lan":
+		_start_lan()
+	else:
+		_stop_lan()
+		await refresh_browse()
+
+
+## Picks a tab ("online" or "lan") on the Browse screen. Leaving the LAN tab closes the finder; opening it starts one.
+func set_browse_tab(tab: String) -> void:
+	if screen != Screen.BROWSE or not browse_tabs_shown() or not ["online", "lan"].has(tab) or tab == browse_tab:
+		return
+	browse_tab = tab
+	await _show_list()
+
+
+## Refresh: asks the server again, or asks the LAN now.
 func refresh_browse() -> void:
+	if shown_list() == "lan":
+		if _finder != null:
+			_finder.ask_now()
+		return
 	browse_status = OneLobbyMenuText.t("browse_loading")
 	browse_items = []
 	changed.emit()
 	var items: Array = await client.list()
-	if screen != Screen.BROWSE:
+	if screen != Screen.BROWSE or shown_list() != "online":
 		return
 	if items.is_empty() and not client.last_error.is_empty():
 		browse_status = str(OneLobbyFriendly.describe_error(client.last_error)["message"])
@@ -810,6 +871,142 @@ func join_listed(code: String) -> void:
 		return
 	_set_screen(Screen.START)
 	set_join_text(code)
+	await join()
+
+
+# ---- LAN games ------------------------------------------------------------------------------------------------------
+
+## How long the LAN list says "looking" before it says nothing was found.
+const LAN_EMPTY_AFTER_MS := 3000
+
+
+func set_lan_password(text: String) -> void:
+	lan_password_text = text.left(64)
+
+
+## True while a finder exists (the LAN list is the shown list). A test counts this.
+func finder_running() -> bool:
+	return _finder != null
+
+
+func _start_lan() -> void:
+	if _finder != null:
+		return
+	var o := {}
+	if local_only:
+		o["targets"] = PackedStringArray(["127.0.0.1"]) # --local: nothing is broadcast
+	_finder = finder_factory.call(o) if finder_factory.is_valid() else client.lan_finder(o)
+	_finder.changed.connect(_on_lan_changed)
+	_lan_empty_since = int(now_fn.call())
+	_lan_status_shown = ""
+	_finder.start()
+	changed.emit()
+
+
+## Closes the finder's socket and frees it. Safe to call when there is none.
+func _stop_lan() -> void:
+	if _finder == null:
+		return
+	var f = _finder
+	_finder = null
+	if is_instance_valid(f):
+		if f.changed.is_connected(_on_lan_changed):
+			f.changed.disconnect(_on_lan_changed)
+		f.stop()
+	if not finder_factory.is_valid() and is_instance_valid(client):
+		client.drop_lan_finder()
+
+
+## For the view: the menu left the tree, the application is quitting, or the menu was hidden. The finder goes; the screen stays.
+func shutdown() -> void:
+	_stop_lan()
+
+
+## For the view: the menu became visible again; a LAN list that is on screen looks again.
+func resume() -> void:
+	if screen == Screen.BROWSE and shown_list() == "lan":
+		_start_lan()
+
+
+func _on_lan_changed(_games: Array) -> void:
+	if _finder == null:
+		return
+	if (_finder.games as Array).is_empty():
+		if _lan_empty_since < 0:
+			_lan_empty_since = int(now_fn.call())
+	else:
+		_lan_empty_since = -1
+	changed.emit()
+
+
+## For the view, every frame while the Browse screen is up: lets the "nothing found" sentence appear after its 3 seconds.
+func tick() -> void:
+	if _finder == null:
+		return
+	var t := lan_status_text()
+	if t != _lan_status_shown:
+		_lan_status_shown = t
+		changed.emit()
+
+
+## The LAN list's rows: {address, port, name, host_name, players, max_players, has_password, same_version, text, lock, can_join, note}.
+## `text` is plain text (names are never markup). `lock` is the password mark ("" when none). `note` says why a row cannot be joined.
+func lan_rows() -> Array:
+	var rows: Array = []
+	if _finder == null:
+		return rows
+	for g: Dictionary in _finder.games:
+		var same := bool(g.get("same_version", true))
+		rows.append({
+			"address": str(g["address"]), "port": int(g["port"]), "name": str(g["name"]), "host_name": str(g["host_name"]),
+			"players": int(g["players"]), "max_players": int(g["max_players"]), "has_password": bool(g["has_password"]), "same_version": same,
+			"text": OneLobbyMenuText.t("lan_row", [str(g["name"]), str(g["host_name"]), int(g["players"]), int(g["max_players"])]),
+			"lock": OneLobbyMenuText.t("lan_locked") if bool(g["has_password"]) else "",
+			"can_join": same,
+			"note": "" if same else str(OneLobbyFriendly.describe_error("version_mismatch")["message"]),
+		})
+	return rows
+
+
+## The sentence under the LAN list's title: still looking, nothing found (after 3 seconds), the socket failed, or LAN switched off. "" with rows.
+func lan_status_text() -> String:
+	if _finder == null:
+		return ""
+	match str(_finder.status):
+		"socket_failed":
+			return OneLobbyMenuText.t("lan_socket_failed")
+		"off", "browser":
+			return OneLobbyMenuText.t("lan_off")
+	if not (_finder.games as Array).is_empty():
+		return ""
+	var waited := int(now_fn.call()) - _lan_empty_since
+	return OneLobbyMenuText.t("lan_empty") if _lan_empty_since >= 0 and waited >= LAN_EMPTY_AFTER_MS else OneLobbyMenuText.t("lan_looking")
+
+
+## The status line of the shown list.
+func list_status() -> String:
+	return lan_status_text() if shown_list() == "lan" else browse_status
+
+
+## The title of the Browse screen: it says which list when only one is available.
+func browse_title() -> String:
+	if browse_tabs_shown():
+		return OneLobbyMenuText.t("browse_title")
+	return OneLobbyMenuText.t("browse_title_lan" if shown_list() == "lan" else "browse_title_online")
+
+
+## Joins row `index` of the LAN list through the join path, as if its "address:port" had been typed. The finder stops with the screen.
+func join_lan(index: int) -> void:
+	if screen != Screen.BROWSE or shown_list() != "lan":
+		return
+	var rows := lan_rows()
+	if index < 0 or index >= rows.size() or not bool(rows[index]["can_join"]):
+		return
+	var r: Dictionary = rows[index]
+	var pw := lan_password_text
+	_set_screen(Screen.START)
+	set_join_text("%s:%d" % [r["address"], r["port"]])
+	set_password(pw)
 	await join()
 
 
@@ -850,4 +1047,6 @@ func apply_boot_flags(args: PackedStringArray) -> String:
 
 func _set_screen(s: Screen) -> void:
 	screen = s
+	if s != Screen.BROWSE:
+		_stop_lan() # the finder lives only while the LAN list is on screen
 	changed.emit()

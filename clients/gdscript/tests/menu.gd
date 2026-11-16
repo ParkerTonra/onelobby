@@ -17,6 +17,39 @@ var _all: Array = [] # every rig made, left at the end
 var _copied: Array = []
 
 
+## A finder with no socket: the model's `finder_factory` seam. Counts what the model does to it.
+class FakeFinder:
+	extends RefCounted
+	signal changed(games: Array)
+	signal status_changed(status: String, reason: String)
+	var status := "idle"
+	var games: Array[Dictionary] = []
+	var options := {}
+	var starts := 0
+	var stops := 0
+	var asks := 0
+
+	func start() -> String:
+		starts += 1
+		if status == "idle":
+			status = "running"
+		return status
+
+	func stop() -> void:
+		stops += 1
+		status = "idle"
+		games = []
+
+	func ask_now() -> void:
+		asks += 1
+
+	func put(rows: Array) -> void:
+		games.clear()
+		for r in rows:
+			games.append(r)
+		changed.emit(games)
+
+
 ## One player: a client and the model that drives it.
 class Rig:
 	var client: OneLobbyClient
@@ -137,6 +170,8 @@ func _run() -> void:
 		await _extras()
 	if only == "" or only == "onopen":
 		await _on_open()
+	if only == "" or only == "lan":
+		await _lan()
 	print("menu: %d passed, %d failed" % [_pass, _fail])
 	for r: Rig in _all:
 		if r.model.lobby != null and not r.model.lobby.is_closed():
@@ -552,3 +587,143 @@ func _on_open() -> void:
 	_check(hm.start_check_line() == hm.check_verdict, "back on the start screen the late warning shows")
 	h["client"].queue_free()
 	await _frames(2)
+
+
+# ---- LAN games: the Browse screen's second list, with a fake finder (no socket) -------------------------------------------------
+
+func _lan_row(address := "192.168.1.20", port := 47810, name := "Sam's game", host := "Sam", players := 2, cap := 4, pw := false, same := true) -> Dictionary:
+	return {"address": address, "port": port, "name": name, "host_name": host, "players": players, "max_players": cap, "has_password": pw,
+		"same_version": same, "net_version": "1", "last_seen_ms": 0}
+
+
+## A model with a blueprint (hosting.server / hosting.lan as given) and a fake finder; `made` collects every finder the model asked for.
+func _lan_model(server: bool, lan: bool, made: Array, clock: Array) -> OneLobbyMenuModel:
+	var cfg := {"game": {"id": "menu-test"}, "engine": "godot-gdscript", "diagnostics": {"checkOnOpen": false},
+		"hosting": {"direct": true, "server": server, "lan": lan, "lobbyServer": "ws://127.0.0.1:1/ws"}}
+	var c := OneLobbyClient.from_config(cfg)
+	c.store = OneLobbyStore.memory()
+	c.settings_env = {}
+	c.log_path = ""
+	c.lobby_server = "ws://127.0.0.1:1/ws"
+	root.add_child(c)
+	var m := OneLobbyMenuModel.new(c)
+	m.finder_factory = func(o: Dictionary) -> FakeFinder:
+		var f := FakeFinder.new()
+		f.options = o
+		made.append(f)
+		return f
+	m.now_fn = func() -> int: return clock[0]
+	return m
+
+
+func _lan() -> void:
+	# availability: all four combinations of (lobby server, LAN)
+	var made: Array = []
+	var clock := [0]
+	var cases := [[false, false, false, false, "online"], [true, false, true, false, "online"], [false, true, false, true, "lan"], [true, true, true, true, "online"]]
+	for k in cases:
+		var m := _lan_model(k[0], k[1], made, clock)
+		_check(m.can_browse() == k[2] and m.lan_available() == k[3] and m.browse_available() == (k[2] or k[3]), "lan: server %s, lan %s -> online %s, lan %s, Browse %s" % [k[0], k[1], m.can_browse(), m.lan_available(), m.browse_available()])
+		_check(m.browse_tabs_shown() == (k[2] and k[3]), "lan: the tab bar shows only with both lists (%s)" % m.browse_tabs_shown())
+		_check(m.shown_list() == k[4] or not m.browse_available(), "lan: the first list shown is %s (got %s)" % [k[4], m.shown_list()])
+		m.client.queue_free()
+	_check(made.is_empty(), "lan: no finder was made by any of that (%d)" % made.size())
+	# a game with no blueprint: the menu's own switch, default off
+	var plain := OneLobbyMenuModel.new(OneLobbyClient.new())
+	root.add_child(plain.client)
+	_check(not plain.lan and not plain.lan_available(), "lan: with no blueprint LAN is off by default")
+	plain.lan = true
+	plain.route = "direct"
+	_check(plain.lan_available() and plain.browse_available() and not plain.browse_tabs_shown() and plain.shown_list() == "lan", "lan: with no blueprint `lan` turns the LAN list on (a direct route has no lobby server list, so no tab bar)")
+	plain.client.queue_free()
+
+	# only LAN available: Browse opens the finder, the title says which list, Back closes it, once each
+	made.clear()
+	var m := _lan_model(false, true, made, clock)
+	m.apply_local()
+	_check(m.browse_title() == "LAN games" and m.shown_list() == "lan", "lan only: the title says LAN games")
+	_check(not m.finder_running() and made.is_empty(), "lan only: before Browse there is no finder")
+	await m.open_browse()
+	_check(m.screen == Screen.BROWSE and made.size() == 1 and made[0].starts == 1 and m.finder_running(), "lan only: Browse starts one finder")
+	_check(made[0].options.get("targets", PackedStringArray()) == PackedStringArray(["127.0.0.1"]), "--local: the finder's targets are [127.0.0.1] (%s)" % str(made[0].options))
+	_check(m.lan_status_text() == "Looking for games on your network...", "the looking sentence shows at once")
+	clock[0] = 2900
+	m.tick()
+	_check(m.lan_status_text() == "Looking for games on your network...", "still looking before 3 seconds")
+	clock[0] = 3000
+	_check(m.lan_status_text().begins_with("No games found on your network.") and "address" in m.lan_status_text(), "after 3 seconds: nothing found, and the host can read out the address")
+	var f: FakeFinder = made[0]
+	f.put([_lan_row(), _lan_row("192.168.1.31", 47811, "<b>Bold</b> game", "Ann", 4, 4, true, false)])
+	var rows := m.lan_rows()
+	_check(rows.size() == 2 and rows[0]["text"] == "Sam's game (Sam) 2/4" and rows[0]["lock"] == "" and rows[0]["can_join"] and rows[0]["note"] == "", "a row: lobby name, host name, players: %s" % str(rows[0]))
+	_check(rows[1]["text"] == "<b>Bold</b> game (Ann) 4/4" and rows[1]["lock"] == "Needs a password", "the second row, password mark, name kept as text: %s" % rows[1]["text"])
+	_check(not rows[1]["can_join"] and rows[1]["note"] == "You and the host are running different versions of the game.", "the other-version row cannot be joined and says why: %s" % rows[1]["note"])
+	_check(m.lan_status_text() == "", "no status line while there are rows")
+	f.put([_lan_row("192.168.1.31", 47811), _lan_row()])
+	_check(m.lan_rows()[0]["address"] == "192.168.1.31", "rows keep the finder's order (it is not re-sorted)")
+	m.refresh_browse()
+	_check(f.asks == 1 and made.size() == 1, "Refresh asks the LAN now (and makes no second finder)")
+	m.back()
+	_check(m.screen == Screen.START and f.stops == 1 and not m.finder_running() and m.lan_rows().is_empty(), "Back stops the finder, once")
+	await m.open_browse()
+	_check(made.size() == 2 and made[1].starts == 1, "opening Browse again makes a new finder (%d made)" % made.size())
+	m.back()
+	_check(made[1].stops == 1, "and Back stops that one too")
+
+	# the finder's own states
+	made.clear()
+	m.shutdown()
+	await m.open_browse()
+	f = made[0]
+	f.status = "socket_failed"
+	f.changed.emit(f.games)
+	_check(m.lan_status_text() == "Couldn't look for games on your network. Ask the host for their address and type it in the join box.", "socket_failed has its sentence")
+	f.status = "off"
+	_check(m.lan_status_text() == "LAN games are switched off in this game.", "off has its sentence")
+	m.back()
+
+	# a join from a row: the join path gets address:port, the finder stops, a password is passed on
+	made.clear()
+	await m.open_browse()
+	f = made[0]
+	f.put([_lan_row("127.0.0.1", 49999, "Sam's game", "Sam", 1, 4, true), _lan_row("127.0.0.1", 49998, "Old", "Bob", 1, 4, false, false)])
+	m.set_lan_password("pw1")
+	m.join_lan(1)
+	_check(m.screen == Screen.BROWSE and m.finder_running(), "a row of another version cannot be joined: nothing happens")
+	m.join_lan(0)
+	_check(m.screen == Screen.CONNECTING and f.stops == 1 and not m.finder_running(), "a join stops the finder at once (screen %s, stops %d)" % [m.screen_name(), f.stops])
+	_check(m.join_text == "127.0.0.1:49999" and m.password_text == "pw1", "the join path got '%s' and the typed password" % m.join_text)
+	m.cancel_connecting()
+	m.client.queue_free()
+
+	# both lists: the tab bar; the screen opens on the tab used last in this run; each switch starts or stops the finder once
+	made.clear()
+	var both := _lan_model(true, true, made, clock)
+	_check(both.browse_title() == "Games to join", "both lists: the title is the plain one")
+	await both.open_browse()
+	_check(both.shown_list() == "online" and made.is_empty(), "both: the first time it opens on Online, with no finder")
+	await both.set_browse_tab("lan")
+	_check(both.shown_list() == "lan" and made.size() == 1 and made[0].starts == 1, "the LAN tab starts one finder")
+	await both.set_browse_tab("lan")
+	_check(made.size() == 1 and made[0].starts == 1, "picking the same tab again does nothing")
+	await both.set_browse_tab("online")
+	_check(made[0].stops == 1 and not both.finder_running(), "the Online tab stops it, once")
+	await both.set_browse_tab("lan")
+	both.back()
+	_check(made.size() == 2 and made[1].stops == 1 and both.screen == Screen.START, "Back from the LAN tab stops the finder")
+	await both.open_browse()
+	_check(both.shown_list() == "lan" and made.size() == 3 and made[2].starts == 1, "Browse opens on the tab used last (LAN)")
+	both.shutdown()
+	_check(made[2].stops == 1 and not both.finder_running() and both.screen == Screen.BROWSE, "shutdown (the menu left the tree) stops it; the screen stays")
+	both.shutdown()
+	_check(made[2].stops == 1, "a second shutdown stops nothing again")
+	both.resume()
+	_check(both.finder_running() and made.size() == 4, "resume (the menu shown again) looks again")
+	both._set_screen(Screen.PLAYING)
+	_check(made[3].stops == 1 and not both.finder_running(), "a game starting (the screen changes) stops it")
+	both.client.queue_free()
+
+	# the host side, no blueprint: the menu's switch reaches host_direct's options
+	var hh := _lan_model(false, true, made, clock)
+	_check(bool(hh.client.config.direct_options("Sam")["lan"]), "with a blueprint hosting.lan reaches the direct host's options")
+	hh.client.queue_free()

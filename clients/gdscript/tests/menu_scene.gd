@@ -14,6 +14,26 @@ var _fail := 0
 var _port := 49500
 
 
+## A finder with no socket, for the layout checks of the LAN list (the model's `finder_factory` seam).
+class FakeFinder:
+	extends RefCounted
+	signal changed(games: Array)
+	signal status_changed(status: String, reason: String)
+	var status := "idle"
+	var games: Array[Dictionary] = []
+
+	func start() -> String:
+		status = "running"
+		return status
+
+	func stop() -> void:
+		status = "idle"
+		games = []
+
+	func ask_now() -> void:
+		pass
+
+
 func _init() -> void:
 	process_frame.connect(func() -> void:
 		if Time.get_ticks_msec() > 200000:
@@ -129,6 +149,8 @@ func _run() -> void:
 	await _layouts()
 	await _smoke()
 	await _on_open_scene()
+	await _lan_scene()
+	await _lan_layouts()
 	print("menu_scene: %d passed, %d failed" % [_pass, _fail])
 	await _frames(5)
 	quit(1 if _fail > 0 else 0)
@@ -347,3 +369,214 @@ func _on_open_scene() -> void:
 	state["gate"] = true
 	await _frames(5)
 	_check(not is_instance_valid(menu) and not model.check_running, "freed mid-check: the late answer ended quietly (the model is done, the menu is gone)")
+
+
+# ---- LAN games in the real scene: real sockets on 127.0.0.1 only, every menu opened with --local ----------------------------------
+
+func _lan_config(server: bool) -> Dictionary:
+	return {"game": {"id": "menu-scene-lan"}, "engine": "godot-gdscript", "diagnostics": {"checkOnOpen": false},
+		"hosting": {"direct": true, "server": server, "lan": true, "nostr": false, "openPort": false, "lobbyServer": "ws://127.0.0.1:1/ws"}}
+
+
+func _lan_menu(display: String, boot: PackedStringArray, cfg: Dictionary) -> OneLobbyMenu:
+	var packed: PackedScene = load("res://addons/onelobby/menu/menu.tscn")
+	var menu: OneLobbyMenu = packed.instantiate()
+	var c := OneLobbyClient.from_config(cfg)
+	c.display_name = display
+	c.store = OneLobbyStore.memory()
+	c.settings_env = {}
+	c.log_path = ""
+	menu.client = c
+	menu.boot_args = boot
+	menu.boot_flags = true
+	menu.host_options = _host_opts()
+	root.add_child(menu)
+	return menu
+
+
+## Every OneLobbyLanFinder under `n`.
+func _finders(n: Node, out: Array = []) -> Array:
+	for c in n.get_children():
+		if c is OneLobbyLanFinder:
+			out.append(c)
+		_finders(c, out)
+	return out
+
+
+## True when nothing holds this UDP port on 127.0.0.1 (a probe socket binds it).
+func _port_free(port: int) -> bool:
+	var probe := PacketPeerUDP.new()
+	var ok := probe.bind(port, "127.0.0.1") == OK
+	probe.close()
+	return ok
+
+
+## `netstat -ano` rows of this process (printed with --netstat after `--`, for the report's socket list).
+func _netstat(tag: String) -> void:
+	if not OS.get_cmdline_user_args().has("--netstat"):
+		return
+	var out := []
+	OS.execute("netstat", ["-ano"], out)
+	var pid := str(OS.get_process_id())
+	for line: String in str(out[0]).split("\n"):
+		var cols := line.strip_edges().split(" ", false)
+		if cols.size() >= 4 and cols[cols.size() - 1] == pid:
+			print("NETSTAT %s: %s" % [tag, " ".join(cols)])
+
+
+func _lan_scene() -> void:
+	root.size = Vector2i(1280, 720)
+	# the host: --local, hosting.lan true, hosted from the menu
+	var hm := _lan_menu("Hosty", PackedStringArray(["--local", "--host", "--name=Hosty"]), _lan_config(false))
+	_check(await _until(func() -> bool: return hm.model.screen == Screen.LOBBY and hm.model.lobby.ip_code != ""), "lan: the host menu reaches its lobby")
+	# the joiner: --local, nothing is looked for yet
+	var jm := _lan_menu("Joey", PackedStringArray(["--local", "--name=Joey"]), _lan_config(false))
+	await _frames(3)
+	_check(jm.model.local_only and jm.model.route == "direct", "lan: the joiner menu is local (--local)")
+	_check(_finders(jm).is_empty() and jm.client._lan_finder == null, "lan: before Browse there is no finder object (%d)" % _finders(jm).size())
+	_check((jm.get_node("%BrowseButton") as Button).visible, "lan: the start screen's Browse button shows with only the LAN list")
+	_netstat("before the list opens")
+	(jm.get_node("%BrowseButton") as Button).pressed.emit()
+	_check((jm.get_node("%BrowseStatus") as Label).text.begins_with("Looking for games"), "lan: the looking sentence shows at once")
+	await _frames(2)
+	_check(jm.model.screen == Screen.BROWSE and not (jm.get_node("%BrowseTabs") as Control).visible, "lan: Browse opens the LAN list, with no tab bar")
+	_check((jm.get_node("%BrowseTitle") as Label).text == "LAN games", "lan: the title says LAN games")
+	var fs := _finders(jm)
+	_check(fs.size() == 1 and fs[0].is_running() and fs[0].local_port > 0, "lan: one finder is running with its own port while the list is open")
+	var fport: int = fs[0].local_port if fs.size() == 1 else 0
+	_check(not _port_free(fport), "lan: the finder's port %d is taken while the list is open" % fport)
+	_netstat("list open")
+	_check(await _until(func() -> bool: return jm.model.lan_rows().size() == 1, 3000), "lan: the host shows in the LAN list within 3 seconds")
+	await _frames(2)
+	var row: Dictionary = jm.model.lan_rows()[0] if jm.model.lan_rows().size() == 1 else {}
+	_check(row.get("address") == "127.0.0.1" and int(row.get("port", 0)) > 0, "lan: the row's address and port (%s:%s)" % [row.get("address"), row.get("port")])
+	_check(row.get("name") == "scene" and row.get("host_name") == "Hosty" and row.get("players") == 1 and row.get("max_players") == 4 and not row.get("has_password", true),
+		"lan: the row's four fields: %s" % str(row))
+	var list: Control = jm.get_node("%BrowseList")
+	var labels := list.find_children("*", "Label", true, false)
+	_check(list.get_child_count() == 1 and labels.size() >= 1 and (labels[0] as Label).text == "scene (Hosty) 1/4", "lan: the scene draws the row: '%s'" % ((labels[0] as Label).text if not labels.is_empty() else ""))
+	_check(not (jm.get_node("%BrowseStatus") as Label).visible, "lan: no status line with a row")
+	# the row goes after the host leaves (the finder drops a row 4 seconds after its last answer)
+	await hm.model.leave()
+	_check(await _until(func() -> bool: return jm.model.lan_rows().is_empty(), 9000), "lan: the row goes after the host leaves")
+	_check(await _until(func() -> bool: return list.get_child_count() == 0, 2000), "lan: and the scene's list is empty again")
+	# Back closes the finder: no node, the port is free again
+	_cancel()
+	await _frames(3)
+	_check(jm.model.screen == Screen.START and _finders(jm).is_empty() and jm.client._lan_finder == null, "lan: Back leaves no finder object")
+	_check(_port_free(fport), "lan: the finder's port is free again after Back")
+	_netstat("after Back")
+	# a host again; a click on the row joins by address:port and closes the finder
+	var host2 := _lan_menu("Hosty2", PackedStringArray(["--local", "--host", "--name=Hosty2"]), _lan_config(false))
+	_check(await _until(func() -> bool: return host2.model.screen == Screen.LOBBY and host2.model.lobby.ip_code != ""), "lan: a second host menu reaches its lobby")
+	(jm.get_node("%BrowseButton") as Button).pressed.emit()
+	_check(await _until(func() -> bool: return jm.model.lan_rows().size() == 1, 4000), "lan: it is found again on the second opening")
+	fport = _finders(jm)[0].local_port
+	await _frames(2)
+	var join_button := (jm.get_node("%BrowseList") as Control).find_children("*", "Button", true, false)
+	_check(join_button.size() == 1 and not (join_button[0] as Button).disabled, "lan: the row has a Join button")
+	var want := "%s:%d" % [row.get("address"), int(jm.model.lan_rows()[0]["port"])]
+	(join_button[0] as Button).pressed.emit() # the join starts at once: its first await comes after the screen changes
+	_check(jm.model.screen == Screen.CONNECTING and _finders(jm).is_empty() and _port_free(fport), "lan: a click on the row joins and the finder's socket is closed (screen %s)" % jm.model.screen_name())
+	_check(jm.model.join_text == want, "lan: the join got '%s'" % jm.model.join_text)
+	jm.model.cancel_connecting()
+	await _frames(3)
+	# a menu freed while the LAN list is open leaves no socket
+	(jm.get_node("%BrowseButton") as Button).pressed.emit()
+	await _frames(3)
+	var held: int = _finders(jm)[0].local_port
+	_check(held > 0 and not _port_free(held), "lan: the list is open again (port %d)" % held)
+	jm.queue_free()
+	await _frames(4)
+	_check(_port_free(held), "lan: a menu freed while the LAN list is open leaves no socket (port %d free)" % held)
+	# hidden while the list is open: no finder; shown again: it looks again
+	var vm := _lan_menu("Vera", PackedStringArray(["--local", "--name=Vera"]), _lan_config(false))
+	await _frames(2)
+	vm.model.open_browse()
+	await _frames(2)
+	held = _finders(vm)[0].local_port
+	vm.visible = false
+	await _frames(2)
+	_check(_finders(vm).is_empty() and _port_free(held), "lan: hiding the menu closes the finder")
+	vm.visible = true
+	await _frames(2)
+	_check(_finders(vm).size() == 1, "lan: showing it again looks again")
+	# a game starting hides the menu and closes the finder
+	vm.model._set_screen(Screen.PLAYING)
+	await _frames(2)
+	_check(_finders(vm).is_empty() and not vm.visible, "lan: a game starting closes the finder")
+	vm.queue_free()
+	# both lists: a tab bar; the tabs start and stop the finder
+	var bm := _lan_menu("Bea", PackedStringArray(["--local", "--name=Bea"]), _lan_config(true))
+	await _frames(2)
+	bm.model.route = "auto" # --local forces the direct route; the lobby server list needs the server route to count as available
+	bm.model.open_browse()
+	await _frames(2)
+	_check((bm.get_node("%BrowseTabs") as Control).visible and (bm.get_node("%BrowseTitle") as Label).text == "Games to join", "lan: with both lists the tab bar shows")
+	_check(bm.model.shown_list() == "online" and _finders(bm).is_empty(), "lan: it opens on Online, with no finder")
+	(bm.get_node("%BrowseTabLanButton") as Button).pressed.emit()
+	await _frames(2)
+	_check(bm.model.shown_list() == "lan" and _finders(bm).size() == 1, "lan: the LAN tab starts a finder")
+	held = _finders(bm)[0].local_port
+	(bm.get_node("%BrowseTabOnlineButton") as Button).pressed.emit()
+	await _frames(2)
+	_check(_finders(bm).is_empty() and _port_free(held), "lan: the Online tab closes it")
+	(bm.get_node("%BrowseTabLanButton") as Button).pressed.emit()
+	await _frames(2)
+	bm.model.back()
+	await _frames(2)
+	_check(_finders(bm).is_empty(), "lan: Back from the LAN tab closes it")
+	bm.model.open_browse()
+	await _frames(2)
+	_check(bm.model.shown_list() == "lan" and _finders(bm).size() == 1, "lan: Browse opens on the tab used last")
+	bm.queue_free()
+	await _frames(3)
+	# the host that was joined, left
+	host2.queue_free()
+	hm.queue_free()
+	await _frames(3)
+
+
+## The LAN list at both sizes: rows (a long name, a password, another version), the empty state and the tab bar, audited like every screen.
+func _lan_layouts() -> void:
+	var packed: PackedScene = load("res://addons/onelobby/menu/menu.tscn")
+	for size in [Vector2i(1280, 720), Vector2i(640, 360)]:
+		root.size = size
+		var tag := "%dx%d" % [size.x, size.y]
+		var menu: OneLobbyMenu = packed.instantiate()
+		var c := OneLobbyClient.from_config(_lan_config(true))
+		c.display_name = "Sam"
+		c.store = OneLobbyStore.memory()
+		c.settings_env = {}
+		c.log_path = ""
+		menu.client = c
+		menu.boot_flags = false
+		var fake := FakeFinder.new()
+		menu.finder_factory = func(_o: Dictionary) -> FakeFinder: return fake
+		root.add_child(menu)
+		await _frames(2)
+		var m := menu.model
+		m.open_browse()
+		m.set_browse_tab("lan")
+		await _audit(menu, tag + " LAN list, looking", Vector2(size))
+		var long_name := "A lobby with a rather long name indeed"
+		fake.games = [
+			{"address": "192.168.1.20", "port": 47810, "name": long_name, "host_name": "Sam", "players": 2, "max_players": 4, "has_password": false, "same_version": true, "net_version": "1", "last_seen_ms": 0},
+			{"address": "192.168.1.21", "port": 47810, "name": "Locked", "host_name": "Ann", "players": 1, "max_players": 8, "has_password": true, "same_version": true, "net_version": "1", "last_seen_ms": 0},
+			{"address": "192.168.1.22", "port": 47810, "name": "<b>Old</b>", "host_name": "Bob", "players": 1, "max_players": 4, "has_password": false, "same_version": false, "net_version": "0", "last_seen_ms": 0}]
+		fake.changed.emit(fake.games)
+		await _audit(menu, tag + " LAN list, three rows", Vector2(size))
+		var texts := PackedStringArray()
+		for l in (menu.get_node("%BrowseList") as Control).find_children("*", "Label", true, false):
+			texts.append((l as Label).text)
+		_check("<b>Old</b> (Bob) 1/4" in texts and "Needs a password" in texts and "You and the host are running different versions of the game." in texts, "%s: the rows draw as text, with the password mark and the reason: %s" % [tag, str(texts)])
+		var buttons := (menu.get_node("%BrowseList") as Control).find_children("*", "Button", true, false)
+		_check(buttons.size() == 3 and not (buttons[0] as Button).disabled and (buttons[2] as Button).disabled, "%s: the other-version row's Join is disabled" % tag)
+		_check((menu.get_node("%BrowseLanPasswordEdit") as Control).visible, "%s: the password field shows above the LAN rows" % tag)
+		fake.games = []
+		fake.changed.emit(fake.games)
+		await _audit(menu, tag + " LAN list, empty", Vector2(size))
+		_cancel()
+		await _frames(2)
+		menu.queue_free()
+		await _frames(2)
