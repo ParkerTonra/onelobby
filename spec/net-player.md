@@ -25,7 +25,7 @@ record allows, so it cannot collide with a game that counts up from 1). Layouts 
 `"owner"` mode the input message carries the state bytes, in `"host"` mode the input preset bytes (section 3).
 
 The host's layer creates the entity: in `"host"` mode when the peer's link is up (it starts at the game's spawn point, the
-origin by default); in `"owner"` mode when the peer's first state arrives (so nobody sees a player flash at the origin). The
+origin by default, and the owner starts from that state, section 5.2); in `"owner"` mode when the peer's first state arrives (so nobody sees a player flash at the origin). The
 host's own player is written straight into its entity. A peer that leaves loses its entity; a peer that becomes a spectator
 loses it too; a spectator never gets one. A late joiner gets everyone through the keyframe.
 
@@ -193,18 +193,23 @@ The host's own player is written straight into its entity each tick. The host ca
 
 1. The game supplies a **step function** `step(state, input, dt) -> state` (`dt` = 1 / `tickRate` seconds) and the same
    function runs on the host and in every owner's prediction. It must be deterministic given its arguments.
-2. Each client tick the owner makes an input (`setLocalInput`), sends it (section 3), and applies `step` to its own state at
+2. **The owner has no local state until the host's first state of its own player has arrived** (JS: `local` is `undefined`;
+   GDScript: `local_state()` returns an empty Dictionary and `get_state` of the local player is null). That state is where the
+   host spawned the player; the owner's predictor starts from it, so the owner never reads a position at the origin and the
+   first state is no correction: no snap, no `corrected` event. Inputs the game gives before that are neither sent nor stepped.
+   (The Godot node writes nothing into its character before then.)
+3. Each client tick the owner makes an input (`setLocalInput`), sends it (section 3), and applies `step` to its own state at
    once (prediction; `Reconciler.predict` with the sequence number `submitInput` returned).
-3. The host takes one input per client per tick and steps that player once (`state = quantise(step(state, input, dt))`). A
+4. The host takes one input per client per tick and steps that player once (`state = quantise(step(state, input, dt))`). A
    repeated input (nothing new arrived) does **not** step: the owner has predicted exactly the inputs it sent, so the state
    after input N is the same on both sides.
-4. The snapshot carries the state and `lastInput`. The owner calls `Reconciler.reconcile(state, lastInput)`: it starts from the
+5. The snapshot carries the state and `lastInput`. The owner calls `Reconciler.reconcile(state, lastInput)`: it starts from the
    host's state and replays the inputs the host has not seen.
-5. The difference between the state before and after is a correction: `PredictionSmoother.correct(dx, dy, dz, teleport)`. The
+6. The difference between the state before and after is a correction: `PredictionSmoother.correct(dx, dy, dz, teleport)`. The
    drawn position is the predicted position plus the smoother's `offset`, which decays to zero in **100 ms**. A correction
    longer than **2.0** on the ground plane, longer than **0.5** vertically, or with a changed teleport counter **snaps** (offset
    cleared). For 2D the plane is x, y and there is no vertical part.
-6. The host quantises after every step so both sides replay from the same bytes.
+7. The host quantises after every step so both sides replay from the same bytes.
 
 Host mode needs the game's movement to be a function of (state, input, dt) only. A game whose movement uses the engine's
 physics (a `CharacterBody`, a `CharacterController`) must wrap one step of it: that is what the Godot node and the Unity
@@ -224,6 +229,10 @@ A client draws every other player from the snapshots it holds (`trySampleAt`), n
 - **Interpolation.** Numbers (`x y z vx vy vz`) blend linearly; `yaw` turns on the **shortest arc**; `pitch` is linear. Fields
   that are not numbers or are discrete (`mode`, `item`, `health`, `team`, the flags) are taken from the **older** sample, never
   blended. If the two samples' `teleport` differ, the older one is held until render time reaches the newer one's tick.
+- **On the host.** The host has no snapshots of its own, so a remote player is drawn from the host's own record of it (the
+  `HistoryRing` of section 8), **one tick behind** (`tick - 1 + alpha`, `alpha` the fraction of the way to the next tick),
+  interpolated as above: a teleport between two records holds the older one until the newer one's tick (the snap), and a
+  player with a single record is held at it. The host's own player is its own state, not delayed. Nothing is carried on.
 - **Carry-on.** Past the newest snapshot the session holds and never extrapolates. The layer carries a player on by its
   velocity: `position + velocity x min(overshoot, 250 ms)`, then holds. The overshoot is `(renderTick - latestTick) x tickMs`. A
   game with `velocity` left out is not carried on.
@@ -270,9 +279,26 @@ tick (x 256) the shooter was seeing. `rewound(peer, view)` answers where that pl
 existing `rewindTick` (`maxRewindMs`, default **250 ms**). The game decides what a hit is and raises `hit` and `death`
 itself (`hostAction`).
 
-The shooter's view is older than its own tick by the render delay plus the one-way trip from the host, and the shot takes
-another one-way trip to reach the host, so the rewind needed is about `one-way x 2 + render delay`. The default 250 ms covers
-links up to about 60 ms one way; with 100 ms one way the clamp cuts in, and `maxRewindMs` has to be raised for such a game.
+**How old a shooter's view is.** When a shot reaches the host, the world the shooter saw is older than the host's tick by the
+shooter's render delay (section 6: `clamp(2 I + 4 J, 2 I, 250 ms)`, so anywhere between two snapshot intervals, 66.7 ms at the
+default, and the 250 ms cap) plus the trip of the snapshots from the host to the shooter (one way) plus the trip of the shot
+to the host (one way): `age = render delay + 2 x one way`.
+
+**What the default covers.** The default `maxRewindMs` of 250 ms therefore covers about 60 ms one way and leaves almost no
+room. On the test link of section 11 with 60 ms one way and 20 ms jitter the render delay is about 110 to 140 ms and the view
+230 to 260 ms old, so 0 to 20 ms of room: some shots are past the limit (in the tests 2 to 14 of 30, depending on the random
+stream). Do not change the default for this; a link slower than 60 ms one way needs a higher limit.
+
+**A shot past the limit.** It is judged at the oldest state the limit allows (`rewindTick` clamps to `now - maxRewindMs`), not
+where the shooter saw the target, so its error is the target's speed times the time past the limit: it grows with the target's
+speed (in the tests, up to 0.13 m for a target at up to 9.6 m/s, while every shot inside the limit was within 0.006 m).
+
+**Slower links.** Set `maxRewindMs` (a session setting: `session: { maxRewindMs }` in JS, `"session": {"max_rewind_ms": ...}` in
+GDScript) to the render delay cap plus twice the one-way time the game supports, for instance 400 ms for the 60 ms link above (the
+tests find every shot within 0.1 m with it). It can go up to the history the host keeps: `historyTicks` host ticks (default 64;
+a view up to 63 ticks back is answered, which is about 2.1 s at 30 Hz), and a ring of that size is what limits it; an older view
+answers nothing (`rewound` returns undefined, null in GDScript), so raise `historyTicks` of the session too to go beyond. A
+higher limit also lets a laggy shooter hit where the target was longer ago.
 
 ## 9. `sync.player` in `onelobby.json`
 
@@ -307,7 +333,9 @@ one-way latency, 20 ms jitter, 3% loss on `fast`** (the fake network's `dropFast
 authority. Bounds the tests hold the layer to: D1 worst path error 0.5 m and mean 0.15 m (the two paths are compared at the one
 constant lag, 0 to 600 ms in 8 ms steps, where they are closest on average; that lag is the sum of the two links and the
 render delay); D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
-the watcher, on-time ones played within 2 ticks after their tick, also at 30% loss; D4 the budget above. The measured numbers
+the watcher, on-time ones played within 2 ticks after their tick, also at 30% loss; D4 the budget above; D8 a shot whose view is within the rewind limit is judged within 0.1 m of where the shooter saw the target
+(at least half of the 30 shots are within it), every shot within 0.3 m, and with `maxRewindMs` 400 on the same link every shot
+within 0.1 m. The measured numbers
 of the last run are in the PR description of the change that added this file.
 
 ## 12. Vectors
@@ -335,4 +363,9 @@ then run the same command without the variable: the plain run only reads the fil
 - In `"host"` mode a repeated input must not step, and the host must quantise after each step.
 - The teleport counter of the owner is the owner's to keep: a game that overwrites it each tick with its own value breaks the
   correction (the layer's `setLocalState` keeps it).
+- The host draws the other players from its own history, one tick behind and interpolated (section 6, "On the host"); a client's
+  snapshot sampler has nothing for them there. A layer that returns nothing for a remote player on the host is wrong.
+- In `"host"` mode the owner has no local state until the host's first state of its own player arrives (section 5.2, step 2): do
+  not start the predictor from the default state, do not send or step inputs before it, and expect no snap and no `corrected` from
+  that first state.
 - Time stamps: `tick` in the message is host ticks; `view` is the render tick x 256 as an unsigned 32-bit number.

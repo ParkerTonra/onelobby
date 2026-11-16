@@ -100,9 +100,9 @@ export function start(lobby: Lobby): NetPlayers {
     const k = readKeys();
     players.setLocalInput({ moveX: k.right, moveY: k.forward, yaw: k.yaw, buttons: { fire: k.fire } });
     players.pump();
-    const me = players.local; // predicted; draw it at me + players.smoother.offset
+    const me = players.local; // predicted; undefined until the host's first state of your player has arrived (nothing to draw yet)
     const o = players.smoother.offset;
-    moveAvatar(players.localPeerId, me.x + o.x, me.y + o.y, me.z + o.z);
+    if (me) moveAvatar(players.localPeerId, me.x + o.x, me.y + o.y, me.z + o.z); // draw it at me + players.smoother.offset
     for (const peer of players.players) {
       const s = players.get(peer);
       if (s && peer !== players.localPeerId) moveAvatar(peer, s.x, s.y, s.z);
@@ -131,8 +131,8 @@ session you made (with `adaptiveDelay: true`) to configure it yourself. Options 
 | `players.on("action", e => ...)` / `players.onAction(name, e => ...)` | an action event; `e` has `player`, `name`, `args`, `tick`, `seq`, `late`, `local`. Returns the unsubscribe function |
 | `players.setLocalState(patch)` | owner: your state, every tick (a patch is merged; the teleport counter is kept for you) |
 | `players.setLocalInput(patch)` | host mode: this tick's input (`moveX`, `moveY`, `yaw`, `pitch`, `buttons`) |
-| `players.local` / `players.smoother.offset` | your own state (host mode: predicted) and the blended correction to add when drawing |
-| `players.get(peer)` | a player's state to draw now: smoothed, shortest-arc yaw, carried on by velocity for at most 250 ms past the newest snapshot, then held |
+| `players.local` / `players.smoother.offset` | your own state (host mode: predicted) and the blended correction to add when drawing. Host mode on a client: `players.local` is `undefined` until the host's first state of your player has arrived (it starts where the host spawned it, never at the origin); inputs before that are not sent or stepped |
+| `players.get(peer)` | a player's state to draw now: smoothed, shortest-arc yaw, carried on by velocity for at most 250 ms past the newest snapshot, then held. On the host: the host's own record of that player, one tick behind and interpolated (a teleport snaps) |
 | `players.latest(peer)` | the authoritative state in the newest snapshot (host: its own record) |
 | `players.players` | the peers that have a player in the world |
 | `players.action(name, args)` | send an action event of the local player; it plays here at once |
@@ -161,8 +161,12 @@ stopped, and a client can still read everything the host sends it.
 ## 7. Hit rewind
 
 The host records every player's state each tick. A `shoot` event carries `view`, the tick the shooter was seeing;
-`players.rewound(target, e.args.view)` is where the target was then, clamped by the session's `maxRewindMs` (default 250 ms,
-enough for links up to about 60 ms one way; raise it for slower ones). You decide what a hit is.
+`players.rewound(target, e.args.view)` is where the target was then, clamped by the session's `maxRewindMs` (default 250 ms). The
+shooter's view is its render delay (66.7 ms up to 250 ms) plus two one-way trips old, so the default covers about 60 ms one way
+and leaves almost no room: on such a link a few shots are past the limit and are judged at the oldest allowed state, off by the
+target's speed times the time past it. For slower links raise it with `session: { maxRewindMs: 400 }` (400 ms finds every shot on a
+60 ms link); the most it can reach is the history the host keeps, `historyTicks` (64 ticks, about 2.1 s at 30 Hz; raise that too
+to go further). You decide what a hit is. Details: `spec/net-player.md` section 8.
 
 ## 8. `onelobby.json`
 
@@ -198,7 +202,7 @@ seated player). Names are snake_case; states, inputs and events are Dictionaries
 | on | the node does |
 |---|---|
 | the machine that owns the player, `"owner"` | each physics frame it reads the parent (global position, `velocity` and `is_on_floor()` of a `CharacterBody`, yaw from `rotation_degrees`) plus the values you set on the node (`pitch`, `mode`, `item`, `aiming`, `blocking`, `health`, `alive`, `team`) and hands them to the layer. You move your character as you always did. `auto_mode` (on by default) derives `mode` (idle, walk, jump, fall) from the movement |
-| the machine that owns the player, `"host"` | you call `set_input({...})` each physics frame; the node predicts with your `step_function` (`Callable(state, input, dt) -> state`, the same function on the host and every owner; without one it logs one clear error) and draws the predicted position plus the smoothed correction |
+| the machine that owns the player, `"host"` | you call `set_input({...})` each physics frame; the node predicts with your `step_function` (`Callable(state, input, dt) -> state`, the same function on the host and every owner; without one it logs one clear error) and draws the predicted position plus the smoothed correction. Until the host's first state of the player has arrived there is nothing to write: the node leaves the character where the game put it (never the origin) and `set_input` is harmless; then the character starts where the host spawned it |
 | every other machine | each rendered frame it writes the smoothed state into the parent (position, yaw; a teleport snaps) and exposes the rest as properties (`pitch`, `mode`, `on_ground`, `item`, `aiming`, `blocking`, `health`, `alive`, `team`, `velocity`). The character stays hidden until its first state has arrived |
 
 | exported property / member | what |
@@ -294,7 +298,9 @@ A game that wants to do all this itself uses the layer directly (`OneLobbyNetPla
 `set_local_state` / `set_local_input`, `get_state(peer)`, `send_action`, `on_action`, ...: the table of section 5 with snake_case names;
 `get` is `get_state`, `latest` is `latest_state`, `local` is `local_state()`, `players` is `player_ids()`, `action` is `send_action` and
 the signal for every action is `action_played`). Where the host draws the other players itself, `get_state(peer)` gives their host
-record one tick behind, interpolated (the JS `get` gives nothing there).
+record one tick behind, interpolated (the JS `get` does the same). Authority `"host"` on a client: `local_state()` is an empty
+Dictionary (and `get_state` of the local player is null) until the host's first state of your player has arrived; JS `local` is
+`undefined` then.
 
 **What is proven, in these words.** Everything on the GDScript side is proven on an in-memory rig (D1 to D9 of
 `clients/gdscript/tests/net_player.gd`, the scene-tree test `net_player_node.gd`) and, in CI, by two headless processes of the sample on

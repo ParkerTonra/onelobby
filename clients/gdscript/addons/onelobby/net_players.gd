@@ -240,7 +240,7 @@ func local_state() -> Dictionary:
 
 ## One player's state to draw now, or null while the player is not in the world. The local player: `local_state()`. A remote
 ## player on a client: its state at render time (about 100 ms behind, more on a jittery link), turning on the shortest arc,
-## carried on by its velocity for at most 250 ms past the newest snapshot, then held. On the host (JS gives nothing there):
+## carried on by its velocity for at most 250 ms past the newest snapshot, then held. On the host (JS does the same):
 ## the host's own record one tick behind, interpolated, so a host that draws the others sees them move smoothly.
 func get_state(peer_id: int) -> Variant:
 	if peer_id == local_peer_id:

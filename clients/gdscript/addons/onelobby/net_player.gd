@@ -57,7 +57,8 @@ signal emoted(emote: int)
 @export var animation_params := {}
 ## True: the node derives `mode` on the owner's machine (idle, walk, jump, fall) from the parent's movement; set `mode` yourself and switch this off to use the others.
 @export var auto_mode := true
-## True: a remote player's character stays hidden until its first state has arrived (nobody sees a player flash at the origin).
+## True: a remote player's character stays hidden until its first state has arrived (nobody sees a player flash at the origin). The local
+## player in "host" authority has nothing to write until the host's first state of it has arrived, so it needs no hiding.
 @export var hide_until_first_state := true
 
 ## Host authority: the game's movement step `Callable(state, input, dt) -> state`. It goes to the layer the node is bound to
