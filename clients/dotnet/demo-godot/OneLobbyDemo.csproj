@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\OneLobby.Core\OneLobby.Core.csproj" />
     <ProjectReference Include="..\OneLobby.Gridpaint\OneLobby.Gridpaint.csproj" />
+    <ProjectReference Include="..\OneLobby.Direct\OneLobby.Direct.csproj" />
     <ProjectReference Include="..\OneLobby.Godot\OneLobby.Godot.csproj" />
     <ProjectReference Include="..\OneLobby.Opus\OneLobby.Opus.csproj" />
   </ItemGroup>

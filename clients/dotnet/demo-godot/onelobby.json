@@ -1,6 +1,6 @@
 {
   "game": { "id": "com.onelobby.demo.menu", "title": "Menu demo" },
   "engine": "godot-csharp",
-  "hosting": { "server": true, "lobbyServer": "ws://127.0.0.1:8080/ws" },
+  "hosting": { "server": true, "direct": true, "lan": true, "lobbyServer": "ws://127.0.0.1:8080/ws" },
   "sync": { "mode": "raw" }
 }
