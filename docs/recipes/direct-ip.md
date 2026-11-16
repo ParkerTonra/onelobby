@@ -324,6 +324,18 @@ itself runs on Node.
   IPAddress.Loopback` (the hub's TCP + UDP listener) plus `DataChannelTransport.BindAddress = "127.0.0.1"` (the WebRTC
   sockets, on host and joiners). Unity: `OneLobbyRunner.BindAddress` or `--bind-address=127.0.0.1` sets both. Never in
   a shipped build: other machines cannot connect.
+  What binds where in a loopback run, per client: **C# (`OneLobby.DataChannel`) and Unity**: the two settings above put every
+  socket (hub TCP, hub UDP, LAN discovery, ICE) on 127.0.0.1. **JS in Node**: `hostDirect` with `bindHost: "127.0.0.1"` listens
+  on loopback and binds its ICE sockets there too (libdatachannel `bindAddress`, set by the library), and `joinDirect` of a
+  127.x.x.x address does the same on the joiner; a link that you build yourself with `webRtcLinkFactoryFor` gets it through
+  `LinkOptions.bindAddress`. **Godot (GDScript and C#)**: the signalling TCP link (and LAN discovery) are loopback-only
+  with `--local` (GDScript: `listen_address` "127.0.0.1"), but the ICE UDP sockets are NOT: Godot's webrtc-native (1.2.2) builds
+  libdatachannel's configuration from `iceServers` and a nested `libdatachannel` dictionary that reads only `enableIceTcp`,
+  `enableIceUdpMux`, `portRangeBegin`, `portRangeEnd` and `mtu` (`WebRTCLibPeerConnection::_initialize`), never
+  `bindAddress`, so each Godot process also holds sockets on 0.0.0.0 and [::] (known gap; no config key or environment variable
+  closes it, only a rebuilt native or a firewall rule). `tools/loopback-check/loopback-sockets.sh` runs a loopback run and
+  fails on any socket of its processes off 127.0.0.1 / ::1; CI uses it for the JS and C# Direct pairs, and for the GDScript
+  two-process samples with the Godot gap printed as a warning.
 
 ## 7. Reference: direct-lobby behavior and limits
 
