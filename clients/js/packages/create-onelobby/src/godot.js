@@ -5,7 +5,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
 import { SCHEMA_URL } from "./blueprint.js";
-import { addAutoload } from "./godot-project.js";
+import { addAutoload, isCSharpProject } from "./godot-project.js";
 import {
   GITATTRIBUTES_LINES,
   GITIGNORE_LINES,
@@ -43,9 +43,6 @@ export function olcEntry({ slug, title }) {
   const entry = (suffix, shell, command) => ({ name: `${slug}-play${suffix}`, label: `${title} - host + joiner${suffix ? ` (${shell})` : ""}`, kind: "task", group: slug, cwd: ".", command, shell, play: true });
   return json({ entries: [entry("", "powershell", ps), entry("-bash", "bash", sh)] });
 }
-
-/** Does the folder hold a Godot C# project (a .csproj or .sln next to project.godot)? */
-export const isCSharpProject = (dir) => readdirSync(dir).some((n) => /\.(csproj|sln)$/i.test(n));
 
 function targetState(target) {
   if (!existsSync(target)) return "missing";
@@ -182,7 +179,7 @@ export async function runGodot(ctx) {
   const { io, opts, blueprint, target, dirName, into } = ctx;
   if (into) {
     if (!existsSync(join(target, "project.godot"))) throw new CliError("not_godot_project", `--into: ${target} has no project.godot; run this inside a Godot 4 project folder, or drop --into to make a new one`);
-    if (isCSharpProject(target))
+    if (isCSharpProject(readdirSync(target)))
       throw new CliError("template_planned", `${target} is a Godot C# project (a .csproj or .sln sits next to project.godot): the godot-csharp template is planned for v2. Follow docs/recipes/godot-csharp.md for now.`);
   } else {
     const state = targetState(target);
