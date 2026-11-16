@@ -14,7 +14,8 @@ import {
   withDefaults,
 } from "./blueprint.js";
 import { RECIPE_URL, intoFiles, webProjectFiles } from "./files.js";
-import { isCSharpProject, runGodot } from "./godot.js";
+import { isCSharpProject } from "./godot-project.js";
+import { runGodot } from "./godot.js";
 import { askOne, createPrompter, questions } from "./prompt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -89,7 +90,7 @@ export async function run(argv, io) {
   // --into a folder with a project.godot and no --template: a Godot project (C# when a .csproj / .sln sits beside it)
   const intoDir = opts.into !== undefined ? resolve(io.cwd, opts.into) : undefined;
   const godotInto = intoDir !== undefined && existsSync(join(intoDir, "project.godot"));
-  const template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(intoDir) ? "godot-csharp" : "godot-gdscript") : "web");
+  const template = opts.template ?? fromFile?.engine ?? (godotInto ? (isCSharpProject(readdirSync(intoDir)) ? "godot-csharp" : "godot-gdscript") : "web");
   if (!TEMPLATES.includes(template)) throw new CliError("bad_flag", `--template: unknown template "${template}". Choose one of: ${TEMPLATES.join(", ")}.`);
   if (!IMPLEMENTED_TEMPLATES.includes(template))
     throw new CliError(
@@ -147,6 +148,10 @@ export async function run(argv, io) {
     const wantUi = template === "godot-gdscript" ? "drop-in" : "generated";
     if (getPath(answers, "ui.kind") !== wantUi)
       throw new CliError("unsupported", `template ${template} writes the ${wantUi} UI (ui.kind "${wantUi}"); ui.kind "${getPath(answers, "ui.kind")}" is not supported by the scaffolder yet`, "ui.kind");
+
+    // the web sample game is lockstep or raw (host broadcasts its state); it has no ReplicationSession, so a replication blueprint would be a lie
+    if (template === "web" && getPath(answers, "sync.mode") === "replication")
+      throw new CliError("unsupported", 'template web writes the lockstep and raw sample game (sync.mode "lockstep" or "raw"); sync.mode "replication" needs a ReplicationSession the web template does not write yet (see docs/recipes/replication.md)', "sync.mode");
 
     // ---- validate with the real loader ----
     const blueprint = await buildBlueprint(answers);

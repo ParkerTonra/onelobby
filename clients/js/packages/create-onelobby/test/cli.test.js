@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -215,6 +215,15 @@ describe("invalid combinations exit 1 with the loader's path and rule", () => {
   });
   it("replication on web", async () => {
     expect((await bad(["--mode", "replication"])).error).toMatchObject({ path: "sync.mode" });
+  });
+  it("replication on web is refused as unsupported, and --into too (the sample game has no ReplicationSession)", async () => {
+    const e = (await bad(["--mode", "replication"])).error;
+    expect(e).toMatchObject({ code: "unsupported", path: "sync.mode" });
+    expect(e.message).toContain('"lockstep" or "raw"');
+    mkdirSync(join(cwd, "into-game"));
+    const r = await json(["--into", "into-game", "--yes", "--mode", "replication"]);
+    expect(r.json.error).toMatchObject({ code: "unsupported", path: "sync.mode" });
+    expect(readdirSync(join(cwd, "into-game"))).toEqual([]);
   });
   it("out-of-range value via --set", async () => {
     expect((await bad(["--set", "lobby.maxPlayers=1"])).error).toMatchObject({ code: "bad_config", path: "lobby.maxPlayers" });

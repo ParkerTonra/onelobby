@@ -143,6 +143,12 @@ describe("godot-gdscript: a new project", () => {
     const r = await j(["game", "--template", "godot-gdscript", "--yes", "--ui", "generated", "--dry-run"]);
     expect(r.json.error).toMatchObject({ code: "unsupported", path: "ui.kind" });
   });
+
+  it.each(["lockstep", "raw", "replication"])("--mode %s is written as asked (net.gd builds the client from the file, whatever the mode)", async (mode) => {
+    const r = await j(["game", "--template", "godot-gdscript", ...FROM, "--mode", mode]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(text("game/onelobby.json")).sync.mode).toBe(mode);
+  });
 });
 
 describe("godot-gdscript: the natives", () => {
