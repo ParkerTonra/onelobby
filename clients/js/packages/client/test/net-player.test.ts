@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ActionName } from "../src/index.js";
+import { PLAYER_TYPE_ID, type ActionName } from "../src/index.js";
 import { PlayerRig, pathAt } from "./player-rig.js";
 import { comparePaths, dist, drive, record, scene, walkStep, type Mode, type Sample } from "./net-player-scenario.js";
 
@@ -157,6 +157,98 @@ describe("D1d a run of lost inputs does not show as a stall on the host's record
     console.log("D1d host: " + rows.join(" | "));
     expect(worstMean, "mean").toBeLessThan(D1_MEAN_ERROR_M);
     expect(worst, "worst").toBeLessThan(D1_MAX_ERROR_M);
+  });
+});
+
+// The same scene as D1d, other judges. A stalled tick on the host must not reach any screen as a stall: the watcher (B) sees the walker with
+// no plateau and no double step (D1e); the walker's own screen is never corrected for it (the host applied none of its inputs that tick, so
+// the snapshot is "after k, ack k" again); and the host's record of the walker is what its snapshot carried, tick for tick.
+async function dropScene(seed: number) {
+  const s = await scene("host", { seed, lossRate: 0 });
+  drive(s);
+  await s.rig.run(6);
+  const dropFrom = [10000, 13000, 16000];
+  const dropMs = Math.ceil(3000 / 30);
+  const frames = Math.floor(14000 / s.rig.frameMs);
+  const frame = async (): Promise<void> => {
+    const t0 = s.rig.nowMs;
+    s.rig.net.dropFast = dropFrom.some((d) => t0 >= d && t0 < d + dropMs) ? () => true : null;
+    await s.rig.step();
+  };
+  return { s, frames, frame };
+}
+
+describe("D1e the watcher sees no stall either (host authority, 3 ticks dropped at 10, 13 and 16 s)", () => {
+  it("B's view of the walker against the walker's own path", async () => {
+    let worst = 0;
+    let worstMean = 0;
+    const rows: string[] = [];
+    for (const seed of D1_SEEDS) {
+      const { s, frames, frame } = await dropScene(seed);
+      const owner: Sample[] = [];
+      const seen: Sample[] = [];
+      for (let i = 0; i < frames; i++) {
+        await frame();
+        const t = s.rig.nowMs;
+        const mine = s.al.get(s.al.localPeerId);
+        if (mine) owner.push({ t, x: mine.x, y: mine.y, z: mine.z });
+        const w = s.bl.get(s.al.localPeerId);
+        if (w) seen.push({ t, x: w.x, y: w.y, z: w.z });
+      }
+      const r = comparePaths(owner, seen);
+      rows.push(`seed ${seed}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, worst ${r.max.toFixed(3)} m, n ${seen.length}`);
+      expect(seen.length, `seed ${seed}`).toBeGreaterThan(600);
+      worst = Math.max(worst, r.max);
+      worstMean = Math.max(worstMean, r.mean);
+    }
+    console.log("D1e host: " + rows.join(" | "));
+    expect(worstMean, "mean").toBeLessThan(D1_MEAN_ERROR_M);
+    expect(worst, "worst").toBeLessThan(D1_MAX_ERROR_M);
+  });
+});
+
+describe("a stalled tick never corrects the owner (host authority, the D1d drops)", () => {
+  it("no correction, no snap, no visible offset", async () => {
+    for (const seed of D1_SEEDS) {
+      const { s, frames, frame } = await dropScene(seed);
+      let peak = 0;
+      for (let i = 0; i < frames; i++) {
+        await frame();
+        peak = Math.max(peak, s.al.smoother.offsetRemaining);
+      }
+      console.log(`stall owner seed ${seed}: corrections ${s.al.stats.corrections}, snaps ${s.al.smoother.snapCount}, offset peak ${peak.toFixed(4)} m`);
+      expect(s.al.stats.corrections, `seed ${seed} corrections`).toBe(0);
+      expect(s.al.smoother.snapCount, `seed ${seed} snaps`).toBe(0);
+      expect(peak, `seed ${seed} offset peak`).toBeLessThan(0.02);
+    }
+  });
+});
+
+describe("the host's record is what its snapshot carried (host authority, the D1d drops)", () => {
+  it("B's newest state of the walker equals the host's record at that tick, stalled ticks included", async () => {
+    const A = (s: Awaited<ReturnType<typeof dropScene>>["s"]) => s.a.peerId;
+    let compared = 0;
+    for (const seed of D1_SEEDS) {
+      const { s, frames, frame } = await dropScene(seed);
+      const quantum = 2 * s.hl.codec.config.range / (2 ** s.hl.codec.posBits - 1);
+      let worst = 0;
+      let last = -1;
+      for (let i = 0; i < frames; i++) {
+        await frame();
+        const id = s.bl.session.entities.find((e) => e.typeId === PLAYER_TYPE_ID && e.owner === A(s))?.id;
+        if (id === undefined) continue;
+        const l = s.bl.session.tryGetLatest(id, { read: (r) => s.bl.codec.readState(r) });
+        if (!l || l.tick === last) continue;
+        last = l.tick;
+        const rec = s.hl.stateAt(A(s), l.tick);
+        if (!rec) continue;
+        compared++;
+        worst = Math.max(worst, Math.abs(rec.x - l.state.x), Math.abs(rec.z - l.state.z), Math.abs(rec.y - l.state.y));
+      }
+      console.log(`record vs snapshot seed ${seed}: worst ${worst.toFixed(4)} m (quantum ${quantum.toFixed(4)})`);
+      expect(worst, `seed ${seed}`).toBeLessThanOrEqual(quantum * 1.001);
+    }
+    expect(compared).toBeGreaterThan(600);
   });
 });
 

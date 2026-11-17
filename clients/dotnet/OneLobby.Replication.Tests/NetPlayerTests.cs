@@ -162,6 +162,100 @@ namespace OneLobby.Replication.Tests
             Assert.True(worst < D1MaxErrorM, "worst " + worst);
         }
 
+        // The scene of D1d, set up once for the three tests below: host authority, no random loss, exactly 3 of the walker's ticks lose their frame
+        // at 10, 13 and 16 s. Returns the scene and the per-frame step (which arms the drops).
+        private Scene DropScene(int seed, out Action frame, out int frames)
+        {
+            var s = Scene.Make(PlayerAuthority.Host, loss: 0, seed: seed, precise: true);
+            s.Drive();
+            s.Rig.Run(6);
+            var dropFrom = new long[] { 10000, 13000, 16000 };
+            frames = 14 * 1000 / s.Rig.FrameMs;
+            var armed = false; var dropping = false; var ticksDropped = 0; var next = 0;
+            s.Al.Tick += _ =>
+            {
+                if (dropping) { if (++ticksDropped == 3) dropping = false; }
+                else if (armed) { armed = false; dropping = true; ticksDropped = 0; }
+            };
+            s.Rig.Net.DropUnreliable = () => dropping;
+            frame = () =>
+            {
+                if (next < dropFrom.Length && s.Rig.NowMs >= dropFrom[next]) { armed = true; next++; }
+                s.Rig.Step();
+            };
+            return s;
+        }
+
+        // D1e: the same scene, judged from the watcher's screen (B) against the walker's own path, with the D1 bounds.
+        [Fact]
+        public void D1e_TheWatcherSeesNoStallEither()
+        {
+            double worst = 0, worstMean = 0;
+            foreach (var seed in D1Seeds)
+            {
+                var s = DropScene(seed, out var frame, out var frames);
+                var owner = new List<Pt>();
+                var seen = new List<Pt>();
+                for (var i = 0; i < frames; i++)
+                {
+                    frame();
+                    var t = s.Rig.NowMs;
+                    if (s.Al.TryGet(s.Al.LocalPeerId, out var mine)) owner.Add(new Pt { T = t, X = mine.X, Y = mine.Y, Z = mine.Z });
+                    if (s.Bl.TryGet(s.A.PeerId, out var w)) seen.Add(new Pt { T = t, X = w.X, Y = w.Y, Z = w.Z });
+                }
+                var r = Scene.ComparePaths(owner, seen);
+                _out.WriteLine($"D1e seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, n {seen.Count}");
+                Assert.True(seen.Count > 600);
+                worst = Math.Max(worst, r.Max);
+                worstMean = Math.Max(worstMean, r.Mean);
+            }
+            Assert.True(worstMean < D1MeanErrorM, "mean " + worstMean);
+            Assert.True(worst < D1MaxErrorM, "worst " + worst);
+        }
+
+        // A stalled tick never corrects the walker: the host applied none of its inputs that tick, so the snapshot is "after k, ack k" again.
+        [Fact]
+        public void AStalledTickNeverCorrectsTheOwner()
+        {
+            foreach (var seed in D1Seeds)
+            {
+                var s = DropScene(seed, out var frame, out var frames);
+                float peak = 0;
+                for (var i = 0; i < frames; i++) { frame(); peak = Math.Max(peak, s.Al.Smoother.OffsetRemaining); }
+                _out.WriteLine($"stall owner seed {seed}: corrections {s.Al.Stats.Corrections}, snaps {s.Al.Smoother.SnapCount}, offset peak {peak:F4} m");
+                Assert.True(s.Al.Stats.Corrections == 0, $"seed {seed} corrections {s.Al.Stats.Corrections}");
+                Assert.True(s.Al.Smoother.SnapCount == 0, $"seed {seed} snaps {s.Al.Smoother.SnapCount}");
+                Assert.True(peak < 0.02f, $"seed {seed} offset peak {peak}");
+            }
+        }
+
+        // The host's record is what its snapshot carried: B's newest state of the walker equals the host's record at that tick, stalled ticks included.
+        [Fact]
+        public void TheHostsRecordIsWhatItsSnapshotCarried()
+        {
+            var compared = 0;
+            foreach (var seed in D1Seeds)
+            {
+                var s = DropScene(seed, out var frame, out var frames);
+                var quantum = 2.0 * s.Hl.Codec.Config.Range / (Math.Pow(2, s.Hl.Codec.PosBits) - 1);
+                double worst = 0; uint last = uint.MaxValue;
+                for (var i = 0; i < frames; i++)
+                {
+                    frame();
+                    NetId id = default; var found = false;
+                    foreach (var e in s.Bl.Session.Entities) if (e.TypeId == PlayerWire.PlayerTypeId && e.Owner == s.A.PeerId) { id = e.Id; found = true; }
+                    if (!found || !s.Bl.Session.TryGetLatest(id, s.Bl.Codec, out var l, out var tick) || tick == last) continue;
+                    last = tick;
+                    if (!s.Hl.TryStateAt(s.A.PeerId, tick, out var rec)) continue;
+                    compared++;
+                    worst = Math.Max(worst, Math.Max(Math.Abs(rec.X - l.X), Math.Max(Math.Abs(rec.Y - l.Y), Math.Abs(rec.Z - l.Z))));
+                }
+                _out.WriteLine($"record vs snapshot seed {seed}: worst {worst:F4} m (quantum {quantum:F4})");
+                Assert.True(worst <= quantum * 1.001, $"seed {seed} worst {worst}");
+            }
+            Assert.True(compared > 600);
+        }
+
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]
         public void D2_WatchedPlayerNeverStandsStillPastTheCarryOnCap(PlayerAuthority mode)
         {

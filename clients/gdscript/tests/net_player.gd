@@ -48,7 +48,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
-		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d1d, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d1d, _test_d1e, _test_stall_never_corrects_owner, _test_record_is_snapshot, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -674,6 +674,109 @@ func _test_d1d() -> void:
 		worst_mean = maxf(worst_mean, float(r["mean"]))
 	_check(worst_mean < D1_MEAN_ERROR_M, "D1d: mean error under %.2f m (%.3f)" % [D1_MEAN_ERROR_M, worst_mean])
 	_check(worst < D1_MAX_ERROR_M, "D1d: worst frame under %.2f m (%.3f)" % [D1_MAX_ERROR_M, worst])
+
+
+## The scene of D1d for the three tests below: host authority, no random loss, every fast frame dropped for 100 ms (3 ticks) at 10, 13 and 16 s.
+func _drop_scene(seed_value: int) -> Dictionary:
+	var s := _scene("host", {"seed": seed_value, "loss_rate": 0.0})
+	_drive(s)
+	var rig: Rig = s["rig"]
+	rig.run(6.0)
+	s["frames"] = int(14000.0 / float(rig.frame_ms))
+	return s
+
+
+func _drop_frame(s: Dictionary) -> void:
+	var rig: Rig = s["rig"]
+	var t0 := rig.now_ms()
+	var dropping := false
+	for d: int in [10000, 13000, 16000]:
+		if t0 >= d and t0 < d + 100:
+			dropping = true
+	if dropping:
+		rig.net.drop_fast = func() -> bool: return true
+	else:
+		rig.net.drop_fast = Callable()
+	rig.step()
+
+
+## D1e: the watcher (B) sees the walker with no stall either, judged with the D1 bounds.
+func _test_d1e() -> void:
+	var worst := 0.0
+	var worst_mean := 0.0
+	for seed_value: int in D1_SEEDS:
+		var s := _drop_scene(seed_value)
+		var rig: Rig = s["rig"]
+		var al: OneLobbyNetPlayers = s["al"]
+		var bl: OneLobbyNetPlayers = s["bl"]
+		var owner := Path.new()
+		var seen := Path.new()
+		for i in int(s["frames"]):
+			_drop_frame(s)
+			var t := float(rig.now_ms())
+			var mine: Variant = al.get_state(al.local_peer_id)
+			if mine != null:
+				owner.add(t, mine)
+			var w: Variant = bl.get_state(al.local_peer_id)
+			if w != null:
+				seen.add(t, w)
+		var r := _compare_paths(owner, seen)
+		print("D1e host seed %d: lag %d ms, mean %.3f m, worst %.3f m, n %d" % [seed_value, r["lag_ms"], r["mean"], r["max"], seen.size()])
+		_check(seen.size() > 600, "D1e seed %d: watched frames" % seed_value)
+		worst = maxf(worst, float(r["max"]))
+		worst_mean = maxf(worst_mean, float(r["mean"]))
+	_check(worst_mean < D1_MEAN_ERROR_M, "D1e: mean error under %.2f m (%.3f)" % [D1_MEAN_ERROR_M, worst_mean])
+	_check(worst < D1_MAX_ERROR_M, "D1e: worst frame under %.2f m (%.3f)" % [D1_MAX_ERROR_M, worst])
+
+
+## A stalled tick never corrects the owner: no correction, no snap, no visible offset.
+func _test_stall_never_corrects_owner() -> void:
+	for seed_value: int in D1_SEEDS:
+		var s := _drop_scene(seed_value)
+		var al: OneLobbyNetPlayers = s["al"]
+		var peak := 0.0
+		for i in int(s["frames"]):
+			_drop_frame(s)
+			peak = maxf(peak, al.smoother.offset_remaining())
+		print("stall owner seed %d: corrections %d, snaps %d, offset peak %.4f m" % [seed_value, al.stats["corrections"], al.smoother.snap_count, peak])
+		_check(int(al.stats["corrections"]) == 0, "stall seed %d: corrections %d" % [seed_value, al.stats["corrections"]])
+		_check(al.smoother.snap_count == 0, "stall seed %d: snaps %d" % [seed_value, al.smoother.snap_count])
+		_check(peak < 0.02, "stall seed %d: offset peak %.4f" % [seed_value, peak])
+
+
+## The host's record is what its snapshot carried: B's newest state of the walker equals the host's record at that tick.
+func _test_record_is_snapshot() -> void:
+	var compared := 0
+	for seed_value: int in D1_SEEDS:
+		var s := _drop_scene(seed_value)
+		var hl: OneLobbyNetPlayers = s["hl"]
+		var bl: OneLobbyNetPlayers = s["bl"]
+		var a: Base.RepPlayer = s["a"]
+		var quantum := 2.0 * bl.codec.range_value / (pow(2.0, bl.codec.pos_bits) - 1.0)
+		var worst := 0.0
+		var last := -1
+		for i in int(s["frames"]):
+			_drop_frame(s)
+			var id := -1
+			for e: Dictionary in bl.session.entities():
+				if int(e["type_id"]) == W.PLAYER_TYPE_ID and int(e["owner"]) == a.peer_id():
+					id = int(e["id"])
+			if id < 0:
+				continue
+			var l := bl.session.try_get_latest(id, bl.codec)
+			if l.is_empty() or int(l["tick"]) == last:
+				continue
+			last = int(l["tick"])
+			var rec: Variant = hl.state_at(a.peer_id(), float(last))
+			if rec == null:
+				continue
+			compared += 1
+			var st: Dictionary = l["state"]
+			for k: String in ["x", "y", "z"]:
+				worst = maxf(worst, absf(float(rec[k]) - float(st[k])))
+		print("record vs snapshot seed %d: worst %.4f m (quantum %.4f)" % [seed_value, worst, quantum])
+		_check(worst <= quantum * 1.001, "record vs snapshot seed %d: worst %.4f" % [seed_value, worst])
+	_check(compared > 600, "record vs snapshot: %d compared" % compared)
 
 
 func _test_d2() -> void:
