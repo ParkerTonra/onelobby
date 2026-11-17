@@ -172,7 +172,7 @@ describe("--help names the build", () => {
   });
 
   it("buildLine tells a published package (node_modules, an npx cache) from a clone", () => {
-    expect(buildLine("/home/x/.npm/_npx/ab12/node_modules/create-onelobby", "0.1.3")).toBe("create-onelobby 0.1.3 (the published npm package, /home/x/.npm/_npx/ab12/node_modules/create-onelobby)");
+    expect(buildLine("/home/runner/.npm/_npx/ab12/node_modules/create-onelobby", "0.1.3")).toBe("create-onelobby 0.1.3 (the published npm package, /home/runner/.npm/_npx/ab12/node_modules/create-onelobby)");
     expect(buildLine("C:\\p\\node_modules\\create-onelobby", "0.1.3")).toContain("the published npm package");
     // negative controls: a folder that only has "node_modules" inside a longer name is a clone
     expect(buildLine("/work/my_node_modules_clone/create-onelobby", "0.1.4")).toContain("a clone's build");

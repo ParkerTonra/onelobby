@@ -1,0 +1,204 @@
+# One workflow for a whole release: pushing a tag v<version> on main (git tag v0.8.1 && git push origin main v0.8.1)
+# publishes `onelobby` and `create-onelobby` to npm, the OneLobby NuGet packages, and creates the GitHub release
+# unity-v<version> with the Unity package tarball. Nothing else is needed: the owner's approval is the tag push itself.
+#
+# Two jobs. `build` checks the versions, runs the tests and packs everything with read-only permissions and no OIDC
+# token (dependency code runs here, so it gets nothing it could publish with). `publish` only downloads those packed
+# files and uploads them; it is the one job with the `release` environment and id-token: write. A bad tag fails in
+# `build`, before anything is public. Uploads skip a version that is already there, so a failed run can be re-run.
+#
+# One-time setup (owner):
+#   - npmjs.com: onelobby > Settings > Trusted Publisher > GitHub Actions: repository ParkerTonra/onelobby, workflow
+#     release.yml, environment release. The same for create-onelobby.
+#   - nuget.org > account > Trusted Publishing: policy for repository ParkerTonra/onelobby, workflow release.yml,
+#     environment release. Secret NUGET_USER = the nuget.org profile name (not the email).
+#   - GitHub > Settings > Environments: `release` with no required reviewer and a deployment tag rule `v*`.
+# Versions: the tag, the onelobby package, the OneLobby.* projects and the Unity package share one version.
+# create-onelobby has its own version and is published when that version is not on npm yet.
+# Release notes: docs/releases/<version>.md must exist (it becomes the GitHub release text).
+# Actions are pinned by commit sha (the tag they were taken from is in the comment).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read # download the datachannel-natives artifacts for the Unity package
+    env:
+      VERSION: ${{ github.ref_name }}
+    outputs:
+      v: ${{ steps.versions.outputs.v }}
+      cv: ${{ steps.versions.outputs.cv }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: The tag matches every package version
+        id: versions
+        run: |
+          set -euo pipefail
+          if ! [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::tag '$VERSION' is not v<major>.<minor>.<patch>"; exit 1; fi
+          v="${VERSION#v}"
+          js="$(node -p "require('./clients/js/packages/client/package.json').version")"
+          unity="$(node -p "require('./clients/unity/com.onelobby.unity/package.json').version")"
+          net="$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' clients/dotnet/Directory.Build.props | head -1)"
+          # no OneLobby.* project may set its own <Version>
+          if grep -rl --include=*.csproj '<Version>' clients server; then echo "::error::a csproj sets its own <Version>"; exit 1; fi
+          bad=0
+          for pair in "onelobby=$js" "OneLobby.*=$net" "com.onelobby.unity=$unity"; do
+            if [ "${pair#*=}" != "$v" ]; then echo "::error::tag says $v but ${pair%%=*} says ${pair#*=}"; bad=1; fi
+          done
+          [ "$bad" = 0 ] || exit 1
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main: release tags go on main only"; exit 1
+          fi
+          [ -f "docs/releases/$v.md" ] || { echo "::error::docs/releases/$v.md is missing (it is the release text)"; exit 1; }
+          cv="$(node -p "require('./clients/js/packages/create-onelobby/package.json').version")"
+          if ! [[ $cv =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::create-onelobby version '$cv' is not <major>.<minor>.<patch>"; exit 1; fi
+          echo "V=$v" >> "$GITHUB_ENV"
+          { echo "v=$v"; echo "cv=$cv"; } >> "$GITHUB_OUTPUT"
+          echo "release $v: onelobby $js, OneLobby.* $net, unity $unity, create-onelobby $cv"
+
+      - name: Tests (.NET)
+        run: |
+          dotnet test clients/dotnet/OneLobby.Core.Tests -c Release
+          dotnet test clients/dotnet/OneLobby.Replication.Tests -c Release
+      - name: Install (JS, no install scripts)
+        working-directory: clients/js
+        run: npm ci --ignore-scripts
+      # What the packages' prepublishOnly would run: publish uploads the packed tarballs, which skips lifecycle scripts.
+      - name: Tests, checks and build (JS)
+        working-directory: clients/js
+        run: |
+          npm run typecheck -w onelobby
+          npm run build -w onelobby
+          npm test -w onelobby
+          (cd packages/client && node scripts/prepublish-check.mjs)
+          npm test -w create-onelobby
+      - name: Pack npm
+        run: |
+          set -euo pipefail
+          mkdir -p dist/npm
+          (cd clients/js/packages/client && npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist/npm")
+          (cd clients/js/packages/create-onelobby && npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist/npm")
+          ls -l dist/npm
+
+      - name: Pack NuGet
+        run: bash clients/dotnet/pack.sh "$V" dist/nuget
+
+      # Only artifacts from a push run of this repository's own main (not a fork's pull request run) are used.
+      - name: Natives from the newest datachannel-natives artifacts on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runtimes=clients/dotnet/OneLobby.DataChannel/runtimes
+          for rid in win-x64 linux-x64 osx android-arm64; do
+            found=""
+            while read -r id run sha; do
+              [ -n "$id" ] || continue
+              meta="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '"\(.event) \(.head_repository.full_name)"')"
+              if [ "$meta" = "push $GITHUB_REPOSITORY" ]; then found="$id $run $sha"; break; fi
+            done < <(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=native-$rid&per_page=100" \
+              --jq '.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main")
+                    | "\(.id) \(.workflow_run.id) \(.workflow_run.head_sha)"')
+            if [ -z "$found" ]; then
+              echo "::error::no unexpired native-$rid artifact from a push to main: run datachannel-natives on main first"
+              exit 1
+            fi
+            read -r id run sha <<< "$found"
+            mkdir -p "$runtimes/$rid/native"
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/$rid.zip"
+            unzip -o -q "$RUNNER_TEMP/$rid.zip" -d "$runtimes/$rid/native"
+            if ! git diff --quiet "$sha" HEAD -- clients/dotnet/OneLobby.DataChannel/native; then
+              echo "::error::native $rid was built from $sha but native/ sources changed since: run datachannel-natives on main"
+              exit 1
+            fi
+          done
+      - name: Pack Unity
+        shell: pwsh
+        run: |
+          ./clients/unity/build-unity-package.ps1 -Out "$env:GITHUB_WORKSPACE/dist/unity" -Version $env:V
+          $tgz = "$env:GITHUB_WORKSPACE/dist/unity/com.onelobby.unity-$($env:V).tgz"
+          $plugins = tar -tzf $tgz | Select-String 'datachannel\.(dll|so|dylib)$'
+          if (@($plugins).Count -lt 4) { throw "expected 4 natives in the tgz, found: $plugins" }
+      - name: Release notes
+        run: |
+          mkdir -p dist/notes
+          cp "docs/releases/$V.md" dist/notes/notes.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-packages
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---- everything in build passed; uploads start here, from the packed files only ----
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    environment: release # no reviewer: the approval happened before the tag was pushed
+    permissions:
+      contents: write # create the unity-v<version> GitHub release
+      id-token: write # OIDC tokens for npm and NuGet trusted publishing
+    env:
+      V: ${{ needs.build.outputs.v }}
+      CV: ${{ needs.build.outputs.cv }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-packages
+          path: dist
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or newer (trusted publishing)
+        run: npm install -g --ignore-scripts npm@11
+      - name: Upload onelobby to npm
+        run: |
+          if npm view "onelobby@$V" version >/dev/null 2>&1; then echo "onelobby@$V is already on npm, skipped"
+          else npm publish "dist/npm/onelobby-$V.tgz" --ignore-scripts; fi
+      - name: Upload create-onelobby to npm
+        run: |
+          if npm view "create-onelobby@$CV" version >/dev/null 2>&1; then echo "create-onelobby@$CV is already on npm, skipped"
+          else npm publish "dist/npm/create-onelobby-$CV.tgz" --ignore-scripts; fi
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Upload to NuGet
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "dist/nuget/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: GitHub release for the Unity package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "unity-v$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "release unity-v$V exists, skipped"; exit 0; fi
+          gh release create "unity-v$V" "dist/unity/com.onelobby.unity-$V.tgz" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "OneLobby Unity $V" --notes-file dist/notes/notes.md

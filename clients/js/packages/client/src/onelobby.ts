@@ -36,7 +36,7 @@ import { checkConnection, probeRelay, type CheckOptions, type CheckResult } from
 import { PlayerSettings, RELAY_SKIPPED_WARNING, cleanLastCode, cleanName, redactUrl, type EnvSource, type SettingsUse } from "./settings.js";
 
 export const LIB_NAME = "onelobby";
-export const LIB_VERSION = "0.8.0";
+export const LIB_VERSION = "0.8.1";
 
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {

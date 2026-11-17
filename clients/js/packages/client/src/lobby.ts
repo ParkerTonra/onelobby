@@ -65,7 +65,7 @@ export interface LobbyDiag {
   route: "server" | "ip" | "nostr";
   /** Send the joiner's diagnosis to the host when the link fails (default true). */
   reportToHost: boolean;
-  /** `0.8.0`: sent in the report. */
+  /** `0.8.1`: sent in the report. */
   clientVersion: string;
   /** The last connection check this kit ran, if any (its NAT reading joins the facts and the report). */
   lastCheck: () => CheckResult | null;

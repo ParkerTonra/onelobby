@@ -49,15 +49,15 @@
       { "input": "6B01-RGFE-P2", "invalid": true }
     ],
     "server": [
-      { "input": "wss://lobby.mygame.net/ws", "ok": "wss://lobby.mygame.net/ws" },
-      { "input": "  wss://lobby.mygame.net/ws  ", "ok": "wss://lobby.mygame.net/ws" },
+      { "input": "wss://lobby.mygame.test/ws", "ok": "wss://lobby.mygame.test/ws" },
+      { "input": "  wss://lobby.mygame.test/ws  ", "ok": "wss://lobby.mygame.test/ws" },
       { "input": "https://onelobby-server-ab12.onrender.com", "ok": "wss://onelobby-server-ab12.onrender.com" },
       { "input": "http://localhost:8080", "ok": "ws://localhost:8080" },
-      { "input": "lobby.mygame.net", "ok": "wss://lobby.mygame.net" },
+      { "input": "lobby.mygame.test", "ok": "wss://lobby.mygame.test" },
       { "input": "ws://127.0.0.1:18555/ws", "ok": "ws://127.0.0.1:18555/ws" },
       { "input": "ws://[::1]:8080/ws", "ok": "ws://[::1]:8080/ws" },
-      { "input": "wss://lobby.mygame.net/ws?token=abc123", "ok": "wss://lobby.mygame.net/ws?token=abc123" },
-      { "input": "wss://sam:pw1234@lobby.mygame.net/ws", "ok": "wss://sam:pw1234@lobby.mygame.net/ws" },
+      { "input": "wss://lobby.mygame.test/ws?token=abc123", "ok": "wss://lobby.mygame.test/ws?token=abc123" },
+      { "input": "wss://sam:pw1234@lobby.mygame.test/ws", "ok": "wss://sam:pw1234@lobby.mygame.test/ws" },
       { "input": "", "ok": "" },
       { "input": "   ", "ok": "" },
       { "input": "lobby", "invalid": true },
@@ -70,8 +70,8 @@
       { "input": "https://example.org", "invalid": true },
       { "input": "wss://lobby.onelobby.example/ws", "invalid": true },
       { "input": "https://", "invalid": true },
-      { "input": "wss://lobby.mygame.net:99999/ws", "invalid": true },
-      { "input": "wss://lobby.mygame.net:0/ws", "invalid": true }
+      { "input": "wss://lobby.mygame.test:99999/ws", "invalid": true },
+      { "input": "wss://lobby.mygame.test:0/ws", "invalid": true }
     ]
   },
   "mask": [
@@ -91,8 +91,8 @@
     { "name": "empty text", "stored": "", "values": { "name": "", "relay": "", "lastCode": "", "server": "" } },
     {
       "name": "all four, stored clean",
-      "stored": "{\"v\":1,\"name\":\"Sam\",\"relay\":\"turn:relay.example.com:3478 alice s3cret\",\"lastCode\":\"7HQ4K2\",\"server\":\"wss://lobby.mygame.net/ws\"}",
-      "values": { "name": "Sam", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "7HQ4K2", "server": "wss://lobby.mygame.net/ws" }
+      "stored": "{\"v\":1,\"name\":\"Sam\",\"relay\":\"turn:relay.example.com:3478 alice s3cret\",\"lastCode\":\"7HQ4K2\",\"server\":\"wss://lobby.mygame.test/ws\"}",
+      "values": { "name": "Sam", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "7HQ4K2", "server": "wss://lobby.mygame.test/ws" }
     },
     {
       "name": "hand-edited values are cleaned, bad ones read as empty",
@@ -114,8 +114,8 @@
     {
       "name": "unknown fields are kept",
       "stored": "{\"v\":1,\"name\":\"Old\",\"theme\":\"dark\",\"extra\":{\"a\":1}}",
-      "patch": { "name": "Sam", "server": "lobby.mygame.net" },
-      "result": { "v": 1, "name": "Sam", "server": "wss://lobby.mygame.net", "theme": "dark", "extra": { "a": 1 } },
+      "patch": { "name": "Sam", "server": "lobby.mygame.test" },
+      "result": { "v": 1, "name": "Sam", "server": "wss://lobby.mygame.test", "theme": "dark", "extra": { "a": 1 } },
       "rejected": []
     },
     {
@@ -177,7 +177,7 @@
     },
     {
       "name": "a variable beats the stored value",
-      "stored": { "name": "Sam", "server": "wss://lobby.mygame.net/ws" },
+      "stored": { "name": "Sam", "server": "wss://lobby.mygame.test/ws" },
       "env": { "ONELOBBY_NAME": "  Ann ", "ONELOBBY_LOBBY_SERVER": "lobby.other.net" },
       "effective": { "name": "Ann", "relay": "", "lastCode": "", "server": "wss://lobby.other.net" }
     },
@@ -195,14 +195,14 @@
     },
     {
       "name": "an invalid variable is ignored",
-      "stored": { "relay": "turn:relay.example.com:3478 alice s3cret", "server": "wss://lobby.mygame.net/ws" },
+      "stored": { "relay": "turn:relay.example.com:3478 alice s3cret", "server": "wss://lobby.mygame.test/ws" },
       "env": { "ONELOBBY_RELAY": "nonsense", "ONELOBBY_LOBBY_SERVER": "lobby" },
-      "effective": { "name": "", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "", "server": "wss://lobby.mygame.net/ws" }
+      "effective": { "name": "", "relay": "turn:relay.example.com:3478 alice s3cret", "lastCode": "", "server": "wss://lobby.mygame.test/ws" }
     },
     {
       "name": "other variables are not read",
       "stored": {},
-      "env": { "ONELOBBY_SERVER": "wss://lobby.mygame.net/ws", "ONELOBBY_NAME_X": "Zed" },
+      "env": { "ONELOBBY_SERVER": "wss://lobby.mygame.test/ws", "ONELOBBY_NAME_X": "Zed" },
       "effective": { "name": "", "relay": "", "lastCode": "", "server": "" }
     }
   ]

@@ -128,10 +128,10 @@ describe("saved settings applied by the kit (memory rig)", () => {
     const r = rig();
     const la = await r.make("alice", { mode: "raw", extra: { settings: false } }).host({ name: "t", maxPlayers: 4 });
     const s = spy(r, "bob");
-    const kit = joinerKit(r, s, rigStore({ v: 1, name: "Sam", relay: RELAY, server: "wss://lobby.mygame.net/ws" }));
+    const kit = joinerKit(r, s, rigStore({ v: 1, name: "Sam", relay: RELAY, server: "wss://lobby.mygame.test/ws" }));
     const lb = await kit.join(la.code);
     await settle();
-    expect(s.urls).toEqual(["wss://lobby.mygame.net/ws"]);
+    expect(s.urls).toEqual(["wss://lobby.mygame.test/ws"]);
     expect(la.peers.find((p) => p.peerId === lb.localPeerId)?.name).toBe("Sam");
     expect(lb.room.entries.find((e) => e.id === lb.localPeerId)?.name).toBe("Sam");
     // the host's own list first, then this player's entry
@@ -144,7 +144,7 @@ describe("saved settings applied by the kit (memory rig)", () => {
     const r = rig();
     const la = await r.make("alice", { mode: "raw", extra: { settings: false } }).host({ name: "t", maxPlayers: 4 });
     const s = spy(r, "bob");
-    const stored = { v: 1, name: "Sam", relay: RELAY, server: "wss://lobby.mygame.net/ws" };
+    const stored = { v: 1, name: "Sam", relay: RELAY, server: "wss://lobby.mygame.test/ws" };
     const kit = joinerKit(r, s, rigStore(stored), { displayName: "Zed", lobbyServer: "mem://explicit" });
     const lb = await kit.join(la.code);
     await settle();
@@ -206,7 +206,7 @@ describe("saved settings applied by the kit (memory rig)", () => {
     const r = rig();
     const la = await r.make("alice", { mode: "raw", extra: { settings: false } }).host({ name: "t", maxPlayers: 4 });
     const s = spy(r, "bob");
-    const kit = joinerKit(r, s, rigStore({ v: 1, relay: RELAY, server: "wss://sam:pwserver9@lobby.mygame.net/ws?token=tok12345" }));
+    const kit = joinerKit(r, s, rigStore({ v: 1, relay: RELAY, server: "wss://sam:pwserver9@lobby.mygame.test/ws?token=tok12345" }));
     const errors: unknown[] = [];
     kit.on("error", (e) => errors.push(e));
     await expect(kit.join("ZZZZZZ")).rejects.toBeTruthy(); // an unknown code
@@ -236,8 +236,8 @@ describe("saved settings applied by the kit (memory rig)", () => {
     expect(mk({ players: { maxNameLength: 5 } }).options.displayName).toBe("Saman");
     // the file's server is "given", so the saved one is not used; an empty one falls back
     expect(mk({ hosting: { lobbyServer: "wss://lobby.file.net/ws" } }).options.lobbyServer).toBe("wss://lobby.file.net/ws");
-    store.setItem(settingsKey(GAME), JSON.stringify({ server: "wss://lobby.mygame.net/ws" }));
-    expect(mk({}).options.lobbyServer).toBe("wss://lobby.mygame.net/ws");
+    store.setItem(settingsKey(GAME), JSON.stringify({ server: "wss://lobby.mygame.test/ws" }));
+    expect(mk({}).options.lobbyServer).toBe("wss://lobby.mygame.test/ws");
     expect(mk({ hosting: { lobbyServer: "wss://lobby.file.net/ws" } }).options.lobbyServer).toBe("wss://lobby.file.net/ws");
   });
 

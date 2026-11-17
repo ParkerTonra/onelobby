@@ -219,10 +219,10 @@ namespace OneLobby.Tests
         {
             var (rig, links) = RigWithRelaySpy();
             var host = rig.Await(Client(rig, Cfg("alice", null, use: SettingsOptions.None)).HostAsync(new LobbyOptions("t", 4)));
-            var store = StoreWith("{\"v\":1,\"name\":\"Sam\",\"relay\":\"" + Relay + "\",\"server\":\"wss://lobby.mygame.net/ws\"}", RigGame);
+            var store = StoreWith("{\"v\":1,\"name\":\"Sam\",\"relay\":\"" + Relay + "\",\"server\":\"wss://lobby.mygame.test/ws\"}", RigGame);
             var cfg = Cfg("", store) with { LobbyServer = OneLobby.Blueprint.NoServer };
             var joinerClient = Client(rig, cfg);
-            Assert.Equal(new Uri("wss://lobby.mygame.net/ws"), joinerClient.HubUri);
+            Assert.Equal(new Uri("wss://lobby.mygame.test/ws"), joinerClient.HubUri);
             var lobby = rig.Await(joinerClient.JoinAsync(host.Code));
             Assert.True(rig.Until(() => lobby.IsReady));
             Assert.Equal("Sam", host.Peers.First(p => p.PeerId == lobby.LocalPeerId).Name);
@@ -244,7 +244,7 @@ namespace OneLobby.Tests
         {
             var (rig, links) = RigWithRelaySpy();
             var host = rig.Await(Client(rig, Cfg("alice", null, use: SettingsOptions.None)).HostAsync(new LobbyOptions("t", 4)));
-            var json = "{\"v\":1,\"name\":\"Sam\",\"relay\":\"" + Relay + "\",\"server\":\"wss://lobby.mygame.net/ws\"}";
+            var json = "{\"v\":1,\"name\":\"Sam\",\"relay\":\"" + Relay + "\",\"server\":\"wss://lobby.mygame.test/ws\"}";
 
             var explicitClient = Client(rig, Cfg("Zed", StoreWith(json, RigGame)));
             var l1 = rig.Await(explicitClient.JoinAsync(host.Code));
@@ -291,8 +291,8 @@ namespace OneLobby.Tests
             var rig = new Rig();
             var c = Client(rig, Cfg("p", StoreWith(null, RigGame)) with { LobbyServer = OneLobby.Blueprint.NoServer });
             Assert.Equal(LobbyErrorCodes.NoServer, Fails(rig, c.HostAsync(new LobbyOptions("t", 4))).Code);
-            var d = Client(rig, Cfg("p", StoreWith("{\"server\":\"lobby.mygame.net\"}", RigGame)) with { LobbyServer = OneLobby.Blueprint.NoServer });
-            Assert.Equal(new Uri("wss://lobby.mygame.net"), d.HubUri);
+            var d = Client(rig, Cfg("p", StoreWith("{\"server\":\"lobby.mygame.test\"}", RigGame)) with { LobbyServer = OneLobby.Blueprint.NoServer });
+            Assert.Equal(new Uri("wss://lobby.mygame.test"), d.HubUri);
             rig.Await(d.HostAsync(new LobbyOptions("t", 4)));
         }
 
@@ -319,7 +319,7 @@ namespace OneLobby.Tests
         {
             var (rig, _) = RigWithRelaySpy();
             var host = rig.Await(Client(rig, Cfg("alice", null, use: SettingsOptions.None)).HostAsync(new LobbyOptions("t", 4)));
-            var c = Client(rig, Cfg("bob", StoreWith("{\"v\":1,\"relay\":\"" + Relay + "\",\"server\":\"wss://sam:pwserver9@lobby.mygame.net/ws?token=tok12345\"}", RigGame)) with { LobbyServer = OneLobby.Blueprint.NoServer });
+            var c = Client(rig, Cfg("bob", StoreWith("{\"v\":1,\"relay\":\"" + Relay + "\",\"server\":\"wss://sam:pwserver9@lobby.mygame.test/ws?token=tok12345\"}", RigGame)) with { LobbyServer = OneLobby.Blueprint.NoServer });
             var seen = new List<string>();
             c.Error += e => seen.Add(e.Code + " " + e.Message);
             c.Warning += w => seen.Add(w);
@@ -338,8 +338,8 @@ namespace OneLobby.Tests
             finally { Console.SetOut(oldOut); Console.SetError(oldErr); }
             var all = string.Join("\n", seen) + "\n" + sw;
             foreach (var secret in new[] { "samuser", "sampass77", "pwserver9", "tok12345" }) Assert.DoesNotContain(secret, all);
-            Assert.Equal("wss://lobby.mygame.net/ws?token=tok12345", SettingsRules.RedactUrl("wss://sam:pwserver9@lobby.mygame.net/ws?token=tok12345").Replace("wss://sam:pwserver9@", "wss://"));
-            Assert.DoesNotContain("pwserver9", SettingsRules.RedactUrl("wss://sam:pwserver9@lobby.mygame.net/ws"));
+            Assert.Equal("wss://lobby.mygame.test/ws?token=tok12345", SettingsRules.RedactUrl("wss://sam:pwserver9@lobby.mygame.test/ws?token=tok12345").Replace("wss://sam:pwserver9@", "wss://"));
+            Assert.DoesNotContain("pwserver9", SettingsRules.RedactUrl("wss://sam:pwserver9@lobby.mygame.test/ws"));
         }
     }
 }

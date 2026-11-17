@@ -189,7 +189,7 @@ func _names(host: OneLobbyClient) -> Array:
 
 
 func _behavior() -> void:
-	var saved := {"v": 1, "name": "Sam", "relay": RELAY, "server": "wss://lobby.mygame.net/ws"}
+	var saved := {"v": 1, "name": "Sam", "relay": RELAY, "server": "wss://lobby.mygame.test/ws"}
 
 	# 1. a joiner's name, relay entry and lobby server come from the saved settings
 	var h := await _host()
@@ -199,7 +199,7 @@ func _behavior() -> void:
 	var warnings: Array = []
 	var j := _client("", _store_with(saved))
 	j.warning.connect(func(m: String) -> void: warnings.append(m))
-	_check(j.effective_name() == "Sam" and j.effective_server() == "wss://lobby.mygame.net/ws", "the saved name and server fill in what the game left empty")
+	_check(j.effective_name() == "Sam" and j.effective_server() == "wss://lobby.mygame.test/ws", "the saved name and server fill in what the game left empty")
 	var jl := await j.join_direct(code, {"timeout_ms": 20000})
 	_check(jl != null, "the joiner joined: %s" % JSON.stringify(j.last_error))
 	if jl == null:
@@ -230,7 +230,7 @@ func _behavior() -> void:
 	var ol := await o.join_direct(code, {"timeout_ms": 20000})
 	_check(ol != null and o.effective_name() == "" and o.ice.size() == host_ice, "name and relay off: no saved name, no saved relay entry")
 	_check(o.settings.load_values()["last_code"] != "", "last_code was left on")
-	_check(o.effective_server() == "wss://lobby.mygame.net/ws", "server left on")
+	_check(o.effective_server() == "wss://lobby.mygame.test/ws", "server left on")
 	o.lobby.leave()
 	await _until(func() -> bool: return o.lobby == null, 3000)
 
@@ -262,8 +262,8 @@ func _behavior() -> void:
 	var n := _client("N", _store_with(null))
 	var nl := await n.host({})
 	_check(nl == null and n.last_error.get("code") == "no_server", "no server anywhere: no_server (%s)" % JSON.stringify(n.last_error))
-	var ns := _client("N", _store_with({"server": "lobby.mygame.net"}))
-	_check(ns.effective_server() == "wss://lobby.mygame.net", "a saved server fills an empty lobby_server")
+	var ns := _client("N", _store_with({"server": "lobby.mygame.test"}))
+	_check(ns.effective_server() == "wss://lobby.mygame.test", "a saved server fills an empty lobby_server")
 
 	# 7. a blueprint: no saved name for anonymous games, maxNameLength clamps
 	var st := _store_with({"v": 1, "name": "Samantha the Long"})
@@ -284,7 +284,7 @@ func _behavior() -> void:
 
 	# 8. never logged: no error, warning or message the client raised holds the relay line
 	var all := "\n".join(PackedStringArray(errors)) + "\n" + "\n".join(PackedStringArray(w_warnings)) + "\n" + JSON.stringify(j.last_error) + JSON.stringify(w.last_error)
-	var bad := _client("B", _store_with({"v": 1, "relay": RELAY, "server": "wss://sam:pwserver9@lobby.mygame.net/ws?token=tok12345"}))
+	var bad := _client("B", _store_with({"v": 1, "relay": RELAY, "server": "wss://sam:pwserver9@lobby.mygame.test/ws?token=tok12345"}))
 	var bad_errors: Array = []
 	bad.error.connect(func(c: String, m: String) -> void: bad_errors.append(c + " " + m))
 	await bad.join_direct("not a code")
@@ -292,4 +292,4 @@ func _behavior() -> void:
 	all += "\n" + "\n".join(PackedStringArray(bad_errors)) + JSON.stringify(bad.last_error)
 	for secret: String in SECRETS:
 		_check(not all.contains(secret), "no error or warning holds %s" % "the secret")
-	_check(not OneLobbySettings.redact_url("wss://sam:pwserver9@lobby.mygame.net/ws").contains("pwserver9"), "redact_url drops user:pass@")
+	_check(not OneLobbySettings.redact_url("wss://sam:pwserver9@lobby.mygame.test/ws").contains("pwserver9"), "redact_url drops user:pass@")

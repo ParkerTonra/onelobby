@@ -145,12 +145,12 @@ namespace OneLobby
 
         public event Action<LobbyError>? Error;
 
-        /// <summary>The library version the report carries (<c>0.8.0</c>).</summary>
+        /// <summary>The library version the report carries (<c>0.8.1</c>).</summary>
         internal static readonly string LibVersion = ReadVersion();
 
         private static string ReadVersion()
         {
-            var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(LobbyClient).Assembly)?.InformationalVersion ?? "0.8.0";
+            var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(LobbyClient).Assembly)?.InformationalVersion ?? "0.8.1";
             var plus = v.IndexOf('+');
             return plus >= 0 ? v.Substring(0, plus) : v;
         }
