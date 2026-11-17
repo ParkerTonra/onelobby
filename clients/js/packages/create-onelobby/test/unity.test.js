@@ -110,8 +110,8 @@ describe("unity: a new project", () => {
 
   it("without --package-from the manifest names the release tarball for Packages/ and says to put it there", async () => {
     const r = await j(["my-game", "--template", "unity", "--yes", "--no-git"]);
-    expect(r.json.package).toMatchObject({ value: "file:com.onelobby.unity-0.7.2.tgz", from: "default" });
-    expect(r.json.next.join("\n")).toContain("Packages/com.onelobby.unity-0.7.2.tgz");
+    expect(r.json.package).toMatchObject({ value: "file:com.onelobby.unity-0.8.0.tgz", from: "default" });
+    expect(r.json.next.join("\n")).toContain("Packages/com.onelobby.unity-0.8.0.tgz");
   });
 
   it("no editor found: the default version, and the reason is said", async () => {
@@ -246,8 +246,8 @@ describe("unity update", () => {
     mk("0.6.0");
     const before = text("g/Packages/manifest.json");
     const r = await upd();
-    expect(r.json).toMatchObject({ ok: true, template: "unity", changed: true, package: { from: "0.6.0", to: "0.7.2", action: "move" } });
-    expect(text("g/Packages/manifest.json")).toBe(before.replace('"0.6.0"', '"0.7.2"'));
+    expect(r.json).toMatchObject({ ok: true, template: "unity", changed: true, package: { from: "0.6.0", to: "0.8.0", action: "move" } });
+    expect(text("g/Packages/manifest.json")).toBe(before.replace('"0.6.0"', '"0.8.0"'));
     expect(r.json.next.join(" ")).toContain("open the project in Unity");
   });
   it("--dry-run shows the edit and writes nothing", async () => {
@@ -255,11 +255,11 @@ describe("unity update", () => {
     const before = text("g/Packages/manifest.json");
     const r = await cli(["update", "g", "--dry-run"]);
     expect(r.out).toContain("Dry run: nothing written.");
-    expect(r.out).toContain("0.6.0 -> 0.7.2");
+    expect(r.out).toContain("0.6.0 -> 0.8.0");
     expect(text("g/Packages/manifest.json")).toBe(before);
   });
   it("nothing to do when it is current", async () => {
-    mk("0.7.2");
+    mk("0.8.0");
     const r = await upd();
     expect(r.json).toMatchObject({ current: true, changed: false, package: { action: "current" } });
   });
@@ -274,8 +274,8 @@ describe("unity update", () => {
   it("moves the line this tool writes (a tarball named after the version beside the manifest) and warns when it is not there", async () => {
     mk("file:com.onelobby.unity-0.6.0.tgz");
     const r = await upd();
-    expect(r.json.package).toMatchObject({ action: "move", to: "file:com.onelobby.unity-0.7.2.tgz" });
-    expect(r.json.warning).toContain("Packages/com.onelobby.unity-0.7.2.tgz is not there yet");
+    expect(r.json.package).toMatchObject({ action: "move", to: "file:com.onelobby.unity-0.8.0.tgz" });
+    expect(r.json.warning).toContain("Packages/com.onelobby.unity-0.8.0.tgz is not there yet");
   });
   it("a project that does not reference the package stops with the command to add it", async () => {
     put("g/ProjectSettings/ProjectVersion.txt", "x");
