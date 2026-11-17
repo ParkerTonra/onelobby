@@ -147,7 +147,12 @@ interface HostPlayer {
   /** Owner mode: ticks on which no new state came; the next ticks take a second one to make them up. */
   stalled: number;
   /** Owner mode, while stalled: the last state that really came; `state` is carried on from it. */
-  carried: PlayerState | null;
+  real: PlayerState | null;
+  /**
+   * What the host shows of this player this tick: the record, the snapshot and the host's own draw. The sim `state`, unless a host-authority
+   * player is stalled: then the sim carried on by its own velocity (carried set), the sim itself untouched.
+   */
+  shown: PlayerState;
 }
 
 interface Dedupe {
@@ -301,7 +306,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     if (this.isHost) {
       const hp = this.hostPlayers.get(peerId);
       if (!hp || !hp.spawned) return undefined;
-      return this.history.trySample(peerId, this.session.clock.tick - 1 + this.session.clock.alpha) ?? hp.state;
+      return this.history.trySample(peerId, this.session.clock.tick - 1 + this.session.clock.alpha) ?? hp.shown;
     }
     const id = this.known.get(peerId);
     if (id === undefined) return undefined;
@@ -319,7 +324,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
 
   /** The authoritative state of a player in the newest snapshot (not smoothed). Host: its own record. */
   latest(peerId: number): PlayerState | undefined {
-    if (this.isHost) return this.hostPlayers.get(peerId)?.state;
+    if (this.isHost) return this.hostPlayers.get(peerId)?.shown;
     const id = this.known.get(peerId);
     return id === undefined ? undefined : this.session.tryGetLatest(id, this.schema)?.state;
   }
@@ -371,8 +376,9 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     this.requireHost();
     const p = this.hostPlayers.get(peerId);
     if (!p) return;
-    p.carried = null;
-    p.state = this.codec.quantize({ ...p.state, ...patch, teleport: (p.state.teleport + HOST_TELEPORT_STEP) % TELEPORT_MODULO });
+    p.real = null;
+    p.state = this.codec.quantize({ ...p.state, ...patch, teleport: (p.state.teleport + HOST_TELEPORT_STEP) % TELEPORT_MODULO, carried: false });
+    p.shown = p.state;
     if (peerId === this.localPeerId) {
       this.localState = p.state;
       this.haveLocal = true;
@@ -518,7 +524,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
     const state = this.codec.quantize({ ...defaultPlayerState(), ...this.spawnFn(peer) });
     const p: HostPlayer = {
       peer, entityId: 0, state, spawned: false, awaiting: false, lastAcceptTick: this.session.clock.tick, lastTeleportMs: -1e9,
-      lastShotTick: -1e9, lastMeleeTick: -1e9, relaySeq: 0, lastInput: defaultPlayerInput(), stalled: 0, carried: null,
+      lastShotTick: -1e9, lastMeleeTick: -1e9, relaySeq: 0, lastInput: defaultPlayerInput(), stalled: 0, real: null, shown: state,
     };
     this.hostPlayers.set(peer, p);
     // host mode: the host places the player at once; owner mode: it appears with its first state
@@ -526,7 +532,8 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
   }
 
   private spawnEntity(p: HostPlayer): void {
-    p.entityId = this.session.spawn(PLAYER_TYPE_ID, p.peer, (w) => this.codec.writeState(w, p.state));
+    p.shown = p.state;
+    p.entityId = this.session.spawn(PLAYER_TYPE_ID, p.peer, (w) => this.codec.writeState(w, p.shown));
     p.spawned = true;
     this.known.set(p.peer, p.entityId);
     this.emit("playerJoined", p.peer);
@@ -565,9 +572,25 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       else {
         this.hostRemote(p, tick, now);
       }
-      if (p.spawned) this.history.record(tick, peer, p.state);
+      p.shown = this.shownState(p);
+      if (p.spawned) this.history.record(tick, peer, p.shown);
     }
     this.session.sendSnapshot();
+  }
+
+  /**
+   * What the host shows of a player this tick (its record, its snapshot, its own draw). Host authority: a stalled tick steps nothing, so the
+   * sim `state` stays where it is (the inputs still queued are stepped later, the stalls made up), but showing that as a plateau followed by a
+   * double step would be the stutter every screen sees. So each stall counted (at most `maxInputBuffer - 1`) shows the sim carried on by its own
+   * velocity, `carried` set, and the sim is never assigned it. The owner skips a carried snapshot (it is "after k, ack k" again). Owner mode
+   * already carries the stalled player on in `state` itself. A game with velocity left out gets no carry-on.
+   */
+  private shownState(p: HostPlayer): PlayerState {
+    if (this.authority !== "host" || p.peer === this.localPeerId || p.stalled <= 0 || !p.spawned || !this.codec.has("velocity")) return p.state;
+    let s = p.state;
+    const carry = Math.min(p.stalled, Math.max(1, this.session.config.maxInputBuffer - 1));
+    for (let i = 0; i < carry; i++) s = this.coast(s);
+    return { ...s, carried: true };
   }
 
   /**
@@ -604,9 +627,9 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       }
       return;
     }
-    if (p.carried) {
-      p.state = p.carried;
-      p.carried = null;
+    if (p.real) {
+      p.state = p.real;
+      p.real = null;
     }
     if (this.skippedTicks > 0) p.stalled = Math.min(p.stalled + this.skippedTicks, stallCap);
     const f = this.session.tryGetInput(p.peer, queue);
@@ -623,11 +646,11 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       }
     } else if (f) p.stalled = Math.min(p.stalled + 1, stallCap);
     if (p.stalled > 0 && p.spawned && !p.awaiting) {
-      p.carried = p.state;
+      p.real = p.state;
       let s = p.state;
       const carry = Math.min(p.stalled, Math.max(1, this.session.config.maxInputBuffer - 1));
       for (let i = 0; i < carry; i++) s = this.coast(s);
-      p.state = s;
+      p.state = { ...s, carried: true };
     }
   }
 
@@ -640,7 +663,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
   private hostLocal(p: HostPlayer): void {
     if (this.authority === "owner") {
       if (!this.haveLocal) return;
-      p.state = this.codec.quantize(this.localState);
+      p.state = this.codec.quantize({ ...this.localState, carried: false });
       this.localState = p.state;
     } else {
       const input = this.codec.quantizeInput(this.localInput);
@@ -663,7 +686,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       }
       return s;
     }
-    return this.codec.quantize(this.step(s, input, this.dt));
+    return this.codec.quantize({ ...this.step(s, input, this.dt), carried: false }); // the bit is the host's, never the game's
   }
 
   private stepRemote(p: HostPlayer, bytes: Uint8Array): void {
@@ -683,6 +706,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       this.stats.statesRejected++;
       return;
     }
+    s.carried = false; // the bit is the host's: an owner's own is ignored
     if (!p.spawned) {
       p.state = s;
       p.lastAcceptTick = tick;
@@ -781,6 +805,7 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
       return;
     }
     if (!this.predictor) return;
+    if (auth.carried) return; // the host applied none of my inputs this tick and showed me carried on: "after k, ack k" again, nothing to reconcile
     const before = this.predictor.current;
     const after = this.predictor.reconcile(auth, this.session.lastProcessedInput);
     const dz = this.codec.is3d ? after.z - before.z : after.y - before.y;

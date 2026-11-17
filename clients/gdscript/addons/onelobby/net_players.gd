@@ -119,7 +119,10 @@ class OLHostPlayer:
 	## Owner mode: ticks on which no new state came; the next ticks take a second one to make them up.
 	var stalled := 0
 	## Owner mode, while stalled: the last state that really came; `state` is carried on from it.
-	var carried: Dictionary = {}
+	var real: Dictionary = {}
+	## What the host shows of this player this tick: the record, the snapshot and the host's own draw. `state` (the sim), unless a
+	## host-authority player is stalled: then the sim carried on by its own velocity ("carried" set), the sim itself untouched.
+	var shown: Dictionary
 
 
 class OLDedupe:
@@ -257,7 +260,7 @@ func get_state(peer_id: int) -> Variant:
 			return null
 		var t := float(session.clock.tick) - 1.0 + session.clock.alpha()
 		var s: Variant = _history.try_sample(peer_id, t)
-		return s if s != null else (_host_players[peer_id] as OLHostPlayer).state
+		return s if s != null else (_host_players[peer_id] as OLHostPlayer).shown
 	if not _known.has(peer_id):
 		return null
 	var smp: Variant = session.try_sample(int(_known[peer_id]), codec)
@@ -280,7 +283,7 @@ func get_state(peer_id: int) -> Variant:
 func latest_state(peer_id: int) -> Variant:
 	if is_host:
 		var hp: Variant = _host_players.get(peer_id)
-		return (hp as OLHostPlayer).state if hp != null else null
+		return (hp as OLHostPlayer).shown if hp != null else null
 	if not _known.has(peer_id):
 		return null
 	var l := session.try_get_latest(int(_known[peer_id]), codec)
@@ -354,8 +357,10 @@ func teleport_player(peer_id: int, patch: Dictionary) -> void:
 	var s := p.state.duplicate()
 	s.merge(patch, true)
 	s["teleport"] = (int(p.state["teleport"]) + HOST_TELEPORT_STEP) % W.TELEPORT_MODULO
-	p.carried = {}
+	s["carried"] = false
+	p.real = {}
 	p.state = codec.quantize(s)
+	p.shown = p.state
 	if peer_id == local_peer_id:
 		_local_state = p.state
 		_have_local = true
@@ -533,6 +538,7 @@ func _add_host_player(peer: int) -> void:
 	var p := OLHostPlayer.new()
 	p.peer = peer
 	p.state = codec.quantize(W.default_player_state(over))
+	p.shown = p.state
 	p.last_accept_tick = session.clock.tick
 	p.last_input = W.default_player_input()
 	_host_players[peer] = p
@@ -542,7 +548,8 @@ func _add_host_player(peer: int) -> void:
 
 
 func _spawn_entity(p: OLHostPlayer) -> void:
-	p.entity_id = session.spawn(W.PLAYER_TYPE_ID, p.peer, func(w: OneLobbyNetWriter) -> void: codec.write_state(w, p.state))
+	p.shown = p.state
+	p.entity_id = session.spawn(W.PLAYER_TYPE_ID, p.peer, func(w: OneLobbyNetWriter) -> void: codec.write_state(w, p.shown))
 	p.spawned = true
 	_known[p.peer] = p.entity_id
 	player_joined.emit(p.peer)
@@ -587,8 +594,9 @@ func _host_tick(t: int) -> void:
 			_host_local(p)
 		else:
 			_host_remote(p, t, now)
+		p.shown = _shown_state(peer, p)
 		if p.spawned:
-			_history.record(t, peer, p.state)
+			_history.record(t, peer, p.shown)
 	session.send_snapshot()
 
 
@@ -622,9 +630,9 @@ func _host_remote(p: OLHostPlayer, t: int, now: int) -> void:
 			p.stalled -= 1
 			_step_remote(p, g0["bytes"])
 		return
-	if not p.carried.is_empty():
-		p.state = p.carried
-		p.carried = {}
+	if not p.real.is_empty():
+		p.state = p.real
+		p.real = {}
 	if _skipped_ticks > 0:
 		p.stalled = mini(p.stalled + _skipped_ticks, stall_cap)
 	var f := session.try_get_input(p.peer, queue)
@@ -640,11 +648,29 @@ func _host_remote(p: OLHostPlayer, t: int, now: int) -> void:
 	elif not f.is_empty():
 		p.stalled = mini(p.stalled + 1, stall_cap)
 	if p.stalled > 0 and p.spawned and not p.awaiting:
-		p.carried = p.state
+		p.real = p.state
 		var s: Dictionary = p.state
 		for i in mini(p.stalled, maxi(1, int(session.config["max_input_buffer"]) - 1)):
 			s = _coast(s)
+		s = s.duplicate()
+		s["carried"] = true
 		p.state = s
+
+
+## What the host shows of a player this tick (its record, its snapshot, its own draw). Host authority: a stalled tick steps nothing, so
+## the sim `state` stays where it is (the inputs still queued are stepped later, the stalls made up), but showing that as a plateau
+## followed by a double step would be the stutter every screen sees. So each stall counted (at most `max_input_buffer - 1`) shows the
+## sim carried on by its own velocity, "carried" set, and the sim is never assigned it. The owner skips a carried snapshot ("after k,
+## ack k" again). Owner mode already carries the stalled player on in `state` itself. A game with velocity left out gets no carry-on.
+func _shown_state(peer: int, p: OLHostPlayer) -> Dictionary:
+	if authority != "host" or peer == local_peer_id or p.stalled <= 0 or not p.spawned or not codec.has("velocity"):
+		return p.state
+	var s: Dictionary = p.state
+	for i in mini(p.stalled, maxi(1, int(session.config["max_input_buffer"]) - 1)):
+		s = _coast(s)
+	s = s.duplicate()
+	s["carried"] = true
+	return s
 
 
 func _coast(st: Dictionary) -> Dictionary:
@@ -661,7 +687,9 @@ func _host_local(p: OLHostPlayer) -> void:
 	if authority == "owner":
 		if not _have_local:
 			return
-		p.state = codec.quantize(_local_state)
+		var ls := _local_state.duplicate()
+		ls["carried"] = false
+		p.state = codec.quantize(ls)
 		_local_state = p.state
 	else:
 		var input := codec.quantize_input(_local_input)
@@ -678,7 +706,9 @@ func _run_step(s: Dictionary, input: Dictionary) -> Dictionary:
 			_warned_step = true
 			push_error("OneLobbyNetPlayers: authority \"host\" needs a step function: OneLobbyNetPlayers.new(lobby, {\"authority\": \"host\", \"step\": Callable(state, input, dt) -> state})")
 		return s
-	return codec.quantize(step.call(s, input, _dt()))
+	var next: Dictionary = (step.call(s, input, _dt()) as Dictionary).duplicate()
+	next["carried"] = false # the bit is the host's, never the game's
+	return codec.quantize(next)
 
 
 func _step_remote(p: OLHostPlayer, bytes: PackedByteArray) -> void:
@@ -697,6 +727,7 @@ func _accept_owner_state(p: OLHostPlayer, bytes: PackedByteArray, t: int, now: i
 		stats["states_rejected"] += 1
 		return
 	var s: Dictionary = sv
+	s["carried"] = false # the bit is the host's: an owner's own is ignored
 	if not p.spawned:
 		p.state = s
 		p.last_accept_tick = t
@@ -793,6 +824,8 @@ func _client_corrections() -> void:
 		return
 	if _predictor == null:
 		return
+	if bool(auth.get("carried", false)):
+		return # the host applied none of my inputs this tick and showed me carried on: "after k, ack k" again, nothing to reconcile
 	var before: Dictionary = _predictor.current
 	var after: Dictionary = _predictor.reconcile(auth, session.last_processed_input)
 	var d3 := codec.is_3d()

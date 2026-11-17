@@ -120,8 +120,10 @@ namespace OneLobby.Replication
             /// <summary>Owner mode: ticks on which no new state came; the next ticks take a second one to make them up.</summary>
             public int Stalled;
             /// <summary>Owner mode, while stalled: the last state that really came; <c>State</c> is carried on from it.</summary>
-            public PlayerState? Carried;
-            public void Write(NetWriter w) => Codec.WriteState(w, State);
+            public PlayerState? Real;
+            /// <summary>What the host shows of this player this tick: the record, the snapshot and the host's own draw. <c>State</c> (the sim), unless a host-authority player is stalled: then the sim carried on by its own velocity (Carried set), the sim itself untouched.</summary>
+            public PlayerState Shown;
+            public void Write(NetWriter w) => Codec.WriteState(w, Shown);
         }
 
         private sealed class Dedupe { public uint Floor; public readonly HashSet<uint> Seen = new(); }
@@ -287,7 +289,7 @@ namespace OneLobby.Replication
             if (IsHost)
             {
                 if (!_hostPlayers.TryGetValue(peerId, out var hp) || !hp.Spawned) return false;
-                if (!_history.TrySample(new NetId((uint)peerId), (double)Session.Clock.Tick - 1 + Session.Clock.Alpha, out state)) state = hp.State;
+                if (!_history.TrySample(new NetId((uint)peerId), (double)Session.Clock.Tick - 1 + Session.Clock.Alpha, out state)) state = hp.Shown;
                 return true;
             }
             if (!_known.TryGetValue(peerId, out var id)) return false;
@@ -316,7 +318,7 @@ namespace OneLobby.Replication
             if (IsHost)
             {
                 if (!_hostPlayers.TryGetValue(peerId, out var hp)) return false;
-                state = hp.State;
+                state = hp.Shown;
                 return true;
             }
             return _known.TryGetValue(peerId, out var id) && Session.TryGetLatest(id, Codec, out state, out _);
@@ -368,8 +370,10 @@ namespace OneLobby.Replication
             RequireHost();
             if (!_hostPlayers.TryGetValue(peerId, out var p)) return;
             to.Teleport = (p.State.Teleport + NetPlayer.HostTeleportStep) % PlayerWire.TeleportModulo;
-            p.Carried = null;
+            p.Real = null;
+            to.Carried = false;
             p.State = Codec.QuantizeState(to);
+            p.Shown = p.State;
             if (peerId == LocalPeerId) { _localState = p.State; _haveLocal = true; }
             else if (Authority == PlayerAuthority.Owner) p.Awaiting = true;
             p.LastTeleportMs = _lobby.NowMs;
@@ -584,6 +588,7 @@ namespace OneLobby.Replication
 
         private void SpawnEntity(HostPlayer p)
         {
+            p.Shown = p.State;
             p.EntityId = Session.Spawn(PlayerWire.PlayerTypeId, p.Peer, p);
             p.Spawned = true;
             _known[p.Peer] = p.EntityId;
@@ -627,7 +632,8 @@ namespace OneLobby.Replication
                 var p = kv.Value;
                 if (kv.Key == LocalPeerId) HostLocal(p);
                 else HostRemote(kv.Key, p, tick, now);
-                if (p.Spawned) _history.Record(tick, new NetId((uint)kv.Key), p.State);
+                p.Shown = ShownState(kv.Key, p);
+                if (p.Spawned) _history.Record(tick, new NetId((uint)kv.Key), p.Shown);
             }
             Session.SendSnapshot();
         }
@@ -661,7 +667,7 @@ namespace OneLobby.Replication
                 }
                 return;
             }
-            if (p.Carried.HasValue) { p.State = p.Carried.Value; p.Carried = null; }
+            if (p.Real.HasValue) { p.State = p.Real.Value; p.Real = null; }
             if (_skippedTicks > 0) p.Stalled = Math.Min(p.Stalled + _skippedTicks, stallCap);
             if (Session.TryGetInputCapped(peer, out var f, queue))
             {
@@ -679,12 +685,28 @@ namespace OneLobby.Replication
             }
             if (p.Stalled > 0 && p.Spawned && !p.Awaiting)
             {
-                p.Carried = p.State;
+                p.Real = p.State;
                 var s = p.State;
                 var carry = Math.Min(p.Stalled, Math.Max(1, Session.Config.MaxInputBuffer - 1));
                 for (var i = 0; i < carry; i++) s = Coast(s);
+                s.Carried = true;
                 p.State = s;
             }
+        }
+
+        // What the host shows of a player this tick (its record, its snapshot, its own draw). Host authority: a stalled tick steps nothing, so the sim
+        // State stays where it is (the inputs still queued are stepped later, the stalls made up), but showing that as a plateau followed by a double step
+        // would be the stutter every screen sees. So each stall counted (at most MaxInputBuffer - 1) shows the sim carried on by its own velocity,
+        // Carried set, and the sim is never assigned it. The owner skips a carried snapshot ("after k, ack k" again). Owner mode already carries the
+        // stalled player on in State itself. A game with velocity left out gets no carry-on.
+        private PlayerState ShownState(int peer, HostPlayer p)
+        {
+            if (Authority != PlayerAuthority.Host || peer == LocalPeerId || p.Stalled <= 0 || !p.Spawned || !Codec.Has("velocity")) return p.State;
+            var s = p.State;
+            var carry = Math.Min(p.Stalled, Math.Max(1, Session.Config.MaxInputBuffer - 1));
+            for (var i = 0; i < carry; i++) s = Coast(s);
+            s.Carried = true;
+            return s;
         }
 
         private PlayerState Coast(PlayerState st)
@@ -700,7 +722,8 @@ namespace OneLobby.Replication
             if (Authority == PlayerAuthority.Owner)
             {
                 if (!_haveLocal) return;
-                p.State = Codec.QuantizeState(_localState);
+                var ls = _localState; ls.Carried = false;
+                p.State = Codec.QuantizeState(ls);
                 _localState = p.State;
             }
             else
@@ -727,7 +750,9 @@ namespace OneLobby.Replication
                 }
                 return s;
             }
-            return Codec.QuantizeState(Step(s, input, Dt));
+            var next = Step(s, input, Dt);
+            next.Carried = false; // the bit is the host's, never the game's
+            return Codec.QuantizeState(next);
         }
 
         private void StepRemote(HostPlayer p, ReadOnlySpan<byte> bytes)
@@ -740,6 +765,7 @@ namespace OneLobby.Replication
         private void AcceptOwnerState(HostPlayer p, ReadOnlySpan<byte> bytes, uint tick, long now)
         {
             if (!Codec.DecodeState(bytes, out var s)) { Stats.StatesRejected++; return; }
+            s.Carried = false; // the bit is the host's: an owner's own is ignored
             if (!p.Spawned)
             {
                 p.State = s;
@@ -843,6 +869,7 @@ namespace OneLobby.Replication
                 return;
             }
             if (_predictor == null) return;
+            if (auth.Carried) return; // the host applied none of my inputs this tick and showed me carried on: "after k, ack k" again, nothing to reconcile
             var before = _predictor.Current;
             var after = _predictor.Reconcile(auth, Session.LastProcessedInput);
             var dz = Codec.Is3D ? after.Z - before.Z : after.Y - before.Y;
