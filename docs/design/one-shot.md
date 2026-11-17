@@ -156,7 +156,7 @@ Each is one lane unless noted; order matters for the first three.
     arguments are structs; no engine type), the session additions (`AdaptiveDelay`, `InterpolationDelayMs`, `JitterMs`, `RegisterKind` / `SendExtension`, per-peer
     `TrafficWith`, state schemas for `TrySampleAt` / `TryGetLatest`), every case of `spec/vectors/net-player.json` in both directions, and D1 to D9 on the C# `Rig`
     (`NetPlayerTests`, `NetPlayerHostTests`). In-memory only: no two processes and no real link have carried it, no game engine has run it, nobody has seen it
-    on a screen. Not built (part 3b): the Unity `NetPlayer` component, a spawner, a sample, and the JS-to-C# trace test.
+    on a screen. Landed (part 3b): the Unity component, see section 7.4. Not built: the JS-to-C# trace test.
     Landed (the Godot C# lane, part 3c): `OneLobbyNetPlayer` and `OneLobbyNetPlayerSpawner` as an add-on folder of the demo project (`addons/onelobby_net_player/`, `[GlobalClass]`;
     a node class in a referenced assembly cannot be attached to a scene), with the same exports, properties, methods and signals as the GDScript node in PascalCase, and a sample
     that moves (`NetPlayerDemo.tscn`). Proven in one headless Godot process on an in-memory network (`--netplayer-selfcheck`, run by `scaffold-test.sh` in CI); the

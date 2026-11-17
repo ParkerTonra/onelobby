@@ -61,3 +61,5 @@ export {
   ACTION_EVENTS, OMITTABLE, OMITTABLE_FIELDS, positionBits, encodePlayerEvents, decodePlayerEvents, actionByName, actionById,
 } from "./replication/index.js";
 export type { Ent, World, SnapshotHeader, DecodedInput, InputEntry, Json, ActionEventDef, WireEvent } from "./replication/index.js";
+export { LanHost, LanAnswerer, LAN_DEFAULT_PORT, lanSourceClass, lanBroadcastTargets, nodeLanUdp } from "./lan.js";
+export type { LanHostInfo, LanHostOptions, LanUdp } from "./lan.js";

@@ -156,6 +156,7 @@ func direct_options(display_name: String = "") -> Dictionary:
 	o.erase("visibility")
 	o["tcp_port"] = hosting["direct_port"]
 	o["nostr"] = hosting["nostr"]
+	o["lan"] = hosting["lan"]
 	if not (hosting["nostr_relays"] as Array).is_empty():
 		o["relays"] = (hosting["nostr_relays"] as Array).duplicate()
 	return o
@@ -264,7 +265,7 @@ static func _schema() -> Dictionary:
 		"game": _obj({"id": _str(-1, -1, "^[A-Za-z0-9._-]{1,64}\\z"), "netVersion": _str(1, 32), "title": _str(-1, 64)}, ["id"]),
 		"engine": _enum(["web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"]),
 		"hosting": _obj({
-			"direct": b, "server": b, "lobbyServer": _str(), "directPort": _int(1024, 65535), "openPort": b, "nostr": b,
+			"direct": b, "server": b, "lobbyServer": _str(), "directPort": _int(1024, 65535), "lan": b, "openPort": b, "nostr": b,
 			"nostrRelays": {"k": "strarr"}, "relayOnly": b, "allowedOrigins": {"k": "strarr"},
 		}),
 		"lobby": _obj({
@@ -499,6 +500,7 @@ static func _fill(input: Dictionary) -> Dictionary:
 		"server": hosting_in.get("server", web),
 		"lobbyServer": hosting_in.get("lobbyServer", ""),
 		"directPort": hosting_in.get("directPort", 47810),
+		"lan": hosting_in.get("lan", false),
 		"openPort": hosting_in.get("openPort", true),
 		"nostr": hosting_in.get("nostr", true),
 		"nostrRelays": hosting_in.get("nostrRelays", DEFAULT_NOSTR_RELAYS.duplicate()),
@@ -580,6 +582,8 @@ static func _cross_rules(d: Dictionary, input: Dictionary) -> Dictionary:
 		return _fail("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)")
 	if _sect(input.get("sync")).has("player") and s["mode"] != "replication":
 		return _fail("sync.player", "player_needs_replication", "sync.player needs sync.mode replication")
+	if h["lan"] and not h["direct"]:
+		return _fail("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)")
 	if s["mode"] == "replication" and ses["hostLeaves"] == "migrate":
 		return _fail("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end")
 	var late_given := _sect(input.get("lobby")).has("lateJoin")

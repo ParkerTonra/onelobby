@@ -877,6 +877,7 @@ export declare class Lobby extends Emitter<LobbyEvents> {
     notifyJoinCodeChanged(): void;
     /** ICE from a peer that has no link yet: its candidates can overtake its offer (node-datachannel). */
     /** Offers from roster members that arrived while the host link was open (see offerVerdict), by sender. */
+    /** The last tick applied when this peer claimed host: every host_claim of the epoch carries it. */
     /** Diagnostics: candidate types that crossed the wire on the host link (joiner view), and how far the attempt got. */
     /** Host: when each joiner's last diagnosis was accepted. */
     /** Host: links that reached open, so a link that dies before that is a failed negotiation, not a leaving peer. */
@@ -2494,6 +2495,16 @@ export declare const ErrorCodes: {
     readonly Kicked: "kicked";
     readonly BadPassword: "bad_password";
     readonly Banned: "banned";
+    readonly Denied: "denied";
+    readonly Disconnected: "disconnected";
+    readonly SpectatorsFull: "spectators_full";
+    readonly RoomUnsupported: "room_unsupported";
+    readonly PasswordRequired: "password_required";
+    readonly WrongState: "wrong_state";
+    readonly NotEnoughPlayers: "not_enough_players";
+    readonly BadValue: "bad_value";
+    readonly UnknownKey: "unknown_key";
+    readonly TooLarge: "too_large";
     readonly NotHost: "not_host";
     readonly RateLimited: "rate_limited";
     readonly ServerFull: "server_full";

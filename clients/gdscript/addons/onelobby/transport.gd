@@ -68,6 +68,10 @@ class OLLink:
 	func facts() -> Dictionary:
 		return {}
 
+	## The remote end's IP address once the transport knows it, else "" (the room layer's ban check polls it; Godot's
+	## WebRTC does not expose the selected candidate pair, so the stock link leaves it empty).
+	var remote_address := ""
+
 	## The initiator creates its offer (the answerer waits for apply_signal).
 	func start_offer() -> void:
 		pass

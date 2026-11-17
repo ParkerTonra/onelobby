@@ -24,7 +24,7 @@ namespace OneLobby
 
     public sealed record GameSection(string Id, string NetVersion, string? Title);
     public sealed record HostingSection(bool Direct, bool Server, string LobbyServer, int DirectPort, bool OpenPort, bool RelayOnly,
-        IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null)
+        IReadOnlyList<string> AllowedOrigins, bool Nostr = true, IReadOnlyList<string>? NostrRelays = null, bool Lan = false)
     {
         /// <summary>The <c>hosting.nostrRelays</c> list; the default list when the blueprint does not set it (an explicit empty list means the library default at use time).</summary>
         public IReadOnlyList<string> Relays => NostrRelays ?? Blueprint.DefaultNostrRelays;
@@ -201,7 +201,7 @@ namespace OneLobby
                 w.WriteStartObject("hosting");
                 w.WriteBoolean("direct", Hosting.Direct); w.WriteBoolean("server", Hosting.Server);
                 w.WriteString("lobbyServer", Hosting.LobbyServer); w.WriteNumber("directPort", Hosting.DirectPort);
-                w.WriteBoolean("openPort", Hosting.OpenPort); w.WriteBoolean("relayOnly", Hosting.RelayOnly);
+                w.WriteBoolean("lan", Hosting.Lan); w.WriteBoolean("openPort", Hosting.OpenPort); w.WriteBoolean("relayOnly", Hosting.RelayOnly);
                 w.WriteStartArray("allowedOrigins");
                 foreach (var o in Hosting.AllowedOrigins) w.WriteStringValue(o);
                 w.WriteEndArray();
@@ -405,7 +405,7 @@ namespace OneLobby
                         break;
                     case "engine": Enum(v, "engine", "web", "node-browser", "godot-csharp", "godot-gdscript", "unity", "dotnet"); break;
                     case "hosting":
-                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
+                        Object(v, "hosting", Array.Empty<string>(), new[] { "direct", "server", "lobbyServer", "directPort", "lan", "openPort", "relayOnly", "allowedOrigins", "nostr", "nostrRelays" }, (hk, hv) =>
                         {
                             var hp = "hosting." + hk;
                             switch (hk)
@@ -674,7 +674,7 @@ namespace OneLobby
                 engine,
                 new HostingSection(B(hosting, "direct", !web), B(hosting, "server", web), S(hosting, "lobbyServer", ""),
                     I(hosting, "directPort", 47810), B(hosting, "openPort", true), B(hosting, "relayOnly", false), origins,
-                    B(hosting, "nostr", true), relays),
+                    B(hosting, "nostr", true), relays, B(hosting, "lan", false)),
                 new LobbySection(I(lobby, "maxPlayers", 4), B(lobby, "listed", false), B(lobby, "approveJoins", false),
                     B(lobby, "password", false), B(lobby, "lateJoin", roomJson is { } rj0 && rj0.TryGetProperty("lateJoin", out var rl0) ? rl0.GetString() != "refuse" : true), B(lobby, "rejoin", true),
                     B(lobby, "joinLink", web || engine == "node-browser"), meta),
@@ -699,6 +699,8 @@ namespace OneLobby
                 throw Err("hosting.direct", "direct_needs_listener", "engine web cannot host direct (a browser cannot listen on a port)");
             if (sync is { } sy && sy.TryGetProperty("player", out _) && bp.Sync.Mode != "replication")
                 throw Err("sync.player", "player_needs_replication", "sync.player needs sync.mode replication");
+            if (bp.Hosting.Lan && !bp.Hosting.Direct)
+                throw Err("hosting.lan", "lan_needs_direct", "hosting.lan needs hosting.direct (LAN discovery finds direct hosts)");
             if (bp.Sync.Mode == "replication" && bp.Session.HostLeaves == "migrate")
                 throw Err("session.hostLeaves", "migrate_with_replication", "replication has no host migration; use end");
             var lateJoinGiven = lobby is { } lg && lg.TryGetProperty("lateJoin", out _);
