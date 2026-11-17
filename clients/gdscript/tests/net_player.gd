@@ -48,7 +48,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
-		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -564,6 +564,52 @@ func _test_d1b() -> void:
 		var r := _compare_paths(rec["owner"], rec["watched"])
 		print("D1b seed %d: lag %d ms, mean %.3f m, worst %.3f m" % [seed_value, r["lag_ms"], r["mean"], r["max"]])
 		_check(float(r["max"]) < D1B_MAX_ERROR_M, "D1b seed %d: a stalled tick does not stay as delay, worst error under %.2f m" % [seed_value, D1B_MAX_ERROR_M])
+
+
+## One runner hitch: a process that stalls for 4, 5 or 7 ticks mid-walk, then runs on. The owner's stall, or the host's, must not leave
+## the host's record of the walker a tick or more ahead for the rest of the run. Samples are not taken while the hitched process is
+## stopped (a stopped process samples nothing; the owner path is not sampled then either) nor, for the watched path, for one second
+## after it (the interpolation buffer refills); the whole of the rest is judged with the D1 bounds, one constant lag fitted over the run.
+func _test_d1c() -> void:
+	for mode: String in MODES:
+		for who: String in ["a", "host"]:
+			for ticks: int in [4, 5, 7]:
+				var worst := 0.0
+				var worst_mean := 0.0
+				for seed_value: int in D1_SEEDS:
+					var s := _scene(mode, {"seed": seed_value})
+					_drive(s)
+					var rig: Rig = s["rig"]
+					rig.run(3.0)
+					var al: OneLobbyNetPlayers = s["al"]
+					var bl: OneLobbyNetPlayers = s["bl"]
+					var frozen_frames := ceili(float(ticks) * 1000.0 / 30.0 / float(rig.frame_ms))
+					var hitch_at := int(6000.0 / float(rig.frame_ms))
+					var settle := int(1000.0 / float(rig.frame_ms))
+					var frames := int(20000.0 / float(rig.frame_ms))
+					var owner := Path.new()
+					var watched := Path.new()
+					for i in frames:
+						if i == hitch_at:
+							rig.frozen[who] = true
+						if i == hitch_at + frozen_frames:
+							rig.frozen.erase(who)
+						rig.step()
+						var stopped := i >= hitch_at and i < hitch_at + frozen_frames
+						var t := float(rig.now_ms())
+						var mine: Variant = al.get_state(al.local_peer_id)
+						if mine != null and not (stopped and who == "a"):
+							owner.add(t, mine)
+						var seen: Variant = bl.get_state(al.local_peer_id)
+						if seen != null and (i < hitch_at or i >= hitch_at + frozen_frames + settle):
+							watched.add(t, seen)
+					var r := _compare_paths(owner, watched)
+					print("D1c %s %s %d ticks seed %d: lag %d ms, mean %.3f m, worst %.3f m" % [mode, who, ticks, seed_value, r["lag_ms"], r["mean"], r["max"]])
+					_check(watched.size() > 600, "D1c %s %s %d: watched frames" % [mode, who, ticks])
+					worst = maxf(worst, float(r["max"]))
+					worst_mean = maxf(worst_mean, float(r["mean"]))
+				_check(worst_mean < D1_MEAN_ERROR_M, "D1c %s, %s stalls %d ticks: mean error under %.2f m (%.3f)" % [mode, who, ticks, D1_MEAN_ERROR_M, worst_mean])
+				_check(worst < D1_MAX_ERROR_M, "D1c %s, %s stalls %d ticks: worst frame under %.2f m (%.3f)" % [mode, who, ticks, D1_MAX_ERROR_M, worst])
 
 
 func _test_d2() -> void:
