@@ -115,6 +115,53 @@ namespace OneLobby.Replication.Tests
             Assert.True(maxShift <= 16, "the lag moved by " + maxShift + " ms across the hitch");
         }
 
+        // A run of lost inputs: at 10, 13 and 16 s every fast frame is dropped for exactly 3 ticks (no random loss, jitter 20 ms as in D1), and
+        // the inputs come back by redundancy, so the host loses none of the walker's (its per-client Lost stays 0; the other client's phase can
+        // make a fourth of its frames fall in the window) but sees 3 stalled ticks each time. A
+        // host-authority host steps nothing on a stalled tick; its record of the walker must not show that as a plateau and a double step. The
+        // record of the walker (6 s to 20 s) is judged against the walker's own path with the D1 bounds.
+        [Fact]
+        public void D1d_ARunOfLostInputsDoesNotShowAsAStallOnTheHostsRecord()
+        {
+            double worst = 0, worstMean = 0;
+            var dropFrom = new long[] { 10000, 13000, 16000 };
+            foreach (var seed in D1Seeds)
+            {
+                var s = Scene.Make(PlayerAuthority.Host, loss: 0, seed: seed, precise: true);
+                s.Drive();
+                s.Rig.Run(6); // past the start-up of the clocks and the buffers
+                var owner = new List<Pt>();
+                var seen = new List<Pt>();
+                var frames = 14 * 1000 / s.Rig.FrameMs;
+                // exactly 3 of the walker's ticks lose their frame (a frame time window would catch 3 or 4): armed when a drop time is
+                // reached, on for the next 3 ticks of the walker
+                var armed = false; var dropping = false; var ticksDropped = 0; var next = 0;
+                s.Al.Tick += _ =>
+                {
+                    if (dropping) { if (++ticksDropped == 3) dropping = false; }
+                    else if (armed) { armed = false; dropping = true; ticksDropped = 0; }
+                };
+                s.Rig.Net.DropUnreliable = () => dropping;
+                for (var i = 0; i < frames; i++)
+                {
+                    if (next < dropFrom.Length && s.Rig.NowMs >= dropFrom[next]) { armed = true; next++; }
+                    s.Rig.Step();
+                    var t = s.Rig.NowMs;
+                    if (s.Al.TryGet(s.Al.LocalPeerId, out var mine)) owner.Add(new Pt { T = t, X = mine.X, Y = mine.Y, Z = mine.Z });
+                    if (s.Hl.TryGet(s.A.PeerId, out var h)) seen.Add(new Pt { T = t, X = h.X, Y = h.Y, Z = h.Z });
+                }
+                var r = Scene.ComparePaths(owner, seen);
+                var lost = s.Hl.Session.InputStatsFor(s.A.PeerId).Lost;
+                _out.WriteLine($"D1d seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, n {seen.Count}, inputs lost of the walker {lost} (host total {s.Hl.Session.Stats.InputsLost})");
+                Assert.Equal(0, lost);
+                Assert.True(seen.Count > 600);
+                worst = Math.Max(worst, r.Max);
+                worstMean = Math.Max(worstMean, r.Mean);
+            }
+            Assert.True(worstMean < D1MeanErrorM, "mean " + worstMean);
+            Assert.True(worst < D1MaxErrorM, "worst " + worst);
+        }
+
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]
         public void D2_WatchedPlayerNeverStandsStillPastTheCarryOnCap(PlayerAuthority mode)
         {

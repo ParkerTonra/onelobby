@@ -48,7 +48,7 @@ func _run() -> void:
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
 		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
-		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
+		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d1d, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
 	]
 	for t: Callable in tests:
@@ -626,6 +626,54 @@ func _test_d1c() -> void:
 				_check(worst_mean < D1_MEAN_ERROR_M, "D1c %s, %s stalls %d ticks: mean error under %.2f m (%.3f)" % [mode, who, ticks, D1_MEAN_ERROR_M, worst_mean])
 				_check(worst < D1_MAX_ERROR_M, "D1c %s, %s stalls %d ticks: worst frame under %.2f m (%.3f)" % [mode, who, ticks, D1_MAX_ERROR_M, worst])
 				_check(max_shift <= 16, "D1c %s, %s stalls %d ticks: the lag moved by %d ms across the hitch" % [mode, who, ticks, max_shift])
+
+
+## A run of lost inputs: at 10, 13 and 16 s every fast frame is dropped for exactly 3 ticks (no random loss, jitter 20 ms as in D1), and
+## the inputs come back by redundancy, so the host loses none (stats.inputs_lost stays 0) but sees 3 stalled ticks each time. A host-authority
+## host steps nothing on a stalled tick; its record of the walker must not show that as a plateau and a double step. The record of the
+## walker (6 s to 20 s) is judged against the walker's own path with the D1 bounds.
+func _test_d1d() -> void:
+	var worst := 0.0
+	var worst_mean := 0.0
+	var drop_from := [10000, 13000, 16000]
+	var drop_ms := 100 # 3 ticks of 33.3 ms
+	for seed_value: int in D1_SEEDS:
+		var s := _scene("host", {"seed": seed_value, "loss_rate": 0.0})
+		_drive(s)
+		var rig: Rig = s["rig"]
+		rig.run(6.0) # past the start-up of the clocks and the buffers
+		var al: OneLobbyNetPlayers = s["al"]
+		var hl: OneLobbyNetPlayers = s["hl"]
+		var frames := int(14000.0 / float(rig.frame_ms))
+		var owner := Path.new()
+		var seen := Path.new()
+		for i in frames:
+			var t0 := rig.now_ms()
+			var dropping := false
+			for d: int in drop_from:
+				if t0 >= d and t0 < d + drop_ms:
+					dropping = true
+			if dropping:
+				rig.net.drop_fast = func() -> bool: return true
+			else:
+				rig.net.drop_fast = Callable()
+			rig.step()
+			var t := float(rig.now_ms())
+			var mine: Variant = al.get_state(al.local_peer_id)
+			if mine != null:
+				owner.add(t, mine)
+			var h: Variant = hl.get_state(al.local_peer_id)
+			if h != null:
+				seen.add(t, h)
+		var r := _compare_paths(owner, seen)
+		var lost := int(hl.session.stats.inputs_lost)
+		print("D1d host seed %d: lag %d ms, mean %.3f m, worst %.3f m, n %d, inputs lost %d" % [seed_value, r["lag_ms"], r["mean"], r["max"], seen.size(), lost])
+		_check(lost == 0, "D1d seed %d: the host lost no input (%d)" % [seed_value, lost])
+		_check(seen.size() > 600, "D1d seed %d: watched frames" % seed_value)
+		worst = maxf(worst, float(r["max"]))
+		worst_mean = maxf(worst_mean, float(r["mean"]))
+	_check(worst_mean < D1_MEAN_ERROR_M, "D1d: mean error under %.2f m (%.3f)" % [D1_MEAN_ERROR_M, worst_mean])
+	_check(worst < D1_MAX_ERROR_M, "D1d: worst frame under %.2f m (%.3f)" % [D1_MAX_ERROR_M, worst])
 
 
 func _test_d2() -> void:

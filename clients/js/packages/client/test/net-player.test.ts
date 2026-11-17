@@ -119,6 +119,47 @@ describe("D1c a hitch of 4, 5 or 7 ticks does not leave the host's record ahead"
   }
 });
 
+// A run of lost inputs: at 10, 13 and 16 s every fast frame is dropped for exactly 3 ticks (no random loss, jitter 20 ms as in D1), and the
+// inputs come back by redundancy, so the host loses none (stats.inputsLost stays 0) but sees 3 stalled ticks each time. A host-authority
+// host steps nothing on a stalled tick; its record of the walker must not show that as a plateau and a double step. The record of the walker
+// (6 s to 20 s) is judged against the walker's own path with the D1 bounds.
+describe("D1d a run of lost inputs does not show as a stall on the host's record (host authority)", () => {
+  it("host authority, 3 ticks dropped at 10, 13 and 16 s", async () => {
+    let worst = 0;
+    let worstMean = 0;
+    const rows: string[] = [];
+    for (const seed of D1_SEEDS) {
+      const s = await scene("host", { seed, lossRate: 0 });
+      drive(s);
+      await s.rig.run(6); // past the start-up of the clocks and the buffers
+      const dropFrom = [10000, 13000, 16000];
+      const dropMs = Math.ceil(3000 / 30);
+      const frames = Math.floor(14000 / s.rig.frameMs);
+      const owner: Sample[] = [];
+      const seen: Sample[] = [];
+      for (let i = 0; i < frames; i++) {
+        const t0 = s.rig.nowMs;
+        s.rig.net.dropFast = dropFrom.some((d) => t0 >= d && t0 < d + dropMs) ? () => true : null;
+        await s.rig.step();
+        const t = s.rig.nowMs;
+        const mine = s.al.get(s.al.localPeerId);
+        if (mine) owner.push({ t, x: mine.x, y: mine.y, z: mine.z });
+        const h = s.hl.get(s.al.localPeerId);
+        if (h) seen.push({ t, x: h.x, y: h.y, z: h.z });
+      }
+      const r = comparePaths(owner, seen);
+      rows.push(`seed ${seed}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, worst ${r.max.toFixed(3)} m, n ${seen.length}, inputsLost ${s.host.session.stats.inputsLost}`);
+      expect(s.host.session.stats.inputsLost, `seed ${seed} inputs lost`).toBe(0);
+      expect(seen.length, `seed ${seed}`).toBeGreaterThan(600);
+      worst = Math.max(worst, r.max);
+      worstMean = Math.max(worstMean, r.mean);
+    }
+    console.log("D1d host: " + rows.join(" | "));
+    expect(worstMean, "mean").toBeLessThan(D1_MEAN_ERROR_M);
+    expect(worst, "worst").toBeLessThan(D1_MAX_ERROR_M);
+  });
+});
+
 describe("D2 the watched player never stands still past the carry-on cap; it stops after the cap when snapshots stop", () => {
   for (const mode of MODES) {
     it(mode, async () => {
