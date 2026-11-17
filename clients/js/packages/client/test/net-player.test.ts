@@ -58,6 +58,55 @@ describe("D1b a stalled tick does not stay as delay (owner authority, loss 3%, n
   }
 });
 
+// One runner hitch: a process that stalls for 4, 5 or 7 ticks mid-walk, then runs on. The owner's stall, or the host's, must not leave
+// the host's record of the walker a tick or more ahead for the rest of the run. Samples are not taken while the hitched process is
+// stopped (a stopped process samples nothing; the owner path is not sampled then either) nor, for the watched path, for one second
+// after it (the interpolation buffer refills); the whole of the rest is judged with the D1 bounds, one constant lag fitted over the run.
+describe("D1c a hitch of 4, 5 or 7 ticks does not leave the watched path ahead", () => {
+  for (const mode of MODES) {
+    for (const who of ["owner", "host"] as const) {
+      for (const ticks of [4, 5, 7]) {
+        it(`${mode} authority, ${who} stalls ${ticks} ticks`, async () => {
+          let worst = 0;
+          let worstMean = 0;
+          const rows: string[] = [];
+          for (const seed of D1_SEEDS) {
+            const s = await scene(mode, { seed });
+            drive(s);
+            await s.rig.run(3);
+            const victim = who === "owner" ? s.a.name : s.host.name;
+            const frozenFrames = Math.ceil((ticks * 1000) / 30 / s.rig.frameMs);
+            const hitchAt = Math.floor(6000 / s.rig.frameMs);
+            const settle = Math.floor(1000 / s.rig.frameMs);
+            const frames = Math.floor(20000 / s.rig.frameMs);
+            const owner: Sample[] = [];
+            const watched: Sample[] = [];
+            for (let i = 0; i < frames; i++) {
+              if (i === hitchAt) s.rig.frozen.add(victim);
+              if (i === hitchAt + frozenFrames) s.rig.frozen.delete(victim);
+              await s.rig.step();
+              const stopped = i >= hitchAt && i < hitchAt + frozenFrames;
+              const t = s.rig.nowMs;
+              const mine = s.al.get(s.al.localPeerId);
+              if (mine && !(stopped && who === "owner")) owner.push({ t, x: mine.x, y: mine.y, z: mine.z });
+              const seen = s.bl.get(s.al.localPeerId);
+              if (seen && (i < hitchAt || i >= hitchAt + frozenFrames + settle)) watched.push({ t, x: seen.x, y: seen.y, z: seen.z });
+            }
+            const r = comparePaths(owner, watched);
+            rows.push(`seed ${seed}: lag ${r.lagMs} ms, mean ${r.mean.toFixed(3)} m, worst ${r.max.toFixed(3)} m`);
+            expect(watched.length, `seed ${seed}`).toBeGreaterThan(600);
+            worst = Math.max(worst, r.max);
+            worstMean = Math.max(worstMean, r.mean);
+          }
+          console.log(`D1c ${mode} ${who} ${ticks}: ` + rows.join(" | "));
+          expect(worstMean, "mean").toBeLessThan(D1_MEAN_ERROR_M);
+          expect(worst, "worst").toBeLessThan(D1_MAX_ERROR_M);
+        });
+      }
+    }
+  }
+});
+
 describe("D2 the watched player never stands still past the carry-on cap; it stops after the cap when snapshots stop", () => {
   for (const mode of MODES) {
     it(mode, async () => {
