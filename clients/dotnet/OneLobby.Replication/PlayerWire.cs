@@ -49,11 +49,13 @@ namespace OneLobby.Replication
         public int Team;
         /// <summary>0..7, wraps. A difference between two samples means "snap, do not slide".</summary>
         public int Teleport;
+        /// <summary>Set by the host when it carried this state on by velocity on a tick with no input from the owner (host authority; owner mode too, where the host carries a stalled player on). The owner does not replay from it. The host's bit: an owner's own is ignored.</summary>
+        public bool Carried;
 
         public PlayerState()
         {
             X = Y = Z = Vx = Vy = Vz = Yaw = Pitch = 0;
-            OnGround = true; Mode = 0; Item = 0; Aiming = false; Blocking = false; Health = 100; Alive = true; Team = 0; Teleport = 0;
+            OnGround = true; Mode = 0; Item = 0; Aiming = false; Blocking = false; Health = 100; Alive = true; Team = 0; Teleport = 0; Carried = false;
         }
     }
 

@@ -109,5 +109,5 @@ export function pathAt(ms: number, phase = 0): PlayerState {
   const y = 0.5 * Math.sin(2 * t);
   const vy = 1.0 * Math.cos(2 * t);
   const yaw = ((Math.atan2(vx, vz) * 180) / Math.PI + 360) % 360;
-  return { x, y, z, vx, vy, vz, yaw, pitch: 0, onGround: true, mode: 2, item: 0, aiming: false, blocking: false, health: 100, alive: true, team: 0, teleport: 0 };
+  return { x, y, z, vx, vy, vz, yaw, pitch: 0, onGround: true, mode: 2, item: 0, aiming: false, blocking: false, health: 100, alive: true, team: 0, teleport: 0, carried: false };
 }

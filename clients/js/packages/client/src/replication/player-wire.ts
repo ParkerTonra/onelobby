@@ -57,12 +57,17 @@ export interface PlayerState {
   team: number;
   /** 0..7, wraps. A difference between two samples means "snap, do not slide". */
   teleport: number;
+  /**
+   * Set by the host when it carried this state on by velocity on a tick with no input from the owner (host authority; owner mode
+   * too, where the host carries a stalled player on). The owner does not replay from it. The host's bit: an owner's own is ignored.
+   */
+  carried: boolean;
 }
 
 export function defaultPlayerState(over: Partial<PlayerState> = {}): PlayerState {
   return {
     x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, pitch: 0, onGround: true, mode: 0, item: 0, aiming: false, blocking: false,
-    health: 100, alive: true, team: 0, teleport: 0, ...over,
+    health: 100, alive: true, team: 0, teleport: 0, carried: false, ...over,
   };
 }
 
@@ -208,6 +213,7 @@ export class PlayerCodec {
     if (this.has("alive")) w.writeBool(s.alive);
     if (this.has("team")) w.writeBits(s.team, 4);
     w.writeBits(s.teleport, 3);
+    w.writeBool(s.carried);
   }
 
   readState(r: NetReader): PlayerState {
@@ -233,6 +239,7 @@ export class PlayerCodec {
     if (this.has("alive")) s.alive = r.readBool();
     if (this.has("team")) s.team = r.readBits(4);
     s.teleport = r.readBits(3);
+    s.carried = r.readBool();
     return s;
   }
 

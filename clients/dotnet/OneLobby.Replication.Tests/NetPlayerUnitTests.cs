@@ -132,6 +132,45 @@ namespace OneLobby.Replication.Tests
         }
 
         [Fact]
+        public void TheCarriedBitRoundTripsDefaultsToFalseAndCannotBeLeftOut()
+        {
+            foreach (var space in new[] { "3d", "2d" })
+            {
+                var c = new PlayerCodec(new PlayerWireConfig { Space = space });
+                Assert.False(new PlayerState().Carried);
+                Assert.True(c.DecodeState(c.EncodeState(new PlayerState()), out var plain));
+                Assert.False(plain.Carried);
+                Assert.True(c.DecodeState(c.EncodeState(new PlayerState { X = 1, Vx = 2, Teleport = 5, Carried = true }), out var on));
+                Assert.True(on.Carried);
+                Assert.Equal(5, on.Teleport);
+                Assert.True(c.DecodeState(c.EncodeState(on), out var again));
+                Assert.True(again.Carried);
+            }
+            Assert.Throws<ArgumentException>(() => new PlayerCodec(new PlayerWireConfig { Omit = new[] { "carried" } }));
+        }
+
+        [Fact]
+        public void ABlendTakesTheOlderSamplesCarriedFlag()
+        {
+            var c = new PlayerCodec(new PlayerWireConfig { Space = "3d" });
+            var a = new PlayerState { X = 0, Carried = true };
+            var b = new PlayerState { X = 2, Carried = false };
+            Assert.True(c.Lerp(a, b, 0.5).Carried);
+            Assert.False(c.Lerp(b, a, 0.5).Carried);
+        }
+
+        [Fact]
+        public void TheStateIs128BitsIn3D92In2DAnd73ForTheLeanLayout()
+        {
+            var d3 = new PlayerCodec(new PlayerWireConfig { Space = "3d" });
+            var d2 = new PlayerCodec(new PlayerWireConfig { Space = "2d" });
+            var lean = new PlayerCodec(new PlayerWireConfig { Space = "3d", Omit = new[] { "velocity", "pitch", "blocking", "aiming", "team", "health", "alive", "emote", "use" } });
+            Assert.Equal((128, 16), (d3.StateBits, d3.StateBytes));
+            Assert.Equal((92, 12), (d2.StateBits, d2.StateBytes));
+            Assert.Equal((73, 10), (lean.StateBits, lean.StateBytes));
+        }
+
+        [Fact]
         public void ATwoDPlayerTravelsAndIsWatchedWith12BytesOfState()
         {
             var cfg = new ReplicationConfig(AdaptiveDelay: true);

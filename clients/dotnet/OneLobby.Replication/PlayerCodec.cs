@@ -102,6 +102,7 @@ namespace OneLobby.Replication
             if (Has("alive")) w.WriteBool(s.Alive);
             if (Has("team")) w.WriteBits((uint)s.Team, 4);
             w.WriteBits((uint)s.Teleport, 3);
+            w.WriteBool(s.Carried);
         }
 
         public PlayerState ReadState(NetReader r)
@@ -130,6 +131,7 @@ namespace OneLobby.Replication
             if (Has("alive")) s.Alive = r.ReadBool();
             if (Has("team")) s.Team = (int)r.ReadBits(4);
             s.Teleport = (int)r.ReadBits(3);
+            s.Carried = r.ReadBool();
             return s;
         }
 

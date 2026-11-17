@@ -138,7 +138,7 @@ func _run() -> void:
 	# the bytes of the preset: 16 / 12 bytes of state, 6 / 5 of input at the default range
 	_check(codecs["default3d"].state_bytes() == 16 and codecs["default2d"].state_bytes() == 12, "state sizes 16 and 12")
 	_check(codecs["default3d"].input_bytes() == 6 and codecs["default2d"].input_bytes() == 5, "input sizes 6 and 5")
-	_check(codecs["default3d"].state_bits() == 127 and codecs["default2d"].state_bits() == 91, "state bits 127 and 91")
+	_check(codecs["default3d"].state_bits() == 128 and codecs["default2d"].state_bits() == 92, "state bits 128 and 92")
 
 	# omit takes the file's spelling and the snake_case one
 	var camel := OneLobbyPlayerCodec.new({"omit": ["onGround", "itemSwitch"]})

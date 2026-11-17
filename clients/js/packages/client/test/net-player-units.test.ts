@@ -209,3 +209,33 @@ describe("the blueprint section", () => {
     expect([...PLAYER_OMITTABLE]).toEqual([...OMITTABLE]);
   });
 });
+
+describe("the carried bit (the last bit of the state)", () => {
+  it("round-trips in 3D and 2D, defaults to false, cannot be left out", () => {
+    for (const space of ["3d", "2d"] as const) {
+      const c = new PlayerCodec({ space });
+      expect(defaultPlayerState().carried).toBe(false);
+      expect(c.decodeState(c.encodeState(defaultPlayerState()))!.carried).toBe(false);
+      const on = c.decodeState(c.encodeState(defaultPlayerState({ x: 1, vx: 2, teleport: 5, carried: true })))!;
+      expect(on.carried).toBe(true);
+      expect(on.teleport).toBe(5);
+      expect(c.decodeState(c.encodeState(on))!.carried).toBe(true);
+    }
+    expect(() => new PlayerCodec({ omit: ["carried"] })).toThrow();
+  });
+  it("a blend takes the older sample's flag", () => {
+    const c = new PlayerCodec({ space: "3d" });
+    const a = defaultPlayerState({ x: 0, carried: true });
+    const b = defaultPlayerState({ x: 2, carried: false });
+    expect(c.lerp(a, b, 0.5).carried).toBe(true);
+    expect(c.lerp(b, a, 0.5).carried).toBe(false);
+  });
+  it("128 bits (16 bytes) in 3D, 92 bits (12 bytes) in 2D, 73 bits (10 bytes) for the lean layout", () => {
+    const d3 = new PlayerCodec({ space: "3d" });
+    const d2 = new PlayerCodec({ space: "2d" });
+    const lean = new PlayerCodec({ space: "3d", omit: ["velocity", "pitch", "blocking", "aiming", "team", "health", "alive", "emote", "use"] });
+    expect([d3.stateBits, d3.stateBytes]).toEqual([128, 16]);
+    expect([d2.stateBits, d2.stateBytes]).toEqual([92, 12]);
+    expect([lean.stateBits, lean.stateBytes]).toEqual([73, 10]);
+  });
+});

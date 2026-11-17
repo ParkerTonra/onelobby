@@ -46,7 +46,7 @@ func _check(ok: bool, what: String) -> void:
 func _run() -> void:
 	var tests := [
 		_test_smoother, _test_reconciler, _test_history_ring, _test_adaptive_delay_option, _test_adaptive_delay_behaviour,
-		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit,
+		_test_no_layer_no_player, _test_old_session_ignores_kind5, _test_rejected_events, _test_malformed_kind5, _test_2d, _test_omit, _test_carried_bit,
 		_test_built_from_session_or_lobby, _test_from_config, _test_host_without_clients, _test_host_without_step,
 		_test_host_draws_others, _test_host_authority_spawn, _test_d1, _test_d1b, _test_d1c, _test_d1d, _test_d1e, _test_stall_never_corrects_owner, _test_record_is_snapshot, _test_d2, _test_d3, _test_d4, _test_d5, _test_d6, _test_d7_speed, _test_d7_teleport, _test_d7_shots, _test_d8, _test_d8_400,
 		_test_d8_clamp, _test_d9, _test_wire_traffic,
@@ -358,6 +358,27 @@ func _test_omit() -> void:
 	_check(lean.state_bytes() < full.state_bytes(), "omit: leaving fields out shortens the state")
 	var back: Dictionary = lean.decode_state(lean.encode_state(W.default_player_state({"x": 3.0, "vx": 9.0})))
 	_check(float(back["vx"]) == 0.0, "omit: a left-out field reads its default")
+
+
+func _test_carried_bit() -> void:
+	for space: String in ["3d", "2d"]:
+		var c := OneLobbyPlayerCodec.new({"space": space})
+		_check(not bool(W.default_player_state()["carried"]), "carried %s: defaults to false" % space)
+		_check(not bool(c.decode_state(c.encode_state(W.default_player_state()))["carried"]), "carried %s: false round-trips" % space)
+		var on: Dictionary = c.decode_state(c.encode_state(W.default_player_state({"x": 1.0, "vx": 2.0, "teleport": 5, "carried": true})))
+		_check(bool(on["carried"]) and int(on["teleport"]) == 5, "carried %s: true round-trips with the teleport counter" % space)
+		_check(bool(c.decode_state(c.encode_state(on))["carried"]), "carried %s: twice" % space)
+	_check(not W.is_omittable("carried"), "carried: cannot be left out")
+	var c3 := OneLobbyPlayerCodec.new({"space": "3d"})
+	var a: Dictionary = W.default_player_state({"x": 0.0, "carried": true})
+	var b: Dictionary = W.default_player_state({"x": 2.0, "carried": false})
+	_check(bool(c3.interpolate(a, b, 0.5)["carried"]), "carried: a blend takes the older sample's flag")
+	_check(not bool(c3.interpolate(b, a, 0.5)["carried"]), "carried: the other way round")
+	var c2 := OneLobbyPlayerCodec.new({"space": "2d"})
+	var lean := OneLobbyPlayerCodec.new({"space": "3d", "omit": ["velocity", "pitch", "blocking", "aiming", "team", "health", "alive", "emote", "use"]})
+	_check(c3.state_bits() == 128 and c3.state_bytes() == 16, "carried: 128 bits, 16 bytes in 3D")
+	_check(c2.state_bits() == 92 and c2.state_bytes() == 12, "carried: 92 bits, 12 bytes in 2D")
+	_check(lean.state_bits() == 73 and lean.state_bytes() == 10, "carried: 73 bits, 10 bytes lean")
 
 
 func _test_built_from_session_or_lobby() -> void:

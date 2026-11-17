@@ -42,7 +42,7 @@ namespace OneLobby.Replication.Tests
         {
             X = N(e, "x"), Y = N(e, "y"), Z = N(e, "z"), Vx = N(e, "vx"), Vy = N(e, "vy"), Vz = N(e, "vz"), Yaw = N(e, "yaw"), Pitch = N(e, "pitch"),
             OnGround = B(e, "onGround"), Mode = (int)N(e, "mode"), Item = (int)N(e, "item"), Aiming = B(e, "aiming"), Blocking = B(e, "blocking"),
-            Health = (int)N(e, "health"), Alive = B(e, "alive"), Team = (int)N(e, "team"), Teleport = (int)N(e, "teleport"),
+            Health = (int)N(e, "health"), Alive = B(e, "alive"), Team = (int)N(e, "team"), Teleport = (int)N(e, "teleport"), Carried = B(e, "carried"),
         };
 
         private static void AssertState(PlayerState want, PlayerState got, string what)
@@ -51,7 +51,7 @@ namespace OneLobby.Replication.Tests
             Assert.True(Math.Abs(want.Vx - got.Vx) < 1e-5 && Math.Abs(want.Vy - got.Vy) < 1e-5 && Math.Abs(want.Vz - got.Vz) < 1e-5, what + " velocity");
             Assert.True(Math.Abs(want.Yaw - got.Yaw) < 1e-5 && Math.Abs(want.Pitch - got.Pitch) < 1e-5, what + " angles");
             Assert.True(want.OnGround == got.OnGround && want.Mode == got.Mode && want.Item == got.Item && want.Aiming == got.Aiming && want.Blocking == got.Blocking
-                && want.Health == got.Health && want.Alive == got.Alive && want.Team == got.Team && want.Teleport == got.Teleport, what + " flags");
+                && want.Health == got.Health && want.Alive == got.Alive && want.Team == got.Team && want.Teleport == got.Teleport && want.Carried == got.Carried, what + " flags");
         }
 
         private static NetPlayerInput InputOf(JsonElement e)
@@ -95,7 +95,7 @@ namespace OneLobby.Replication.Tests
                 n++;
             }
             _out.WriteLine("states: " + n + " cases passed");
-            Assert.Equal(9, n);
+            Assert.Equal(11, n);
         }
 
         [Fact]

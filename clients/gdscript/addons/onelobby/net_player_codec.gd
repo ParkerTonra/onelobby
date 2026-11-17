@@ -113,6 +113,7 @@ func write_state(w: OneLobbyNetWriter, s: Dictionary) -> void:
 	if has("team"):
 		w.write_bits(int(s["team"]), 4)
 	w.write_bits(int(s["teleport"]), 3)
+	w.write_bool(bool(s["carried"]))
 
 
 func read_state(r: OneLobbyNetReader) -> Dictionary:
@@ -149,6 +150,7 @@ func read_state(r: OneLobbyNetReader) -> Dictionary:
 	if has("team"):
 		s["team"] = r.read_bits(4)
 	s["teleport"] = r.read_bits(3)
+	s["carried"] = r.read_bool()
 	return s
 
 

@@ -33,6 +33,8 @@ const STATES: { name: string; config: string; state: PlayerState }[] = [
   { name: "two_d_small_range", config: "small2d", state: st({ x: 49.99, y: -49.99, vx: 16, vy: -16, yaw: 1 }) },
   { name: "lean_left_out_fields", config: "lean3d", state: st({ x: 1, y: 2, z: 3, yaw: 90, onGround: false, mode: 4, item: 9, teleport: 1 }) },
   { name: "no_health_team", config: "noHealth3d", state: st({ x: 7.77, y: 0, z: -7.77, vx: 1, vz: 1, yaw: 45, pitch: 10, mode: 3, aiming: true }) },
+  { name: "carried_walking", config: "default3d", state: st({ x: 12.34, y: 1.5, z: -56.78, vx: 3.2, vy: 0, vz: -4.1, yaw: 135, pitch: -20, mode: 2, item: 3, health: 87, team: 2, carried: true }) },
+  { name: "lean_carried", config: "lean3d", state: st({ x: 1, y: 2, z: 3, yaw: 90, onGround: false, mode: 4, item: 9, teleport: 1, carried: true }) },
 ];
 
 const INPUTS: { name: string; config: string; input: PlayerInput }[] = [

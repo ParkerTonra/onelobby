@@ -82,7 +82,7 @@ static func action_by_id(id: int) -> Variant:
 static func default_player_state(over: Dictionary = {}) -> Dictionary:
 	var s := {
 		"x": 0.0, "y": 0.0, "z": 0.0, "vx": 0.0, "vy": 0.0, "vz": 0.0, "yaw": 0.0, "pitch": 0.0, "on_ground": true, "mode": 0,
-		"item": 0, "aiming": false, "blocking": false, "health": 100, "alive": true, "team": 0, "teleport": 0,
+		"item": 0, "aiming": false, "blocking": false, "health": 100, "alive": true, "team": 0, "teleport": 0, "carried": false,
 	}
 	for k: String in over:
 		s[k] = over[k]
