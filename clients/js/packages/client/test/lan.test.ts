@@ -9,6 +9,7 @@ import {
   decodeLanAnswer, decodeLanQuestion, encodeLanAnswer, encodeLanQuestion, lanSourceClass, type LanHostInfo, type LanUdp,
 } from "../src/lan.js";
 import { freePort, loopbackRtc } from "./helpers.js";
+import { ManualClock } from "../src/testing.js";
 import { hex, specJson, unhex } from "./spec.js";
 
 const V = specJson("vectors/lan-discovery.json");
@@ -227,21 +228,22 @@ describe("host and finder on 127.0.0.1", () => {
   });
 
   it("askNow asks at once, but never faster than the minimum gap", async () => {
-    const port = await freeUdpPort();
-    const seen: number[] = [];
-    const host = new LanHost({ gameId: "g", netVersion: "1", info: () => info(), port, bindHost: "127.0.0.1" });
-    await host.start();
-    cleanup.push(() => host.close());
-    const orig = host.answerer.handle.bind(host.answerer);
-    host.answerer.handle = (b, a, p) => (seen.push(Date.now()), orig(b, a, p));
-    const finder = new LanFinder({ gameId: "g", netVersion: "1", targets: ["127.0.0.1"], port, askIntervalMs: 60_000, minGapMs: 200 });
+    // a manual clock and a stand-in socket: the gap is measured in the finder's own time, so nothing here waits or races a timer
+    const clock = new ManualClock();
+    const sent: number[] = [];
+    const fake: LanUdp = { onMessage: null, bind: async () => 40000, send: () => sent.push(clock.now()), close: () => {} };
+    const finder = new LanFinder({ gameId: "g", netVersion: "1", targets: ["127.0.0.1"], udp: () => fake, clock, askIntervalMs: 60_000, minGapMs: 200 });
     cleanup.push(() => finder.stop());
     await finder.start();
+    expect(sent.length).toBe(1); // start asks at once
     for (let i = 0; i < 10; i++) finder.askNow();
-    await new Promise((r) => setTimeout(r, 120));
-    expect(seen.length).toBe(1);
-    await until(() => seen.length === 2, "the held ask goes out");
-    expect(seen[1] - seen[0]).toBeGreaterThanOrEqual(150);
+    clock.advance(120);
+    expect(sent.length).toBe(1); // held: the gap has not passed
+    clock.advance(100);
+    expect(sent.length).toBe(2); // the held ask goes out on the first tick after the gap
+    expect(sent[1] - sent[0]).toBeGreaterThanOrEqual(200);
+    finder.askNow();
+    expect(sent.length).toBe(2); // and asks again no sooner than the gap
   });
 
   it("the taken-port case: the second host goes on without LAN discovery and says why", async () => {

@@ -4,8 +4,7 @@ import { schnorrPublicKey, schnorrSign, schnorrVerify } from "../src/nostr/secp2
 import { decryptContent, deriveRoomKeys, encryptContent, fromHex, toHex } from "../src/nostr/crypto.js";
 import { eventId, makeEvent, checkNostrRelays, RelayPool, DEFAULT_NOSTR_RELAYS } from "../src/nostr/relays.js";
 import { ReliableLink, type Frame, type OutFrame } from "../src/nostr/link.js";
-import { ManualClock } from "../src/testing.js";
-import { systemClock } from "../src/clock.js";
+import { ManualClock, settle } from "../src/testing.js";
 import { JOIN_CODE_KINDS, joinCodeKindName } from "../src/join-code-kind.js";
 import * as L from "../src/nostr/limits.js";
 import { FakeRelays } from "./fake-relay.js";
@@ -235,26 +234,26 @@ describe("relay pool", () => {
     const urls = ["wss://a.test", "wss://b.test", "wss://c.test"];
     relays.down.add("wss://c.test");
     const got: string[] = [];
-    const pool = new RelayPool({ urls, topic: "tt", connect: relays.connect, clock: systemClock, wall: Date.now, onEvent: (e) => got.push(e.id) });
+    const pool = new RelayPool({ urls, topic: "tt", connect: relays.connect, clock: new ManualClock(), wall: Date.now, onEvent: (e) => got.push(e.id) });
     pool.start();
     expect(await pool.whenUp(2000)).toBe(true);
-    await new Promise((r) => setTimeout(r, 50));
+    await settle();
     expect(pool.connected).toBe(2);
     const secret = fromHex(vec.bip340[1].secretKey);
     const ev = await makeEvent(secret, "tt", "c", Math.floor(Date.now() / 1000));
     pool.publish(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await settle();
     expect(got).toEqual([ev.id]); // echoed by both relays, delivered once
     relays.refuse.add("wss://b.test");
     pool.publish(await makeEvent(secret, "tt", "d", Math.floor(Date.now() / 1000)));
-    await new Promise((r) => setTimeout(r, 50));
+    await settle();
     expect(pool.connected).toBe(1);
     pool.close();
   });
 });
 
 describe("relay pool: a relay that never connects", () => {
-  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const tick = () => settle();
   async function dialsTo(down: string[], urls: string[], rounds: number): Promise<{ dials: number; pool: RelayPool }> {
     const relays = new FakeRelays();
     for (const u of down) relays.down.add(u);
@@ -305,11 +304,11 @@ describe("relay pool settled", () => {
   it("is true once every relay has connected or failed, not before; a dead relay counts", async () => {
     const relays = new FakeRelays();
     relays.down.add("wss://c.test");
-    const pool = new RelayPool({ urls: ["wss://a.test", "wss://b.test", "wss://c.test"], topic: "tt", connect: relays.connect, clock: systemClock, wall: Date.now, onEvent: () => {} });
+    const pool = new RelayPool({ urls: ["wss://a.test", "wss://b.test", "wss://c.test"], topic: "tt", connect: relays.connect, clock: new ManualClock(), wall: Date.now, onEvent: () => {} });
     expect(pool.settled).toBe(false);
     pool.start();
     expect(pool.settled).toBe(false); // nothing has answered yet
-    await new Promise((r) => setTimeout(r, 50));
+    await settle();
     expect(pool.settled).toBe(true);
     expect(pool.connected).toBe(2); // c is dead but known to be
     pool.close();

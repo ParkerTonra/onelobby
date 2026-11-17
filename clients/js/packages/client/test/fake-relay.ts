@@ -44,6 +44,9 @@ export class FakeRelays {
 
 type Filter = { kinds?: number[]; "#t"?: string[]; since?: number };
 
+/** The fake relay's own "network": the next turn of the event loop, not a timer, so a test that awaits `settle()` sees every delivery. */
+const later = (fn: () => void): void => void setImmediate(fn);
+
 class FakeSocket implements SocketLike {
   readyState = 0;
   onopen: SocketLike["onopen"] = null;
@@ -53,7 +56,7 @@ class FakeSocket implements SocketLike {
   readonly subs = new Map<string, Filter>();
 
   constructor(private readonly relays: FakeRelays, readonly url: string) {
-    setTimeout(() => {
+    later(() => {
       if (this.relays.down.has(url)) {
         this.readyState = 3;
         this.onerror?.({});
@@ -62,7 +65,7 @@ class FakeSocket implements SocketLike {
       }
       this.readyState = 1;
       this.onopen?.();
-    }, 1);
+    });
   }
 
   send(data: string): void {
@@ -83,13 +86,13 @@ class FakeSocket implements SocketLike {
   }
 
   deliver(text: string): void {
-    setTimeout(() => this.readyState === 1 && this.onmessage?.({ data: text }), 0);
+    later(() => this.readyState === 1 && this.onmessage?.({ data: text }));
   }
 
   close(): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    setTimeout(() => this.onclose?.({}), 0);
+    later(() => this.onclose?.({}));
   }
 
   serverClose(): void {

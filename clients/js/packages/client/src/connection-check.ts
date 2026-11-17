@@ -3,6 +3,7 @@
  * already uses and the player's TURN entry, and nothing else. Where the runtime can open a UDP socket (Node) it speaks STUN
  * and TURN itself from one socket; where it cannot (browsers) it reads the candidates of one RTCPeerConnection.
  */
+import type { Clock } from "./clock.js";
 import { checkVerdict, classifyNat, type CheckFindings, type CheckVerdict, type MappedAddress } from "./diagnose.js";
 import { hasTurn, type IceServer } from "./transport.js";
 
@@ -28,6 +29,8 @@ export interface CheckOptions {
   rtc?: typeof RTCPeerConnection;
   /** Test seam: the UDP socket factory. Default: node:dgram where it exists. */
   udp?: () => UdpSocketLike | null;
+  /** Test seam: the clock every wait of the check runs on (the whole-check limit, the retransmit, the per-server limit). Default: the real timers. */
+  clock?: Pick<Clock, "setTimeout">;
 }
 
 /** What a relay probe finds out. */
@@ -261,18 +264,25 @@ export function iceUrlTarget(url: string): { host: string; port: number } | null
 
 // ---- measurements ------------------------------------------------------------------------------------------------
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+type Timers = Pick<Clock, "setTimeout">;
+const realTimers: Timers = {
+  setTimeout(fn, ms) {
+    const h = setTimeout(fn, ms);
+    return () => clearTimeout(h);
+  },
+};
+const wait = (ms: number, timers: Timers = realTimers) => new Promise<void>((r) => void timers.setTimeout(r, ms));
 
 /** One request/response exchange from the shared socket, with one retransmit; null when nothing valid came back in `ms`. */
-function exchange<T>(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, send: () => void, parse: (b: Uint8Array) => T | null, ms: number): Promise<T | null> {
+function exchange<T>(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, send: () => void, parse: (b: Uint8Array) => T | null, ms: number, timers: Timers): Promise<T | null> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v: T | null) => {
       if (done) return;
       done = true;
       listeners.delete(on);
-      clearTimeout(t1);
-      clearTimeout(t2);
+      cancel1();
+      cancel2();
       resolve(v);
     };
     const on = (b: Uint8Array) => {
@@ -281,27 +291,27 @@ function exchange<T>(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void
     };
     listeners.add(on);
     send();
-    const t1 = setTimeout(send, Math.min(RETRANSMIT_MS, Math.floor(ms / 3)));
-    const t2 = setTimeout(() => finish(null), ms);
+    const cancel1 = timers.setTimeout(send, Math.min(RETRANSMIT_MS, Math.floor(ms / 3)));
+    const cancel2 = timers.setTimeout(() => finish(null), ms);
     void sock;
   });
 }
 
-async function probeStun(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, t: { host: string; port: number }, ms: number): Promise<MappedAddress | null> {
+async function probeStun(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, t: { host: string; port: number }, ms: number, timers: Timers): Promise<MappedAddress | null> {
   const tid = randomBytes(12);
   const req = stunBindingRequest(tid);
-  return exchange(sock, listeners, () => sock.send(req, t.host, t.port), (b) => parseStunResponse(b, tid), ms);
+  return exchange(sock, listeners, () => sock.send(req, t.host, t.port), (b) => parseStunResponse(b, tid), ms, timers);
 }
 
 /** The TURN login round trip (RFC 5766 long-term credentials) against `turn:` entry `s`; `ok`, `refused` or `unreachable`. */
-async function probeTurn(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, s: IceServer, ms: number): Promise<RelayProbeResult> {
+async function probeTurn(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => void>, s: IceServer, ms: number, timers: Timers): Promise<RelayProbeResult> {
   const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u) => /^turn:/i.test(u));
   const targets = urls.map(iceUrlTarget).filter((x): x is { host: string; port: number } => x !== null);
   if (targets.length === 0) return "unknown";
   const t = targets[0];
   const tid1 = randomBytes(12);
   const first = turnAllocateRequest(tid1)!;
-  const r1 = await exchange(sock, listeners, () => sock.send(first, t.host, t.port), (b) => parseTurnResponse(b, tid1), ms);
+  const r1 = await exchange(sock, listeners, () => sock.send(first, t.host, t.port), (b) => parseTurnResponse(b, tid1), ms, timers);
   if (!r1) return "unreachable";
   if (r1.ok) return "ok"; // an open relay
   if (r1.code !== 401 || !r1.realm || !r1.nonce) return "refused";
@@ -309,7 +319,7 @@ async function probeTurn(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => 
   const tid2 = randomBytes(12);
   const second = turnAllocateRequest(tid2, { username: s.username, realm: r1.realm, nonce: r1.nonce, password: s.credential });
   if (!second) return "unknown";
-  const r2 = await exchange(sock, listeners, () => sock.send(second, t.host, t.port), (b) => parseTurnResponse(b, tid2), ms);
+  const r2 = await exchange(sock, listeners, () => sock.send(second, t.host, t.port), (b) => parseTurnResponse(b, tid2), ms, timers);
   if (!r2) return "unreachable";
   return r2.ok ? "ok" : "refused";
 }
@@ -319,7 +329,7 @@ async function probeTurn(sock: UdpSocketLike, listeners: Set<(b: Uint8Array) => 
  * `unreachable` (no answer) or `unknown` (this runtime cannot test it: no UDP socket, a `turns:` URL). A lobby uses it to
  * tell `relay_refused` from `relay_unreachable` after a failed connect.
  */
-export async function probeRelay(s: IceServer, udp: () => UdpSocketLike | null = nodeUdp, ms = SERVER_MS): Promise<RelayProbeResult> {
+export async function probeRelay(s: IceServer, udp: () => UdpSocketLike | null = nodeUdp, ms = SERVER_MS, timers: Timers = realTimers): Promise<RelayProbeResult> {
   const sock = udp();
   if (!sock) return "unknown";
   const listeners = new Set<(b: Uint8Array) => void>();
@@ -328,7 +338,7 @@ export async function probeRelay(s: IceServer, udp: () => UdpSocketLike | null =
     const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u) => /^turn:/i.test(u));
     const ts = urls.map(iceUrlTarget).filter((x): x is { host: string; port: number } => x !== null);
     await sock.bind(allLoopback(ts.slice(0, 1)) ? "127.0.0.1" : undefined);
-    return await probeTurn(sock, listeners, s, ms);
+    return await probeTurn(sock, listeners, s, ms, timers);
   } catch {
     return "unknown";
   } finally {
@@ -346,12 +356,12 @@ async function checkRaw(sock: UdpSocketLike, o: CheckOptions, stun: string[], tu
     // the servers are asked one after the other from the same socket: a NAT that maps by destination shows two ports
     const answers: MappedAddress[] = [];
     for (const t of targets) {
-      const a = await probeStun(sock, listeners, t, o.serverTimeoutMs ?? SERVER_MS);
+      const a = await probeStun(sock, listeners, t, o.serverTimeoutMs ?? SERVER_MS, o.clock ?? realTimers);
       if (a) answers.push(a);
     }
     const mine = answers.length > 0 && local.addresses.includes(answers[0].ip) ? { ip: answers[0].ip, port: local.port } : { ip: "", port: local.port };
     const nat = classifyNat(targets.length, answers, mine);
-    const relay = turn ? await probeTurn(sock, listeners, turn, o.serverTimeoutMs ?? SERVER_MS) : "none";
+    const relay = turn ? await probeTurn(sock, listeners, turn, o.serverTimeoutMs ?? SERVER_MS, o.clock ?? realTimers) : "none";
     return { ...nat, relay };
   } finally {
     sock.close();
@@ -365,7 +375,7 @@ interface RtcErrorEvent {
   errorCode?: number;
 }
 
-async function checkRtc(rtc: typeof RTCPeerConnection, stun: string[], turn: IceServer | undefined, timeoutMs: number): Promise<CheckFindings> {
+async function checkRtc(rtc: typeof RTCPeerConnection, stun: string[], turn: IceServer | undefined, timeoutMs: number, timers: Timers): Promise<CheckFindings> {
   const iceServers: IceServer[] = [{ urls: stun }];
   if (turn) iceServers.push(turn);
   const pc = new rtc({ iceServers: iceServers as RTCIceServer[] });
@@ -386,7 +396,7 @@ async function checkRtc(rtc: typeof RTCPeerConnection, stun: string[], turn: Ice
         errored = true;
         if (e.errorCode === 401 || e.errorCode === 403) refused = true;
       };
-      setTimeout(resolve, timeoutMs);
+      timers.setTimeout(resolve, timeoutMs);
     });
     pc.createDataChannel("check");
     await pc.setLocalDescription(await pc.createOffer());
@@ -415,10 +425,10 @@ export async function checkConnection(options: CheckOptions = {}): Promise<Check
   const run = sock
     ? checkRaw(sock, options, stun, turn)
     : (options.rtc ?? (globalThis as { RTCPeerConnection?: typeof RTCPeerConnection }).RTCPeerConnection)
-      ? checkRtc((options.rtc ?? globalThis.RTCPeerConnection) as typeof RTCPeerConnection, stun, turn, Math.min(total, 4000))
+      ? checkRtc((options.rtc ?? globalThis.RTCPeerConnection) as typeof RTCPeerConnection, stun, turn, Math.min(total, 4000), options.clock ?? realTimers)
       : Promise.resolve(findings);
   try {
-    findings = await Promise.race([run, wait(total).then(() => findings)]);
+    findings = await Promise.race([run, wait(total, options.clock ?? realTimers).then(() => findings)]);
   } catch {
     sock?.close();
   }

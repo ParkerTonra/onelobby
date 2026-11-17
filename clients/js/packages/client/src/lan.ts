@@ -8,6 +8,7 @@
  * drives them with no socket at all; `nodeLanUdp()` is the Node implementation, found without a static import so a
  * browser bundle never pulls in `node:dgram`.
  */
+import type { Clock } from "./clock.js";
 import { Emitter } from "./emitter.js";
 
 export const LAN_DEFAULT_PORT = 47840;
@@ -442,6 +443,8 @@ export interface LanFinderOptions {
   rowTimeoutMs?: number;
   udp?: () => LanUdp | null;
   now?: () => number;
+  /** The time source for the ask timer and the row ages (default: the real clock). A test passes a ManualClock; `now` still wins for the readings. */
+  clock?: Clock;
   log?: (line: string) => void;
 }
 
@@ -456,6 +459,7 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
   private rows: LanGame[] = [];
   private udp: LanUdp | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private cancelTimer: (() => void) | null = null;
   private nonces: string[] = [];
   private lastAsk = -Infinity;
   private askHeld = false;
@@ -474,7 +478,7 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
   }
 
   private now(): number {
-    return (this.o.now ?? Date.now)();
+    return (this.o.now ?? (this.o.clock ? () => this.o.clock!.now() : Date.now))();
   }
 
   private setStatus(s: LanFinderStatus, reason = ""): void {
@@ -514,8 +518,11 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
     this.o.log?.(`LAN finder started (asking ${targets.join(", ")})`);
     this.ask();
     const every = Math.max(50, Math.min(this.o.askIntervalMs ?? LAN_ASK_INTERVAL_MS, this.o.minGapMs ?? LAN_MIN_GAP_MS) / 2);
-    this.timer = setInterval(() => this.tick(), every);
-    (this.timer as { unref?: () => void }).unref?.();
+    if (this.o.clock) this.cancelTimer = this.o.clock.setInterval(() => this.tick(), every);
+    else {
+      this.timer = setInterval(() => this.tick(), every);
+      (this.timer as { unref?: () => void }).unref?.();
+    }
     return this.status;
   }
 
@@ -523,6 +530,8 @@ export class LanFinder extends Emitter<{ changed: [games: LanGame[]]; status: [s
     this.run++;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.cancelTimer?.();
+    this.cancelTimer = null;
     this.udp?.close();
     const was = this.udp !== null;
     this.udp = null;
