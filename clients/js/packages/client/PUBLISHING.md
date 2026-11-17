@@ -26,7 +26,7 @@ npm publish                # access is public via publishConfig
 ```
 
 Then check: https://www.npmjs.com/package/onelobby and
-https://cdn.jsdelivr.net/npm/onelobby@0.8.1/dist/onelobby.global.min.js (CDNs pick it up within minutes).
+https://cdn.jsdelivr.net/npm/onelobby@0.8.2/dist/onelobby.global.min.js (CDNs pick it up within minutes).
 
 ## Fallback: name taken -> `one-lobby`
 
@@ -43,10 +43,10 @@ https://cdn.jsdelivr.net/npm/onelobby@0.8.1/dist/onelobby.global.min.js (CDNs pi
 
 Bump `version` in `package.json` **and** `LIB_VERSION` in `src/onelobby.ts` (prepublish-check fails if they differ),
 update the pinned version in every CDN URL in the docs and examples (`git grep -n "onelobby@"`), merge to main, then
-push a tag `v<version>` on main (`git tag v0.8.1 && git push origin main v0.8.1`). The `release.yml` workflow does
+push a tag `v<version>` on main (`git tag v0.8.2 && git push origin main v0.8.2`). The `release.yml` workflow does
 the rest: it checks the tag against every package version, runs the tests, then uploads `onelobby` and `create-onelobby`
 to npm (npm trusted publishing through GitHub OIDC: no token, no 2FA prompt, provenance attached), packs the NuGet
 packages and creates the `unity-v<version>` GitHub release with the Unity tarball. `docs/releases/<version>.md` must
 exist: it is the release text. npm's one-time setup is on npmjs.com: the package's Settings > Trusted Publisher >
 GitHub Actions, repository `ParkerTonra/onelobby`, workflow `release.yml`, environment `release`. A
-manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.8.1`) so a page never silently picks up a different release.
+manual `npm publish` from a logged-in machine still works as a fallback. CDN URLs are pinned (`onelobby@0.8.2`) so a page never silently picks up a different release.

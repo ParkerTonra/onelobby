@@ -1,4 +1,4 @@
-# One workflow for a whole release: pushing a tag v<version> on main (git tag v0.8.1 && git push origin main v0.8.1)
+# One workflow for a whole release: pushing a tag v<version> on main (git tag v0.8.2 && git push origin main v0.8.2)
 # publishes `onelobby` and `create-onelobby` to npm, the OneLobby NuGet packages, and creates the GitHub release
 # unity-v<version> with the Unity package tarball. Nothing else is needed: the owner's approval is the tag push itself.
 #
@@ -37,7 +37,9 @@ jobs:
       contents: read
       actions: read # download the datachannel-natives artifacts for the Unity package
     env:
-      VERSION: ${{ github.ref_name }}
+      # not VERSION: MSBuild reads environment variables as properties, and server/OneLobby.Hub (outside
+      # clients/dotnet/Directory.Build.props) would get Version=v<x.y.z>, which breaks its restore (0.8.1 failed so)
+      RELEASE_TAG: ${{ github.ref_name }}
     outputs:
       v: ${{ steps.versions.outputs.v }}
       cv: ${{ steps.versions.outputs.cv }}
@@ -59,8 +61,8 @@ jobs:
         id: versions
         run: |
           set -euo pipefail
-          if ! [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::tag '$VERSION' is not v<major>.<minor>.<patch>"; exit 1; fi
-          v="${VERSION#v}"
+          if ! [[ $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::tag '$RELEASE_TAG' is not v<major>.<minor>.<patch>"; exit 1; fi
+          v="${RELEASE_TAG#v}"
           js="$(node -p "require('./clients/js/packages/client/package.json').version")"
           unity="$(node -p "require('./clients/unity/com.onelobby.unity/package.json').version")"
           net="$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' clients/dotnet/Directory.Build.props | head -1)"
@@ -158,6 +160,8 @@ jobs:
   # ---- everything in build passed; uploads start here, from the packed files only ----
   publish:
     needs: build
+    # only the public repo uploads: a v* tag on the private dev repo runs the build job as a rehearsal
+    if: github.repository == 'ParkerTonra/onelobby'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     environment: release # no reviewer: the approval happened before the tag was pushed

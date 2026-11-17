@@ -59,7 +59,7 @@ func _now() -> int:
 	return int(_now_fn.call()) if _now_fn.is_valid() else Time.get_ticks_msec()
 
 
-## Sets the header facts: client ("onelobby-gdscript 0.8.1"), protocol ("lk1"), platform.
+## Sets the header facts: client ("onelobby-gdscript 0.8.2"), protocol ("lk1"), platform.
 func set_meta_info(client: String, protocol: String, platform: String) -> void:
 	_client = client
 	_protocol = protocol
