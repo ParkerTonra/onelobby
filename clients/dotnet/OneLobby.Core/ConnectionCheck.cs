@@ -24,6 +24,8 @@ namespace OneLobby
         public int ServerTimeoutMs { get; init; } = ConnectionCheck.ServerMs;
         /// <summary>Bind the probe socket here (default: all interfaces, or 127.0.0.1 when every target is loopback).</summary>
         public string? BindAddress { get; init; }
+        /// <summary>The clock seam: how a wait of <c>ms</c> milliseconds is spent (default <see cref="Task.Delay(int)"/>, the real clock). A test passes its own to control every timeout of the check (the whole-check limit, the retransmit, the per-server limit).</summary>
+        public Func<int, Task>? Delay { get; init; }
     }
 
     /// <summary>STUN and TURN messages, hand-rolled (RFC 5389 / RFC 5766): what the check and the relay probe speak, and what test servers answer with.</summary>
@@ -206,11 +208,13 @@ namespace OneLobby
             private readonly List<Action<byte[]>> _listeners = new List<Action<byte[]>>();
             private readonly object _lock = new object();
             private bool _closed;
+            private readonly Func<int, Task> _delay;
             public int LocalPort { get; }
             public IReadOnlyList<string> LocalAddresses { get; }
 
-            public Probe(string? bind)
+            public Probe(string? bind, Func<int, Task>? delay = null)
             {
+                _delay = delay ?? Task.Delay;
                 var addr = bind == null ? IPAddress.Any : IPAddress.Parse(bind);
                 _udp = new UdpClient(new IPEndPoint(addr, 0));
                 LocalPort = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
@@ -270,9 +274,9 @@ namespace OneLobby
                 {
                     void Send() { try { _udp.Client.SendTo(request, ep); } catch (Exception) { /* nothing listening: the timeout says so */ } }
                     Send();
-                    var first = Task.Delay(Math.Min(RetransmitMs, ms / 3));
+                    var first = _delay(Math.Min(RetransmitMs, ms / 3));
                     if (await Task.WhenAny(tcs.Task, first).ConfigureAwait(false) != tcs.Task) Send();
-                    var rest = Task.Delay(ms);
+                    var rest = _delay(ms);
                     await Task.WhenAny(tcs.Task, rest).ConfigureAwait(false);
                     return tcs.Task.IsCompleted ? tcs.Task.Result : null;
                 }
@@ -325,13 +329,13 @@ namespace OneLobby
         /// login down), <c>unreachable</c> (no answer) or <c>unknown</c>. A lobby uses it to tell <c>relay_refused</c> from
         /// <c>relay_unreachable</c> after a failed connect.
         /// </summary>
-        public static async Task<string> ProbeRelayAsync(IceServer s, int ms = ServerMs)
+        public static async Task<string> ProbeRelayAsync(IceServer s, int ms = ServerMs, Func<int, Task>? delay = null)
         {
             try
             {
                 var t = TurnTarget(s);
                 if (t == null) return "unknown";
-                using var p = new Probe(AllLoopback(new[] { t.Value }) ? "127.0.0.1" : null);
+                using var p = new Probe(AllLoopback(new[] { t.Value }) ? "127.0.0.1" : null, delay);
                 return await ProbeTurn(p, s, ms).ConfigureAwait(false);
             }
             catch (Exception) { return "unknown"; }
@@ -348,8 +352,9 @@ namespace OneLobby
             var stun = o.Stun ?? DefaultStun;
             var turn = (o.IceServers ?? Array.Empty<IceServer>()).FirstOrDefault(s => s.Urls.Any(u => u.StartsWith("turn:", StringComparison.OrdinalIgnoreCase) || u.StartsWith("turns:", StringComparison.OrdinalIgnoreCase)));
             var findings = new CheckFindings("unknown", "unknown", turn != null ? "unknown" : "none");
+            var whole = (o.Delay ?? Task.Delay)(o.TimeoutMs); // started before the run: a test's clock sees the whole-check limit first
             var run = Task.Run(() => CheckRaw(o, stun, turn));
-            var winner = await Task.WhenAny(run, Task.Delay(o.TimeoutMs)).ConfigureAwait(false);
+            var winner = await Task.WhenAny(run, whole).ConfigureAwait(false);
             if (winner == run)
             {
                 try { findings = await run.ConfigureAwait(false); } catch (Exception) { /* no socket: unknown */ }
@@ -363,7 +368,7 @@ namespace OneLobby
             var targets = stun.Select(IceUrlTarget).Where(t => t != null).Select(t => t!.Value).ToList();
             var all = new List<(string Host, int Port)>(targets);
             if (turn != null && TurnTarget(turn) is { } tt) all.Add(tt);
-            using var p = new Probe(o.BindAddress ?? (AllLoopback(all) ? "127.0.0.1" : null));
+            using var p = new Probe(o.BindAddress ?? (AllLoopback(all) ? "127.0.0.1" : null), o.Delay);
             // the servers are asked one after the other from the same socket: a NAT that maps by destination shows two ports
             var answers = new List<(string Ip, int Port)>();
             foreach (var t in targets)

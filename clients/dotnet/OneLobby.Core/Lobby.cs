@@ -600,7 +600,7 @@ namespace OneLobby
             // wait for the relay probe (at most a moment) so a refused login is told from a silent relay
             if (_relayProbe != null && !_closed)
             {
-                _giveUpWait = System.Diagnostics.Stopwatch.StartNew();
+                _giveUpWaitMs = NowMs; // the client's own clock (the transport's), so a test that drives the transport's time drives this wait too
                 return;
             }
             FinishGivingUp();
@@ -613,9 +613,9 @@ namespace OneLobby
 
         private void CheckGiveUpWait()
         {
-            if (_giveUpWait == null) return;
-            if (_relayProbe != null && !_relayProbe.IsCompleted && _giveUpWait.ElapsedMilliseconds < RelayProbeWaitMs) return;
-            _giveUpWait = null;
+            if (_giveUpWaitMs < 0) return;
+            if (_relayProbe != null && !_relayProbe.IsCompleted && NowMs - _giveUpWaitMs < RelayProbeWaitMs) return;
+            _giveUpWaitMs = -1;
             FinishGivingUp();
         }
 
@@ -643,7 +643,7 @@ namespace OneLobby
         private bool _negotiated, _gaveUp, _relayRetried;
         private readonly long _startedMs;
         private Task<string>? _relayProbe;
-        private System.Diagnostics.Stopwatch? _giveUpWait;
+        private long _giveUpWaitMs = -1;
         private readonly Dictionary<int, long> _diagAt = new Dictionary<int, long>();
         private static readonly string[] CandidateOrder = { "host", "srflx", "relay" };
         private static readonly System.Text.RegularExpressions.Regex CandRe = new System.Text.RegularExpressions.Regex(

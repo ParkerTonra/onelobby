@@ -85,14 +85,36 @@ namespace OneLobby.Tests
         public static T For<T>(Task<T> t) => t.GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// The clock the connection-check tests pass in (<see cref="CheckOptions.Delay"/>, the seam), so no result rides on a real timeout. The check
+    /// waits twice per request/answer exchange (the retransmit, then the limit); <c>silent[i]</c> says whether the i-th exchange meets a server
+    /// that never answers (both waits end at once: nothing can answer) or one that does (both waits are wide, so a late thread-pool
+    /// answer on a busy runner still lands; the bound only a failing test reaches).
+    /// </summary>
+    internal sealed class ScriptedDelay
+    {
+        private const int WideMs = 60_000;
+        private readonly bool[] _silent;
+        private readonly bool _whole;
+        private int _n;
+        public ScriptedDelay(bool whole, params bool[] silent) { _whole = whole; _silent = silent; }
+        public Func<int, Task> Delay => _ =>
+        {
+            var i = Interlocked.Increment(ref _n) - 1 - (_whole ? 1 : 0); // CheckAsync asks for its whole-check wait first
+            if (i < 0 || i / 2 >= _silent.Length || !_silent[i / 2]) return Task.Delay(WideMs);
+            return Task.CompletedTask;
+        };
+    }
+
     public class ConnectionCheckTests
     {
-        private static CheckOptions Opts(FakeUdpServer[] stun, IceServer? turn = null) => new CheckOptions
+        private static CheckOptions Opts(FakeUdpServer[] stun, IceServer? turn = null, params bool[] silent) => new CheckOptions
         {
             Stun = stun.Select(s => "stun:127.0.0.1:" + s.Port).ToArray(),
             IceServers = turn == null ? null : new[] { turn },
             ServerTimeoutMs = 450,
             TimeoutMs = 4000,
+            Delay = new ScriptedDelay(true, silent).Delay,
         };
 
         private static CheckResult Run(CheckOptions o) => ConnectionCheck.CheckAsync(o).GetAwaiter().GetResult();
@@ -129,7 +151,7 @@ namespace OneLobby.Tests
         {
             using var a = FakeUdpServer.Stun("203.0.113.9", 40000);
             using var b = FakeUdpServer.Silent();
-            var r = Run(Opts(new[] { a, b }));
+            var r = Run(Opts(new[] { a, b }, null, false, true));
             Assert.Equal(("ok", "unknown", "unknown"), (r.Udp, r.NatType, r.Verdict));
         }
 
@@ -138,7 +160,7 @@ namespace OneLobby.Tests
         {
             using var a = FakeUdpServer.Silent();
             using var b = FakeUdpServer.Silent();
-            var r = Run(Opts(new[] { a, b }));
+            var r = Run(Opts(new[] { a, b }, null, true, true));
             Assert.Equal(("blocked", "unknown", "blocked"), (r.Udp, r.NatType, r.Verdict));
             Assert.Contains("blocks UDP", r.Message);
         }
@@ -152,9 +174,9 @@ namespace OneLobby.Tests
             using var bad = FakeUdpServer.Turn(false);
             using var mute = FakeUdpServer.Silent();
             IceServer T(FakeUdpServer s) => new IceServer(new[] { "turn:127.0.0.1:" + s.Port }, "sam", "secret");
-            Assert.Equal("ok", Run(Opts(new[] { a, b }, T(good))).Relay);
-            Assert.Equal(("refused", "relay_refused"), (Run(Opts(new[] { a, b }, T(bad))).Relay, Run(Opts(new[] { a, b }, T(bad))).Verdict));
-            Assert.Equal("unreachable", Run(Opts(new[] { a, b }, T(mute))).Relay);
+            Assert.Equal("ok", Run(Opts(new[] { a, b }, T(good), false, false, false, false)).Relay);
+            Assert.Equal(("refused", "relay_refused"), (Run(Opts(new[] { a, b }, T(bad), false, false, false, false)).Relay, Run(Opts(new[] { a, b }, T(bad), false, false, false, false)).Verdict));
+            Assert.Equal("unreachable", Run(Opts(new[] { a, b }, T(mute), false, false, true)).Relay);
         }
 
         [Fact]
@@ -164,9 +186,9 @@ namespace OneLobby.Tests
             using var mute = FakeUdpServer.Silent();
             using var good = FakeUdpServer.Turn(true);
             IceServer T(FakeUdpServer s) => new IceServer(new[] { "turn:127.0.0.1:" + s.Port }, "sam", "secret");
-            Assert.Equal("refused", Wait.For(ConnectionCheck.ProbeRelayAsync(T(bad), 400)));
-            Assert.Equal("unreachable", Wait.For(ConnectionCheck.ProbeRelayAsync(T(mute), 400)));
-            Assert.Equal("ok", Wait.For(ConnectionCheck.ProbeRelayAsync(T(good), 400)));
+            Assert.Equal("refused", Wait.For(ConnectionCheck.ProbeRelayAsync(T(bad), 400, new ScriptedDelay(false, false, false).Delay)));
+            Assert.Equal("unreachable", Wait.For(ConnectionCheck.ProbeRelayAsync(T(mute), 400, new ScriptedDelay(false, true).Delay)));
+            Assert.Equal("ok", Wait.For(ConnectionCheck.ProbeRelayAsync(T(good), 400, new ScriptedDelay(false, false, false).Delay)));
             Assert.Equal("unknown", Wait.For(ConnectionCheck.ProbeRelayAsync(new IceServer(new[] { "turns:127.0.0.1:5349" }, "a", "b"), 400)));
         }
     }
@@ -195,7 +217,7 @@ namespace OneLobby.Tests
                 Joiner = Rig.Await(JoinClient.JoinAsync(Host.Code));
             }
 
-            /// <summary>Steps the clocks and lets real time pass (the relay probe is a real UDP exchange).</summary>
+            /// <summary>Steps the rig's clocks until the joiner's ready wait fails (no relay is set, so nothing real is waited for: the loop never sleeps).</summary>
             public bool UntilFailed(int seconds = 20)
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -203,7 +225,6 @@ namespace OneLobby.Tests
                 {
                     Rig.Step(1, 100);
                     if (Joiner.ReadyAsync.IsFaulted) { Rig.Step(8); return true; }
-                    Thread.Sleep(1);
                 }
                 return false;
             }
@@ -282,22 +303,22 @@ namespace OneLobby.Tests
         public void ARelayThatRejectsTheLoginIsRelayRefused()
         {
             using var turn = FakeUdpServer.Turn(false);
-            RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ");
+            RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", silentRelay: false);
         }
 
         [Fact]
         public void ARelayThatNeverAnswersIsRelayUnreachable()
         {
             using var turn = FakeUdpServer.Silent();
-            RunRelay(turn, "relay_unreachable", "Sam: the relay did not answer, stopped at the connection check after ");
+            RunRelay(turn, "relay_unreachable", "Sam: the relay did not answer, stopped at the connection check after ", silentRelay: true);
         }
 
         // A relay that answers late: the probe says "refused" 3.5 s after it starts. The joiner used to wait 2.5 s for it and
         // reported relay_unreachable; the wait is now RelayProbeWaitMs (4.5 s). The probe is a stand-in (LobbyClient.RelayProbeForTests),
         // so the real probe's own time limits play no part, and the joiner is relay-only, so there is no relay retry and the
-        // probe starts in the same call as the wait: 1 s to spare against the old wait. The stand-in is answered by the pump loop
-        // (not by a timer on the thread pool, which a busy CI runner can hold up for a second) and the loop waits until the
-        // client has taken the answer before it pumps again, so a late thread cannot make the wait run out first.
+        // probe starts in the same call as the wait: 1 s to spare against the old wait. The wait runs on the client's own clock (the
+        // transport's, here the rig's virtual one), so the test drives time itself: 3.5 s pass in a few steps, whatever the runner's load,
+        // and the stand-in is answered by the loop between two steps, never by a timer on the thread pool.
         private const int SlowProbeMs = 3500;
 
         [Fact]
@@ -305,31 +326,37 @@ namespace OneLobby.Tests
         {
             Assert.True(SlowProbeMs - 2500 >= 1000 && Lobby.RelayProbeWaitMs - SlowProbeMs >= 1000);
             using var turn = FakeUdpServer.Silent(); // only its address is used: nothing is sent to it
-            System.Diagnostics.Stopwatch? probe = null;
+            long probeAt = -1;
             var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             var answered = false;
             var calls = 0;
-            var waited = RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", relayOnly: true, probe: _ =>
+            var waited = RunRelay(turn, "relay_refused", "Sam: the relay rejected the login, stopped at the connection check after ", relayOnly: true, probe: (_, now) =>
             {
                 calls++;
-                probe = System.Diagnostics.Stopwatch.StartNew();
+                probeAt = now;
                 return answer.Task;
-            }, sinceProbe: () => probe?.ElapsedMilliseconds ?? -1, each: jc =>
+            }, sinceProbe: now => probeAt < 0 ? -1 : now - probeAt, each: (jc, now) =>
             {
-                if (answered || probe == null || probe.ElapsedMilliseconds < SlowProbeMs) return;
+                if (answered || probeAt < 0 || now - probeAt < SlowProbeMs) return;
                 answered = true;
                 answer.SetResult("refused");
+                // the client takes the answer on a thread-pool continuation: wait (a condition, not a delay) until it has, before time moves on
                 var until = System.Diagnostics.Stopwatch.StartNew();
-                while (!jc.NetLog.Export().Contains("relay probe refused") && until.Elapsed < TimeSpan.FromSeconds(20)) Thread.Sleep(2);
+                while (!jc.NetLog.Export().Contains("relay probe refused") && until.Elapsed < TimeSpan.FromSeconds(20)) Thread.Sleep(1);
             });
             Assert.Equal(1, calls);
             Assert.True(answered);
             Assert.Empty(turn.Received);
-            Assert.True(waited >= SlowProbeMs - 100, waited + " ms"); // it waited for the answer; the cause shows the answer ended the wait
+            Assert.True(waited >= SlowProbeMs, waited + " ms"); // it waited for the answer; the cause shows the answer ended the wait
         }
 
-        /// <summary>Returns <paramref name="sinceProbe"/> read when the joiner gave up (0 without one).</summary>
-        private static long RunRelay(FakeUdpServer turn, string cause, string linePrefix, bool relayOnly = false, Func<IceServer, Task<string>>? probe = null, Func<long>? sinceProbe = null, Action<LobbyClient>? each = null)
+        /// <summary>
+        /// Returns <paramref name="sinceProbe"/> read (with the rig's time) when the joiner gave up (0 without one). With a stand-in probe the rig's
+        /// time is driven by the loop alone (100 ms a step). Without one the real probe runs (a UDP exchange with the fake server on the thread
+        /// pool) on a scripted clock (<see cref="ScriptedDelay"/>: no time limit rides on the runner's speed), and the rig's time stands still
+        /// while it is out, so the joiner's own wait cannot end before the exchange does.
+        /// </summary>
+        private static long RunRelay(FakeUdpServer turn, string cause, string linePrefix, bool relayOnly = false, Func<IceServer, long, Task<string>>? probe = null, Func<long, long>? sinceProbe = null, Action<LobbyClient, long>? each = null, bool silentRelay = false)
         {
             var rig = new Rig();
             rig.Net.IceServers.Add(new IceServer(new[] { "turn:127.0.0.1:" + turn.Port }, "sam", "secret"));
@@ -339,12 +366,20 @@ namespace OneLobby.Tests
             var hl = rig.Await(host.HostAsync(new LobbyOptions("room", 4)));
             var reports = new List<PeerDiagnosisInfo>();
             hl.PeerDiagnosis += r => reports.Add(r);
-            var jc = new LobbyClient(Rig.Config("Sam") with { RelayOnly = relayOnly }, rig.Net.CreateTransport()) { RelayProbeForTests = probe };
+            var probeCalls = 0;
+            var realProbe = probe == null;
+            if (realProbe) probe = (ice, _) => ConnectionCheck.ProbeRelayAsync(ice, ConnectionCheck.ServerMs, new ScriptedDelay(false, silentRelay ? new[] { true } : new[] { false, false }).Delay);
+            var jc = new LobbyClient(Rig.Config("Sam") with { RelayOnly = relayOnly }, rig.Net.CreateTransport()) { RelayProbeForTests = ice => { probeCalls++; return probe!(ice, rig.Net.NowMs); } };
             rig.Clients.Add(jc);
             var jl = rig.Await(jc.JoinAsync(hl.Code));
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20)) { each?.Invoke(jc); rig.Step(1, 100); Thread.Sleep(2); }
-            var waited = sinceProbe?.Invoke() ?? 0;
+            while (!jl.ReadyAsync.IsFaulted && sw.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                each?.Invoke(jc, rig.Net.NowMs);
+                if (realProbe && probeCalls > 0 && !jc.NetLog.Export().Contains("relay probe ")) { Thread.Sleep(1); continue; } // the exchange is out: time stands still
+                rig.Step(1, 100);
+            }
+            var waited = sinceProbe?.Invoke(rig.Net.NowMs) ?? 0;
             Assert.True(jl.ReadyAsync.IsFaulted);
             rig.Step(8);
             sw.Restart();
@@ -393,7 +428,7 @@ namespace OneLobby.Tests
             using var b = FakeUdpServer.Stun("203.0.113.9", 40001);
             var rig = new Rig();
             var c = rig.NewClient("p");
-            var r = Wait.For(c.CheckConnectionAsync(new CheckOptions { Stun = new[] { "stun:127.0.0.1:" + a.Port, "stun:127.0.0.1:" + b.Port }, ServerTimeoutMs = 400 }));
+            var r = Wait.For(c.CheckConnectionAsync(new CheckOptions { Stun = new[] { "stun:127.0.0.1:" + a.Port, "stun:127.0.0.1:" + b.Port }, ServerTimeoutMs = 400, Delay = new ScriptedDelay(true, false, false).Delay }));
             Assert.Equal("symmetric", r.NatType);
             Assert.Same(r, c.LastCheck);
             Assert.Contains("connection check udp=ok nat=symmetric", c.NetLog.Export());
