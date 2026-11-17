@@ -77,6 +77,9 @@ function findTerm(tokens, term, claimed) {
   return -1;
 }
 
+// the sentence talks about the host leaving or migrating, and does not say yet whether a lobby server is accepted
+const HOST_LEAVES_WORDS = /\bmigrat\w*|\bhost\s+(?:leaves?|leaving|drops?|quits?|disconnects?|handover|hand-over|handoff)\b|\bnew\s+host\b/i;
+const SERVER_ANSWER = /\blobby\s+server\b|\bmay\s+end\b|\bends?\s+when\b/i;
 const has = (tokens, term) => findTerm(tokens, term, new Set()) >= 0;
 const hasAny = (tokens, terms) => terms.some((t) => has(tokens, t));
 
@@ -365,6 +368,7 @@ export function recommend({ description, engine } = {}) {
   const pause = pauseFor(shape, tokens);
   if (pause) rows.push(["session.pause", pause.value, pause.why]);
   rows.push(...hostingRows(eng.id));
+  if (HOST_LEAVES_WORDS.test(text) && !SERVER_ANSWER.test(text)) ask("hostLeaves");
 
   rec.advice = adviceFor(shape.id, eng.id);
   if (shape.id === "lockstep" && !has(tokens, DETERMINISM_WORD)) ask("determinism");

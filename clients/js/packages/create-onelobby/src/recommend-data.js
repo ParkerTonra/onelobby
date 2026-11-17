@@ -417,6 +417,11 @@ export const QUESTIONS = {
   tickRate: { question: "What fixed tick rate does the simulation run at?", add: "at 30 ticks per second" },
   engine: { question: "Which engine or platform is it for? It changes hosting, the modes the scaffolder writes today and which helpers (prediction, hit rewind) exist.", add: "in Godot (GDScript or C#), in Unity, or in the browser" },
   godotLanguage: { question: "GDScript or C#? Assumed GDScript, the default Godot template (the C# one is --template godot-csharp).", add: "in Godot with GDScript, or in Godot with C#" },
+  hostLeaves: {
+    question:
+      "Must the match survive its host leaving (host migration)? A direct lobby has none: when the host drops, the session ends for everyone. Only a lobby server (hosting.server true, --host-leaves migrate, not --mode replication) moves the host.",
+    add: "with a lobby server that migrates the host, or: the match may end when the host leaves",
+  },
   players: { question: "How many players?", add: "for 4 players, or up to 8 players, or a 1v1 duel" },
   stateSize: { question: "Roughly how large is the world state? Binary deltas matter once it passes about 3 KB.", add: "with a world state of about 10 KB" },
   shape: {

@@ -629,3 +629,16 @@ describe("a sentence with no engine", () => {
     expect(recommend({ description: "co-op game in Godot for 4 players where the host runs the world" }).runCommand).toContain("create-onelobby");
   });
 });
+
+describe("the host-leaves question", () => {
+  const ids = (description) => recommend({ description }).questions.map((q) => q.id);
+  it("asked when the sentence talks about host migration and does not say whether a lobby server is accepted", () => {
+    expect(ids("co-op survival in Godot for 4 players where a new host takes over when the host leaves")).toContain("hostLeaves");
+    expect(ids("co-op survival in Godot for 4 players with host migration")).toContain("hostLeaves");
+  });
+  it("not asked without the words, or once the sentence answers it", () => {
+    expect(ids("co-op survival in Godot for 4 players")).not.toContain("hostLeaves");
+    expect(ids("co-op survival in Godot for 4 players with host migration through a lobby server")).not.toContain("hostLeaves");
+    expect(ids("co-op survival in Godot for 4 players; the match may end when the host leaves")).not.toContain("hostLeaves");
+  });
+});

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
+import { refuseOldGodot } from "./godot-project.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
 import { NET_PLAYER_PACKAGES, ONELOBBY_PACKAGES, addReferences, inspectCsproj, newCsproj } from "./csproj.js";
@@ -359,6 +360,7 @@ export async function runCSharp(ctx) {
   const { io, opts, blueprint, target, dirName, into } = ctx;
   if (into) {
     if (!existsSync(join(target, "project.godot"))) throw new CliError("not_godot_project", `--into: ${target} has no project.godot; run this inside a Godot 4 project folder, or drop --into to make a new one`);
+    refuseOldGodot(readFileSync(join(target, "project.godot"), "utf8"), target);
     if (!readdirSync(target).some((n) => /\.(csproj|sln)$/i.test(n)))
       throw new CliError("not_csharp_project", `--into: ${target} is a Godot project without C# (no .csproj or .sln next to project.godot). In Godot: Project > Tools > C# > Create C# solution, then run this again; or use --template godot-gdscript for a GDScript game.`);
   } else {

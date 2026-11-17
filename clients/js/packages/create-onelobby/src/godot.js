@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CliError } from "./flags.js";
 import { keepOnelobbyJson } from "./recommend.js";
 import { SCHEMA_URL } from "./blueprint.js";
-import { addAutoload, isCSharpProject } from "./godot-project.js";
+import { addAutoload, isCSharpProject, refuseOldGodot } from "./godot-project.js";
 import { checkNameClashes, declaredClasses } from "./godot-names.js";
 import { pickBlocks, playerFlags, resolveNetPlayer } from "./net-player.js";
 import {
@@ -316,6 +316,7 @@ export async function runGodot(ctx) {
   const { io, opts, blueprint, target, dirName, into } = ctx;
   if (into) {
     if (!existsSync(join(target, "project.godot"))) throw new CliError("not_godot_project", `--into: ${target} has no project.godot; run this inside a Godot 4 project folder, or drop --into to make a new one`);
+    refuseOldGodot(readFileSync(join(target, "project.godot"), "utf8"), target);
     if (isCSharpProject(readdirSync(target)))
       throw new CliError("wrong_template", `${target} is a Godot C# project (a .csproj or .sln sits next to project.godot), not a GDScript one: drop --template godot-gdscript (or use --template godot-csharp).`);
   } else {

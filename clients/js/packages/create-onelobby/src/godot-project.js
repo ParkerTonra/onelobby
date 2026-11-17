@@ -61,6 +61,24 @@ export function addAutoload(text, name, path, { resolveUid } = {}) {
   return { text: `${body}${gap}[autoload]${eol}${eol}${name}="${wanted}"${eol}`, changed: true };
 }
 
+/**
+ * The engine version a project.godot says it was saved by, from `config/features=PackedStringArray("4.3", ...)`, as [major, minor]; null when
+ * no feature names a version (a hand-made file: nothing to judge, so nothing is refused).
+ */
+export function godotFeatureVersion(text) {
+  const m = /^config\/features\s*=\s*PackedStringArray\(([^)]*)\)/m.exec(text);
+  if (!m) return null;
+  for (const f of m[1].matchAll(/"(\d+)\.(\d+)"/g)) return [Number(f[1]), Number(f[2])];
+  return null;
+}
+
+/** Throws godot_too_old when project.godot says Godot older than 4.4 (the add-on and `verify` need 4.4 or newer). */
+export function refuseOldGodot(text, target) {
+  const v = godotFeatureVersion(text);
+  if (v && (v[0] < 4 || (v[0] === 4 && v[1] < 4)))
+    throw new CliError("godot_too_old", `${target}/project.godot was saved by Godot ${v[0]}.${v[1]}: the OneLobby add-on and verify need Godot 4.4 or newer. Open the project in Godot 4.4+ and save it (project.godot then lists 4.4 or later), then run this again. Nothing was changed.`);
+}
+
 /** Does this folder hold a Godot C# project (a .csproj or .sln next to project.godot)? `names`: the folder's file names. */
 export const isCSharpProject = (names) => names.some((n) => /\.(csproj|sln)$/i.test(n));
 

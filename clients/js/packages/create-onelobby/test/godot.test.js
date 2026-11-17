@@ -220,6 +220,19 @@ describe("godot-gdscript: --into", () => {
     expect(r.json.next.join("\n")).toContain("docs/recipes/godot-gdscript.md");
   });
 
+  it("refuses a project saved by Godot older than 4.4 and writes nothing; 4.4+ and no version pass", async () => {
+    godotProject("old", 'config/features=PackedStringArray("4.3", "Forward Plus")\n');
+    const before = tree(at("old"));
+    const r = await j(["--into", "old", ...FROM]);
+    expect(r.code).not.toBe(0);
+    expect(JSON.stringify(r)).toContain("godot_too_old");
+    expect(tree(at("old"))).toEqual(before);
+    godotProject("new", 'config/features=PackedStringArray("4.4", "Forward Plus")\n');
+    expect((await j(["--into", "new", "--dry-run", ...FROM])).code).toBe(0);
+    godotProject("bare");
+    expect((await j(["--into", "bare", "--dry-run", ...FROM])).code).toBe(0);
+  });
+
   it("a second run changes nothing and says so", async () => {
     godotProject();
     await cli(["--into", "mine", ...FROM]);
