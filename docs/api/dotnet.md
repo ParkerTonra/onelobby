@@ -2072,6 +2072,8 @@ public record struct PlayerState
     public int Team;
     /// 0..7, wraps. A difference between two samples means "snap, do not slide".
     public int Teleport;
+    /// Set by the host when it carried this state on by velocity on a tick with no input from the owner (host authority; owner mode too, where the host carries a stalled player on). The owner does not replay from it. The host's bit: an owner's own is ignored.
+    public bool Carried;
     public PlayerState();
 /// One input of host-decides mode (the input preset). MoveX is strafe right, MoveY is forward (2D: down is +1).
 public record struct NetPlayerInput

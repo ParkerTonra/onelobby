@@ -61,8 +61,9 @@ a step (R = 300: 16 bits, 0.92 cm; R = 1000: 18 bits; R = 100000: 24 bits, the m
 | 15 | `alive` | bool | 1 | 1 | | true | `alive` |
 | 16 | `team` | bits | 4 | 4 | team or colour 0..15 | 0 | `team` |
 | 17 | `teleport` | bits | 3 | 3 | counter, wraps at 8 | 0 | never |
+| 18 | `carried` | bool | 1 | 1 | set by the host when this state is the host's carry-on, not a state its owner reached (5.1 step 3, 5.2 step 4) | false | never |
 
-Totals with nothing left out: **127 bits = 16 bytes (3D)**, **91 bits = 12 bytes (2D)**, at the default range. A field
+Totals with nothing left out: **128 bits = 16 bytes (3D)**, **92 bits = 12 bytes (2D)**, at the default range (`carried` is the last bit, so the default byte counts did not change; a layout whose bits were a multiple of 8, such as the lean one in the vectors, gains one byte). A field
 that is left out is not on the wire (the later fields move up), and a reader sees its default. Quantisation clamps: a value
 outside the range travels as the nearest end; 0 is not exactly representable for `pitch` (10 bits over 180 degrees), it
 travels as 0.088. Two ends that use different `sync.player` settings cannot read each other: the file is part of the game's
@@ -192,7 +193,7 @@ the same way in both modes (section 6).
    schedule for good), and up to `maxInputBuffer + maxCatchUp - 1` stalls are counted; (b) a tick the host's own clock skipped
    after a stall longer than `maxCatchUp` (`spec/replication.md`, the clock keeps its epoch and jumps the tick number) counts as
    one stall, and when the queue runs dry before the count does, the rest of the count is dropped (a record carried on past the
-   newest input is a guess, not a delay). Host authority (5.2) makes up stalls the same way, without carrying anything on.
+   newest input is a guess, not a delay). The carried record has `carried` set; the host clears it on every state it accepts from the owner (the bit is the host's: an owner's own is ignored). Host authority (5.2) makes up stalls the same way and shows the same carry-on.
 4. The host checks it (section 7). If it passes, it becomes the entity's state; the snapshot carries it to everyone else.
 5. The owner never applies snapshot state to its own player.
 6. Except one case: the snapshot's `lastInput` names the last input the host applied. The owner remembers the teleport counter
@@ -220,10 +221,16 @@ The host's own player is written straight into its entity each tick. The host ca
    repeated input (nothing new arrived) does **not** step: the owner has predicted exactly the inputs it sent, so the state
    after input N is the same on both sides. Each repeated input is a counted stall as in 5.1 step 3: the next ticks that have an input
    step one further input for each stall counted (only while inputs are queued, never more than were counted), so the player's
-   sim does not stay a tick behind its input for good; the host carries nothing on (the record stands still on the stalled tick),
-   which is why the owner's reconciliation, replaying the inputs after `lastInput`, still starts from a state it can replay.
-5. The snapshot carries the state and `lastInput`. The owner calls `Reconciler.reconcile(state, lastInput)`: it starts from the
-   host's state and replays the inputs the host has not seen.
+   sim does not stay a tick behind its input for good. The sim is untouched on a stalled tick, but what the host **shows** is not
+   a plateau: for each stall counted (at most `maxInputBuffer - 1` ticks, as in 5.1 step 3) it shows the sim carried on by its own
+   velocity (`x += vx dt` and so on, clamped, quantised) with `carried` set, in its record (section 8), in the snapshot and in its
+   own draw of the player; a game with `velocity` left out is not carried on. The carry-on is never assigned back to the sim: the
+   next tick that steps shows the sim itself (`carried` clear). A turn during a stall shows one tick of the old direction to
+   the other screens.
+5. The snapshot carries the state and `lastInput`. For every snapshot whose own state has `carried` clear the owner calls
+   `Reconciler.reconcile(state, lastInput)`: it starts from the host's state and replays the inputs the host has not seen. A
+   state with `carried` set is the host's guess for the other screens (the host applied none of the owner's inputs that tick, so
+   `lastInput` has not moved and the state is "after input k" again at the next stepped tick): the owner skips it, no correction.
 6. The difference between the state before and after is a correction: `PredictionSmoother.correct(dx, dy, dz, teleport)`. The
    drawn position is the predicted position plus the smoother's `offset`, which decays to zero in **100 ms**. A correction
    longer than **2.0** on the ground plane, longer than **0.5** vertically, or with a changed teleport counter **snaps** (offset
@@ -251,7 +258,7 @@ A client draws every other player from the snapshots it holds (`trySampleAt`), n
 - **On the host.** The host has no snapshots of its own, so a remote player is drawn from the host's own record of it (the
   `HistoryRing` of section 8), **one tick behind** (`tick - 1 + alpha`, `alpha` the fraction of the way to the next tick),
   interpolated as above: a teleport between two records holds the older one until the newer one's tick (the snap), and a
-  player with a single record is held at it. The host's own player is its own state, not delayed. Nothing is carried on.
+  player with a single record is held at it. The host's own player is its own state, not delayed. The record is the **shown** state of 5.1 step 3 and 5.2 step 4, so the host draws a stalled player carried on like every other screen does.
 - **Carry-on.** Past the newest snapshot the session holds and never extrapolates. The layer carries a player on by its
   velocity: `position + velocity x min(overshoot, 250 ms)`, then holds. The overshoot is `(renderTick - latestTick) x tickMs`. A
   game with `velocity` left out is not carried on.
@@ -354,7 +361,7 @@ authority: the mean error under 0.15 m and the 99th percentile of the per-frame 
 frame over all seeds under 0.45 m (the two paths are compared at the one constant lag, 0 to 600 ms in 8 ms steps, where they are
 closest on average; that lag is the sum of the two links and the render delay; the error of a frame is the distance between the
 watched path and the owner's path at that lag); D1b the same scene with no jitter and owner authority, seeds 4, 10 and 13: worst
-error under 0.25 m; D1c one runner hitch (the owner, then the host, stops for 4, 5 or 7 ticks in the middle of a 20 s walk, no loss, jitter 20 ms, both authorities, seeds 1, 2, 7 and 8): the host's own record of the walker against the walker's own path holds the D1 bounds (mean under 0.15 m, worst frame under 0.45 m) and the lag fitted after the hitch (from 2 s after it) is the lag fitted before it, within 16 ms; D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
+error under 0.25 m; D1c one runner hitch (the owner, then the host, stops for 4, 5 or 7 ticks in the middle of a 20 s walk, no loss, jitter 20 ms, both authorities, seeds 1, 2, 7 and 8): the host's own record of the walker against the walker's own path holds the D1 bounds (mean under 0.15 m, worst frame under 0.45 m) and the lag fitted after the hitch (from 2 s after it) is the lag fitted before it, within 16 ms; D1d (host authority, no random loss, seeds 1, 2, 7 and 8) at 10, 13 and 16 s every fast frame is dropped for 3 ticks, so the host sees 3 stalled ticks each time and loses no input (the inputs come back by redundancy): the host's record of the walker holds the D1 bounds; D1e the same scene judged from the watcher's screen (B's view of the walker) with the D1 bounds; in that scene the owner is never corrected (`stats.corrections` 0, the smoother never snaps, its offset stays under 0.02 m) and the host's record equals the newest snapshot state B holds, tick for tick, to the position quantum, stalled ticks included; D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
 the watcher, on-time ones played within 2 ticks after their tick, also at 30% loss; D4 the budget above; D8 a shot whose view is within the rewind limit is judged within 0.1 m of where the shooter saw the target
 (at least half of the 30 shots are within it), every shot within 0.3 m, and with `maxRewindMs` 400 on the same link every shot
 within 0.1 m. The measured numbers
@@ -396,16 +403,26 @@ costs one tick of age per tick of depth for every player on every screen: `sessi
 depth. At 10% loss the owner's worst frame is 0.34 m (0.62 m before; jitter 0, 16 seeds, 6%: 0.18 and 0.49 m); the carry-on makes up at
 most `maxInputBuffer` stalls.
 
-Why host authority carries nothing on (it only makes stalls up): carrying the record on by the last input (`step(state, lastInput)`) and taking a second
-input later makes the watcher's path smooth (largest step of one frame 0.106 m, as on a clean link), but the owner's own
-reconciliation replays the inputs after the session's `lastInput` on top of the host's state, and that state is then ahead by the
-carried ticks, so the owner's own path jumps 0.41 to 0.62 m in one frame (0.21 m without it) and the D1 worst error rises to 0.49 m. It needs the owner to be told which
-state is carried (a wire change) or the session's `lastInput` to count it (a change to `spec/replication.md`).
+How host authority carries on. In `"host"` authority one state of the player has three readers: the owner reconciles against it (the snapshot
+carries `lastInput`, which does not move on a stalled tick, and `Reconciler.reconcile(state, lastInput)` assumes the state is the sim after
+input `lastInput`), every watcher interpolates it, and the host's own record of it answers `get` and `rewound`. A stalled tick that stands still
+shows to the watchers (and to the record) as a plateau and then a double step: 0.15 to 0.60 m in one frame on D1d. Carrying the record only (a
+second, shown record next to an unchanged snapshot) fixed the record and broke D8: the snapshot and the record then differed by the stall step.
+Carrying the sim itself on (`step(state, lastInput)`, then a second input later) makes every screen smooth, but the owner then reconciles from a
+state ahead of its ack by the carried ticks: its own path jumps 0.41 to 0.62 m in one frame (0.21 m without it) and the D1 worst error rises to
+0.49 m. So the host keeps both: the sim `state` (never assigned the carry-on) and a **shown** state, the same for the snapshot, the record,
+`latest` and the host's own draw, with the `carried` bit (field 18) telling the owner which snapshots to skip. The next stepped tick the bit is
+clear and the state is the sim, exactly "after input k" as before, so the owner's correction stays zero. Measured on this rig (worst frame, before,
+after): D1d 0.605 to 0.061 m (JS), 0.508 to 0.057 m (C#), 0.605 to 0.061 m (GDScript); D1e, the watcher's view, 0.607 to 0.134 m (JS), 0.600 to
+0.141 m (C#), 0.618 to 0.154 m (GDScript). Accepted costs: the state is one bit longer (one byte more only where the bits were a multiple of 8); on
+a frozen owner every screen shows the player carried on up to `maxInputBuffer - 1` ticks ahead, then the make-up closes it (owner authority
+already does the same); a turn during a stall shows one tick of the old direction to the others; a game with `velocity` left out gets no
+carry-on.
 
 ## 12. Vectors
 
 `spec/vectors/net-player.json`: `configs` (the settings that shape the wire), `states` (encode `state` for `config` to `hex`,
-decode `hex` to `decoded`, `bits`), `inputs`, `args` (one event's arguments), `events` (kind 5 messages) and `invalid` (decoding
+decode `hex` to `decoded`, `bits`; `carried_walking` and `lean_carried` have `carried` set), `inputs`, `args` (one event's arguments), `events` (kind 5 messages) and `invalid` (decoding
 must fail with `error`; `length` for a state, input or arguments of the wrong length). Compare decoded floats with a tolerance
 of 1e-5.
 
@@ -423,6 +440,10 @@ then run the same command without the variable: the plain run only reads the fil
   from zero in double precision and clamps; `pitch` and `moveX` have even step counts, so 0
   does not round-trip exactly.
 - Left-out fields shorten the state and move the later ones up: the layout depends on the settings, and both ends must agree.
+- `carried` is the host's bit, the last one in the state, never omittable. The host sets it on a state it carried on, and clears it on every owner
+  state it accepts (an owner's own is ignored). Reconciling against a carried state wobbles the owner's path by one tick's step on each
+  stall: the owner skips it. In host authority the record, the snapshot, `latest`, `stateAt`, `rewound` and the host's own `get` of a remote
+  player are all the shown state; the sim `state` is never assigned a carried state.
 - The host numbers relayed events itself (section 4.2); the sender's numbers are only for the first hop.
 - In `"host"` mode a repeated input must not step, and the host must quantise after each step.
 - The teleport counter of the owner is the owner's to keep: a game that overwrites it each tick with its own value breaks the

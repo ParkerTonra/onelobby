@@ -152,9 +152,12 @@ aiming blocking health alive team teleport`; `shoot` has `yaw`, `pitch`, `view`)
 **Packet loss and a watched player.** With authority `"owner"` the host carries a player on by its velocity for a tick on which its
 state is late or lost and takes a second state later to make it up, so a lost packet no longer leaves the player a tick (33 ms at
 30 Hz) older on every screen for the rest of the session; nothing needs setting for that. On a 3% lossy link the watched path now
-stays within 0.3 m of the owner's (it was up to 0.8 m), at 0 and 20 ms of jitter. With authority `"host"` a lost input still leaves the
-queue one tick longer (worst 0.4 m on the same link); the only setting that hides it is a deeper standing queue, which makes every
-player a tick older for good, so the layer does not do it for you. Measured numbers: `spec/net-player.md` section 11.
+stays within 0.3 m of the owner's (it was up to 0.8 m), at 0 and 20 ms of jitter. With authority `"host"` a lost input is a stalled tick:
+the host steps nothing, but it shows every screen (its snapshot, its own record and its own draw) that player carried on by its velocity
+for up to `maxInputBuffer - 1` ticks, with the state's `carried` bit set so the owner does not reconcile against it, and makes the
+stall up on the next ticks. The watched path no longer plateaus and then double steps (a run of 3 lost inputs was 0.6 m in one frame,
+now 0.06 to 0.15 m); the state is one bit longer (still 16 bytes in 3D, 12 in 2D at the default layout). Measured numbers: `spec/net-player.md`
+section 11.
 
 ## 6. The host's limits
 
@@ -465,7 +468,7 @@ godot --path clients/dotnet/demo-godot res://NetPlayerDemo.tscn -- --join=127.0.
 `NetPlayer` component is section 12; the Godot C# node is section 10b. A game with its own engine glue calls the layer from its own
 `MonoBehaviour` or `Node`: pump it every frame, hand it your player each tick, draw the other players from `Get(peer)`, and
 make the characters yourself from `PlayerJoined` / `PlayerLeft`. Names are the JS ones in PascalCase; a state is a `PlayerState`
-struct (`X Y Z Vx Vy Vz Yaw Pitch OnGround Mode Item Aiming Blocking Health Alive Team Teleport`, doubles for the numbers), an
+struct (`X Y Z Vx Vy Vz Yaw Pitch OnGround Mode Item Aiming Blocking Health Alive Team Teleport Carried`, doubles for the numbers; `Carried` is the host's bit, see the spec, section 2), an
 input is a `NetPlayerInput` struct (`MoveX MoveY Yaw Pitch` and a `PlayerButtons` flags value), event arguments are one `ActionArgs`
 struct (the event decides which fields travel), and events are the `PlayerAction` enum. `new PlayerState()` is the default
 player (alive, health 100, on the ground); `default(PlayerState)` is all zero, so always use `new`. (The input struct is `NetPlayerInput`: a game often has its own `PlayerInput`, Unity's input system has one.)
