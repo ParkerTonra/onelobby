@@ -57,6 +57,50 @@ namespace OneLobby.Replication.Tests
             Assert.True(r.Max < D1bMaxErrorM, "worst " + r.Max);
         }
 
+        // One runner hitch: a process that stalls for 4, 5 or 7 ticks mid-walk, then runs on. The owner's stall, or the host's, must not leave
+        // the host's record of the walker a tick or more ahead for the rest of the run. Samples are not taken while the hitched process is
+        // stopped (a stopped process samples nothing; the owner path is not sampled then either) nor, for the watched path, for one second after it (the interpolation buffer refills); the whole of the rest
+        // is judged with the D1 bounds, a single constant lag fitted over the run.
+        [Theory]
+        [InlineData(PlayerAuthority.Owner, true, 4), InlineData(PlayerAuthority.Owner, true, 5), InlineData(PlayerAuthority.Owner, true, 7)]
+        [InlineData(PlayerAuthority.Owner, false, 4), InlineData(PlayerAuthority.Owner, false, 5), InlineData(PlayerAuthority.Owner, false, 7)]
+        [InlineData(PlayerAuthority.Host, true, 4), InlineData(PlayerAuthority.Host, true, 5), InlineData(PlayerAuthority.Host, true, 7)]
+        [InlineData(PlayerAuthority.Host, false, 4), InlineData(PlayerAuthority.Host, false, 5), InlineData(PlayerAuthority.Host, false, 7)]
+        public void D1c_AHitchDoesNotLeaveTheWatchedPathAhead(PlayerAuthority mode, bool freezeOwner, int ticks)
+        {
+            double worst = 0, worstMean = 0;
+            foreach (var seed in D1Seeds)
+            {
+                var s = Scene.Make(mode, seed: seed, precise: true);
+                s.Drive();
+                s.Rig.Run(3);
+                var victim = freezeOwner ? s.A : s.Host;
+                var frozenFrames = (int)Math.Ceiling(ticks * 1000.0 / 30 / s.Rig.FrameMs);
+                var owner = new List<Pt>();
+                var watched = new List<Pt>();
+                var frames = 20 * 1000 / s.Rig.FrameMs;
+                var hitchAt = 6 * 1000 / s.Rig.FrameMs;
+                var settle = 1000 / s.Rig.FrameMs;
+                for (var i = 0; i < frames; i++)
+                {
+                    if (i == hitchAt) s.Rig.Frozen.Add(victim);
+                    if (i == hitchAt + frozenFrames) s.Rig.Frozen.Remove(victim);
+                    s.Rig.Step();
+                    var stopped = i >= hitchAt && i < hitchAt + frozenFrames;
+                    var t = s.Rig.NowMs;
+                    if (!(stopped && freezeOwner) && s.Al.TryGet(s.Al.LocalPeerId, out var mine)) owner.Add(new Pt { T = t, X = mine.X, Y = mine.Y, Z = mine.Z });
+                    if ((i < hitchAt || i >= hitchAt + frozenFrames + settle) && s.Bl.TryGet(s.A.PeerId, out var seen)) watched.Add(new Pt { T = t, X = seen.X, Y = seen.Y, Z = seen.Z });
+                }
+                var r = Scene.ComparePaths(owner, watched);
+                _out.WriteLine($"D1c {mode} {(freezeOwner ? "owner" : "host")} {ticks} ticks seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, n {watched.Count}");
+                Assert.True(watched.Count > 600);
+                worst = Math.Max(worst, r.Max);
+                worstMean = Math.Max(worstMean, r.Mean);
+            }
+            Assert.True(worstMean < D1MeanErrorM, "mean " + worstMean);
+            Assert.True(worst < D1MaxErrorM, "worst " + worst);
+        }
+
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]
         public void D2_WatchedPlayerNeverStandsStillPastTheCarryOnCap(PlayerAuthority mode)
         {
