@@ -89,6 +89,16 @@ func _frames(n: int) -> void:
 		await process_frame
 
 
+## The real transport, with a clock the test can move forward: every client of the file reads `shift_ms` added to the real time, so a
+## lobby that "sits idle for 3.6 s" is one jump of the clock, not a wait.
+class ShiftedTransport:
+	extends OneLobbyGodotTransport
+	static var shift_ms := 0
+
+	func now_ms() -> int:
+		return super.now_ms() + shift_ms
+
+
 func _client(display: String, store: OneLobbyStore = null, mode: String = "raw") -> OneLobbyClient:
 	var c := OneLobbyClient.new()
 	c.game_id = "room-test"
@@ -96,6 +106,7 @@ func _client(display: String, store: OneLobbyStore = null, mode: String = "raw")
 	c.display_name = display
 	c.store = store if store != null else OneLobbyStore.memory()
 	c.sync_mode = mode
+	c.transport = ShiftedTransport.new()
 	c.tick_rate = 20
 	c.hash_every_ticks = 10
 	c.ready_timeout_ms = 20000
@@ -186,9 +197,8 @@ func _idle_lobby_then_start() -> void:
 	if ann.lobby == null:
 		return
 	var hr := h.lobby.room
-	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < 3600: # longer than OneLobbyLockstep.HOST_SILENCE_MS, with the lobby doing nothing
-		await process_frame
+	ShiftedTransport.shift_ms += OneLobbyLockstep.HOST_SILENCE_MS + 600 # longer than the silent-host window, with the lobby doing nothing
+	await _frames(3)
 	_check(hr.start() == "", "idle lobby: the host starts after the long wait")
 	_check(await _until(func() -> bool: return ann.lobby.phase == "in_game" and ann.lobby.lockstep.is_started), "idle lobby: the joiner is told the game started")
 	_check(await _until(func() -> bool: return ann.lobby.lockstep.last_tick > 3), "idle lobby: the joiner's lockstep frames flow (last_tick %d)" % ann.lobby.lockstep.last_tick)

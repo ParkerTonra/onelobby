@@ -8,6 +8,10 @@ extends SceneTree
 var _pass := 0
 var _fail := 0
 var _servers: Array = []
+## The clock the connection checks run on (their `now_fn`): it moves 25 ms per frame and nothing else moves it, so a timeout is a count of
+## frames and no result rides on how fast the runner is.
+var _clock_ms := 0
+var _clock := func() -> int: return _clock_ms
 
 
 func _check(ok: bool, what: String) -> void:
@@ -20,6 +24,7 @@ func _check(ok: bool, what: String) -> void:
 
 func _init() -> void:
 	process_frame.connect(_poll_servers)
+	process_frame.connect(func() -> void: _clock_ms += 25)
 	_run.call_deferred()
 
 
@@ -276,7 +281,7 @@ func _stun_opts(servers: Array, turn: Dictionary = {}) -> Dictionary:
 	var urls: Array = []
 	for s: OLFake in servers:
 		urls.append("stun:127.0.0.1:%d" % s.port)
-	var o := {"stun": urls, "server_timeout_ms": 450, "timeout_ms": 4000}
+	var o := {"stun": urls, "server_timeout_ms": 450, "timeout_ms": 4000, "now_fn": _clock}
 	if not turn.is_empty():
 		o["ice_servers"] = [turn]
 	return o
@@ -312,10 +317,10 @@ func _sockets() -> void:
 	_check(r["relay"] == "refused" and r["verdict"] == "relay_refused", "check: relay login refused, " + JSON.stringify(r))
 	r = await OneLobbyConnectionCheck.check(self, _stun_opts([cone_a, cone_b], _turn_entry(mute)))
 	_check(r["relay"] == "unreachable" and r["verdict"] == "relay_unreachable", "check: relay silent, " + JSON.stringify(r))
-	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(turn_bad), 400) == "refused", "probe: refused")
-	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(mute2), 400) == "unreachable", "probe: unreachable")
-	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(turn_ok), 400) == "ok", "probe: ok")
-	_check(await OneLobbyConnectionCheck.probe_relay(self, {"urls": ["turns:127.0.0.1:5349"], "username": "a", "credential": "b"}, 400) == "unknown", "probe: turns: is unknown")
+	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(turn_bad), 400, null, _clock) == "refused", "probe: refused")
+	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(mute2), 400, null, _clock) == "unreachable", "probe: unreachable")
+	_check(await OneLobbyConnectionCheck.probe_relay(self, _turn_entry(turn_ok), 400, null, _clock) == "ok", "probe: ok")
+	_check(await OneLobbyConnectionCheck.probe_relay(self, {"urls": ["turns:127.0.0.1:5349"], "username": "a", "credential": "b"}, 400, null, _clock) == "unknown", "probe: turns: is unknown")
 
 
 ## A resolver the test controls: a name table (addresses in the order the system would give them), an optional delay,
@@ -328,14 +333,18 @@ class FakeResolver:
 	var begun: Array = []
 	var cancelled := 0
 	var _started := {}
+	var clock := Callable() # the test's clock (a frame count), like the check's
+
+	func _t() -> int:
+		return int(clock.call()) if clock.is_valid() else Time.get_ticks_msec()
 
 	func begin(host: String) -> int:
 		begun.append(host)
-		_started[begun.size()] = [host, Time.get_ticks_msec()]
+		_started[begun.size()] = [host, _t()]
 		return begun.size()
 
 	func poll(ticket: int) -> Variant:
-		if never or Time.get_ticks_msec() - int(_started[ticket][1]) < delay_ms:
+		if never or _t() - int(_started[ticket][1]) < delay_ms:
 			return null
 		return PackedStringArray(table.get(_started[ticket][0], []))
 
@@ -347,7 +356,7 @@ class FakeResolver:
 func _names() -> void:
 	var stun_a := _fake("stun", "203.0.113.9", 40000)
 	var stun_b := _fake("stun", "203.0.113.9", 40000)
-	var opts := {"stun": ["stun:one.test:%d" % stun_a.port, "stun:two.test:%d" % stun_b.port], "server_timeout_ms": 450, "timeout_ms": 4000, "bind_address": "127.0.0.1"}
+	var opts := {"stun": ["stun:one.test:%d" % stun_a.port, "stun:two.test:%d" % stun_b.port], "server_timeout_ms": 450, "timeout_ms": 4000, "bind_address": "127.0.0.1", "now_fn": _clock}
 	var v6_first := ["2001:db8::53", "127.0.0.1"] # a documentation IPv6 address nothing answers on, then the IPv4 one that does
 	_check(OneLobbyConnectionCheck.pick_address(PackedStringArray(v6_first)) == "127.0.0.1", "pick_address: IPv4 before IPv6")
 	_check(OneLobbyConnectionCheck.pick_address(PackedStringArray(["2001:db8::53"])) == "2001:db8::53", "pick_address: IPv6 only falls back to IPv6")
@@ -355,32 +364,35 @@ func _names() -> void:
 
 	# a name that answers IPv6 first and IPv4 second: asked over IPv4, so the answer comes
 	var res := FakeResolver.new()
+	res.clock = _clock
 	res.table = {"one.test": v6_first, "two.test": v6_first}
 	var o := opts.duplicate()
 	o["resolver"] = res
-	var t0 := Time.get_ticks_msec()
+	var t0 := _clock_ms
 	var r: Dictionary = await OneLobbyConnectionCheck.check(self, o)
 	_check(r["udp"] == "ok" and r["natType"] == "cone" and r["verdict"] == "good", "names: IPv6 first, IPv4 second still gets the answer, " + JSON.stringify(r))
-	_check(Time.get_ticks_msec() - t0 < 900, "names: the answer comes at once, not after the per-server limit")
+	_check(_clock_ms - t0 < 900, "names: the answer comes at once, not after the per-server limit")
 	_check(res.begun == ["one.test", "two.test"] and res.cancelled == 2, "names: each name looked up once, tickets released, " + str(res.begun))
 
 	# a name with no IPv4 address is asked over IPv6 (nothing answers on this fake address): no answer, no hang
 	res = FakeResolver.new()
+	res.clock = _clock
 	res.table = {"one.test": ["2001:db8::53"], "two.test": ["2001:db8::54"]}
 	o["resolver"] = res
-	t0 = Time.get_ticks_msec()
+	t0 = _clock_ms
 	r = await OneLobbyConnectionCheck.check(self, o)
-	_check(r["udp"] == "blocked" and Time.get_ticks_msec() - t0 < 1500, "names: IPv6-only names fall back to IPv6 and end in no answer within the limits, " + JSON.stringify(r))
+	_check(r["udp"] == "blocked" and _clock_ms - t0 < 1500, "names: IPv6-only names fall back to IPv6 and end in no answer within the limits, " + JSON.stringify(r))
 
 	# a slow lookup is polled, not waited on: frames keep coming, and the answer still arrives
 	res = FakeResolver.new()
+	res.clock = _clock
 	res.table = {"one.test": v6_first, "two.test": v6_first}
 	res.delay_ms = 200
 	o["resolver"] = res
 	var frames := [0]
 	var count := func() -> void: frames[0] += 1
 	process_frame.connect(count)
-	t0 = Time.get_ticks_msec()
+	t0 = _clock_ms
 	r = await OneLobbyConnectionCheck.check(self, o)
 	process_frame.disconnect(count)
 	_check(r["udp"] == "ok", "names: a slow lookup still gets the answer, " + JSON.stringify(r))
@@ -388,13 +400,14 @@ func _names() -> void:
 
 	# a name that never resolves: no answer inside the per-server limits, no hang
 	res = FakeResolver.new()
+	res.clock = _clock
 	res.never = true
 	o["resolver"] = res
 	frames[0] = 0
 	process_frame.connect(count)
-	t0 = Time.get_ticks_msec()
+	t0 = _clock_ms
 	r = await OneLobbyConnectionCheck.check(self, o)
-	var took := Time.get_ticks_msec() - t0
+	var took := _clock_ms - t0
 	process_frame.disconnect(count)
 	_check(r["udp"] == "blocked" and r["natType"] == "unknown", "names: a name that never resolves is no answer, " + JSON.stringify(r))
 	_check(took >= 800 and took < 1500, "names: it ends inside the per-server limits (2 x 450 ms), took %d ms" % took)
@@ -402,12 +415,13 @@ func _names() -> void:
 	_check(res.cancelled == 2, "names: the pending lookups are released")
 
 	# a relay named by a name that never resolves: unreachable (no answer), in time
-	t0 = Time.get_ticks_msec()
-	var rp: String = await OneLobbyConnectionCheck.probe_relay(self, {"urls": ["turn:relay.test:3478"], "username": "a", "credential": "b"}, 400, res)
-	_check(rp == "unreachable" and Time.get_ticks_msec() - t0 < 900, "names: a relay name that never resolves is unreachable in time: " + rp)
+	t0 = _clock_ms
+	var rp: String = await OneLobbyConnectionCheck.probe_relay(self, {"urls": ["turn:relay.test:3478"], "username": "a", "credential": "b"}, 400, res, _clock)
+	_check(rp == "unreachable" and _clock_ms - t0 < 900, "names: a relay name that never resolves is unreachable in time: " + rp)
 
 	# a literal address goes to the socket as it is: the resolver is never asked
 	res = FakeResolver.new()
+	res.clock = _clock
 	o = _stun_opts([stun_a, stun_b])
 	o["resolver"] = res
 	r = await OneLobbyConnectionCheck.check(self, o)

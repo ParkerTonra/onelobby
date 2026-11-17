@@ -239,6 +239,8 @@ class OLProbe:
 	var ok := false
 	var local_port := 0
 	var resolver: OneLobbyConnectionCheck.OLResolver
+	## The clock the waits run on: a Callable returning milliseconds. Unset: the real one (a test passes its own, see `check`'s `now_fn`).
+	var now_fn := Callable()
 	var _resolved := {}
 
 	func _init(bind_address: String, res: OneLobbyConnectionCheck.OLResolver = null) -> void:
@@ -249,12 +251,15 @@ class OLProbe:
 
 	## The address to send to for `host`: a literal address as it is, a name through the resolver, polled once per frame
 	## for at most `ms` (so a slow DNS answer costs time but never a frame). "" when it does not resolve in time.
+	func _ms() -> int:
+		return int(now_fn.call()) if now_fn.is_valid() else Time.get_ticks_msec()
+
 	func resolve(tree: SceneTree, host: String, ms: int) -> String:
 		if host.is_valid_ip_address():
 			return host
 		if _resolved.has(host):
 			return _resolved[host]
-		var t0 := Time.get_ticks_msec()
+		var t0 := _ms()
 		var ticket := resolver.begin(host)
 		if ticket < 0:
 			return ""
@@ -264,7 +269,7 @@ class OLProbe:
 			if r != null:
 				out = OneLobbyConnectionCheck.pick_address(r)
 				break
-			if Time.get_ticks_msec() - t0 >= ms:
+			if _ms() - t0 >= ms:
 				break
 			await tree.process_frame
 		resolver.cancel(ticket)
@@ -277,23 +282,23 @@ class OLProbe:
 	func exchange(tree: SceneTree, target: Dictionary, request: PackedByteArray, parse: Callable, ms: int) -> Variant:
 		if not ok:
 			return null
-		var start := Time.get_ticks_msec()
+		var start := _ms()
 		var addr: String = await resolve(tree, str(target["host"]), ms)
 		if addr == "" or udp.set_dest_address(addr, int(target["port"])) != OK:
 			return null # the name does not resolve (in time): nothing can answer
-		var t0 := Time.get_ticks_msec()
+		var t0 := _ms()
 		ms -= t0 - start
 		if ms <= 0:
 			return null
 		var retransmit_at := mini(OneLobbyConnectionCheck.RETRANSMIT_MS, ms / 3)
 		udp.put_packet(request)
 		var resent := false
-		while Time.get_ticks_msec() - t0 < ms:
+		while _ms() - t0 < ms:
 			while udp.get_available_packet_count() > 0:
 				var v: Variant = parse.call(udp.get_packet())
 				if v != null:
 					return v
-			if not resent and Time.get_ticks_msec() - t0 >= retransmit_at:
+			if not resent and _ms() - t0 >= retransmit_at:
 				resent = true
 				udp.put_packet(request)
 			await tree.process_frame
@@ -301,6 +306,10 @@ class OLProbe:
 
 	func close() -> void:
 		udp.close()
+
+
+static func _tick(now_fn: Callable) -> int:
+	return int(now_fn.call()) if now_fn.is_valid() else Time.get_ticks_msec()
 
 
 static func _random_tid() -> PackedByteArray:
@@ -338,11 +347,12 @@ static func _probe_turn(tree: SceneTree, p: OLProbe, s: Dictionary, ms: int) -> 
 ## Probes a relay entry on its own (a fresh UDP socket): "ok", "refused" (the server answered and turned the login down),
 ## "unreachable" (no answer) or "unknown" (a turns: URL, a tcp transport, no socket). A lobby uses it to tell relay_refused
 ## from relay_unreachable after a failed connect.
-static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS, resolver: OLResolver = null) -> String:
+static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS, resolver: OLResolver = null, now_fn := Callable()) -> String:
 	var t := _turn_target(server)
 	if t.is_empty():
 		return "unknown"
 	var p := OLProbe.new("127.0.0.1" if all_loopback([t]) else "*", resolver)
+	p.now_fn = now_fn
 	var r := "unknown"
 	if p.ok:
 		r = await _probe_turn(tree, p, server, ms)
@@ -352,7 +362,7 @@ static func probe_relay(tree: SceneTree, server: Dictionary, ms := SERVER_MS, re
 
 ## Checks what this network allows. `options`: stun (Array of URLs, default Google and Cloudflare), ice_servers (the
 ## player's TURN entry: the first turn: one is tested), timeout_ms (8000 for the whole check), server_timeout_ms (1500 per
-## server, one retransmit at a third), bind_address, resolver (an OLResolver; tests only). Returns {udp, natType, relay, verdict, message}.
+## server, one retransmit at a third), bind_address, resolver (an OLResolver; tests only), now_fn (a Callable giving ms, the clock every wait runs on; tests only). Returns {udp, natType, relay, verdict, message}.
 static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 	var stun: Array = options.get("stun", DEFAULT_STUN)
 	var turn: Dictionary = {}
@@ -361,7 +371,8 @@ static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 			turn = s
 			break
 	var per_server := int(options.get("server_timeout_ms", SERVER_MS))
-	var deadline := Time.get_ticks_msec() + int(options.get("timeout_ms", WHOLE_MS))
+	var now_fn: Callable = options.get("now_fn", Callable())
+	var deadline := _tick(now_fn) + int(options.get("timeout_ms", WHOLE_MS))
 	var targets: Array = []
 	for u: Variant in stun:
 		var t := ice_url_target(str(u))
@@ -375,11 +386,12 @@ static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 		bind = "127.0.0.1" if all_loopback(all) else "*"
 	var findings := {"udp": "unknown", "natType": "unknown", "relay": "unknown" if not turn.is_empty() else "none"}
 	var p := OLProbe.new(bind, options.get("resolver", null))
+	p.now_fn = now_fn
 	if p.ok:
 		# one after the other from the same socket: a NAT that maps by destination shows two ports
 		var answers: Array = []
 		for t: Dictionary in targets:
-			var left := deadline - Time.get_ticks_msec()
+			var left := deadline - _tick(now_fn)
 			if left <= 0:
 				break
 			var a: Variant = await _probe_stun(tree, p, t, mini(per_server, left))
@@ -394,7 +406,7 @@ static func check(tree: SceneTree, options: Dictionary = {}) -> Dictionary:
 		if turn.is_empty():
 			findings["relay"] = "none"
 		else:
-			var left2 := deadline - Time.get_ticks_msec()
+			var left2 := deadline - _tick(now_fn)
 			findings["relay"] = await _probe_turn(tree, p, turn, mini(per_server, maxi(left2, 1))) if left2 > 0 else "unknown"
 	p.close()
 	var v := OneLobbyDiagnose.check_verdict(findings)

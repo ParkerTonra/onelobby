@@ -25,9 +25,12 @@ var _last_heard := 0
 var _last_tick := 0
 var _flush_at := -1
 var _done := false
+var _now_fn := Callable()
 
 
-func _init(send: Callable, deliver: Callable, on_peer_close: Callable, on_dead: Callable) -> void:
+## `now_fn`: a Callable giving milliseconds, the clock the batching and heartbeat timers run on (default: the real one; a test passes its own).
+func _init(send: Callable, deliver: Callable, on_peer_close: Callable, on_dead: Callable, now_fn := Callable()) -> void:
+	_now_fn = now_fn
 	_send = send
 	_deliver = deliver
 	_on_peer_close = on_peer_close
@@ -37,8 +40,8 @@ func _init(send: Callable, deliver: Callable, on_peer_close: Callable, on_dead: 
 	_last_tick = _last_sent
 
 
-static func _now() -> int:
-	return Time.get_ticks_msec()
+func _now() -> int:
+	return int(_now_fn.call()) if _now_fn.is_valid() else Time.get_ticks_msec()
 
 
 func is_closed() -> bool:

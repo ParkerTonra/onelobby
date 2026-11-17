@@ -188,16 +188,19 @@ func _link() -> void:
 	var a_got: Array = []
 	var b_got: Array = []
 	var a_closed := [""]
-	var a := OneLobbyNostrLink.new(func(f: Dictionary) -> void: a_out.append(f), func(t: String) -> void: a_got.append(t), func(r: String) -> void: a_closed[0] = "peer:" + r, func(_r: String) -> void: a_closed[0] = "dead")
-	var b := OneLobbyNostrLink.new(func(f: Dictionary) -> void: b_out.append(f), func(t: String) -> void: b_got.append(t), func(_r: String) -> void: pass, func(_r: String) -> void: pass)
+	# the links run on a clock the test moves (their `now_fn`), so a batching window is passed by moving it, not by waiting
+	var now := [0]
+	var clock := func() -> int: return now[0]
+	var a := OneLobbyNostrLink.new(func(f: Dictionary) -> void: a_out.append(f), func(t: String) -> void: a_got.append(t), func(r: String) -> void: a_closed[0] = "peer:" + r, func(_r: String) -> void: a_closed[0] = "dead", clock)
+	var b := OneLobbyNostrLink.new(func(f: Dictionary) -> void: b_out.append(f), func(t: String) -> void: b_got.append(t), func(_r: String) -> void: pass, func(_r: String) -> void: pass, clock)
 	a.send("one")
 	a.send("two")
-	OS.delay_msec(40)
+	now[0] += 40
 	a.poll()
 	_check(a_out.size() == 1 and a_out[0]["type"] == "data" and a_out[0]["msgs"] == ["one", "two"], "link batches two texts into one frame")
 	_check(a.buffered() == 6, "link counts unacked bytes")
 	a.send("three")
-	OS.delay_msec(40)
+	now[0] += 40
 	a.poll()
 	_check(a_out.size() == 2 and a_out[1]["seq"] == 2, "link second frame has seq 2")
 	# frame 2 arrives first (held), then frame 1, then a duplicate of frame 1
@@ -207,7 +210,7 @@ func _link() -> void:
 	_check(b_got == ["one", "two", "three"], "link delivers in order once the gap fills")
 	b.receive(a_out[0])
 	_check(b_got.size() == 3, "link drops a duplicate")
-	OS.delay_msec(40)
+	now[0] += 40
 	b.poll()
 	_check(b_out.size() == 1 and b_out[0]["type"] == "beat" and b_out[0]["ack"] == 2, "link answers with an ack beat")
 	a.receive(b_out[0])
