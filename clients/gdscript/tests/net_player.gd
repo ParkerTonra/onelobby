@@ -567,28 +567,34 @@ func _test_d1b() -> void:
 
 
 ## One runner hitch: a process that stalls for 4, 5 or 7 ticks mid-walk, then runs on. The owner's stall, or the host's, must not leave
-## the host's record of the walker a tick or more ahead for the rest of the run. Samples are not taken while the hitched process is
-## stopped (a stopped process samples nothing; the owner path is not sampled then either) nor, for the watched path, for one second
-## after it (the interpolation buffer refills); the whole of the rest is judged with the D1 bounds, one constant lag fitted over the run.
+## the host's record of the walker a tick or more ahead for the rest of the run. As in the engine-smoke players run, the path judged is
+## the host's own record of the walker against the walker's own path (not a third peer's interpolated view). Samples are not taken while
+## the hitched process is stopped (a stopped process samples nothing) nor for two seconds after it (the stall itself is lost time and the
+## path takes a moment to settle; it is the lag that is left that counts). The whole of the rest is judged with the D1 bounds, one
+## constant lag fitted over the run, and the lag fitted after the hitch must be the lag fitted before it, give or take half a tick.
+## No loss (jitter 20 ms as in D1): a lost command is a step a host-mode host never takes whatever the hitch, which would bury the hitch in noise.
 func _test_d1c() -> void:
 	for mode: String in MODES:
 		for who: String in ["a", "host"]:
 			for ticks: int in [4, 5, 7]:
 				var worst := 0.0
 				var worst_mean := 0.0
+				var max_shift := 0
 				for seed_value: int in D1_SEEDS:
-					var s := _scene(mode, {"seed": seed_value})
+					var s := _scene(mode, {"seed": seed_value, "loss_rate": 0.0})
 					_drive(s)
 					var rig: Rig = s["rig"]
 					rig.run(3.0)
 					var al: OneLobbyNetPlayers = s["al"]
-					var bl: OneLobbyNetPlayers = s["bl"]
+					var hl: OneLobbyNetPlayers = s["hl"]
 					var frozen_frames := ceili(float(ticks) * 1000.0 / 30.0 / float(rig.frame_ms))
-					var hitch_at := int(6000.0 / float(rig.frame_ms))
-					var settle := int(1000.0 / float(rig.frame_ms))
+					var hitch_at := int(10000.0 / float(rig.frame_ms))
+					var settle := int(2000.0 / float(rig.frame_ms))
 					var frames := int(20000.0 / float(rig.frame_ms))
 					var owner := Path.new()
-					var watched := Path.new()
+					var before := Path.new()
+					var after := Path.new()
+					var all := Path.new()
 					for i in frames:
 						if i == hitch_at:
 							rig.frozen[who] = true
@@ -600,16 +606,26 @@ func _test_d1c() -> void:
 						var mine: Variant = al.get_state(al.local_peer_id)
 						if mine != null and not (stopped and who == "a"):
 							owner.add(t, mine)
-						var seen: Variant = bl.get_state(al.local_peer_id)
-						if seen != null and (i < hitch_at or i >= hitch_at + frozen_frames + settle):
-							watched.add(t, seen)
-					var r := _compare_paths(owner, watched)
-					print("D1c %s %s %d ticks seed %d: lag %d ms, mean %.3f m, worst %.3f m" % [mode, who, ticks, seed_value, r["lag_ms"], r["mean"], r["max"]])
-					_check(watched.size() > 600, "D1c %s %s %d: watched frames" % [mode, who, ticks])
+						var seen: Variant = hl.get_state(al.local_peer_id)
+						if seen == null:
+							continue
+						if i < hitch_at:
+							before.add(t, seen)
+							all.add(t, seen)
+						elif i >= hitch_at + frozen_frames + settle:
+							after.add(t, seen)
+							all.add(t, seen)
+					var r := _compare_paths(owner, all)
+					var rb := _compare_paths(owner, before)
+					var ra := _compare_paths(owner, after)
+					print("D1c %s %s %d ticks seed %d: lag %d ms, mean %.3f m, worst %.3f m; lag before %d ms, after %d ms" % [mode, who, ticks, seed_value, r["lag_ms"], r["mean"], r["max"], rb["lag_ms"], ra["lag_ms"]])
+					_check(all.size() > 600, "D1c %s %s %d: watched frames" % [mode, who, ticks])
 					worst = maxf(worst, float(r["max"]))
 					worst_mean = maxf(worst_mean, float(r["mean"]))
+					max_shift = maxi(max_shift, absi(int(ra["lag_ms"]) - int(rb["lag_ms"])))
 				_check(worst_mean < D1_MEAN_ERROR_M, "D1c %s, %s stalls %d ticks: mean error under %.2f m (%.3f)" % [mode, who, ticks, D1_MEAN_ERROR_M, worst_mean])
 				_check(worst < D1_MAX_ERROR_M, "D1c %s, %s stalls %d ticks: worst frame under %.2f m (%.3f)" % [mode, who, ticks, D1_MAX_ERROR_M, worst])
+				_check(max_shift <= 16, "D1c %s, %s stalls %d ticks: the lag moved by %d ms across the hitch" % [mode, who, ticks, max_shift])
 
 
 func _test_d2() -> void:

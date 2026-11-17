@@ -62,7 +62,8 @@ namespace OneLobby.Replication.Tests
         // the host's own record of the walker against the walker's own path (not a third peer's interpolated view). Samples are not taken while
         // the hitched process is stopped (a stopped process samples nothing) nor for two seconds after it (the stall itself is lost time and the path takes a moment to settle; it is
         // the lag that is left that counts). The whole of the rest is judged with the D1 bounds, one constant lag fitted over the run, and the
-        // lag fitted after the hitch must be the lag fitted before it, give or take half a tick.
+        // lag fitted after the hitch must be the lag fitted before it, give or take half a tick. No loss (jitter 20 ms as in D1): a lost command
+        // is a step a host-mode host never takes whatever the hitch, which would bury the hitch in noise.
         [Theory]
         [InlineData(PlayerAuthority.Owner, true, 4), InlineData(PlayerAuthority.Owner, true, 5), InlineData(PlayerAuthority.Owner, true, 7)]
         [InlineData(PlayerAuthority.Owner, false, 4), InlineData(PlayerAuthority.Owner, false, 5), InlineData(PlayerAuthority.Owner, false, 7)]
@@ -74,7 +75,7 @@ namespace OneLobby.Replication.Tests
             var maxShift = 0;
             foreach (var seed in D1Seeds)
             {
-                var s = Scene.Make(mode, seed: seed, precise: true);
+                var s = Scene.Make(mode, loss: 0, seed: seed, precise: true);
                 s.Drive();
                 s.Rig.Run(3);
                 var victim = freezeOwner ? s.A : s.Host;

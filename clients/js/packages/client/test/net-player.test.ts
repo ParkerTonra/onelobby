@@ -64,6 +64,7 @@ describe("D1b a stalled tick does not stay as delay (owner authority, loss 3%, n
 // the hitched process is stopped (a stopped process samples nothing) nor for two seconds after it (the stall itself is lost time and the
 // path takes a moment to settle; it is the lag that is left that counts). The whole of the rest is judged with the D1 bounds, one
 // constant lag fitted over the run, and the lag fitted after the hitch must be the lag fitted before it, give or take half a tick.
+// No loss (jitter 20 ms as in D1): a lost command is a step a host-mode host never takes whatever the hitch, which would bury the hitch in noise.
 describe("D1c a hitch of 4, 5 or 7 ticks does not leave the host's record ahead", () => {
   for (const mode of MODES) {
     for (const who of ["owner", "host"] as const) {
@@ -74,7 +75,7 @@ describe("D1c a hitch of 4, 5 or 7 ticks does not leave the host's record ahead"
           let maxShift = 0;
           const rows: string[] = [];
           for (const seed of D1_SEEDS) {
-            const s = await scene(mode, { seed });
+            const s = await scene(mode, { seed, lossRate: 0 });
             drive(s);
             await s.rig.run(3);
             const victim = who === "owner" ? s.a.name : s.host.name;
