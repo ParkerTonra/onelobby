@@ -58,17 +58,20 @@ namespace OneLobby.Replication.Tests
         }
 
         // One runner hitch: a process that stalls for 4, 5 or 7 ticks mid-walk, then runs on. The owner's stall, or the host's, must not leave
-        // the host's record of the walker a tick or more ahead for the rest of the run. Samples are not taken while the hitched process is
-        // stopped (a stopped process samples nothing; the owner path is not sampled then either) nor, for the watched path, for one second after it (the interpolation buffer refills); the whole of the rest
-        // is judged with the D1 bounds, a single constant lag fitted over the run.
+        // the host's record of the walker a tick or more ahead for the rest of the run. As in the engine-smoke players run, the path judged is
+        // the host's own record of the walker against the walker's own path (not a third peer's interpolated view). Samples are not taken while
+        // the hitched process is stopped (a stopped process samples nothing) nor for two seconds after it (the stall itself is lost time and the path takes a moment to settle; it is
+        // the lag that is left that counts). The whole of the rest is judged with the D1 bounds, one constant lag fitted over the run, and the
+        // lag fitted after the hitch must be the lag fitted before it, give or take half a tick.
         [Theory]
         [InlineData(PlayerAuthority.Owner, true, 4), InlineData(PlayerAuthority.Owner, true, 5), InlineData(PlayerAuthority.Owner, true, 7)]
         [InlineData(PlayerAuthority.Owner, false, 4), InlineData(PlayerAuthority.Owner, false, 5), InlineData(PlayerAuthority.Owner, false, 7)]
         [InlineData(PlayerAuthority.Host, true, 4), InlineData(PlayerAuthority.Host, true, 5), InlineData(PlayerAuthority.Host, true, 7)]
         [InlineData(PlayerAuthority.Host, false, 4), InlineData(PlayerAuthority.Host, false, 5), InlineData(PlayerAuthority.Host, false, 7)]
-        public void D1c_AHitchDoesNotLeaveTheWatchedPathAhead(PlayerAuthority mode, bool freezeOwner, int ticks)
+        public void D1c_AHitchDoesNotLeaveTheHostsRecordAhead(PlayerAuthority mode, bool freezeOwner, int ticks)
         {
             double worst = 0, worstMean = 0;
+            var maxShift = 0;
             foreach (var seed in D1Seeds)
             {
                 var s = Scene.Make(mode, seed: seed, precise: true);
@@ -77,10 +80,11 @@ namespace OneLobby.Replication.Tests
                 var victim = freezeOwner ? s.A : s.Host;
                 var frozenFrames = (int)Math.Ceiling(ticks * 1000.0 / 30 / s.Rig.FrameMs);
                 var owner = new List<Pt>();
-                var watched = new List<Pt>();
+                var before = new List<Pt>();
+                var after = new List<Pt>();
                 var frames = 20 * 1000 / s.Rig.FrameMs;
-                var hitchAt = 6 * 1000 / s.Rig.FrameMs;
-                var settle = 1000 / s.Rig.FrameMs;
+                var hitchAt = 10 * 1000 / s.Rig.FrameMs;
+                var settle = 2000 / s.Rig.FrameMs;
                 for (var i = 0; i < frames; i++)
                 {
                     if (i == hitchAt) s.Rig.Frozen.Add(victim);
@@ -89,16 +93,25 @@ namespace OneLobby.Replication.Tests
                     var stopped = i >= hitchAt && i < hitchAt + frozenFrames;
                     var t = s.Rig.NowMs;
                     if (!(stopped && freezeOwner) && s.Al.TryGet(s.Al.LocalPeerId, out var mine)) owner.Add(new Pt { T = t, X = mine.X, Y = mine.Y, Z = mine.Z });
-                    if ((i < hitchAt || i >= hitchAt + frozenFrames + settle) && s.Bl.TryGet(s.A.PeerId, out var seen)) watched.Add(new Pt { T = t, X = seen.X, Y = seen.Y, Z = seen.Z });
+                    if (!s.Hl.TryGet(s.A.PeerId, out var seen)) continue;
+                    var pt = new Pt { T = t, X = seen.X, Y = seen.Y, Z = seen.Z };
+                    if (i < hitchAt) before.Add(pt);
+                    else if (i >= hitchAt + frozenFrames + settle) after.Add(pt);
                 }
-                var r = Scene.ComparePaths(owner, watched);
-                _out.WriteLine($"D1c {mode} {(freezeOwner ? "owner" : "host")} {ticks} ticks seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, n {watched.Count}");
-                Assert.True(watched.Count > 600);
+                var all = new List<Pt>(before);
+                all.AddRange(after);
+                var r = Scene.ComparePaths(owner, all);
+                var rb = Scene.ComparePaths(owner, before);
+                var ra = Scene.ComparePaths(owner, after);
+                _out.WriteLine($"D1c {mode} {(freezeOwner ? "owner" : "host")} {ticks} ticks seed {seed}: lag {r.LagMs} ms, mean {r.Mean:F3} m, worst {r.Max:F3} m, n {all.Count}; lag before {rb.LagMs} ms, after {ra.LagMs} ms");
+                Assert.True(all.Count > 600);
                 worst = Math.Max(worst, r.Max);
                 worstMean = Math.Max(worstMean, r.Mean);
+                maxShift = Math.Max(maxShift, Math.Abs(ra.LagMs - rb.LagMs));
             }
             Assert.True(worstMean < D1MeanErrorM, "mean " + worstMean);
             Assert.True(worst < D1MaxErrorM, "worst " + worst);
+            Assert.True(maxShift <= 16, "the lag moved by " + maxShift + " ms across the hitch");
         }
 
         [Theory, InlineData(PlayerAuthority.Owner), InlineData(PlayerAuthority.Host)]
