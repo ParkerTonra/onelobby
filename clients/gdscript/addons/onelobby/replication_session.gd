@@ -420,13 +420,16 @@ func _restart_client(c: OLRepClient) -> void:
 
 
 ## Host: this tick's input from a client (one call per client per tick): `{seq, view_tick, bytes, repeated}`. The next input
-## in sequence; when none has arrived the previous one is repeated (`repeated` true); `{}` only before the first.
-func try_get_input(peer_id: int) -> Dictionary:
+## in sequence; when none has arrived the previous one is repeated (`repeated` true); `{}` only before the first. `max_buffer`
+## (default `max_input_buffer`) is the latency cap: a longer queue loses its oldest inputs first (the player layer asks for a
+## longer one and makes up for it itself).
+func try_get_input(peer_id: int, max_buffer: int = -1) -> Dictionary:
 	if not _require_host("try_get_input") or not _client_recs.has(peer_id):
 		return {}
 	var c: OLRepClient = _client_recs[peer_id]
 	# latency cap: a client that got ahead (a burst after a stall) skips its oldest inputs
-	while c.inputs.size() > maxi(1, int(config["max_input_buffer"])):
+	var cap := int(config["max_input_buffer"]) if max_buffer < 0 else max_buffer
+	while c.inputs.size() > maxi(1, cap):
 		var k := _first_key(c.inputs)
 		c.inputs.erase(k)
 		c.last_consumed = k

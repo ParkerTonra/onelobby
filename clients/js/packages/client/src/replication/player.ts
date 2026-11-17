@@ -552,8 +552,14 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
 
   // ---- host tick -------------------------------------------------------------------------------------------------
 
+  private lastHostTick = 0;
+  private skippedTicks = 0;
+
   private hostTick(tick: number): void {
     const now = this.lobby.nowMs;
+    // ticks the clock skipped after a long stall (maxCatchUp) were not run: remote players make them up like stalls
+    this.skippedTicks = this.lastHostTick > 0 && tick > this.lastHostTick + 1 ? tick - this.lastHostTick - 1 : 0;
+    this.lastHostTick = tick;
     for (const [peer, p] of this.hostPlayers) {
       if (peer === this.localPeerId) this.hostLocal(p);
       else {
@@ -568,33 +574,59 @@ export class NetPlayers extends Emitter<NetPlayersEvents> {
    * One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
    * (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
    * on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
-   * until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most
-   * `maxInputBuffer` stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+   * until the stalls are made up, so the queue does not keep for good the tick a stall gave it. The same goes for the ticks the
+   * clock skipped after a long stall of the host (`maxCatchUp`): the inputs of those ticks wait in the queue. The queue here may hold
+   * `maxInputBuffer` plus `maxCatchUp` inputs (the session's own cap would drop the oldest of such a burst, and a dropped input puts the
+   * record ahead of its schedule for good), so up to one less than that is counted as stalls, and when the queue runs dry before the
+   * count does the rest is forgiven: a record carried on past the newest input is a guess, not a delay. At most `maxInputBuffer - 1`
+   * ticks are carried on. Host mode steps one input a tick, and one more for each stall it counted (only while inputs are queued).
    */
   private hostRemote(p: HostPlayer, tick: number, now: number): void {
+    const queue = Math.max(1, this.session.config.maxInputBuffer) + Math.max(0, this.session.clock.maxCatchUp);
+    const stallCap = Math.max(1, queue - 1);
     if (this.authority !== "owner") {
-      const f = this.session.tryGetInput(p.peer);
-      if (f && !f.repeated) this.stepRemote(p, f.bytes);
+      if (this.skippedTicks > 0) p.stalled = Math.min(p.stalled + this.skippedTicks, stallCap);
+      const f0 = this.session.tryGetInput(p.peer, queue);
+      if (!f0) return;
+      if (f0.repeated) {
+        p.stalled = Math.min(p.stalled + 1, stallCap);
+        return;
+      }
+      this.stepRemote(p, f0.bytes);
+      while (p.stalled > 0) {
+        const g0 = this.session.tryGetInput(p.peer, queue);
+        if (!g0 || g0.repeated) {
+          p.stalled = 0;
+          break;
+        }
+        p.stalled--;
+        this.stepRemote(p, g0.bytes);
+      }
       return;
     }
     if (p.carried) {
       p.state = p.carried;
       p.carried = null;
     }
-    const f = this.session.tryGetInput(p.peer);
+    if (this.skippedTicks > 0) p.stalled = Math.min(p.stalled + this.skippedTicks, stallCap);
+    const f = this.session.tryGetInput(p.peer, queue);
     if (f && !f.repeated) {
       this.acceptOwnerState(p, f.bytes, tick, now);
       while (p.stalled > 0) {
-        const g = this.session.tryGetInput(p.peer);
-        if (!g || g.repeated) break;
+        const g = this.session.tryGetInput(p.peer, queue);
+        if (!g || g.repeated) {
+          p.stalled = 0;
+          break;
+        }
         p.stalled--;
         this.acceptOwnerState(p, g.bytes, tick, now);
       }
-    } else if (f) p.stalled = Math.min(p.stalled + 1, Math.max(1, this.session.config.maxInputBuffer));
+    } else if (f) p.stalled = Math.min(p.stalled + 1, stallCap);
     if (p.stalled > 0 && p.spawned && !p.awaiting) {
       p.carried = p.state;
       let s = p.state;
-      for (let i = 0; i < p.stalled; i++) s = this.coast(s);
+      const carry = Math.min(p.stalled, Math.max(1, this.session.config.maxInputBuffer - 1));
+      for (let i = 0; i < carry; i++) s = this.coast(s);
       p.state = s;
     }
   }

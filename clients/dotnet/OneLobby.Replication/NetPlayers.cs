@@ -613,10 +613,15 @@ namespace OneLobby.Replication
         }
 
         // ---- host tick -----------------------------------------------------------------------------------------------
+        private uint _lastHostTick;
+        private int _skippedTicks;
 
         private void HostTick(uint tick)
         {
             var now = _lobby.NowMs;
+            // ticks the clock skipped after a long stall (NetworkClock.MaxCatchUp) were not run: owner mode makes them up like stalls
+            _skippedTicks = _lastHostTick > 0 && tick > _lastHostTick + 1 ? (int)(tick - _lastHostTick - 1) : 0;
+            _lastHostTick = tick;
             foreach (var kv in _hostPlayers)
             {
                 var p = kv.Value;
@@ -630,35 +635,54 @@ namespace OneLobby.Replication
         // One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
         // (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
         // on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
-        // until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most MaxInputBuffer
-        // stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+        // until the stalls are made up, so the queue does not keep for good the tick a stall gave it. The same goes for the ticks the
+        // clock skipped after a long stall of the host (NetworkClock.MaxCatchUp): the inputs of those ticks wait in the queue. The queue
+        // here may hold MaxInputBuffer plus MaxCatchUp inputs (the session's own cap would drop the oldest of such a burst, and a dropped
+        // input puts the record ahead of its schedule for good), so up to one less than that is counted as stalls, and when the queue runs dry
+        // before the count does the rest is forgiven: a record carried on past the newest input is a guess, not a delay. At most
+        // MaxInputBuffer - 1 ticks are carried on. Host mode takes one input a tick (and one more for each stall it counted, see below).
         private void HostRemote(int peer, HostPlayer p, uint tick, long now)
         {
+            var queue = Math.Max(1, Session.Config.MaxInputBuffer) + Math.Max(0, Session.Clock.MaxCatchUp);
+            var stallCap = Math.Max(1, queue - 1);
             if (Authority != PlayerAuthority.Owner)
             {
-                if (Session.TryGetInput(peer, out var f0) && !f0.Repeated) StepRemote(p, f0.Bytes.Span);
+                // host mode: a stalled tick steps nothing; the ticks after it step a second input for each stall counted (never more than were
+                // counted, and only while inputs are queued), so the sim of the player does not stay a tick behind its input
+                if (_skippedTicks > 0) p.Stalled = Math.Min(p.Stalled + _skippedTicks, stallCap);
+                if (!Session.TryGetInputCapped(peer, out var f0, queue)) return;
+                if (f0.Repeated) { p.Stalled = Math.Min(p.Stalled + 1, stallCap); return; }
+                StepRemote(p, f0.Bytes.Span);
+                while (p.Stalled > 0)
+                {
+                    if (!Session.TryGetInputCapped(peer, out var g0, queue) || g0.Repeated) { p.Stalled = 0; break; }
+                    p.Stalled--;
+                    StepRemote(p, g0.Bytes.Span);
+                }
                 return;
             }
             if (p.Carried.HasValue) { p.State = p.Carried.Value; p.Carried = null; }
-            if (Session.TryGetInput(peer, out var f))
+            if (_skippedTicks > 0) p.Stalled = Math.Min(p.Stalled + _skippedTicks, stallCap);
+            if (Session.TryGetInputCapped(peer, out var f, queue))
             {
                 if (!f.Repeated)
                 {
                     AcceptOwnerState(p, f.Bytes.Span, tick, now);
                     while (p.Stalled > 0)
                     {
-                        if (!Session.TryGetInput(peer, out var g) || g.Repeated) break;
+                        if (!Session.TryGetInputCapped(peer, out var g, queue) || g.Repeated) { p.Stalled = 0; break; }
                         p.Stalled--;
                         AcceptOwnerState(p, g.Bytes.Span, tick, now);
                     }
                 }
-                else p.Stalled = Math.Min(p.Stalled + 1, Math.Max(1, Session.Config.MaxInputBuffer));
+                else p.Stalled = Math.Min(p.Stalled + 1, stallCap);
             }
             if (p.Stalled > 0 && p.Spawned && !p.Awaiting)
             {
                 p.Carried = p.State;
                 var s = p.State;
-                for (var i = 0; i < p.Stalled; i++) s = Coast(s);
+                var carry = Math.Min(p.Stalled, Math.Max(1, Session.Config.MaxInputBuffer - 1));
+                for (var i = 0; i < carry; i++) s = Coast(s);
                 p.State = s;
             }
         }

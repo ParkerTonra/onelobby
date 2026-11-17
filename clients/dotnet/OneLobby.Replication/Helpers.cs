@@ -47,8 +47,9 @@ namespace OneLobby.Replication
             if (due <= Tick) return false;
             if (due - Tick > MaxCatchUp)
             {
-                // a long stall: drop the backlog instead of racing through it
-                _startMs = now - (long)Math.Ceiling((Tick + MaxCatchUp) * TickMs);
+                // a long stall: skip the backlog by number instead of racing through it
+                // (the epoch stays, so the tick numbers stay on the schedule; the skipped ones are not run)
+                Tick = (uint)(due - MaxCatchUp);
             }
             Tick++;
             return true;

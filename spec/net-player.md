@@ -177,8 +177,22 @@ the same way in both modes (section 6).
    teleport counter is the layer's to keep).
 2. The layer writes it (section 2) and sends it as the bytes of that tick's input (`submitInput`): it is repeated 4 times and
    acked like any input.
-3. The host takes one input per client per tick (`tryGetInput`; a repeated input is ignored) and decodes it. A state of the
-   wrong length is dropped and counted (`statesRejected`).
+3. The host takes one input per client per tick (`tryGetInput`; a repeated input is no new input) and decodes it. A state of the
+   wrong length is dropped and counted (`statesRejected`). A tick with no new input is a **stall** (the input was late or
+   lost). The host counts it and carries the player's record on by its own velocity for that tick (`x += vx dt`, `y += vy dt`,
+   `z += vz dt` in 3D, clamped to the range, quantised; no limit check, nothing else changes; at most `maxInputBuffer - 1`
+   ticks of it, once for every counted stall up to that), so the snapshot does not show the player standing still. On
+   the next tick that has an input the host first puts the record back to the last state that really came, then applies the
+   new one as in step 4, and while stalls are counted it takes a further input in the same tick, each one applied as one
+   tick's move (steps 3 and 4 again), and counts one stall off per further input. A stall is thereby made up, and the queue
+   does not keep the tick for good (the session hands over one input a tick, oldest first: without this, every stall added a
+   tick to the age of the owner's state until the queue overflowed). Two rules keep the make-up closed, so that a long stall
+   leaves no lasting offset: (a) the queue the layer reads may hold `maxInputBuffer + maxCatchUp` inputs, not `maxInputBuffer`
+   (the session's own cap drops the oldest input of a longer burst; a dropped input puts the record one tick ahead of its
+   schedule for good), and up to `maxInputBuffer + maxCatchUp - 1` stalls are counted; (b) a tick the host's own clock skipped
+   after a stall longer than `maxCatchUp` (`spec/replication.md`, the clock keeps its epoch and jumps the tick number) counts as
+   one stall, and when the queue runs dry before the count does, the rest of the count is dropped (a record carried on past the
+   newest input is a guess, not a delay). Host authority (5.2) makes up stalls the same way, without carrying anything on.
 4. The host checks it (section 7). If it passes, it becomes the entity's state; the snapshot carries it to everyone else.
 5. The owner never applies snapshot state to its own player.
 6. Except one case: the snapshot's `lastInput` names the last input the host applied. The owner remembers the teleport counter
@@ -204,7 +218,10 @@ The host's own player is written straight into its entity each tick. The host ca
    once (prediction; `Reconciler.predict` with the sequence number `submitInput` returned).
 4. The host takes one input per client per tick and steps that player once (`state = quantise(step(state, input, dt))`). A
    repeated input (nothing new arrived) does **not** step: the owner has predicted exactly the inputs it sent, so the state
-   after input N is the same on both sides.
+   after input N is the same on both sides. Each repeated input is a counted stall as in 5.1 step 3: the next ticks that have an input
+   step one further input for each stall counted (only while inputs are queued, never more than were counted), so the player's
+   sim does not stay a tick behind its input for good; the host carries nothing on (the record stands still on the stalled tick),
+   which is why the owner's reconciliation, replaying the inputs after `lastInput`, still starts from a state it can replay.
 5. The snapshot carries the state and `lastInput`. The owner calls `Reconciler.reconcile(state, lastInput)`: it starts from the
    host's state and replays the inputs the host has not seen.
 6. The difference between the state before and after is a correction: `PredictionSmoother.correct(dx, dy, dz, teleport)`. The
@@ -332,13 +349,58 @@ is. A game that needs its own state next to the player sends it as its own entit
 
 `clients/js/packages/client/test/net-player*.test.ts` on `RepRig`: a host and two clients (A moves, B watches) at **100 ms
 one-way latency, 20 ms jitter, 3% loss on `fast`** (the fake network's `dropFast`), a fixed seed, 16 ms frames, once for each
-authority. Bounds the tests hold the layer to: D1 worst path error 0.5 m and mean 0.15 m (the two paths are compared at the one
-constant lag, 0 to 600 ms in 8 ms steps, where they are closest on average; that lag is the sum of the two links and the
-render delay); D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
+authority. Bounds the tests hold the layer to: D1, over the seeds 1, 2, 7 and 8 (the seed draws the loss and the jitter) and for each
+authority: the mean error under 0.15 m and the 99th percentile of the per-frame error under 0.40 m for each seed, and the worst
+frame over all seeds under 0.45 m (the two paths are compared at the one constant lag, 0 to 600 ms in 8 ms steps, where they are
+closest on average; that lag is the sum of the two links and the render delay; the error of a frame is the distance between the
+watched path and the owner's path at that lag); D1b the same scene with no jitter and owner authority, seeds 4, 10 and 13: worst
+error under 0.25 m; D1c one runner hitch (the owner, then the host, stops for 4, 5 or 7 ticks in the middle of a 20 s walk, no loss, jitter 20 ms, both authorities, seeds 1, 2, 7 and 8): the host's own record of the walker against the walker's own path holds the D1 bounds (mean under 0.15 m, worst frame under 0.45 m) and the lag fitted after the hitch (from 2 s after it) is the lag fitted before it, within 16 ms; D2 never still longer than 250 ms; D3 every one of 235 jumps, shoots and melees exactly once at the host and at
 the watcher, on-time ones played within 2 ticks after their tick, also at 30% loss; D4 the budget above; D8 a shot whose view is within the rewind limit is judged within 0.1 m of where the shooter saw the target
 (at least half of the 30 shots are within it), every shot within 0.3 m, and with `maxRewindMs` 400 on the same link every shot
 within 0.1 m. The measured numbers
-of the last run are in the PR description of the change that added this file.
+of the last run are in the PR description of the change that added this file. The three clients hold the same numbers (the
+seed's draws differ between the rigs, so a seed is not the same run in each).
+
+### What packet loss does to a watched player
+
+A watched player is the owner's state three hops later: the owner to the host, the host's snapshot to the watcher, and the
+watcher's render delay. D1 compares the watched path with the owner's at one constant lag, so anything that changes the age of
+what the watcher draws during the run shows as error: at a speed of 9.6 m/s one tick (33.3 ms) is 0.32 m. Measured on the JS
+rig (loss 3% on `fast`, 16 seeds, 20 s each), the large errors were not the moment of a loss but a change of age that a loss
+left behind. Cause: the host takes one input per tick, oldest first, from a queue. A tick on which the queue was empty (the
+input was lost or late) takes nothing and the record of the owner stands still for that tick; the lost input arrives a tick
+later inside the next packet (each packet repeats the last four), the queue then holds two, and the host still takes one a
+tick, so the queue keeps the tick for good. Each such stall made the owner's state one tick (33 ms) older on every screen,
+and only a queue overflow (more than `maxInputBuffer` waiting) gave ticks back. In one seed (loss 3%, jitter 20 ms) the age of
+the owner's state at the host rose from 128 ms to 208 ms in 6 s after two stalls, and the error against the best constant lag
+was 0.77 m.
+A lost snapshot to the watcher left no step: the watcher interpolates over the gap and the chord error of a 12 m circle is
+under 0.01 m. Host authority has the same queue and the same stall; its path moves at 6 m/s, so a tick is 0.2 m there.
+
+Since the change in 5.1 step 3 (owner authority), measured on the same 16 seeds, per link, the worst frame over the seeds
+(before, after), the largest 99th percentile (before, after) and the largest mean (before, after):
+
+| link | authority | worst | 99th percentile | mean |
+|---|---|---|---|---|
+| loss 3%, jitter 0 | owner | 0.48, 0.17 m | 0.45, 0.15 m | 0.148, 0.061 m |
+| loss 3%, jitter 20 ms | owner | 0.77, 0.29 m | 0.58, 0.23 m | 0.160, 0.075 m |
+| loss 0, jitter 20 ms | owner | 0.27, 0.27 m | 0.21, 0.21 m | 0.068, 0.068 m |
+| loss 3%, jitter 0 | host | 0.39 m, unchanged | 0.34 m | 0.100 m |
+| loss 3%, jitter 20 ms | host | 0.36 m, unchanged | 0.32 m | 0.114 m |
+| loss 0, jitter 20 ms | host | 0.16 m, unchanged | 0.14 m | 0.045 m |
+
+What is left: with jitter alone and no loss, owner authority is about 0.27 m at the worst (not loss; the cause is not investigated
+here), and host authority still has the queue growth, for the reason below. What a game maker can set: nothing in
+the layer needs setting for owner authority. For host authority the stall can be hidden only by a deeper standing queue, which
+costs one tick of age per tick of depth for every player on every screen: `session: { maxInputBuffer }` is the cap, not the
+depth. At 10% loss the owner's worst frame is 0.34 m (0.62 m before; jitter 0, 16 seeds, 6%: 0.18 and 0.49 m); the carry-on makes up at
+most `maxInputBuffer` stalls.
+
+Why host authority carries nothing on (it only makes stalls up): carrying the record on by the last input (`step(state, lastInput)`) and taking a second
+input later makes the watcher's path smooth (largest step of one frame 0.106 m, as on a clean link), but the owner's own
+reconciliation replays the inputs after the session's `lastInput` on top of the host's state, and that state is then ahead by the
+carried ticks, so the owner's own path jumps 0.41 to 0.62 m in one frame (0.21 m without it) and the D1 worst error rises to 0.49 m. It needs the owner to be told which
+state is carried (a wire change) or the session's `lastInput` to count it (a change to `spec/replication.md`).
 
 ## 12. Vectors
 
@@ -392,4 +454,9 @@ then run the same command without the variable: the plain run only reads the fil
   new session's peer start over, or make the session submit an input at once. And a session that starts within 500 ms of the
   first ack of the one before it is not recognised (the rule in `spec/replication.md` keeps a late packet of the old session from
   being taken for a new one).
+- Owner authority, stalls (section 5.1, step 3): the carried-on record is not a state the owner sent. Put the record back to the last
+  real state before every new input is applied (the speed and step limits compare with that, not with the carried state), drop it
+  when the host places the player (`teleportPlayer`), count a stall only when the session says "repeated" and not when it has
+  never had an input from that client, and do not carry a record on while it waits for a teleport counter. Taking a further
+  input in the same tick makes the session's `inputsRepeated` count rise by the failed tries; do not read it as stalls.
 - Time stamps: `tick` in the message is host ticks; `view` is the render tick x 256 as an unsigned 32-bit number.

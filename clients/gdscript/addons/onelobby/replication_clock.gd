@@ -45,6 +45,6 @@ func try_advance() -> bool:
 	if due <= tick:
 		return false
 	if due - tick > max_catch_up:
-		_start_ms = now - ceili(float(tick + max_catch_up) * tick_ms())
+		tick = due - max_catch_up # skip the backlog by number: the epoch stays, so the tick numbers stay on the schedule
 	tick += 1
 	return true

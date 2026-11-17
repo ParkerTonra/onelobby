@@ -572,8 +572,15 @@ func _client_roster() -> void:
 
 # ---- host tick ---------------------------------------------------------------------------------------------------------
 
+var _last_host_tick := 0
+var _skipped_ticks := 0
+
+
 func _host_tick(t: int) -> void:
 	var now := int(_lobby.now_ms())
+	# ticks the clock skipped after a long stall (max_catch_up) were not run: remote players make them up like stalls
+	_skipped_ticks = t - _last_host_tick - 1 if _last_host_tick > 0 and t > _last_host_tick + 1 else 0
+	_last_host_tick = t
 	for peer: int in _host_players.keys():
 		var p: OLHostPlayer = _host_players[peer]
 		if peer == local_peer_id:
@@ -588,32 +595,54 @@ func _host_tick(t: int) -> void:
 ## One remote player on a host tick. The session hands over one input a tick, oldest first; a tick on which none has come
 ## (late or lost) is a stall. Owner mode, so that a stall is not seen and does not stay: the record of the player is carried
 ## on by its own velocity for each stalled tick (the next real state replaces it), and the next ticks take a second state
-## until the stalls are made up, so the queue does not keep for good the tick a stall gave it. At most `max_input_buffer`
-## stalls are counted, the size of the queue the session keeps. Host mode takes one input a tick.
+## until the stalls are made up, so the queue does not keep for good the tick a stall gave it. The same goes for the ticks the
+## clock skipped after a long stall of the host (`max_catch_up`): the inputs of those ticks wait in the queue. The queue here may hold
+## `max_input_buffer` plus `max_catch_up` inputs (the session's own cap would drop the oldest of such a burst, and a dropped input puts
+## the record ahead of its schedule for good), so up to one less than that is counted as stalls, and when the queue runs dry before the
+## count does the rest is forgiven: a record carried on past the newest input is a guess, not a delay. At most `max_input_buffer - 1`
+## ticks are carried on. Host mode steps one input a tick, and one more for each stall it counted (only while inputs are queued).
 func _host_remote(p: OLHostPlayer, t: int, now: int) -> void:
+	var queue := maxi(1, int(session.config["max_input_buffer"])) + maxi(0, session.clock.max_catch_up)
+	var stall_cap := maxi(1, queue - 1)
 	if authority != "owner":
-		var f0 := session.try_get_input(p.peer)
-		if not f0.is_empty() and not bool(f0["repeated"]):
-			_step_remote(p, f0["bytes"])
+		if _skipped_ticks > 0:
+			p.stalled = mini(p.stalled + _skipped_ticks, stall_cap)
+		var f0 := session.try_get_input(p.peer, queue)
+		if f0.is_empty():
+			return
+		if bool(f0["repeated"]):
+			p.stalled = mini(p.stalled + 1, stall_cap)
+			return
+		_step_remote(p, f0["bytes"])
+		while p.stalled > 0:
+			var g0 := session.try_get_input(p.peer, queue)
+			if g0.is_empty() or bool(g0["repeated"]):
+				p.stalled = 0
+				break
+			p.stalled -= 1
+			_step_remote(p, g0["bytes"])
 		return
 	if not p.carried.is_empty():
 		p.state = p.carried
 		p.carried = {}
-	var f := session.try_get_input(p.peer)
+	if _skipped_ticks > 0:
+		p.stalled = mini(p.stalled + _skipped_ticks, stall_cap)
+	var f := session.try_get_input(p.peer, queue)
 	if not f.is_empty() and not bool(f["repeated"]):
 		_accept_owner_state(p, f["bytes"], t, now)
 		while p.stalled > 0:
-			var g := session.try_get_input(p.peer)
+			var g := session.try_get_input(p.peer, queue)
 			if g.is_empty() or bool(g["repeated"]):
+				p.stalled = 0
 				break
 			p.stalled -= 1
 			_accept_owner_state(p, g["bytes"], t, now)
 	elif not f.is_empty():
-		p.stalled = mini(p.stalled + 1, maxi(1, int(session.config["max_input_buffer"])))
+		p.stalled = mini(p.stalled + 1, stall_cap)
 	if p.stalled > 0 and p.spawned and not p.awaiting:
 		p.carried = p.state
 		var s: Dictionary = p.state
-		for i in p.stalled:
+		for i in mini(p.stalled, maxi(1, int(session.config["max_input_buffer"]) - 1)):
 			s = _coast(s)
 		p.state = s
 

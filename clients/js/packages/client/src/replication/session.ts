@@ -231,7 +231,8 @@ export class NetworkClock {
     }
     const due = Math.floor((now - this.startMs) / this.tickMs);
     if (due <= this.tick) return false;
-    if (due - this.tick > this.maxCatchUp) this.startMs = now - Math.ceil((this.tick + this.maxCatchUp) * this.tickMs);
+    // a long stall: skip the backlog by number (the epoch stays, so the tick numbers stay on the schedule; the skipped ones are not run)
+    if (due - this.tick > this.maxCatchUp) this.tick = due - this.maxCatchUp;
     this.tick++;
     return true;
   }
@@ -574,14 +575,15 @@ export class ReplicationSession extends Emitter<ReplicationEvents> {
 
   /**
    * Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when none
-   * has arrived the previous one is repeated (`repeated`); null only before the first.
+   * has arrived the previous one is repeated (`repeated`); null only before the first. `maxBuffer` (default `config.maxInputBuffer`) is the
+   * latency cap: a longer queue loses its oldest inputs first (the player layer asks for a longer one and makes up for it itself).
    */
-  tryGetInput(peerId: number): InputFrame | null {
+  tryGetInput(peerId: number, maxBuffer: number = this.config.maxInputBuffer): InputFrame | null {
     this.requireHost();
     const c = this.clientRecs.get(peerId);
     if (!c) return null;
     // latency cap: a client that got ahead (a burst after a stall) skips its oldest inputs
-    while (c.inputs.size > Math.max(1, this.config.maxInputBuffer)) {
+    while (c.inputs.size > Math.max(1, maxBuffer)) {
       const k = firstKey(c.inputs);
       c.inputs.delete(k);
       c.lastConsumed = k;

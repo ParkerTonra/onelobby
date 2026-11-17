@@ -331,13 +331,16 @@ namespace OneLobby.Replication
         /// Host: this tick's input from a client. One call per client per tick. Returns the next input in sequence; when
         /// none has arrived the previous one is repeated (<see cref="InputFrame.Repeated"/>); false only before the first.
         /// </summary>
-        public bool TryGetInput(int peerId, out InputFrame input)
+        public bool TryGetInput(int peerId, out InputFrame input) => TryGetInputCapped(peerId, out input, Config.MaxInputBuffer);
+
+        /// <summary>As <see cref="TryGetInput"/>, with the latency cap given (the player layer keeps a longer queue in owner mode and makes up for it itself).</summary>
+        internal bool TryGetInputCapped(int peerId, out InputFrame input, int maxBuffer)
         {
             RequireHost();
             input = default;
             if (!_clients.TryGetValue(peerId, out var c)) return false;
             // latency cap: a client that got ahead (a burst after a stall) skips its oldest inputs
-            while (c.Inputs.Count > Math.Max(1, Config.MaxInputBuffer))
+            while (c.Inputs.Count > Math.Max(1, maxBuffer))
             {
                 var k = c.Inputs.Keys.First();
                 c.Inputs.Remove(k);
