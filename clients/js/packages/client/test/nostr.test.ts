@@ -230,7 +230,7 @@ describe("frame layer (ReliableLink)", () => {
 
 describe("relay pool", () => {
   it("dedupes events, skips a relay that refuses events, reconnects with backoff", async () => {
-    const relays = new FakeRelays();
+    const relays = new FakeRelays(true);
     const urls = ["wss://a.test", "wss://b.test", "wss://c.test"];
     relays.down.add("wss://c.test");
     const got: string[] = [];
@@ -255,7 +255,7 @@ describe("relay pool", () => {
 describe("relay pool: a relay that never connects", () => {
   const tick = () => settle();
   async function dialsTo(down: string[], urls: string[], rounds: number): Promise<{ dials: number; pool: RelayPool }> {
-    const relays = new FakeRelays();
+    const relays = new FakeRelays(true);
     for (const u of down) relays.down.add(u);
     let dials = 0;
     const clock = new ManualClock();
@@ -302,7 +302,7 @@ describe("default relay list", () => {
 
 describe("relay pool settled", () => {
   it("is true once every relay has connected or failed, not before; a dead relay counts", async () => {
-    const relays = new FakeRelays();
+    const relays = new FakeRelays(true);
     relays.down.add("wss://c.test");
     const pool = new RelayPool({ urls: ["wss://a.test", "wss://b.test", "wss://c.test"], topic: "tt", connect: relays.connect, clock: new ManualClock(), wall: Date.now, onEvent: () => {} });
     expect(pool.settled).toBe(false);
@@ -317,7 +317,7 @@ describe("relay pool settled", () => {
 
 describe("checkNostrRelays", () => {
   it("reports ok for an echoing relay, and the reason for the others", async () => {
-    const relays = new FakeRelays();
+    const relays = new FakeRelays(true);
     relays.down.add("wss://down.test");
     relays.refuse.add("wss://refuses.test");
     const res = await checkNostrRelays(["wss://ok.test", "wss://down.test", "wss://refuses.test"], 3000, { connect: relays.connect });

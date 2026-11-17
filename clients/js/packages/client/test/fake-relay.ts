@@ -5,6 +5,18 @@ import type { SocketLike } from "../src/transport.js";
  * forwarded to every matching subscription on the same relay and never stored. Knobs for the failure tests.
  */
 export class FakeRelays {
+  /**
+   * True: every connect, delivery and close happens on the next turn of the event loop (setImmediate), not on a timer, so a test that
+   * awaits `settle()` has seen all of it and waits no real time. Default: a 0 to 1 ms timer, as a real socket's delay.
+   */
+  constructor(readonly immediate = false) {}
+
+  /** Runs `fn` after the fake network's delay: see `immediate`. */
+  later(fn: () => void, ms: number): void {
+    if (this.immediate) setImmediate(fn);
+    else setTimeout(fn, ms);
+  }
+
   /** URLs that refuse connections. */
   down = new Set<string>();
   /** URLs that answer every EVENT with ["OK", id, false, ...]. */
@@ -44,9 +56,6 @@ export class FakeRelays {
 
 type Filter = { kinds?: number[]; "#t"?: string[]; since?: number };
 
-/** The fake relay's own "network": the next turn of the event loop, not a timer, so a test that awaits `settle()` sees every delivery. */
-const later = (fn: () => void): void => void setImmediate(fn);
-
 class FakeSocket implements SocketLike {
   readyState = 0;
   onopen: SocketLike["onopen"] = null;
@@ -56,7 +65,7 @@ class FakeSocket implements SocketLike {
   readonly subs = new Map<string, Filter>();
 
   constructor(private readonly relays: FakeRelays, readonly url: string) {
-    later(() => {
+    this.relays.later(() => {
       if (this.relays.down.has(url)) {
         this.readyState = 3;
         this.onerror?.({});
@@ -65,7 +74,7 @@ class FakeSocket implements SocketLike {
       }
       this.readyState = 1;
       this.onopen?.();
-    });
+    }, 1);
   }
 
   send(data: string): void {
@@ -86,13 +95,13 @@ class FakeSocket implements SocketLike {
   }
 
   deliver(text: string): void {
-    later(() => this.readyState === 1 && this.onmessage?.({ data: text }));
+    this.relays.later(() => this.readyState === 1 && this.onmessage?.({ data: text }), 0);
   }
 
   close(): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    later(() => this.onclose?.({}));
+    this.relays.later(() => this.onclose?.({}), 0);
   }
 
   serverClose(): void {
