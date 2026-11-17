@@ -584,7 +584,7 @@ func _test_d1c() -> void:
 					var s := _scene(mode, {"seed": seed_value, "loss_rate": 0.0})
 					_drive(s)
 					var rig: Rig = s["rig"]
-					rig.run(3.0)
+					rig.run(6.0) # past the start-up of the clocks and the buffers
 					var al: OneLobbyNetPlayers = s["al"]
 					var hl: OneLobbyNetPlayers = s["hl"]
 					var frozen_frames := ceili(float(ticks) * 1000.0 / 30.0 / float(rig.frame_ms))

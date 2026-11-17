@@ -77,7 +77,7 @@ describe("D1c a hitch of 4, 5 or 7 ticks does not leave the host's record ahead"
           for (const seed of D1_SEEDS) {
             const s = await scene(mode, { seed, lossRate: 0 });
             drive(s);
-            await s.rig.run(3);
+            await s.rig.run(6); // past the start-up of the clocks and the buffers
             const victim = who === "owner" ? s.a.name : s.host.name;
             const frozenFrames = Math.ceil((ticks * 1000) / 30 / s.rig.frameMs);
             const hitchAt = Math.floor(10000 / s.rig.frameMs);

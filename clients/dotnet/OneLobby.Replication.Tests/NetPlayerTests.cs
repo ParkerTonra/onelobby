@@ -77,7 +77,7 @@ namespace OneLobby.Replication.Tests
             {
                 var s = Scene.Make(mode, loss: 0, seed: seed, precise: true);
                 s.Drive();
-                s.Rig.Run(3);
+                s.Rig.Run(6); // past the start-up of the clocks and the buffers
                 var victim = freezeOwner ? s.A : s.Host;
                 var frozenFrames = (int)Math.Ceiling(ticks * 1000.0 / 30 / s.Rig.FrameMs);
                 var owner = new List<Pt>();
