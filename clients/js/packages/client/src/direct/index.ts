@@ -165,6 +165,8 @@ export async function hostDirect(kit: OneLobby, opts: DirectHostOptions = {}): P
   const o: DirectHostOptions = bp
     ? {
         port: bp.hosting.directPort,
+        // the file's port is always set, so the bare-port rule (no fallback) would apply: keep the 9 ports a plain hostDirect has
+        fallbackPorts: DEFAULT_FALLBACK_PORTS,
         lan: bp.hosting.lan,
         openPort: bp.hosting.openPort,
         nostr: bp.hosting.nostr ? { relays: [...bp.hosting.nostrRelays] } : false,

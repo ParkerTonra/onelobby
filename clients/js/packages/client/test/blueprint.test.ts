@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ManualClock, MemoryNetwork, MemoryServer, settle } from "../src/testing.js";
@@ -238,6 +239,28 @@ describe("hostDirect defaults from the blueprint", () => {
       expect(lobby.meta).toEqual({ map: "m" });
     } finally {
       await lobby.leave();
+    }
+  });
+});
+
+describe("hostDirect with a blueprint keeps the port fallback", () => {
+  it("a busy file port moves to the next one; an explicit fallbackPorts: 0 still fails", async () => {
+    const port = Math.max(await freePort(), 1024);
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(port, "127.0.0.1", r));
+    try {
+      const cfg = { game: { id: "g" }, engine: "node-browser", hosting: { directPort: port, openPort: false, nostr: false } };
+      const kit = OneLobby.fromConfig(cfg, { displayName: "Ann", rememberSeat: false });
+      const lobby = await hostDirect(kit, { bindHost: "127.0.0.1" });
+      try {
+        expect(lobby.directHub.port).toBeGreaterThan(port);
+      } finally {
+        await lobby.leave();
+      }
+      const kit2 = OneLobby.fromConfig(cfg, { displayName: "Ann", rememberSeat: false });
+      await expect(hostDirect(kit2, { bindHost: "127.0.0.1", fallbackPorts: 0 })).rejects.toMatchObject({ code: "port_in_use" });
+    } finally {
+      await new Promise((r) => blocker.close(r));
     }
   });
 });
