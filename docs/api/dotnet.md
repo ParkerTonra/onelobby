@@ -911,6 +911,8 @@ public sealed class MenuModel
     public RoomJoinOptions? JoinOptions { get; set; }
     /// Hosts a direct lobby (OneLobby.Direct: client.HostDirectAsync(...)); gets the typed password or null. Core cannot reference that package, so a game that wants direct hosting passes this. Null: a direct route shows the "no server" sentence.
     public Func<string?, Task<Lobby>>? HostDirect { get; set; }
+    /// Gets OneLobby: hosting, join code &lt;code&gt; once this menu has hosted (the code a joiner types, as the room page shows it); null: nothing is printed. The Godot menu sets it in a headless run, so a two-copy script can read the code from the host's log.
+    public Action<string>? HostLog { get; set; }
     /// Joins a direct code or an ip:port address (client.JoinDirectAsync(...)); gets the text and the typed password or null.
     public Func<string, string?, Task<Lobby>>? JoinDirect { get; set; }
     /// Base address of an invite link ("https://game.example/play"). Optional: with it, and a lobby-server code, the copied invite sentence ends with the link.
@@ -1128,6 +1130,10 @@ public sealed class NetLog : IDisposable
     public static string Mask(string text, bool includeAddresses = false);
     /// Where Save writes when given no path, and where the log is flushed on exit; null: nowhere.
     public string? Path { get; set; }
+    /// True: every entry is also appended to Path as it is added (the first one writes the whole log), so a killed process still has its log. EnvPath turns it on from the environment. Needs a path; masked, never addresses.
+    public bool Live { get; set; }
+    /// The log file the environment variable ONELOBBY_NETLOG asks for, or null. Give each copy of a game on one PC its own file.
+    public static string? EnvPath(Func<string, string?>? env = null);
     /// Ring size capacity (default 500, clamped to 50..5000; raw skips the clamp: tests); clock is monotonic milliseconds (the transport's clock, default a stopwatch).
     public NetLog(int capacity = DefaultCapacity, Func<long>? clock = null, NetLogMeta? meta = null, string? path = null, bool raw = false);
     /// Adds a step. text is cut to 200 characters; keep addresses in addr, never in the text.

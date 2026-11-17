@@ -2750,6 +2750,11 @@ export interface NetLogOptions {
     meta?: Partial<NetLogMeta>;
     /** Where `save()` writes when given no path (Node), and where the log is flushed on exit. */
     path?: string;
+    /**
+     * Node: every entry is also appended to `path` as it is added (the first one writes the whole log), so a killed process still has
+     * its log. Needs a path; masked, never addresses. `netLogEnvPath()` (the `ONELOBBY_NETLOG` variable) turns it on for a kit.
+     */
+    live?: boolean;
     /** Key under which a `pagehide` stores the entries in session storage so a reload can export the last session (browsers). */
     storageKey?: string;
     /** Do not clamp `capacity` (tests of the ring). */
@@ -2759,6 +2764,8 @@ export interface NetLogOptions {
 export declare class NetLog {
     /** Where `save()` and the exit flush write (Node); null: nowhere. */
     path: string | null;
+    /** True: every entry is also appended to `path` as it is added (Node); see `NetLogOptions.live`. */
+    live: boolean;
     constructor(opts?: NetLogOptions);
     /** Adds a step. `text` is cut to 200 characters; keep addresses in `addr`, never in `text`. */
     add(kind: NetLogKind, text: string, extra?: {
@@ -2808,6 +2815,8 @@ export declare class NetLog {
      */
     flushOnExit(path?: string): void;
 }
+/** The log file the `ONELOBBY_NETLOG` environment variable asks for (Node), or null. Give each copy of a game on one PC its own file. */
+export declare function netLogEnvPath(env?: Record<string, string | undefined>): string | null;
 ```
 
 ## connection-check
