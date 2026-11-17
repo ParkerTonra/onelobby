@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSync } from "esbuild";
 import { NetLog, OneLobby, describeError } from "../src/index.js";
+import { netLogEnvPath } from "../src/netlog.js";
 import type { PeerDiagnosis } from "../src/lobby.js";
 import type { LinkFactory, PeerLink } from "../src/transport.js";
 import { ManualClock, MemoryNetwork, MemoryServer, settle } from "../src/testing.js";
@@ -17,6 +18,7 @@ const dir = () => {
 };
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   for (const d of tmp.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -175,6 +177,31 @@ describe("saving and flushing the log", () => {
     await k.netLog.save(join(d, "full.log"), { includeAddresses: true });
     expect(readFileSync(join(d, "full.log"), "utf8")).toMatch(/addr=203\.0\.113\.9:4000/);
     await expect(new NetLog().save()).rejects.toThrow(/no log path/);
+  });
+
+  it("a live log has every line on disk as it is added (no save, no exit); a plain one does not; the env variable asks for it", () => {
+    const d = dir();
+    const path = join(d, "sub", "live.log");
+    const live = new NetLog({ path, live: true });
+    expect(existsSync(path)).toBe(false);
+    live.add("info", "first");
+    live.add("sig", "dial 203.0.113.9:4000");
+    const t = readFileSync(path, "utf8");
+    expect(t).toMatch(/^# onelobby netlog v1/);
+    expect(t).toContain("info first");
+    expect(t).toContain("sig dial <ip4>");
+    expect(t).not.toContain("203.0.113.9");
+    const quiet = join(d, "quiet.log");
+    new NetLog({ path: quiet }).add("info", "first");
+    expect(existsSync(quiet)).toBe(false);
+    expect(netLogEnvPath({ ONELOBBY_NETLOG: " x.log " })).toBe("x.log");
+    expect(netLogEnvPath({ ONELOBBY_NETLOG: "  " })).toBeNull();
+    expect(netLogEnvPath({})).toBeNull();
+    // a kit built with the variable set writes its own file line by line
+    const envFile = join(d, "kit.log");
+    vi.stubEnv("ONELOBBY_NETLOG", envFile);
+    new OneLobby({ gameId: "g", netVersion: "1", lobbyServer: "", rememberSeat: false });
+    expect(readFileSync(envFile, "utf8")).toContain("client onelobby-js");
   });
 
   /** Runs `body` in a fresh Node process that has the log module bundled in. */

@@ -245,6 +245,35 @@ namespace OneLobby.Tests
         }
 
         [Fact]
+        public void ALiveNetLogHasEveryLineOnDiskAsItIsAdded()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "onelobby-netlog-live-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var path = Path.Combine(dir, "live.txt");
+                var live = new NetLog(path: path) { Live = true };
+                Assert.False(File.Exists(path)); // nothing yet: the first entry opens the file
+                live.Add("info", "first");
+                live.Add("sig", "dial 192.0.2.7:47810");
+                var text = File.ReadAllText(path); // no Save, no Flush, no exit: the file is already there
+                Assert.StartsWith("# onelobby netlog v1", text);
+                Assert.Contains("info first", text);
+                Assert.Contains("sig dial <ip4>", text); // masked like the export
+                Assert.DoesNotContain("192.0.2.7", text);
+                // negative control: not live, nothing is written until Save or Flush
+                var quietPath = Path.Combine(dir, "quiet.txt");
+                var quiet = new NetLog(path: quietPath);
+                quiet.Add("info", "first");
+                Assert.False(File.Exists(quietPath));
+                // the environment variable names the file; blank means none
+                Assert.Equal("x.txt", NetLog.EnvPath(_ => " x.txt "));
+                Assert.Null(NetLog.EnvPath(_ => "  "));
+                Assert.Null(NetLog.EnvPath(_ => null));
+            }
+            finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        }
+
+        [Fact]
         public void LoopbackTargetsBindLoopback()
         {
             Assert.True(ConnectionCheck.AllLoopback(new[] { ("127.0.0.1", 1), ("localhost", 2) }));

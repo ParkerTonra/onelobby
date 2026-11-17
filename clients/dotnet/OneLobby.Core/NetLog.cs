@@ -82,6 +82,21 @@ namespace OneLobby
         /// <summary>Where <see cref="Save"/> writes when given no path, and where the log is flushed on exit; null: nowhere.</summary>
         public string? Path { get; set; }
 
+        /// <summary>
+        /// True: every entry is also appended to <see cref="Path"/> as it is added (the first one writes the whole log), so a killed
+        /// process still has its log. <see cref="EnvPath"/> turns it on from the environment. Needs a path; masked, never addresses.
+        /// </summary>
+        public bool Live { get; set; }
+
+        private bool _liveOpen;
+
+        /// <summary>The log file the environment variable <c>ONELOBBY_NETLOG</c> asks for, or null. Give each copy of a game on one PC its own file.</summary>
+        public static string? EnvPath(Func<string, string?>? env = null)
+        {
+            var v = (env ?? Environment.GetEnvironmentVariable)("ONELOBBY_NETLOG");
+            return string.IsNullOrWhiteSpace(v) ? null : v!.Trim();
+        }
+
         /// <summary>Ring size <paramref name="capacity"/> (default 500, clamped to 50..5000; <paramref name="raw"/> skips the clamp: tests); <paramref name="clock"/> is monotonic milliseconds (the transport's clock, default a stopwatch).</summary>
         public NetLog(int capacity = DefaultCapacity, Func<long>? clock = null, NetLogMeta? meta = null, string? path = null, bool raw = false)
         {
@@ -102,7 +117,24 @@ namespace OneLobby
                 if (t.Length > TextMax) t = t.Substring(0, TextMax);
                 _ring.Add(new NetLogEntry(_nextSeq++, Math.Max(0, _now() - _t0), kind, t, string.IsNullOrEmpty(addr) ? null : addr, string.IsNullOrEmpty(code) ? null : code));
                 if (_ring.Count > _cap) _ring.RemoveAt(0);
+                if (Live && !string.IsNullOrEmpty(Path)) AppendLive(_ring[_ring.Count - 1]);
             }
+        }
+
+        // Live mode (called under the lock): the first entry writes the whole log (header and the ring), later ones append one masked line.
+        private void AppendLive(NetLogEntry e)
+        {
+            try
+            {
+                if (!_liveOpen)
+                {
+                    _liveOpen = true;
+                    Save();
+                    return;
+                }
+                File.AppendAllText(Path!, Mask("#" + e.Seq.ToString(CultureInfo.InvariantCulture) + " +" + e.T.ToString(CultureInfo.InvariantCulture) + "ms " + e.Kind + " " + e.Text, false) + "\n", new UTF8Encoding(false));
+            }
+            catch (Exception) { /* the log is a courtesy: a failed write never matters */ }
         }
 
         /// <summary>The entries kept, oldest first (a copy).</summary>

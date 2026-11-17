@@ -30,7 +30,7 @@ import { DEFAULT_DIRECT_PORT, loopbackBindAddress, parseDirectAddress } from "./
 import { BlueprintError, parseBlueprint, type Blueprint } from "./blueprint.js";
 import { hostNostr, type BrowserHostOptions } from "./direct/browser-host.js";
 import { diagnose, type DiagnoseFacts, type Reached } from "./diagnose.js";
-import { NetLog, maskText } from "./netlog.js";
+import { NetLog, maskText, netLogEnvPath } from "./netlog.js";
 import { LanFinder, type LanFinderOptions } from "./lan.js";
 import { checkConnection, probeRelay, type CheckOptions, type CheckResult } from "./connection-check.js";
 import { PlayerSettings, RELAY_SKIPPED_WARNING, cleanLastCode, cleanName, redactUrl, type EnvSource, type SettingsUse } from "./settings.js";
@@ -444,14 +444,16 @@ export class OneLobby extends Emitter<OneLobbyEvents> {
     const dg = o.diagnostics ?? {};
     this.diagOpts = { reportToHost: dg.reportToHost !== false, relayProbe: dg.relayProbe === undefined ? (s) => probeRelay(s) : dg.relayProbe };
     const proc = (globalThis as { process?: { platform?: string; arch?: string; versions?: { node?: string } } }).process;
+    const asked = netLogEnvPath(); // ONELOBBY_NETLOG: this copy's own file, written line by line (wins over diagnostics.logPath)
     this.netLog = new NetLog({
       capacity: dg.logSize,
       clock: this.clock,
-      path: dg.logPath,
+      path: asked ?? dg.logPath,
+      live: asked !== null,
       storageKey: `onelobby.netlog.${o.gameId}`,
       meta: { client: `${LIB_NAME}-js ${LIB_VERSION}`, protocol: PROTO_ID, platform: proc?.versions?.node ? `node ${proc.platform ?? ""} ${proc.arch ?? ""}`.trim() : "browser" },
     });
-    if (dg.logPath) this.netLog.flushOnExit(dg.logPath);
+    if (asked ?? dg.logPath) this.netLog.flushOnExit((asked ?? dg.logPath)!);
     this.netLog.add("info", `client ${LIB_NAME}-js ${LIB_VERSION} protocol ${PROTO_ID} game version ${o.netVersion}`);
   }
 

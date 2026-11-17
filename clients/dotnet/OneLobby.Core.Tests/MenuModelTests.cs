@@ -276,6 +276,28 @@ namespace OneLobby.Tests
             Assert.False(h.M.CopyInvite() || h.M.CopyCode()); // no clipboard injected: nothing copied
         }
 
+        [Fact]
+        public void HostLogGetsTheJoinCodeLineOnHostOnly()
+        {
+            var w = new World();
+            var lines = new List<string>();
+            var h = w.New("Sam");
+            h.M.HostLog = lines.Add;
+            h.M.SetName("Sam");
+            w.Run(h.M.HostAsync());
+            Assert.Equal(new[] { "OneLobby: hosting, join code " + h.M.CodeText() }, lines);
+            Assert.NotEqual("", h.M.CodeText());
+            var g = w.New("Ann");
+            g.M.HostLog = lines.Add; // a joiner never prints a hosting line
+            g.M.SetName("Ann");
+            g.M.SetJoinText(h.M.CodeText().ToLowerInvariant());
+            w.Run(g.M.JoinAsync());
+            Assert.Single(lines);
+            var quiet = w.New("Bo"); // no HostLog: nothing printed, nothing thrown
+            quiet.M.SetName("Bo");
+            w.Run(quiet.M.HostAsync());
+        }
+
         [Theory]
         [InlineData("Fortress")]
         [InlineData("Castle")]

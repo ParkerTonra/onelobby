@@ -178,6 +178,12 @@ namespace OneLobby
             var t0 = transport.NowMs;
             NetLog = new NetLog(dg.LogSize, () => Transport.NowMs - t0, new NetLogMeta("onelobby-dotnet " + LibVersion, Signaling.Proto, "dotnet"), dg.LogPath);
             if (!string.IsNullOrEmpty(dg.LogPath)) NetLog.FlushOnExit(dg.LogPath);
+            var asked = NetLog.EnvPath();
+            if (asked != null)
+            {
+                NetLog.FlushOnExit(asked); // ONELOBBY_NETLOG: this copy's own file, written line by line
+                NetLog.Live = true;
+            }
             NetLog.Add("info", "client onelobby-dotnet " + LibVersion + " protocol " + Signaling.Proto + " game version " + config.NetVersion);
         }
 

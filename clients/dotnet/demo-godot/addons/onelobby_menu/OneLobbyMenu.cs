@@ -142,6 +142,8 @@ public partial class OneLobbyMenu : Control
             // and Host never goes to a lobby server (the direct route above). Read here, not from BootFlags: a game that applies the
             // boot flags itself later would be too late for the check on open.
             LocalOnly = _local,
+            // a headless host prints its join code (as the GDScript menu does), so a two-copy script reads it from the log instead of guessing
+            HostLog = DisplayServer.GetName() == "headless" ? line => GD.Print(line) : null,
         };
         Model.GameStarted += l => GameStarted?.Invoke(l);
         Model.ReturnedToLobby += l => ReturnedToLobby?.Invoke(l);

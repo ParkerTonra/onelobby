@@ -78,6 +78,11 @@ export interface NetLogOptions {
   meta?: Partial<NetLogMeta>;
   /** Where `save()` writes when given no path (Node), and where the log is flushed on exit. */
   path?: string;
+  /**
+   * Node: every entry is also appended to `path` as it is added (the first one writes the whole log), so a killed process still has
+   * its log. Needs a path; masked, never addresses. `netLogEnvPath()` (the `ONELOBBY_NETLOG` variable) turns it on for a kit.
+   */
+  live?: boolean;
   /** Key under which a `pagehide` stores the entries in session storage so a reload can export the last session (browsers). */
   storageKey?: string;
   /** Do not clamp `capacity` (tests of the ring). */
@@ -86,6 +91,7 @@ export interface NetLogOptions {
 
 interface NodeFs {
   writeFileSync(path: string, data: string): void;
+  appendFileSync(path: string, data: string): void;
   mkdirSync(path: string, opts: { recursive: true }): void;
 }
 interface NodePath {
@@ -113,6 +119,9 @@ export class NetLog {
   private lastSession: NetLogEntry[] | null = null;
   /** Where `save()` and the exit flush write (Node); null: nowhere. */
   path: string | null;
+  /** True: every entry is also appended to `path` as it is added (Node); see `NetLogOptions.live`. */
+  live: boolean;
+  private liveOpen = false;
 
   constructor(opts: NetLogOptions = {}) {
     const c = opts.capacity ?? NETLOG_DEFAULT_CAPACITY;
@@ -121,6 +130,7 @@ export class NetLog {
     this.t0 = this.now();
     this.meta = { client: "onelobby", protocol: "lk1", platform: "unknown", ...opts.meta };
     this.path = opts.path ?? null;
+    this.live = !!opts.live;
     if (opts.storageKey) this.keepAcrossReload(opts.storageKey);
   }
 
@@ -131,6 +141,26 @@ export class NetLog {
     if (extra.code) e.code = extra.code;
     this.ring.push(e);
     if (this.ring.length > this.cap) this.ring.shift();
+    if (this.live && this.path) this.appendLive(e);
+  }
+
+  // Live mode: the first entry writes the whole log (header and the ring), later ones append one masked line.
+  private appendLive(e: NetLogEntry): void {
+    try {
+      const proc = nodeProcess();
+      const fs = proc?.getBuiltinModule?.(["node", "fs"].join(":")) as NodeFs | undefined;
+      const pth = proc?.getBuiltinModule?.(["node", "path"].join(":")) as NodePath | undefined;
+      if (!fs || !pth || !this.path) return;
+      if (!this.liveOpen) {
+        this.liveOpen = true;
+        fs.mkdirSync(pth.dirname(this.path), { recursive: true });
+        fs.writeFileSync(this.path, this.export());
+        return;
+      }
+      fs.appendFileSync(this.path, maskText(`#${e.seq} +${e.t}ms ${e.kind} ${e.text}`, false) + "\n");
+    } catch {
+      /* the log is a courtesy: a failed write never matters */
+    }
   }
 
   /** The entries kept, oldest first. */
@@ -254,6 +284,13 @@ export class NetLog {
       }
     });
   }
+}
+
+/** The log file the `ONELOBBY_NETLOG` environment variable asks for (Node), or null. Give each copy of a game on one PC its own file. */
+export function netLogEnvPath(env?: Record<string, string | undefined>): string | null {
+  const e = env ?? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const v = e?.ONELOBBY_NETLOG?.trim();
+  return v ? v : null;
 }
 
 function render(entries: readonly NetLogEntry[], meta: NetLogMeta, dropped: number, includeAddresses: boolean): string {

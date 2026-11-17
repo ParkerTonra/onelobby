@@ -111,6 +111,12 @@ namespace OneLobby
         /// </summary>
         public Func<string?, Task<Lobby>>? HostDirect { get; set; }
 
+        /// <summary>
+        /// Gets <c>OneLobby: hosting, join code &lt;code&gt;</c> once this menu has hosted (the code a joiner types, as the room page shows it);
+        /// null: nothing is printed. The Godot menu sets it in a headless run, so a two-copy script can read the code from the host's log.
+        /// </summary>
+        public Action<string>? HostLog { get; set; }
+
         /// <summary>Joins a direct code or an <c>ip:port</c> address (<c>client.JoinDirectAsync(...)</c>); gets the text and the typed password or null.</summary>
         public Func<string, string?, Task<Lobby>>? JoinDirect { get; set; }
 
@@ -496,6 +502,7 @@ namespace OneLobby
             }
             catch (Exception ex) { failure = ex; }
             Connected(t, l, failure, direct);
+            if (l != null && failure == null && ReferenceEquals(Lobby, l)) HostLog?.Invoke("OneLobby: hosting, join code " + CodeText());
         }
 
         private string DisplayNameOrPlayer() => NameText.Length > 0 && NamesAllowed ? NameText : "Player";
