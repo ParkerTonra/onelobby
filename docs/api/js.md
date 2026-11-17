@@ -87,7 +87,7 @@ import { LanFinder, type LanFinderOptions } from "./lan.js";
 import { type CheckOptions, type CheckResult } from "./connection-check.js";
 import { PlayerSettings, type EnvSource, type SettingsUse } from "./settings.js";
 export declare const LIB_NAME = "onelobby";
-export declare const LIB_VERSION = "0.7.2";
+export declare const LIB_VERSION = "0.8.0";
 /** Where `rememberSeat` keeps the resume token: the subset of the Web Storage API it uses. */
 export interface SeatStorage {
     getItem(key: string): string | null;
@@ -699,7 +699,7 @@ export interface LobbyDiag {
     route: "server" | "ip" | "nostr";
     /** Send the joiner's diagnosis to the host when the link fails (default true). */
     reportToHost: boolean;
-    /** `0.7.2`: sent in the report. */
+    /** `0.8.0`: sent in the report. */
     clientVersion: string;
     /** The last connection check this kit ran, if any (its NAT reading joins the facts and the report). */
     lastCheck: () => CheckResult | null;
@@ -2737,7 +2737,7 @@ export declare const NETLOG_TEXT_MAX = 200;
  */
 export declare function maskText(text: string, includeAddresses?: boolean): string;
 export interface NetLogMeta {
-    /** `onelobby-js 0.7.2` */
+    /** `onelobby-js 0.8.0` */
     client: string;
     protocol: string;
     platform: string;

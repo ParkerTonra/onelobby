@@ -63,7 +63,7 @@ describe("the kit's net log", () => {
     const lines = text.trimEnd().split("\n");
     expect(lines.slice(0, 4)).toEqual([
       "# onelobby netlog v1",
-      expect.stringMatching(/^# client onelobby-js 0\.7\.2 protocol lk1 platform (node .+|browser)$/),
+      expect.stringMatching(/^# client onelobby-js 0\.8\.0 protocol lk1 platform (node .+|browser)$/),
       expect.stringMatching(/^# entries \d+ dropped 0$/),
       "# addresses masked",
     ]);
@@ -113,7 +113,7 @@ describe("the host's event for a joiner's diagnosis", () => {
     const shown = describeError(rejected);
     expect(shown).toMatchObject({ code: "ice_failed", cause: "timeout_unknown", stage: "ice" });
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ name: "bob", cause: "timeout_unknown", stage: "ice", relaySet: false, message: shown.message, hint: "Ask them to copy their log and send it to you.", clientVersion: "0.7.2" });
+    expect(seen[0]).toMatchObject({ name: "bob", cause: "timeout_unknown", stage: "ice", relaySet: false, message: shown.message, hint: "Ask them to copy their log and send it to you.", clientVersion: "0.8.0" });
     expect(seen[0].line).toBe("bob: unknown cause, stopped at the connection check after 5 s.");
     expect(seen[0].peer.peerId).toBe(2);
     expect(la.peers.map((p) => p.peerId)).toEqual([1]);

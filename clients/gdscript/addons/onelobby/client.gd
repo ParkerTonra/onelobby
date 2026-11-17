@@ -58,7 +58,7 @@ const RETIRE_MS := 1500
 @export var relay_probe := true
 
 ## The library version the report carries.
-const LIB_VERSION := "0.7.2"
+const LIB_VERSION := "0.8.0"
 ## The last check_connection() result ({udp, natType, relay, verdict, message}); {} before the first one. Its NAT reading
 ## joins a later failure's diagnosis and the report to the host.
 var last_check := {}

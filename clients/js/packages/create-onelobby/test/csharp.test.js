@@ -127,9 +127,9 @@ project/assembly_name="MyGame"
 
   it("without --packages-from the project references the registry version and writes no nuget.config", async () => {
     const r = await j(["my-game", "--template", "godot-csharp", "--addon-from", "checkout", "--webrtc-zip", "natives.zip", "--yes", "--no-git"]);
-    expect(r.json.packages).toEqual({ version: "0.7.2", from: "registry" });
+    expect(r.json.packages).toEqual({ version: "0.8.0", from: "registry" });
     expect(existsSync(at("my-game/nuget.config"))).toBe(false);
-    expect(text("my-game/MyGame.csproj")).toContain('Include="OneLobby.Godot" Version="0.7.2"');
+    expect(text("my-game/MyGame.csproj")).toContain('Include="OneLobby.Godot" Version="0.8.0"');
   });
 
   it("a voice game gets the microphone setting in project.godot", async () => {

@@ -7,7 +7,7 @@
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
   "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
-  "onelobby.json": "0e902840a9afe9391dd0e6c2e2fc0a7191e84c57f56a08f7856ff5bedf453cd3",
+  "onelobby.json": "be8d4b5865b98aa4dc08aaf4fb8d6ca27e36f672011bd0d0b960ec7b3b7b39f3",
   "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
   "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
  },
@@ -19,7 +19,7 @@
   "main.gd": "165c952a64f0c08b73e8cccbab317de69c4a19344fb6f0997ea85260d2feb9fc",
   "main.tscn": "61a66bc8b64acd28ca49adbfa122763f1f37b3617b7d70bf01225fef19874cb7",
   "net.gd": "fa002370e0659acbee44bec56be4e4441731c4a799a7053bd151b99e5d6443d9",
-  "onelobby.json": "28fb6dde49bdb2f84f1bfd5e7329bbcaecef76b91e61dc923b0dea15c0aa4538",
+  "onelobby.json": "fa117252fd736aa4aa8c18f499ff5cef57a99d1c32fe3c1a6f1c0c2edc0f1f40",
   "project.godot": "deba58e3070f30cb9f1aebcee8487a790a4493760f58450f59ea1b3bfa0c7e49",
   "tests/multiplayer.gd": "d65229a8d92cc5f8ddcf3e859c2f68897502075f702e8d11d3aeb32ca43838ab"
  },
@@ -33,7 +33,7 @@
   "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",
   "OneLobbyNet.cs": "2d91b86a6db779a45878b3c68088afaa0c60dc171ee6bd2289cac2848e76f7ad",
   "nuget.config": "922fbc5385f0385512122d15dab63e5fe71bf370a981a5b1d191b13d7af698b9",
-  "onelobby.json": "cc6ec79c637c590602fb873bce543c3fc187d17ce839cec6b32ff99d63e5a4bb",
+  "onelobby.json": "9729be451ded1ae9788f15c16da2590fc3baca03f7aecfe13ef816b14a8e78f5",
   "project.godot": "d59fd31697a50d97f3c14f33441e16cf9c40a03da178522e10b58edb09dfb0a9",
   "tests/MultiplayerTest.cs": "435fb17f8d9890f9768fcdaaed59e18faaa133df4c4e304457af341aa3e7e9f8",
   "tests/MultiplayerTest.tscn": "577d47f0e85d003eb7ae08b0fb98f18224f9f80b5d7af1ae08ac62fea4f91ff5"
@@ -48,7 +48,7 @@
   "MyGame.csproj": "f23e0e5819db4c22e38d50aa8aa8a96bead454e25047047bd20a337de185cae9",
   "OneLobbyNet.cs": "2d91b86a6db779a45878b3c68088afaa0c60dc171ee6bd2289cac2848e76f7ad",
   "nuget.config": "922fbc5385f0385512122d15dab63e5fe71bf370a981a5b1d191b13d7af698b9",
-  "onelobby.json": "a443b3d9c53f01663a9f411cb769551b38e2c8ccc69675711f14e290a0e9aec1",
+  "onelobby.json": "224a45bd62743cc1559edacbefe7205c6097a29818c8b42c75259111a40d1f58",
   "project.godot": "d59fd31697a50d97f3c14f33441e16cf9c40a03da178522e10b58edb09dfb0a9",
   "tests/MultiplayerTest.cs": "435fb17f8d9890f9768fcdaaed59e18faaa133df4c4e304457af341aa3e7e9f8",
   "tests/MultiplayerTest.tscn": "577d47f0e85d003eb7ae08b0fb98f18224f9f80b5d7af1ae08ac62fea4f91ff5"

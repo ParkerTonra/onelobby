@@ -64,7 +64,7 @@ export function maskText(text: string, includeAddresses = false): string {
 }
 
 export interface NetLogMeta {
-  /** `onelobby-js 0.7.2` */
+  /** `onelobby-js 0.8.0` */
   client: string;
   protocol: string;
   platform: string;
