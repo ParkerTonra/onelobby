@@ -68,3 +68,16 @@ describe("verify's header names the engine of a web-kind folder", () => {
     expect(json).toMatchObject({ kind: "web", engine: "node-browser" });
   });
 });
+
+describe("a web game with its own sync: the Next lines do not tell you to swap it into the lockstep stand-in", async () => {
+  const { intoNext } = await import("../src/files.js");
+  const pkg = { created: false, hasOnelobby: true, isModule: true };
+  it("raw: says the stand-in test proves the lobby only; lockstep keeps the swap line", () => {
+    const raw = intoNext({ rel: ".", pkg, standIn: true, mode: "raw" }).join("\n");
+    expect(raw).toContain("proves those only");
+    expect(raw).not.toContain("swap it for the stand-in Game");
+    const lock = intoNext({ rel: ".", pkg, standIn: true, mode: "lockstep" }).join("\n");
+    expect(lock).toContain("swap it for the stand-in Game");
+    expect(lock).not.toContain("proves those only");
+  });
+});

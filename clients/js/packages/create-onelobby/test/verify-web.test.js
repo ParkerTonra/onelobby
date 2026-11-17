@@ -67,6 +67,17 @@ describe("nostr and turn skip reasons are true for this folder", () => {
       expect(r.detail).not.toContain("this folder has none");
     }
   });
+  it("names the real game kind: a node-browser game is not called a web game", async () => {
+    put("package.json", JSON.stringify({ optionalDependencies: { "node-datachannel": "^0.33.4" } }));
+    put("onelobby.json", JSON.stringify({ engine: "node-browser" }));
+    for (const name of ["nostr", "turn"]) {
+      const r = await check(name).run({ dir });
+      expect(r.detail).toContain("verify does not start JS peers for a Node game that hosts its pages");
+      expect(r.detail).not.toContain("for a web game");
+    }
+    put("onelobby.json", JSON.stringify({ engine: "web" }));
+    expect(skipReason(dir)).toContain("for a web game");
+  });
   it("node-datachannel installed counts too", () => {
     put("node_modules/node-datachannel/package.json", "{}");
     expect(nodeDatachannelIn(dir)).toBe("installed");

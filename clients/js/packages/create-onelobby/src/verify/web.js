@@ -39,11 +39,20 @@ export function projectTestDetail(passed, mode) {
   return `test/multiplayer.mjs: ${passed} checks passed, in memory: this proves OneLobby's lobby and messages and the template's stand-in game only, NOT this game's own netcode (sync.mode ${mode}); run the game's own two-player test and name it in the report`;
 }
 
+/** What to call this game in the skip text: "a Node game that hosts its pages" for engine node-browser, else "a web game". */
+export function gameKind(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "onelobby.json"), "utf8"))?.engine === "node-browser" ? "a Node game that hosts its pages" : "a web game";
+  } catch {
+    return "a web game";
+  }
+}
+
 /** The true reason `nostr` and `turn` are skipped for this web project (they are never run: verify starts no JS peers for a web game). */
 export function skipReason(dir) {
   const found = nodeDatachannelIn(dir);
   if (found)
-    return `node-datachannel is ${found === "installed" ? "installed" : "listed in package.json"} here, so this game can run WebRTC in Node, but verify does not start JS peers for a web game, so this route was not run; the game's own two-peer test over real WebRTC is what proves it (run that test and name it in the report)`;
+    return `node-datachannel is ${found === "installed" ? "installed" : "listed in package.json"} here, so this game can run WebRTC in Node, but verify does not start JS peers for ${gameKind(dir)}, so this route was not run; the game's own two-peer test over real WebRTC is what proves it (run that test and name it in the report)`;
   return "verify would need two JS clients over real WebRTC in Node, which needs node-datachannel; this folder has none (not in node_modules, not in package.json), so there is nothing to run here, and a browser page brings its own WebRTC; add node-datachannel and give the game its own two-peer test to prove this route";
 }
 
